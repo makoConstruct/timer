@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 const tau = 2 * pi;
 const double standardLineWidth = 6;
 const double standardButtonSizeMM = 13;
+const double timerPaddingr = 3;
 
 class JukeBox {
   static final AssetSource pianoSound =

@@ -307,10 +307,10 @@ class TimerState extends State<Timer>
               toggleRunning();
             },
             child: Padding(
-              padding: const EdgeInsets.all(3),
+              padding: const EdgeInsets.all(timerPaddingr),
               child: Row(
                 children: [
-                  Container(width: 7),
+                  Container(width: timerPaddingr),
                   Pie(
                     size: 29,
                     backgroundColor: theme.colorScheme.secondaryContainer,
@@ -323,7 +323,7 @@ class TimerState extends State<Timer>
                     // value: timeHasRun.inSeconds / duration.inSeconds,
                     value: pieCompletion,
                   ),
-                  Container(width: 10),
+                  Container(width: timerPaddingr * 2),
                   Text(
                       style: TextStyle(color: theme.colorScheme.onSurface),
                       '${formatTime(currentTime)}/${isDigitMode ? formatTime(digits) : formatTime(duration)}'),
