@@ -2,9 +2,30 @@
 
 import 'dart:math';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 const tau = 2 * pi;
+const double standardLineWidth = 6;
+const double standardButtonSizeMM = 13;
+
+class JukeBox {
+  static final AssetSource pianoSound =
+      AssetSource('sounds/piano sound 448552__tedagame__g4.ogg');
+  // static const String jarringSound = 'assets/jarring.mp3';
+  late AudioPool jarringPlayers;
+  static Future<JukeBox> create() async {
+    return AudioPool.create(
+      source: pianoSound,
+      maxPlayers: 4,
+    ).then((pool) => JukeBox()..jarringPlayers = pool);
+  }
+}
+
+Offset widgetCenter(GlobalKey k) {
+  final cpro = k.currentContext!.findRenderObject() as RenderBox;
+  return cpro.localToGlobal(Offset.zero) + sizeToOffset(cpro.size / 2);
+}
 
 class EnspiralPainter extends CustomPainter {
   @override
@@ -74,6 +95,16 @@ double shortestAngleDistance(double from, double to) {
 
 double lerp(double a, double b, double t) {
   return a + (b - a) * t;
+}
+
+/// ceilab is better for interpollation but in most cases it doesn't matter and also the cielab library I tried seemed to have compilation errros in it
+Color lerpColor(Color a, Color b, double t) {
+  return Color.from(
+    alpha: lerp(a.a, b.a, t),
+    red: lerp(a.r, b.r, t),
+    green: lerp(a.g, b.g, t),
+    blue: lerp(a.b, b.b, t),
+  );
 }
 
 double unlerp(double a, double b, double t) {
@@ -242,6 +273,21 @@ Duration digitsToDuration(List<int> digits) {
   return Duration(seconds: seconds);
 }
 
+double lpixPerMM(BuildContext context) {
+  // consider using a package like device_info, or millimeters
+
+  // final dpi = MediaQuery.devicePixelRatioOf(context);
+  // final s = MediaQuery.sizeOf(context);
+  // print("${s.width}x${s.height}dpi:$dpi");
+  // return s.width / mm * 25.4 * dpi;
+  // return px / mm * 25.4 * dpi;
+
+  // source: https://api.flutter.dev/flutter/dart-ui/FlutterView/devicePixelRatio.html
+  final double officialValue = 3.8;
+  final double samsungS9PlusValue = 411.4 / 70;
+  return samsungS9PlusValue;
+}
+
 void testTimeConversions() {
   final sd = Duration(days: 1 + 20173 * 365, hours: 2, minutes: 3, seconds: 4);
   String formatted = formatTime(sd, padLevel: 3);
@@ -265,12 +311,13 @@ class PiePainter extends CustomPainter {
     final radius = size.width / 2;
     final rect = Rect.fromCircle(center: center, radius: radius);
 
-    // Draw outline
-    final outlinePaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    canvas.drawCircle(center, radius, outlinePaint);
+    // no outline, we have a backing now
+    // // Draw outline
+    // final outlinePaint = Paint()
+    //   ..color = color
+    //   ..style = PaintingStyle.stroke
+    //   ..strokeWidth = standardLineWidth;
+    // canvas.drawCircle(center, radius, outlinePaint);
 
     // Draw filled portion
     if (value > 0) {
@@ -357,5 +404,47 @@ class SweepGradientCirclePainter extends CustomPainter {
         oldDelegate.b != b ||
         oldDelegate.angle != angle ||
         oldDelegate.holeRadius != holeRadius;
+  }
+}
+
+class Pie extends StatelessWidget {
+  final double value;
+  final Color backgroundColor;
+  final Color color;
+  final double size;
+
+  const Pie({
+    super.key,
+    required this.value,
+    required this.backgroundColor,
+    required this.color,
+    this.size = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CustomPaint(
+            size: Size(size, size),
+            painter: PiePainter(
+              value: 1.0, // Full circle for the background
+              color: backgroundColor,
+            ),
+          ),
+          CustomPaint(
+            size: Size(size, size),
+            painter: PiePainter(
+              value: value.clamp(0.0, 1.0),
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
