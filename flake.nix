@@ -61,9 +61,9 @@
             
             nativeBuildInputs = [pkgs.pkg-config];
             
-            # shellHook = ''
-            #   export PKG_CONFIG_PATH="${pkgs.gst_all_1.gstreamer.dev}/lib/pkgconfig:${pkgs.gst_all_1.gst-plugins-base.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-            # '';
+            shellHook = ''
+              export PKG_CONFIG_PATH="${pkgs.gst_all_1.gstreamer.dev}/lib/pkgconfig:${pkgs.gst_all_1.gst-plugins-base.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+            '';
 
             ANDROID_HOME = android.androidsdk + /libexec/android-sdk;
             JAVA_HOME = pkgs.jdk17;

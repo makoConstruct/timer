@@ -1,11 +1,10 @@
 import 'dart:math';
-import 'dart:async' as da;
 import 'dart:async';
-import 'package:audioplayers/audioplayers.dart';
 
 import 'package:animated_list_plus/animated_list_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
@@ -66,6 +65,11 @@ final List<(double, double)> angleTimeSeconds = [
   // (21 * pi, 200 * 365 * 24 * 60 * 60),
 ];
 
+const double numeralDragDistanceTs = 0.5;
+const double standardLineWidth = 6;
+const double standardButtonSizeMM = 13;
+const double timerPaddingr = 3;
+
 final List<(double, double)> angleTimeMinutes = [(0, 0), (tau, 6 * 60)];
 
 /// basically just linearly interpolates the relevant angleTime segment
@@ -95,31 +99,41 @@ double angleToTime(double angle, List<(double, double)> angleTimeSeconds) {
   return sign * (lp.$2 + (angle - lp.$1) / lastad * lasttd);
 }
 
+class Thumbspan {
+  double thumbspan;
+  Thumbspan(this.thumbspan);
+  static double of(BuildContext context, {bool listen = false}) {
+    return Provider.of<Thumbspan>(context, listen: listen).thumbspan;
+  }
+}
+
 class TimersApp extends StatelessWidget {
   const TimersApp({super.key});
 
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    final timers = [
-      Timer(key: GlobalKey<TimerState>()),
-    ];
+    final initialTimers = <Timer>[];
 
     // print("screenSize ${MediaQuery.sizeOf(context)}");
+
+    final jukeBox = JukeBox.create();
 
     return MaterialApp(
       title: 'timer',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color.fromARGB(255, 60, 92, 56)),
         useMaterial3: true,
       ),
       home: MultiProvider(
           providers: [
-            FutureProvider<JukeBox?>(
-                initialData: null, create: (_) => JukeBox.create())
+            Provider<Thumbspan>(
+                create: (context) => Thumbspan(lpixPerThumbspan(context))),
+            Provider<Future<JukeBox>>(create: (_) => jukeBox)
           ],
           child: Timerscreen(
-            timers: timers,
+            timers: initialTimers,
             selectLastTimer: true,
           )),
     );
@@ -129,7 +143,14 @@ class TimersApp extends StatelessWidget {
 class Timer extends StatefulWidget {
   final bool selected;
   final bool animateIn;
-  const Timer({super.key, this.selected = false, this.animateIn = false});
+  final List<int> digits;
+  final bool running;
+  const Timer({
+    super.key,
+    this.selected = false,
+    this.animateIn = true,
+    this.digits = const [],
+  }) : running = false;
 
   @override
   State<Timer> createState() => TimerState();
@@ -138,18 +159,26 @@ class Timer extends StatefulWidget {
 class TimerState extends State<Timer>
     with SignalsMixin, TickerProviderStateMixin {
   // we actually do need to keep both forms of these around, as each form can represent information the other can't. Duration can be millisecond precise, while digits can have abnormal numbers in, say, the seconds segment, eg, more than 60 seconds.
-  bool isDigitMode = false;
+  bool isDigitMode = true;
   // the digit form of duration. Used when tapping out or backspacing numbers. Not always kept up to date with duration..
-  List<int> _digits = [];
+  late List<int> _digits;
   bool isGoingOff = false;
   Duration _duration = Duration.zero;
   DateTime? _startTime;
   Key dismissableKey = GlobalKey();
+  bool wasDismissed = false;
   late Ticker _ticker;
   Duration currentTime = Duration.zero;
-  late final Signal<bool> selectedSignal;
+  late bool _selected;
   bool isRunning = false;
-  bool isCompleted = true;
+  bool isCompleted = false;
+  var timerLayerLink = LayerLink();
+  set selected(bool v) {
+    setState(() {
+      _selected = v;
+    });
+  }
+
   set duration(Duration d) {
     setState(() {
       d - currentTime;
@@ -187,9 +216,11 @@ class TimerState extends State<Timer>
 
   @override
   void initState() {
-    testTimeConversions();
     super.initState();
-    selectedSignal = createSignal(widget.selected);
+    testTimeConversions();
+    _selected = widget.selected;
+    _digits = widget.digits;
+    isRunning = widget.running;
     _ticker = createTicker((d) {
       setTime(DateTime.now().difference(_startTime!));
     });
@@ -206,9 +237,9 @@ class TimerState extends State<Timer>
       setState(() {
         isDigitMode = v;
         if (v) {
-          digits = durationToDigits(duration);
+          _digits = durationToDigits(_duration);
         } else {
-          duration = digitsToDuration(digits);
+          _duration = digitsToDuration(_digits);
         }
       });
     }
@@ -218,9 +249,9 @@ class TimerState extends State<Timer>
     if (currentTime == n) {
       return;
     }
-    setDigitMode(false);
     Duration prev = currentTime;
     currentTime = n;
+    setDigitMode(false);
     // only update the widgets if the seconds part changed, otherwise the change would be invisible
     if (n.inSeconds != prev.inSeconds) {
       setState(() {
@@ -228,11 +259,9 @@ class TimerState extends State<Timer>
           isCompleted = true;
           //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
 
-          // context
-          //     .findAncestorStateOfType<TimerScreenState>()
-          //     ?.jarringSoundPlayer
-          //     .play(pianoSound);
-          context.read<JukeBox?>()?.jarringPlayers.start();
+          context.read<Future<JukeBox>>().then((jb) {
+            jb.jarringPlayers.start();
+          });
 
           _ticker.stop();
 
@@ -265,6 +294,15 @@ class TimerState extends State<Timer>
     return ret;
   }
 
+  void reset() {
+    setState(() {
+      setTime(Duration.zero);
+      if (!isRunning) {
+        toggleRunning();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -273,6 +311,22 @@ class TimerState extends State<Timer>
         : clampUnit(currentTime.inMilliseconds.toDouble() /
             duration.inMilliseconds.toDouble());
     final dismissThreshold = 25 / MediaQuery.of(context).size.width;
+    final durationDigits =
+        isDigitMode ? digits : durationToDigits(duration, padLevel: 1);
+    final timeDigits = durationToDigits(currentTime,
+        padLevel: padLevelFor(durationDigits.length));
+    final Widget durationWidget = Text(formatTime(durationDigits));
+    final Widget timeDisplay = DefaultTextStyle.merge(
+        style: TextStyle(color: theme.colorScheme.onSurface),
+        child: Row(children: [
+          Text(formatTime(timeDigits)),
+          Text("/"),
+          CompositedTransformTarget(
+            link: timerLayerLink,
+            child: durationWidget,
+          )
+        ]));
+
     return Dismissible(
       key: dismissableKey,
       dismissThresholds: {
@@ -281,6 +335,7 @@ class TimerState extends State<Timer>
       },
       onDismissed: (_) {
         final ts = context.findAncestorStateOfType<TimerScreenState>();
+        wasDismissed = true;
         ts!.removeTimer(widget.key as GlobalKey<TimerState>);
       },
       background: Container(
@@ -313,20 +368,12 @@ class TimerState extends State<Timer>
                   Container(width: timerPaddingr),
                   Pie(
                     size: 29,
-                    backgroundColor: theme.colorScheme.secondaryContainer,
-                    color: isRunning
-                        ? theme.colorScheme.onSecondaryContainer
-                        :
-                        // otherwise soften the color
-                        lerpColor(theme.colorScheme.onSecondaryContainer,
-                            theme.colorScheme.secondaryContainer, 0.5),
-                    // value: timeHasRun.inSeconds / duration.inSeconds,
+                    backgroundColor: theme.colorScheme.primaryContainer,
+                    color: theme.colorScheme.primary,
                     value: pieCompletion,
                   ),
                   Container(width: timerPaddingr * 2),
-                  Text(
-                      style: TextStyle(color: theme.colorScheme.onSurface),
-                      '${formatTime(currentTime)}/${isDigitMode ? formatTime(digits) : formatTime(duration)}'),
+                  timeDisplay,
                 ],
               ),
             ),
@@ -375,57 +422,63 @@ class FadingDial extends AnimatedWidget {
   }
 }
 
-/// something that self-removing widgets can seek and remove themselves from. Example of such a widget: Animated ones that need to be removed when their timer runs down.
-class RemovalHost extends StatefulWidget {
-  /// if a new widget is identified with this one that has a different initialChildren, it will be ignored. RemovalHosts manage their children statefully.
-  final List<Widget> initialChildren;
-  final Widget Function(BuildContext context, List<Widget> children) builder;
-  const RemovalHost(
-      {super.key, required this.initialChildren, required this.builder});
-  @override
-  State<RemovalHost> createState() => RemovalHostState();
+// I don't think this works right. It needs to diff children and *also* maintain a separate stateful stack, or have no children at all, or maybe just one.
+// /// something that self-removing widgets can seek and remove themselves from. Example of such a widget: Animated ones that need to be removed when their timer runs down.
+// class RemovalHost extends StatefulWidget {
+//   /// if a new widget is identified with this one that has a different initialChildren, it will be ignored. RemovalHosts manage their children statefully.
+//   final List<Widget> initialChildren;
+//   final Widget Function(BuildContext context, List<Widget> children) builder;
+//   const RemovalHost(
+//       {super.key, required this.initialChildren, required this.builder});
+//   @override
+//   State<RemovalHost> createState() => RemovalHostState();
 
-  static RemovalHostState? of(BuildContext context) {
-    return context.findAncestorStateOfType<RemovalHostState>()!;
-  }
-}
+//   static RemovalHostState? of(BuildContext context) {
+//     return context.findAncestorStateOfType<RemovalHostState>()!;
+//   }
+// }
 
-class RemovalHostState extends State<RemovalHost> {
-  List<Widget> children = [];
-  @override
-  void initState() {
-    super.initState();
-    children = List.from(widget.initialChildren);
-  }
+// class RemovalHostState extends State<RemovalHost> {
+//   List<Widget> children = [];
+//   @override
+//   void initState() {
+//     super.initState();
+//     children = List.from(widget.initialChildren);
+//   }
 
-  add(Widget w) {
-    setState(() {
-      children.add(w);
-    });
-  }
+//   add(Widget w) {
+//     setState(() {
+//       children.add(w);
+//     });
+//   }
 
-  remove(GlobalKey key) {
-    setState(() {
-      children.removeWhere((w) => w.key == key);
-    });
-  }
+//   remove(GlobalKey key) {
+//     setState(() {
+//       children.removeWhere((w) => w.key == key);
+//     });
+//   }
 
-  // I notice I kinda wanna animate removals, but no, ImplicitlyAnimatedList can't do that, it really has to be a list.
-  @override
-  void didUpdateWidget(RemovalHost oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.initialChildren != oldWidget.initialChildren) {
-      setState(() {
-        children = List.from(widget.initialChildren);
-      });
-    }
-  }
+//   // I notice I kinda wanna animate removals, but no, ImplicitlyAnimatedList can't do that, it really has to be a list.
+//   @override
+//   void didUpdateWidget(RemovalHost oldWidget) {
+//     super.didUpdateWidget(oldWidget);
+//     if (widget.initialChildren != oldWidget.initialChildren) {
+//       setState(() {
+//         children = List.from(widget.initialChildren);
+//       });
+//     }
+//   }
 
-  @override
-  Widget build(BuildContext context) {
-    return widget.builder(context, children);
-  }
-}
+//   @override
+//   Widget build(BuildContext context) {
+//     return widget.builder(context, children);
+//   }
+// }
+
+// class RemovalStack extends RemovalHost {
+//   RemovalStack({super.key, required super.initialChildren})
+//       : super(builder: (context, children) => Stack(children: children));
+// }
 
 class Timerscreen extends StatefulWidget {
   final List<Timer> timers;
@@ -572,19 +625,13 @@ class DialState extends State<Dial> {
     return Positioned(
       left: positionRelControlPad.dx,
       top: positionRelControlPad.dy,
-      child: RemovalHost(
-        key: widget.dialHost,
-        builder: (context, stackLayers) => Stack(children: stackLayers),
-        initialChildren: [
-          FadingDial(
-              listenable: widget.fadeBloom,
-              angle: angle,
-              radius: r,
-              topColor: topColor,
-              bottomColor: bottomColor,
-              holeRadius: 0),
-        ],
-      ),
+      child: FadingDial(
+          listenable: widget.fadeBloom,
+          angle: angle,
+          radius: r,
+          topColor: topColor,
+          bottomColor: bottomColor,
+          holeRadius: 0),
     );
   }
 
@@ -613,6 +660,8 @@ class TimerScreenState extends State<Timerscreen>
   Dial? dial;
   late final GlobalKey secondCrankButtonKey;
   late final GlobalKey minuteCrankButtonKey;
+  Offset numeralDragStart = Offset.zero;
+  late final AnimationController numeralDragIndicator;
 
   @override
   void initState() {
@@ -625,6 +674,8 @@ class TimerScreenState extends State<Timerscreen>
         _selectTimer(timers.first.key as GlobalKey<TimerState>);
       });
     }
+    numeralDragIndicator =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 90));
     secondCrankButtonKey = GlobalKey();
     minuteCrankButtonKey = GlobalKey();
   }
@@ -632,29 +683,20 @@ class TimerScreenState extends State<Timerscreen>
   @override
   void dispose() {
     super.dispose();
+    dialBloom.dispose();
+    numeralDragIndicator.dispose();
   }
 
-  void _numeralPressed(List<int> number) {
+  void numeralPressed(List<int> number) {
     if (selectedTimer == null) {
-      _addNewTimer();
-      // double deferral to ensure the new timer is mounted after the setState in _addNewTimer
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final sc = selectedTimer!.currentState!;
-          List<int> ct = sc.digits;
-          for (int n in number) {
-            ct.add(n);
-          }
-          sc.digits = ct;
-          if (sc.isRunning) {
-            sc.toggleRunning();
-          }
-        });
-      });
+      addNewTimer(Timer(
+          key: GlobalKey<TimerState>(),
+          selected: true,
+          digits: stripZeroes(number)));
     } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final sc = selectedTimer!.currentState!;
-        List<int> ct = sc.digits;
+      final sc = selectedTimer!.currentState!;
+      List<int> ct = sc.digits;
+      sc.setState(() {
         for (int n in number) {
           ct.add(n);
         }
@@ -664,8 +706,8 @@ class TimerScreenState extends State<Timerscreen>
   }
 
   void startDragFor(double Function(double) timeFunction, Offset position) {
-    final GlobalKey<TimerState> operatingTimer = _addNewTimer();
-
+    final GlobalKey<TimerState> operatingTimer = GlobalKey<TimerState>();
+    addNewTimer(Timer(key: operatingTimer, selected: true));
     setState(() {
       isCranking = true;
 
@@ -692,11 +734,36 @@ class TimerScreenState extends State<Timerscreen>
     });
   }
 
+  // Add new method to handle key events
+  void _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return;
+    }
+    // Handle number keys 0-9
+    int? kn = recognizeDigitPress(event.logicalKey);
+    if (kn != null) {
+      numeralPressed([kn]);
+    } else {
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.backspace:
+          _backspace();
+          break;
+        case LogicalKeyboardKey.keyP:
+        case LogicalKeyboardKey.space:
+        case LogicalKeyboardKey.enter:
+          pausePlaySelected();
+          break;
+        case LogicalKeyboardKey.keyN:
+          addNewTimer(Timer(key: GlobalKey<TimerState>(), selected: true));
+          break;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // todo: trying to determine the physical dimensions of the screen so that we know how many logical pixels to assign to ergonomic controls
     const int falcrumAnimationDurationMs = 140;
-    final Size screenSize = MediaQuery.sizeOf(context);
 
     double lpixPerMM = boring.lpixPerMM(context);
 
@@ -733,6 +800,7 @@ class TimerScreenState extends State<Timerscreen>
             setState(() {
               ((dial?.key as GlobalKey).currentState as DialState?)?.endDrag();
               isCranking = false;
+              _selectTimer(null);
             });
           });
     }
@@ -740,95 +808,53 @@ class TimerScreenState extends State<Timerscreen>
     final crankMinutesButton =
         crankButton(false, "m+↻", angleToTimeMinutes, minuteCrankButtonKey);
     final crankSecondsButton =
-        crankButton(true, "s+↻", angleToTimeSeconds, secondCrankButtonKey);
+        crankButton(false, "s+↻", angleToTimeSeconds, secondCrankButtonKey);
 
-    final addButton =
-        TimersButton(label: Icon(Icons.add_circle), onPressed: _addNewTimer);
+    final addButton = TimersButton(
+        label: Icon(Icons.add_circle),
+        onPressed: () {
+          addNewTimer(Timer(key: GlobalKey<TimerState>(), selected: true));
+        });
 
     final playButton = TimersButton(
-        label: Icon(Icons.play_circle_fill_rounded),
-        onPressed: _pausePlaySelected);
+        label: Icon(Icons.play_arrow_rounded), onPressed: pausePlaySelected);
 
-    final doubleZeroButton = TimersButton(
-        label: "00",
-        onPressed: () {
-          _numeralPressed([0, 0]);
-        });
+    final resetButton = TimersButton(
+      label: Icon(Icons.restart_alt_rounded),
+      onPressed: () {
+        selectedTimer?.currentState?.reset();
+      },
+    );
 
-    final zeroButton = TimersButton(
-        label: "0",
-        onPressed: () {
-          _numeralPressed([0]);
-        });
-
-    final oneButton = TimersButton(
-        label: "1",
-        onPressed: () {
-          _numeralPressed([1]);
-        });
-
-    final twoButton = TimersButton(
-        label: "2",
-        onPressed: () {
-          _numeralPressed([2]);
-        });
-
-    final threeButton = TimersButton(
-        label: "3",
-        onPressed: () {
-          _numeralPressed([3]);
-        });
-
-    final fourButton = TimersButton(
-        label: "4",
-        onPressed: () {
-          _numeralPressed([4]);
-        });
-
-    final fiveButton = TimersButton(
-        label: "5",
-        onPressed: () {
-          _numeralPressed([5]);
-        });
-
-    final sixButton = TimersButton(
-        label: "6",
-        onPressed: () {
-          _numeralPressed([6]);
-        });
-
-    final sevenButton = TimersButton(
-        label: "7",
-        onPressed: () {
-          _numeralPressed([7]);
-        });
-
-    final eightButton = TimersButton(
-        label: "8",
-        onPressed: () {
-          _numeralPressed([8]);
-        });
-
-    final nineButton = TimersButton(
-        label: "9",
-        onPressed: () {
-          _numeralPressed([9]);
-        });
+    final doubleZeroButton = NumberButton(digits: [0, 0]);
+    final zeroButton = NumberButton(digits: [0]);
+    final oneButton = NumberButton(digits: [1]);
+    final twoButton = NumberButton(digits: [2]);
+    final threeButton = NumberButton(digits: [3]);
+    final fourButton = NumberButton(digits: [4]);
+    final fiveButton = NumberButton(digits: [5]);
+    final sixButton = NumberButton(digits: [6]);
+    final sevenButton = NumberButton(digits: [7]);
+    final eightButton = NumberButton(digits: [8]);
+    final nineButton = NumberButton(digits: [9]);
 
     List<Widget> controlPadWidgets(bool isRightHanded) {
       return isRightHanded
           ? [
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  backspaceButton,
-                  crankMinutesButton,
-                  crankSecondsButton,
-                  addButton,
-                ],
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    backspaceButton,
+                    crankMinutesButton,
+                    crankSecondsButton,
+                    addButton,
+                  ],
+                ),
               ),
-              Column(
+              Flexible(
+                  child: Column(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -837,26 +863,30 @@ class TimerScreenState extends State<Timerscreen>
                   sevenButton,
                   playButton,
                 ],
+              )),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    twoButton,
+                    fiveButton,
+                    eightButton,
+                    zeroButton,
+                  ],
+                ),
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  twoButton,
-                  fiveButton,
-                  eightButton,
-                  zeroButton,
-                ],
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  threeButton,
-                  sixButton,
-                  nineButton,
-                  doubleZeroButton,
-                ],
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    threeButton,
+                    sixButton,
+                    nineButton,
+                    doubleZeroButton,
+                  ],
+                ),
               ),
             ]
           : [
@@ -904,22 +934,26 @@ class TimerScreenState extends State<Timerscreen>
             ];
     }
 
-    var controlPad =
-        Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
-      if (dial != null) dial!,
-      Container(
-        key: controlPadKey,
-        constraints: BoxConstraints(
-            maxHeight: lpixPerMM * 4 * standardButtonSizeMM,
-            maxWidth: lpixPerMM * 4 * standardButtonSizeMM),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment:
-              isRightHanded ? MainAxisAlignment.end : MainAxisAlignment.start,
-          children: controlPadWidgets(isRightHanded),
-        ),
-      )
-    ]);
+    final thumbSpan = Thumbspan.of(context);
+    final buttonSpan = thumbSpan * 0.7;
+
+    var controlPad = Stack(
+        clipBehavior: Clip.none,
+        fit: StackFit.passthrough,
+        alignment: Alignment.center,
+        children: [
+          if (dial != null) dial!,
+          Container(
+            key: controlPadKey,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: isRightHanded
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.start,
+              children: controlPadWidgets(isRightHanded),
+            ),
+          )
+        ]);
     var controlPadder = Container(
       constraints: BoxConstraints.tight(Size(lpixPerMM * 10, lpixPerMM * 10)),
       color: Colors.transparent,
@@ -935,76 +969,126 @@ class TimerScreenState extends State<Timerscreen>
           children: reverseIfNot(isRightHanded, [controlPad, controlPadder])),
     );
 
-    return Scaffold(
-        body: Column(
-      children: [
-        Expanded(
-          child: Container(
-            color: theme.colorScheme.onPrimary, // Slightly grey background
-            child: ImplicitlyAnimatedList(
-              insertDuration: Duration(milliseconds: 170),
-              removeDuration: Duration(milliseconds: 170),
-              items: timers,
-              reverse: true,
-              itemBuilder: (context, animation, item, index) {
-                return RaiseAnimation(
-                  animation: animation,
-                  child: item,
-                );
-              },
-              removeItemBuilder: (context, animation, item) {
-                // the timers are dismissables, which animate their own removal, so at this point they're already invisible, so we'll return an empty. If we didn't do this, and instead built the dismissible form item as usual, the dismissable would scream.
-                return Container();
-                // RaiseAnimation(
-                //   animation: animation,
-                //   child: item,
-                // );
-              },
-              areItemsTheSame: (oldItem, newItem) => oldItem.key == newItem.key,
-            ),
+    Widget drawIfNotDismissed(Widget item, Animation<double> animation,
+        {required bool elseAssumeDismissed}) {
+      final tk = item.key as GlobalKey<TimerState>?;
+      if (tk == null) {
+        return item;
+      } else {
+        final tks = tk.currentState;
+        final raise = RaiseAnimation(
+          animation: animation,
+          child: item,
+        );
+        if (tks != null) {
+          if (tks.wasDismissed) {
+            return Container();
+          } else {
+            return raise;
+          }
+        } else {
+          if (elseAssumeDismissed) {
+            return Container();
+          } else {
+            return raise;
+          }
+        }
+      }
+    }
+
+    return Focus(
+      autofocus: true, // Automatically request focus when built
+      onKeyEvent: (_, event) {
+        _handleKeyPress(event);
+        return KeyEventResult.handled; // Prevent event from propagating
+      },
+      child: Scaffold(
+        body: Stack(children: [
+          Column(
+            children: [
+              Expanded(
+                child: Container(
+                  color:
+                      theme.colorScheme.onPrimary, // Slightly grey background
+                  child: ImplicitlyAnimatedList(
+                    insertDuration: Duration(milliseconds: 170),
+                    removeDuration: Duration(milliseconds: 170),
+                    items: timers,
+                    reverse: true,
+                    // this horriffic workaround is here because ImplicitlyAnimatedList doesn't remove items as soon as the list changes, because it uses an asynchronous MyersDiff call, so a removed item may still be in the list and may still be called in itemBuilder for a frame after being removed, and if that removed item contains a Dismissible, it will scream, so we build a Container instead in those cases.
+                    // The following two sections of code differ only in how they behave when the item has no state.
+                    itemBuilder: (context, animation, item, index) {
+                      return drawIfNotDismissed(item, animation,
+                          elseAssumeDismissed: false);
+                    },
+                    removeItemBuilder: (context, animation, item) {
+                      return drawIfNotDismissed(item, animation,
+                          elseAssumeDismissed: true);
+                    },
+                    areItemsTheSame: (oldItem, newItem) =>
+                        oldItem.key == newItem.key,
+                  ),
+                ),
+              ),
+              Container(
+                constraints: BoxConstraints(
+                    maxHeight: double.infinity,
+                    minHeight: 0,
+                    maxWidth: double.infinity,
+                    minWidth: double.infinity),
+                child: controls,
+              )
+            ],
           ),
-        ),
-        Container(
-          constraints: BoxConstraints(
-              maxHeight: double.infinity,
-              minHeight: 0,
-              maxWidth: double.infinity,
-              minWidth: double.infinity),
-          child: controls,
-        )
-      ],
-    ));
+          AnimatedBuilder(
+            animation:
+                Tween(begin: 0.3, end: 1.0).animate(numeralDragIndicator),
+            builder: (context, child) => Positioned(
+              left: numeralDragStart.dx,
+              top: numeralDragStart.dy -
+                  numeralDragDistanceTs * Thumbspan.of(context),
+              child: CustomPaint(
+                painter: DragIndicatorPainter(
+                  color: theme.colorScheme.primary,
+                  radius: Curves.easeIn.transform(numeralDragIndicator.value) *
+                      thumbSpan *
+                      0.15,
+                ),
+              ),
+            ),
+          )
+        ]),
+      ),
+    );
   }
 
-  void _pausePlaySelected() {
+  void pausePlaySelected() {
     if (selectedTimer != null) {
-      if (selectedTimer!.currentState!.toggleRunning()) {
-        selectedTimer!.currentState!.selectedSignal.value = false;
-        selectedTimer = null;
-      }
+      getStateMaybeDeferring(selectedTimer!, (ts) {
+        if (ts.toggleRunning()) {
+          _selectTimer(null);
+        }
+      });
     } else {
       if (timers.isNotEmpty) {
-        (timers[0].key as GlobalKey<TimerState>).currentState!.toggleRunning();
+        getStateMaybeDeferring(timers[0].key as GlobalKey<TimerState>, (ts) {
+          ts.toggleRunning();
+        });
       }
     }
   }
 
-  GlobalKey<TimerState> _addNewTimer() {
-    final nk = GlobalKey<TimerState>();
-    final nt = Timer(key: nk, selected: true, animateIn: true);
+  void addNewTimer(Timer nt) {
     setState(() {
       timers.insert(0, nt);
       _selectTimer(nt.key as GlobalKey<TimerState>);
     });
-    return nk;
   }
 
   void _selectTimer(GlobalKey<TimerState>? key) {
-    selectedTimer?.currentState?.selectedSignal.value = false;
+    selectedTimer?.currentState?.selected = false;
     selectedTimer = key;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      key?.currentState?.selectedSignal.value = true;
-    });
+    key?.currentState?.selected = true;
   }
 
   void _backspace() {
@@ -1036,10 +1120,65 @@ class TimerScreenState extends State<Timerscreen>
   }
 }
 
-class TimersButton extends StatelessWidget {
+class NumberButton extends StatefulWidget {
+  final List<int> digits;
+  const NumberButton({super.key, required this.digits});
+  @override
+  State<NumberButton> createState() => _NumberButtonState();
+}
+
+class _NumberButtonState extends State<NumberButton>
+    with TickerProviderStateMixin {
+  late AnimationController _dragIndicator;
+  Offset _startDrag = Offset.zero;
+  bool hasTriggered = false;
+  @override
+  void initState() {
+    super.initState();
+    _dragIndicator =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 140));
+  }
+
+  @override
+  void dispose() {
+    _dragIndicator.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TimersButton(
+      label: widget.digits.join(),
+      onPanDown: (Offset p) {
+        hasTriggered = false;
+        _startDrag = p;
+        final tss = context.findAncestorStateOfType<TimerScreenState>();
+        tss?.numeralPressed(widget.digits);
+        tss?.numeralDragStart = _startDrag;
+        tss?.numeralDragIndicator.forward();
+      },
+      onPanUpdate: (Offset p) {
+        if ((p - _startDrag).dy <=
+                -numeralDragDistanceTs * Thumbspan.of(context) &&
+            !hasTriggered) {
+          final tss = context.findAncestorStateOfType<TimerScreenState>();
+          tss?.pausePlaySelected();
+          tss?.numeralDragIndicator.reverse();
+          hasTriggered = true;
+        }
+      },
+      onPanEnd: () {
+        final tss = context.findAncestorStateOfType<TimerScreenState>();
+        tss?.numeralDragIndicator.reverse();
+      },
+    );
+  }
+}
+
+class TimersButton extends StatefulWidget {
   /// either a String or a Widget
   final Object label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool accented;
   final Function(Offset globalPosition)? onPanDown;
   final Function(Offset globalPosition)? onPanUpdate;
@@ -1049,7 +1188,7 @@ class TimersButton extends StatelessWidget {
   const TimersButton(
       {super.key,
       required this.label,
-      required this.onPressed,
+      this.onPressed,
       this.accented = false,
       this.onPanDown,
       this.onPanUpdate,
@@ -1057,74 +1196,117 @@ class TimersButton extends StatelessWidget {
       this.dialBloomAnimation});
 
   @override
+  State<TimersButton> createState() => _TimersButtonState();
+}
+
+class _TimersButtonState extends State<TimersButton>
+    with TickerProviderStateMixin {
+  late AnimationController _shortFlash;
+  late AnimationController _longFlash;
+  initState() {
+    super.initState();
+    _shortFlash =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 450))
+          ..value = 1;
+    _longFlash =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 800))
+          ..value = 1;
+  }
+
+  @override
+  void dispose() {
+    _shortFlash.dispose();
+    _longFlash.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     ThemeData theme = Theme.of(context);
-    Animation<double> dialBloom = dialBloomAnimation ??
+    final buttonSpan = 0.7 * Thumbspan.of(context);
+    Animation<double> dialBloom = widget.dialBloomAnimation ??
         context.findAncestorStateOfType<TimerScreenState>()!.dialBloom;
     return Flexible(
       child: GestureDetector(
           // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
-          onPanDown: onPanDown != null
-              ? (details) => onPanDown?.call(details.globalPosition)
+          onPanDown: (details) {
+            if (widget.onPanDown != null) {
+              widget.onPanDown?.call(details.globalPosition);
+              _shortFlash.value = 0;
+              _shortFlash.forward();
+            }
+          },
+          onPanUpdate: widget.onPanUpdate != null
+              ? (details) => widget.onPanUpdate?.call(details.globalPosition)
               : null,
-          onPanUpdate: onPanUpdate != null
-              ? (details) => onPanUpdate?.call(details.globalPosition)
+          onPanCancel:
+              widget.onPanEnd != null ? () => widget.onPanEnd?.call() : null,
+          onPanEnd: widget.onPanEnd != null
+              ? (details) => widget.onPanEnd?.call()
               : null,
-          onPanCancel: onPanEnd != null ? () => onPanEnd?.call() : null,
-          onPanEnd: onPanEnd != null ? (details) => onPanEnd?.call() : null,
           child: Container(
             // todo: this is wrong, we shouldn't be setting the size here, unfortunately there's a layout overflow behavior with rows that I don't understand
-            constraints: BoxConstraints(
-                maxWidth: standardButtonSizeMM * lpixPerMM(context),
-                maxHeight: standardButtonSizeMM * lpixPerMM(context)),
+            constraints:
+                BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
             child: InkWell(
-                onTap: onPressed,
-                splashColor: accented ? Colors.transparent : null,
-                highlightColor: accented ? Colors.transparent : null,
-                hoverColor: accented ? Colors.transparent : null,
-                focusColor: accented ? Colors.transparent : null,
+                onTap: widget.onPressed,
+                splashColor: widget.accented ? Colors.transparent : null,
+                highlightColor: widget.accented ? Colors.transparent : null,
+                hoverColor: widget.accented ? Colors.transparent : null,
+                focusColor: widget.accented ? Colors.transparent : null,
                 // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
                 child: AnimatedBuilder(
-                    animation: dialBloom,
+                    animation:
+                        Listenable.merge([dialBloom, _shortFlash, _longFlash]),
                     builder: (context, child) {
-                      Color? textColor = accented
+                      double flash = 0.2 *
+                          max((1 - Curves.easeIn.transform(_shortFlash.value)),
+                              (1 - Curves.easeIn.transform(_longFlash.value)));
+                      Color? textColor = widget.accented
                           ? lerpColor(theme.colorScheme.primary,
                               theme.colorScheme.onPrimary, 1 - dialBloom.value)
                           : null;
-                      Widget backing() => Padding(
+                      final backingColor = lerpColor(
+                          widget.accented
+                              ? theme.colorScheme.primary.withAlpha(
+                                  ((1 - dialBloom.value) * 255).toInt())
+                              : Colors.transparent,
+                          theme.colorScheme.primary,
+                          flash);
+                      final backing = Padding(
                           padding: EdgeInsets.all(4),
                           child: Container(
                               decoration: BoxDecoration(
-                                  color: theme.colorScheme.primary.withAlpha(
-                                      ((1 - dialBloom.value) * 255).toInt()),
+                                  color: backingColor,
                                   border: Border.all(
-                                      width: standardLineWidth,
-                                      color: theme.colorScheme.primary),
+                                    width: standardLineWidth,
+                                    color: widget.accented
+                                        ? theme.colorScheme.primary
+                                        : Colors.transparent,
+                                  ),
                                   borderRadius: BorderRadius.circular(9))));
                       final Widget labelWidget;
-                      if (label is String) {
-                        labelWidget = Text(label as String,
+                      if (widget.label is String) {
+                        labelWidget = Text(widget.label as String,
                             style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
                                 color: textColor));
                       } else {
-                        assert(label is Widget);
-                        labelWidget = label as Widget;
+                        assert(widget.label is Widget);
+                        labelWidget = widget.label as Widget;
                       }
                       return Opacity(
-                        opacity: accented ? 1 : 1 - dialBloom.value * 1,
+                        opacity: widget.accented ? 1 : 1 - dialBloom.value * 1,
                         child: Center(
                             child: Transform.scale(
-                                scale:
-                                    accented ? 1 - dialBloom.value * 0.08 : 1,
+                                scale: widget.accented
+                                    ? 1 - dialBloom.value * 0.08
+                                    : 1,
                                 // 1,
                                 child: Stack(
                                     alignment: Alignment.center,
-                                    children: [
-                                      if (accented) backing(),
-                                      labelWidget
-                                    ]))),
+                                    children: [backing, labelWidget]))),
                       );
                     })),
           )),

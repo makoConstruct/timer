@@ -4,11 +4,9 @@ import 'dart:math';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 const tau = 2 * pi;
-const double standardLineWidth = 6;
-const double standardButtonSizeMM = 13;
-const double timerPaddingr = 3;
 
 class JukeBox {
   static final AssetSource pianoSound =
@@ -20,6 +18,19 @@ class JukeBox {
       source: pianoSound,
       maxPlayers: 4,
     ).then((pool) => JukeBox()..jarringPlayers = pool);
+  }
+}
+
+/// only defers once, assumes it'll be there on the next frame
+void getStateMaybeDeferring<T extends State>(
+    GlobalKey<T> k, void Function(T) to) {
+  final tk = k.currentState;
+  if (tk == null) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      to(k.currentState!);
+    });
+  } else {
+    to(tk);
   }
 }
 
@@ -127,23 +138,36 @@ double clampUnit(double t) {
 }
 
 const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
-const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9, 13];
+const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9];
+const List<int> datetimeMaxima = [60, 60, 24, 365];
+
+int padLevelFor(int digitLength) {
+  return datetimeSectionOffsets.indexWhere((s) => s >= digitLength);
+}
 
 /// if d is greater than the number of given padLevel, eg, if it's 25 hours and place is 3 (which means show seconds, minutes and hours), it will still automatically show 1 day, 1 hour, and zero minutes and seconds. padLevel is for making sure enough places are shown in numbers that are too low.
+/// d: `List<int> | Duration`
 String formatTime(Object d, {int padLevel = 0}) {
   List<int> digits =
       d is List<int> ? d : durationToDigits(d as Duration, padLevel: padLevel);
 
   String ret = "";
-  int di = max(datetimeSectionOffsets[padLevel], digits.length) - 1;
-  int level = datetimeSectionOffsets.indexWhere((s) => s >= di);
-  if (level == -1) {
-    level = datetimeSectionOffsets.length - 1;
-  }
-  level = max(padLevel, level);
+  // the index of the next digit to be printed
+  int underLevel = max(
+      0,
+      max(padLevel - 1,
+          datetimeSectionOffsets.lastIndexWhere((s) => s < digits.length)));
+  int di = max(
+          underLevel + 1 < datetimeSectionOffsets.length
+              ? datetimeSectionOffsets[underLevel + 1]
+              : digits.length,
+          digits.length) -
+      1;
+
+  underLevel = max(padLevel, underLevel);
   while (di >= 0) {
-    if (di < datetimeSectionOffsets[level - 1]) {
-      --level;
+    if (di < datetimeSectionOffsets[underLevel]) {
+      --underLevel;
       ret += ":";
     }
     if (di < digits.length) {
@@ -205,22 +229,22 @@ List<int> durationToDigits(Duration d, {int padLevel = 1}) {
     started = true;
   }
   // Days
-  if (started || days > 0) {
+  if (started || days > 0 || padLevel > 3) {
     pushDigits(digits, days, 3);
     started = true;
   }
   // Hours
-  if (started || d.inHours % 24 > 0) {
+  if (started || d.inHours % 24 > 0 || padLevel > 2) {
     pushDigits(digits, d.inHours % 24, 2);
     started = true;
   }
   // Minutes
-  if (started || d.inMinutes % 60 > 0) {
+  if (started || d.inMinutes % 60 > 0 || padLevel > 1) {
     pushDigits(digits, d.inMinutes % 60, 2);
     started = true;
   }
   // Seconds
-  if (started || d.inSeconds % 60 > 0 || digits.isEmpty) {
+  if (started || d.inSeconds % 60 > 0 || padLevel > 0) {
     pushDigits(digits, d.inSeconds % 60, 2);
   }
 
@@ -285,8 +309,22 @@ double lpixPerMM(BuildContext context) {
 
   // source: https://api.flutter.dev/flutter/dart-ui/FlutterView/devicePixelRatio.html
   final double officialValue = 3.8;
-  final double samsungS9PlusValue = 411.4 / 70;
+  final double samsungS9PlusValue = 411.4 / 70; // = 5.877
   return samsungS9PlusValue;
+}
+
+/// the span of the user's thumbtip in logical pixels. Defaults to 17mm*lpixPerMM (the span of mako's thumb on a samsung s9+)
+double lpixPerThumbspan(BuildContext context) {
+  // todo: get device info and provide upper and lower bounds using those
+  return 17 * lpixPerMM(context);
+}
+
+List<int> stripZeroes(List<int> digits) {
+  int i = 0;
+  while (i < digits.length && digits[i] == 0) {
+    i++;
+  }
+  return digits.sublist(i);
 }
 
 void testTimeConversions() {
@@ -311,14 +349,6 @@ class PiePainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
     final rect = Rect.fromCircle(center: center, radius: radius);
-
-    // no outline, we have a backing now
-    // // Draw outline
-    // final outlinePaint = Paint()
-    //   ..color = color
-    //   ..style = PaintingStyle.stroke
-    //   ..strokeWidth = standardLineWidth;
-    // canvas.drawCircle(center, radius, outlinePaint);
 
     // Draw filled portion
     if (value > 0) {
@@ -447,5 +477,62 @@ class Pie extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class DragIndicatorPainter extends CustomPainter {
+  final Color color;
+  final double radius;
+
+  DragIndicatorPainter({
+    required this.color,
+    required this.radius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final Path path = Path();
+    path.moveTo(-radius, 0);
+    path.lineTo(0, -radius);
+    path.lineTo(radius, 0);
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(DragIndicatorPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.radius != radius;
+  }
+}
+
+int? recognizeDigitPress(LogicalKeyboardKey k) {
+  switch (k) {
+    case LogicalKeyboardKey.digit0:
+      return 0;
+    case LogicalKeyboardKey.digit1:
+      return 1;
+    case LogicalKeyboardKey.digit2:
+      return 2;
+    case LogicalKeyboardKey.digit3:
+      return 3;
+    case LogicalKeyboardKey.digit4:
+      return 4;
+    case LogicalKeyboardKey.digit5:
+      return 5;
+    case LogicalKeyboardKey.digit6:
+      return 6;
+    case LogicalKeyboardKey.digit7:
+      return 7;
+    case LogicalKeyboardKey.digit8:
+      return 8;
+    case LogicalKeyboardKey.digit9:
+      return 9;
+    default:
+      return null;
   }
 }
