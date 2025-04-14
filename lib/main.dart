@@ -100,6 +100,7 @@ double angleToTime(double angle, List<(double, double)> angleTimeSeconds) {
 }
 
 class Thumbspan {
+  /// measured in logical pixels
   double thumbspan;
   Thumbspan(this.thumbspan);
   static double of(BuildContext context, {bool listen = false}) {
@@ -259,9 +260,7 @@ class TimerState extends State<Timer>
           isCompleted = true;
           //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
 
-          context.read<Future<JukeBox>>().then((jb) {
-            jb.jarringPlayers.start();
-          });
+          JukeBox.jarringSound(context);
 
           _ticker.stop();
 
@@ -274,14 +273,15 @@ class TimerState extends State<Timer>
     }
   }
 
-  bool toggleRunning() {
+  /// returns true iff the timer was caused to start by this call
+  bool toggleRunning([bool reset = false]) {
     setState(() {
       isRunning = !isRunning;
     });
     final ret = isRunning;
     if (isRunning) {
       setDigitMode(false);
-      if (isCompleted) {
+      if (isCompleted || reset) {
         _startTime = DateTime.now();
         isCompleted = false;
       } else {
@@ -290,6 +290,9 @@ class TimerState extends State<Timer>
       _ticker.start();
     } else {
       _ticker.stop();
+      if (reset) {
+        setTime(Duration.zero);
+      }
     }
     return ret;
   }
@@ -306,11 +309,13 @@ class TimerState extends State<Timer>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final thumbSpan = Thumbspan.of(context);
     double pieCompletion = currentTime.inMilliseconds <= 0
         ? 0
         : clampUnit(currentTime.inMilliseconds.toDouble() /
             duration.inMilliseconds.toDouble());
-    final dismissThreshold = 25 / MediaQuery.of(context).size.width;
+    final dismissThreshold =
+        (1.4 * thumbSpan) / MediaQuery.of(context).size.width;
     final durationDigits =
         isDigitMode ? digits : durationToDigits(duration, padLevel: 1);
     final timeDigits = durationToDigits(currentTime,
@@ -662,6 +667,8 @@ class TimerScreenState extends State<Timerscreen>
   late final GlobalKey minuteCrankButtonKey;
   Offset numeralDragStart = Offset.zero;
   late final AnimationController numeralDragIndicator;
+  final List<GlobalKey<TimersButtonState>> numeralKeys =
+      List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
 
   @override
   void initState() {
@@ -675,7 +682,7 @@ class TimerScreenState extends State<Timerscreen>
       });
     }
     numeralDragIndicator =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 90));
+        AnimationController(vsync: this, duration: Duration(milliseconds: 70));
     secondCrankButtonKey = GlobalKey();
     minuteCrankButtonKey = GlobalKey();
   }
@@ -687,21 +694,29 @@ class TimerScreenState extends State<Timerscreen>
     numeralDragIndicator.dispose();
   }
 
-  void numeralPressed(List<int> number) {
+  void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
     if (selectedTimer == null) {
       addNewTimer(Timer(
           key: GlobalKey<TimerState>(),
           selected: true,
           digits: stripZeroes(number)));
     } else {
-      final sc = selectedTimer!.currentState!;
-      List<int> ct = sc.digits;
-      sc.setState(() {
-        for (int n in number) {
-          ct.add(n);
-        }
-        sc.digits = ct;
+      getStateMaybeDeferring(selectedTimer!, (sc) {
+        List<int> ct = sc.digits;
+        sc.setState(() {
+          for (int n in number) {
+            ct.add(n);
+          }
+          sc.digits = ct;
+        });
       });
+    }
+    if (viaKeyboard) {
+      final flashAnimation = numeralKeys[number.first].currentState?.longFlash;
+      if (flashAnimation != null) {
+        flashAnimation.value = 0;
+        flashAnimation.forward();
+      }
     }
   }
 
@@ -742,7 +757,7 @@ class TimerScreenState extends State<Timerscreen>
     // Handle number keys 0-9
     int? kn = recognizeDigitPress(event.logicalKey);
     if (kn != null) {
-      numeralPressed([kn]);
+      numeralPressed([kn], viaKeyboard: true);
     } else {
       switch (event.logicalKey) {
         case LogicalKeyboardKey.backspace:
@@ -772,13 +787,22 @@ class TimerScreenState extends State<Timerscreen>
     //buttons
     var settingsButton = TimersButton(
         label: Icon(Icons.settings),
-        onPressed: () {
-          context.read<JukeBox?>()?.jarringPlayers.start();
+        onPanDown: (_) {
+          JukeBox.jarringSound(context);
+        });
+
+    //buttons
+    var selectButton = TimersButton(
+        // label: Icon(Icons.select_all),
+        // label: Icon(Icons.border_outer_rounded),
+        label: Icon(Icons.center_focus_strong),
+        onPanDown: (_) {
+          JukeBox.jarringSound(context);
         });
 
     var backspaceButton = TimersButton(
         label: Icon(Icons.backspace),
-        onPressed: () {
+        onPanDown: (_) {
           _backspace();
         });
 
@@ -788,7 +812,6 @@ class TimerScreenState extends State<Timerscreen>
           key: key,
           label: name,
           accented: accented,
-          onPressed: () {},
           onPanDown: (Offset position) {
             startDragFor(timeFunction, position);
           },
@@ -812,161 +835,141 @@ class TimerScreenState extends State<Timerscreen>
 
     final addButton = TimersButton(
         label: Icon(Icons.add_circle),
-        onPressed: () {
+        onPanDown: (_) {
           addNewTimer(Timer(key: GlobalKey<TimerState>(), selected: true));
         });
 
-    final playButton = TimersButton(
-        label: Icon(Icons.play_arrow_rounded), onPressed: pausePlaySelected);
+    // todo: animate the play icon out when playing
+    Widget playIcon(Icon otherIcon) {
+      // todo: measure the width of the icons to make this precise
+      double dispf = 0.3;
+      return Stack(children: [
+        FractionalTranslation(translation: Offset(-dispf, 0), child: otherIcon),
+        Transform.scale(
+            scale: 0.8,
+            child: FractionalTranslation(
+                translation: Offset(dispf, 0),
+                child: Icon(Icons.play_arrow_rounded)))
+      ]);
+    }
 
-    final resetButton = TimersButton(
-      label: Icon(Icons.restart_alt_rounded),
-      onPressed: () {
-        selectedTimer?.currentState?.reset();
-      },
-    );
+    final pausePlayButton = TimersButton(
+        label: playIcon(Icon(Icons.pause_rounded)),
+        onPanDown: (_) {
+          pausePlaySelected();
+        });
+    final stopPlayButton = TimersButton(
+        label: playIcon(Icon(Icons.restart_alt_rounded)),
+        onPanDown: (_) {
+          pausePlaySelected(true);
+        });
 
     final doubleZeroButton = NumberButton(digits: [0, 0]);
-    final zeroButton = NumberButton(digits: [0]);
-    final oneButton = NumberButton(digits: [1]);
-    final twoButton = NumberButton(digits: [2]);
-    final threeButton = NumberButton(digits: [3]);
-    final fourButton = NumberButton(digits: [4]);
-    final fiveButton = NumberButton(digits: [5]);
-    final sixButton = NumberButton(digits: [6]);
-    final sevenButton = NumberButton(digits: [7]);
-    final eightButton = NumberButton(digits: [8]);
-    final nineButton = NumberButton(digits: [9]);
+    final zeroButton =
+        NumberButton(digits: [0], timerButtonKey: numeralKeys[0]);
 
     List<Widget> controlPadWidgets(bool isRightHanded) {
-      return isRightHanded
-          ? [
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    backspaceButton,
-                    crankMinutesButton,
-                    crankSecondsButton,
-                    addButton,
-                  ],
-                ),
-              ),
-              Flexible(
-                  child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  oneButton,
-                  fourButton,
-                  sevenButton,
-                  playButton,
-                ],
-              )),
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    twoButton,
-                    fiveButton,
-                    eightButton,
-                    zeroButton,
-                  ],
-                ),
-              ),
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    threeButton,
-                    sixButton,
-                    nineButton,
-                    doubleZeroButton,
-                  ],
-                ),
-              ),
-            ]
-          : [
-              // you can't just flip the arrays since the number pad has to be the same despite the rest being flipped
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  oneButton,
-                  fourButton,
-                  sevenButton,
-                  doubleZeroButton,
-                ],
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  twoButton,
-                  fiveButton,
-                  eightButton,
-                  zeroButton,
-                ],
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  threeButton,
-                  sixButton,
-                  nineButton,
-                  playButton,
-                ],
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  backspaceButton,
-                  crankMinutesButton,
-                  crankSecondsButton,
-                  addButton,
-                ],
-              ),
-            ];
+      /// the number pad isn't flipped for lefthanded mode
+      Widget pad(int column, int row) {
+        row = isRightHanded ? row : 2 - row;
+        final n = row * 3 + column + 1;
+        return NumberButton(digits: [n], timerButtonKey: numeralKeys[n]);
+      }
+
+      return reverseIfNot(isRightHanded, [
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(child: backspaceButton),
+              Flexible(child: addButton),
+              Flexible(child: stopPlayButton),
+              Flexible(child: pausePlayButton),
+            ],
+          ),
+        ),
+        Flexible(
+            child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Flexible(child: pad(0, 0)),
+            Flexible(child: pad(0, 1)),
+            Flexible(child: pad(0, 2)),
+            Flexible(child: doubleZeroButton),
+          ],
+        )),
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(child: pad(1, 0)),
+              Flexible(child: pad(1, 1)),
+              Flexible(child: pad(1, 2)),
+              Flexible(child: zeroButton),
+            ],
+          ),
+        ),
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(child: pad(2, 0)),
+              Flexible(child: pad(2, 1)),
+              Flexible(child: pad(2, 2)),
+            ],
+          ),
+        ),
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(child: settingsButton),
+              Flexible(child: selectButton),
+            ],
+          ),
+        ),
+      ]);
     }
 
     final thumbSpan = Thumbspan.of(context);
     final buttonSpan = thumbSpan * 0.7;
 
-    var controlPad = Stack(
-        clipBehavior: Clip.none,
-        fit: StackFit.passthrough,
-        alignment: Alignment.center,
-        children: [
-          if (dial != null) dial!,
-          Container(
-            key: controlPadKey,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: isRightHanded
-                  ? MainAxisAlignment.end
-                  : MainAxisAlignment.start,
-              children: controlPadWidgets(isRightHanded),
-            ),
-          )
-        ]);
-    var controlPadder = Container(
-      constraints: BoxConstraints.tight(Size(lpixPerMM * 10, lpixPerMM * 10)),
-      color: Colors.transparent,
-    );
-
+    // the lower part of the screen
     var controls = Container(
-      clipBehavior: Clip.antiAlias,
+      clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(color: theme.colorScheme.primaryContainer),
-      child: Row(
-          // mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment:
-              isRightHanded ? MainAxisAlignment.end : MainAxisAlignment.start,
-          children: reverseIfNot(isRightHanded, [controlPad, controlPadder])),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Stack(
+              clipBehavior: Clip.none,
+              fit: StackFit.passthrough,
+              alignment: Alignment.bottomRight,
+              children: [
+                if (dial != null) dial!,
+                Container(
+                  key: controlPadKey,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: isRightHanded
+                        ? MainAxisAlignment.end
+                        : MainAxisAlignment.start,
+                    children: controlPadWidgets(isRightHanded),
+                  ),
+                )
+              ]),
+          Container(
+            constraints: BoxConstraints(maxHeight: thumbSpan * 0.3),
+          )
+        ],
+      ),
     );
 
     Widget drawIfNotDismissed(Widget item, Animation<double> animation,
@@ -996,14 +999,14 @@ class TimerScreenState extends State<Timerscreen>
       }
     }
 
-    return Focus(
-      autofocus: true, // Automatically request focus when built
-      onKeyEvent: (_, event) {
-        _handleKeyPress(event);
-        return KeyEventResult.handled; // Prevent event from propagating
-      },
-      child: Scaffold(
-        body: Stack(children: [
+    return Scaffold(
+      body: Focus(
+        autofocus: true, // Automatically request focus when built
+        onKeyEvent: (_, event) {
+          _handleKeyPress(event);
+          return KeyEventResult.handled; // Prevent event from propagating
+        },
+        child: Stack(children: [
           Column(
             children: [
               Expanded(
@@ -1036,13 +1039,16 @@ class TimerScreenState extends State<Timerscreen>
                     minHeight: 0,
                     maxWidth: double.infinity,
                     minWidth: double.infinity),
+                // the lower part of the screen
                 child: controls,
               )
             ],
           ),
           AnimatedBuilder(
-            animation:
-                Tween(begin: 0.3, end: 1.0).animate(numeralDragIndicator),
+            animation: Tween(begin: 0.3, end: 1.0).animate(CurvedAnimation(
+              parent: numeralDragIndicator,
+              curve: Curves.easeInCubic,
+            )),
             builder: (context, child) => Positioned(
               left: numeralDragStart.dx,
               top: numeralDragStart.dy -
@@ -1062,17 +1068,21 @@ class TimerScreenState extends State<Timerscreen>
     );
   }
 
-  void pausePlaySelected() {
+  void toggleStopPlay() {
+    selectedOrFirstTimerState()?.toggleRunning(true);
+  }
+
+  void pausePlaySelected([bool reset = false]) {
     if (selectedTimer != null) {
       getStateMaybeDeferring(selectedTimer!, (ts) {
-        if (ts.toggleRunning()) {
+        if (ts.toggleRunning(reset)) {
           _selectTimer(null);
         }
       });
     } else {
       if (timers.isNotEmpty) {
         getStateMaybeDeferring(timers[0].key as GlobalKey<TimerState>, (ts) {
-          ts.toggleRunning();
+          ts.toggleRunning(reset);
         });
       }
     }
@@ -1118,11 +1128,22 @@ class TimerScreenState extends State<Timerscreen>
       }
     });
   }
+
+  TimerState? selectedOrFirstTimerState() {
+    if (selectedTimer != null) {
+      return selectedTimer!.currentState;
+    } else {
+      return timers.isNotEmpty
+          ? (timers[0].key as GlobalKey<TimerState>).currentState
+          : null;
+    }
+  }
 }
 
 class NumberButton extends StatefulWidget {
   final List<int> digits;
-  const NumberButton({super.key, required this.digits});
+  final GlobalKey<TimersButtonState>? timerButtonKey;
+  const NumberButton({super.key, required this.digits, this.timerButtonKey});
   @override
   State<NumberButton> createState() => _NumberButtonState();
 }
@@ -1148,6 +1169,7 @@ class _NumberButtonState extends State<NumberButton>
   @override
   Widget build(BuildContext context) {
     return TimersButton(
+      key: widget.timerButtonKey,
       label: widget.digits.join(),
       onPanDown: (Offset p) {
         hasTriggered = false;
@@ -1196,27 +1218,28 @@ class TimersButton extends StatefulWidget {
       this.dialBloomAnimation});
 
   @override
-  State<TimersButton> createState() => _TimersButtonState();
+  State<TimersButton> createState() => TimersButtonState();
 }
 
-class _TimersButtonState extends State<TimersButton>
+class TimersButtonState extends State<TimersButton>
     with TickerProviderStateMixin {
-  late AnimationController _shortFlash;
-  late AnimationController _longFlash;
+  late AnimationController shortFlash;
+  late AnimationController longFlash;
+  @override
   initState() {
     super.initState();
-    _shortFlash =
+    shortFlash =
         AnimationController(vsync: this, duration: Duration(milliseconds: 450))
           ..value = 1;
-    _longFlash =
+    longFlash =
         AnimationController(vsync: this, duration: Duration(milliseconds: 800))
           ..value = 1;
   }
 
   @override
   void dispose() {
-    _shortFlash.dispose();
-    _longFlash.dispose();
+    shortFlash.dispose();
+    longFlash.dispose();
     super.dispose();
   }
 
@@ -1226,90 +1249,86 @@ class _TimersButtonState extends State<TimersButton>
     final buttonSpan = 0.7 * Thumbspan.of(context);
     Animation<double> dialBloom = widget.dialBloomAnimation ??
         context.findAncestorStateOfType<TimerScreenState>()!.dialBloom;
-    return Flexible(
-      child: GestureDetector(
-          // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
-          onPanDown: (details) {
-            if (widget.onPanDown != null) {
-              widget.onPanDown?.call(details.globalPosition);
-              _shortFlash.value = 0;
-              _shortFlash.forward();
-            }
-          },
-          onPanUpdate: widget.onPanUpdate != null
-              ? (details) => widget.onPanUpdate?.call(details.globalPosition)
-              : null,
-          onPanCancel:
-              widget.onPanEnd != null ? () => widget.onPanEnd?.call() : null,
-          onPanEnd: widget.onPanEnd != null
-              ? (details) => widget.onPanEnd?.call()
-              : null,
-          child: Container(
-            // todo: this is wrong, we shouldn't be setting the size here, unfortunately there's a layout overflow behavior with rows that I don't understand
-            constraints:
-                BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
-            child: InkWell(
-                onTap: widget.onPressed,
-                splashColor: widget.accented ? Colors.transparent : null,
-                highlightColor: widget.accented ? Colors.transparent : null,
-                hoverColor: widget.accented ? Colors.transparent : null,
-                focusColor: widget.accented ? Colors.transparent : null,
-                // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
-                child: AnimatedBuilder(
-                    animation:
-                        Listenable.merge([dialBloom, _shortFlash, _longFlash]),
-                    builder: (context, child) {
-                      double flash = 0.2 *
-                          max((1 - Curves.easeIn.transform(_shortFlash.value)),
-                              (1 - Curves.easeIn.transform(_longFlash.value)));
-                      Color? textColor = widget.accented
-                          ? lerpColor(theme.colorScheme.primary,
-                              theme.colorScheme.onPrimary, 1 - dialBloom.value)
-                          : null;
-                      final backingColor = lerpColor(
-                          widget.accented
-                              ? theme.colorScheme.primary.withAlpha(
-                                  ((1 - dialBloom.value) * 255).toInt())
-                              : Colors.transparent,
-                          theme.colorScheme.primary,
-                          flash);
-                      final backing = Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Container(
-                              decoration: BoxDecoration(
-                                  color: backingColor,
-                                  border: Border.all(
-                                    width: standardLineWidth,
-                                    color: widget.accented
-                                        ? theme.colorScheme.primary
-                                        : Colors.transparent,
-                                  ),
-                                  borderRadius: BorderRadius.circular(9))));
-                      final Widget labelWidget;
-                      if (widget.label is String) {
-                        labelWidget = Text(widget.label as String,
-                            style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: textColor));
-                      } else {
-                        assert(widget.label is Widget);
-                        labelWidget = widget.label as Widget;
-                      }
-                      return Opacity(
-                        opacity: widget.accented ? 1 : 1 - dialBloom.value * 1,
-                        child: Center(
-                            child: Transform.scale(
-                                scale: widget.accented
-                                    ? 1 - dialBloom.value * 0.08
-                                    : 1,
-                                // 1,
-                                child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [backing, labelWidget]))),
-                      );
-                    })),
-          )),
+    return GestureDetector(
+      // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
+      onPanDown: (details) {
+        if (widget.onPanDown != null) {
+          widget.onPanDown?.call(details.globalPosition);
+          shortFlash.value = 0;
+          shortFlash.forward();
+        }
+      },
+      onPanUpdate: widget.onPanUpdate != null
+          ? (details) => widget.onPanUpdate?.call(details.globalPosition)
+          : null,
+      onPanCancel:
+          widget.onPanEnd != null ? () => widget.onPanEnd?.call() : null,
+      onPanEnd:
+          widget.onPanEnd != null ? (details) => widget.onPanEnd?.call() : null,
+      child: Container(
+        // todo: this is wrong, we shouldn't be setting the size here, unfortunately there's a layout overflow behavior with rows that I don't understand
+        constraints:
+            BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
+        child: InkWell(
+            onTap: widget.onPressed,
+            splashColor: widget.accented ? Colors.transparent : null,
+            highlightColor: widget.accented ? Colors.transparent : null,
+            hoverColor: widget.accented ? Colors.transparent : null,
+            focusColor: widget.accented ? Colors.transparent : null,
+            // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
+            child: AnimatedBuilder(
+                animation: Listenable.merge([dialBloom, shortFlash, longFlash]),
+                builder: (context, child) {
+                  double flash = max(
+                      (1 - Curves.easeIn.transform(shortFlash.value)),
+                      (1 - Curves.easeInOutCubic.transform(longFlash.value)));
+                  Color? textColor = widget.accented
+                      ? lerpColor(theme.colorScheme.primary,
+                          theme.colorScheme.onPrimary, 1 - dialBloom.value)
+                      : null;
+                  final backingColor = lerpColor(
+                      widget.accented
+                          ? theme.colorScheme.primary
+                              .withAlpha(((1 - dialBloom.value) * 255).toInt())
+                          : Colors.white.withAlpha(0),
+                      Colors.white,
+                      flash);
+                  final backing = Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Container(
+                          decoration: BoxDecoration(
+                              color: backingColor,
+                              border: Border.all(
+                                width: standardLineWidth,
+                                color: widget.accented
+                                    ? theme.colorScheme.primary
+                                    : Colors.transparent,
+                              ),
+                              borderRadius: BorderRadius.circular(9))));
+                  final Widget labelWidget;
+                  if (widget.label is String) {
+                    labelWidget = Text(widget.label as String,
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: textColor));
+                  } else {
+                    labelWidget = widget.label as Widget;
+                  }
+                  return Opacity(
+                    opacity: widget.accented ? 1 : 1 - dialBloom.value * 1,
+                    child: Center(
+                        child: Transform.scale(
+                            scale:
+                                widget.accented ? 1 - dialBloom.value * 0.3 : 1,
+                            // 1,
+                            child: Stack(
+                                alignment: Alignment.center,
+                                clipBehavior: Clip.none,
+                                children: [backing, labelWidget]))),
+                  );
+                })),
+      ),
     );
   }
 }

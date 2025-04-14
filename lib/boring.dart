@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 const tau = 2 * pi;
 
@@ -18,6 +19,12 @@ class JukeBox {
       source: pianoSound,
       maxPlayers: 4,
     ).then((pool) => JukeBox()..jarringPlayers = pool);
+  }
+
+  static void jarringSound(BuildContext context) {
+    context.read<Future<JukeBox>>().then((jb) {
+      jb.jarringPlayers.start();
+    });
   }
 }
 
@@ -298,6 +305,11 @@ Duration digitsToDuration(List<int> digits) {
   return Duration(seconds: seconds);
 }
 
+/// the number of logical pixels per degree, like, from the user's eye, a degree over from the center of the screen, the number of pixels that would be in that arc. This is *the* salient metric for deciding how big to make things, logical pixels are *supposed* to track along with it, but they're actually wildly inaccurate so we might want a better metric at some point.
+double lpixPerDegree(BuildContext context) {
+  return 30;
+}
+
 double lpixPerMM(BuildContext context) {
   // consider using a package like device_info, or millimeters
 
@@ -314,6 +326,7 @@ double lpixPerMM(BuildContext context) {
 }
 
 /// the span of the user's thumbtip in logical pixels. Defaults to 17mm*lpixPerMM (the span of mako's thumb on a samsung s9+)
+/// use this when you're thinking about touch ergonomics, like, how big should a button be? How accurately can the user click things? How far should they have to drag before something will activate?
 double lpixPerThumbspan(BuildContext context) {
   // todo: get device info and provide upper and lower bounds using those
   return 17 * lpixPerMM(context);
