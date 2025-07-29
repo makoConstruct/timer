@@ -32,15 +32,23 @@ dependencies:
   flutter:
     sdk: flutter
   signals: ^6.0.2
-  animated_list_plus: ^0.5.2
+  # animated_list_plus: ^0.5.2
   flutter_animate: ^4.5.2
   hsluv: ^1.1.3
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   workmanager: ^0.5.2
+  # there's a bug https://github.com/bluefireteam/audioplayers/issues/1749 on linux, random delay when starting playback for the second time, maintainers say they'll get to it.
   audioplayers: ^6.4.0
+  # so I tried this instead of the above audioplayers, but couldn't get it to run, apparently it was failing to find the plugin .so it was generating during build. No idea why. It's right there. It has all of its dependencies. (alsa)
+  # flutter_soloud: ^3.1.8
   provider: ^6.1.4
+  nb_utils: ^7.1.4
+  animated_to: ^0.3.2
+  # animated_containers: ^1.1.0
+  animated_containers:
+    path: /home/mako/programming/animated_containers
 
 dev_dependencies:
   flutter_test:
@@ -67,7 +75,9 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     # CC0: https://freesound.org/people/TEDAgame/sounds/448552/
-    - assets/sounds/piano sound 448552__tedagame__g4.ogg
+    - assets/sounds/jarring piano sound 448552__tedagame__g4.ogg
+    - assets/sounds/jingles_STEEL15_kenney.ogg
+    - assets/sounds/forceField_002_kenney.ogg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -1,14 +1,17 @@
 import 'dart:math';
 import 'dart:async';
 
-import 'package:animated_list_plus/animated_list_plus.dart';
+import 'package:animated_containers/animated_wrap.dart';
+import 'package:animated_to/animated_to.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:hsluv/extensions.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/raise_animation.dart';
+import 'package:makos_timer/size_reporter.dart';
 import 'package:provider/provider.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:workmanager/workmanager.dart';
@@ -68,7 +71,7 @@ final List<(double, double)> angleTimeSeconds = [
 const double numeralDragDistanceTs = 0.5;
 const double standardLineWidth = 6;
 const double standardButtonSizeMM = 13;
-const double timerPaddingr = 3;
+const double timerPaddingr = 6;
 
 final List<(double, double)> angleTimeMinutes = [(0, 0), (tau, 6 * 60)];
 
@@ -116,22 +119,19 @@ class TimersApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final initialTimers = <Timer>[];
 
-    // print("screenSize ${MediaQuery.sizeOf(context)}");
-
     final jukeBox = JukeBox.create();
 
     return MaterialApp(
       title: 'timer',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color.fromARGB(255, 60, 92, 56)),
         useMaterial3: true,
       ),
       home: MultiProvider(
           providers: [
             Provider<Thumbspan>(
                 create: (context) => Thumbspan(lpixPerThumbspan(context))),
-            Provider<Future<JukeBox>>(create: (_) => jukeBox)
+            Provider<Future<JukeBox>>(create: (_) => jukeBox),
+            // Provider<SoloudJukebox>(create: (_) => SoloudJukebox())
           ],
           child: Timerscreen(
             timers: initialTimers,
@@ -146,12 +146,17 @@ class Timer extends StatefulWidget {
   final bool animateIn;
   final List<int> digits;
   final bool running;
+
+  /// hue is in degrees
+  final double hue;
   const Timer({
-    super.key,
+    required GlobalKey<TimerState> key,
     this.selected = false,
     this.animateIn = true,
     this.digits = const [],
-  }) : running = false;
+    required this.hue,
+  })  : running = false,
+        super(key: key);
 
   @override
   State<Timer> createState() => TimerState();
@@ -171,9 +176,15 @@ class TimerState extends State<Timer>
   late Ticker _ticker;
   Duration currentTime = Duration.zero;
   late bool _selected;
+  late double hue;
   bool isRunning = false;
   bool isCompleted = false;
+  late AnimationController _runningAnimation;
+  final GlobalKey _clockKey = GlobalKey();
   var timerLayerLink = LayerLink();
+  final previousSize = ValueNotifier<Size?>(null);
+  final transferrableKey = GlobalKey();
+
   set selected(bool v) {
     setState(() {
       _selected = v;
@@ -215,6 +226,19 @@ class TimerState extends State<Timer>
     return _digits.toList();
   }
 
+  Color get backgroundColor => hpluvToRGBColor([widget.hue, 100, 90]);
+  Color get primaryColor => hpluvToRGBColor([widget.hue, 100, 30]);
+
+  @override
+  void didUpdateWidget(Timer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.hue != oldWidget.hue) {
+      setState(() {
+        hue = widget.hue;
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -222,6 +246,9 @@ class TimerState extends State<Timer>
     _selected = widget.selected;
     _digits = widget.digits;
     isRunning = widget.running;
+    hue = widget.hue;
+    _runningAnimation = AnimationController(
+        duration: const Duration(milliseconds: 80), vsync: this);
     _ticker = createTicker((d) {
       setTime(DateTime.now().difference(_startTime!));
     });
@@ -229,7 +256,9 @@ class TimerState extends State<Timer>
 
   @override
   dispose() {
+    _runningAnimation.dispose();
     _ticker.dispose();
+    previousSize.dispose();
     super.dispose();
   }
 
@@ -250,27 +279,27 @@ class TimerState extends State<Timer>
     if (currentTime == n) {
       return;
     }
-    Duration prev = currentTime;
-    currentTime = n;
-    setDigitMode(false);
-    // only update the widgets if the seconds part changed, otherwise the change would be invisible
-    if (n.inSeconds != prev.inSeconds) {
-      setState(() {
-        if (isRunning && n.inSeconds >= duration.inSeconds && !isCompleted) {
-          isCompleted = true;
-          //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
+    setState(() {
+      currentTime = n;
+      setDigitMode(false);
+      if (isRunning && n.inSeconds >= duration.inSeconds && !isCompleted) {
+        triggerAlert();
+      }
+    });
+  }
 
-          JukeBox.jarringSound(context);
+  void triggerAlert() {
+    setState(() {
+      isCompleted = true;
+      //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
 
-          _ticker.stop();
+      JukeBox.jarringSound(context);
 
-          setState(() {
-            isGoingOff = false;
-            isRunning = false;
-          });
-        }
-      });
-    }
+      _ticker.stop();
+
+      isGoingOff = false;
+      toggleRunning(true);
+    });
   }
 
   /// returns true iff the timer was caused to start by this call
@@ -280,6 +309,7 @@ class TimerState extends State<Timer>
     });
     final ret = isRunning;
     if (isRunning) {
+      _runningAnimation.forward();
       setDigitMode(false);
       if (isCompleted || reset) {
         _startTime = DateTime.now();
@@ -289,6 +319,7 @@ class TimerState extends State<Timer>
       }
       _ticker.start();
     } else {
+      _runningAnimation.reverse();
       _ticker.stop();
       if (reset) {
         setTime(Duration.zero);
@@ -309,84 +340,146 @@ class TimerState extends State<Timer>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mover = 0.1;
     final thumbSpan = Thumbspan.of(context);
+
     double pieCompletion = currentTime.inMilliseconds <= 0
         ? 0
         : clampUnit(currentTime.inMilliseconds.toDouble() /
             duration.inMilliseconds.toDouble());
-    final dismissThreshold =
-        (1.4 * thumbSpan) / MediaQuery.of(context).size.width;
     final durationDigits =
         isDigitMode ? digits : durationToDigits(duration, padLevel: 1);
     final timeDigits = durationToDigits(currentTime,
         padLevel: padLevelFor(durationDigits.length));
-    final Widget durationWidget = Text(formatTime(durationDigits));
-    final Widget timeDisplay = DefaultTextStyle.merge(
-        style: TextStyle(color: theme.colorScheme.onSurface),
-        child: Row(children: [
-          Text(formatTime(timeDigits)),
-          Text("/"),
-          CompositedTransformTarget(
-            link: timerLayerLink,
-            child: durationWidget,
-          )
-        ]));
 
-    return Dismissible(
-      key: dismissableKey,
-      dismissThresholds: {
-        DismissDirection.endToStart: dismissThreshold,
-        DismissDirection.startToEnd: dismissThreshold,
-      },
-      onDismissed: (_) {
-        final ts = context.findAncestorStateOfType<TimerScreenState>();
-        wasDismissed = true;
-        ts!.removeTimer(widget.key as GlobalKey<TimerState>);
-      },
-      background: Container(
-        color: const Color.fromARGB(255, 231, 148, 142),
-        alignment: Alignment.centerLeft,
-        // padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: const Icon(Icons.delete, color: Colors.white),
-      ),
-      secondaryBackground: Container(
-        color: const Color.fromARGB(255, 231, 148, 142),
-        alignment: Alignment.centerRight,
-        // padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: const Icon(Icons.delete, color: Colors.white),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            color: Theme.of(context).colorScheme.onPrimary,
-          ),
-          child: InkWell(
-            onTap: () {
-              toggleRunning();
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(timerPaddingr),
-              child: Row(
-                children: [
-                  Container(width: timerPaddingr),
-                  Pie(
-                    size: 29,
-                    backgroundColor: theme.colorScheme.primaryContainer,
-                    color: theme.colorScheme.primary,
-                    value: pieCompletion,
-                  ),
-                  Container(width: timerPaddingr * 2),
-                  timeDisplay,
-                ],
+    final Widget timeText = DefaultTextStyle.merge(
+        style: TextStyle(color: theme.colorScheme.onSurface),
+        child: AnimatedBuilder(
+          animation: _runningAnimation,
+          builder: (context, child) {
+            final v = Curves.easeInCubic.transform(_runningAnimation.value);
+            return FractionalTranslation(
+                translation: Offset(0, lerp(-mover, mover, v)),
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Transform.scale(
+                          alignment: Alignment.bottomLeft,
+                          scale: lerp(0.6, 1, v),
+                          child: Text(boring.formatTime(timeDigits))),
+                      Transform.scale(
+                          alignment: Alignment.topLeft,
+                          scale: lerp(1, 0.6, v),
+                          child: Text(boring.formatTime(durationDigits))),
+                    ]));
+          },
+        ));
+
+    final expandingHindCircle = AnimatedBuilder(
+        animation: _runningAnimation,
+        builder: (context, child) => Visibility(
+            visible: _runningAnimation.value != 0,
+            maintainSize: true,
+            maintainState: true,
+            maintainAnimation: true,
+            child: Transform.scale(
+              scale: 1 + _runningAnimation.value * 3,
+              child: Container(
+                  decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.colorScheme.surfaceContainerLowest,
+              )),
+            )));
+
+    Widget clockDial(Key? key, Widget? expandingHindCircle) {
+      return AnimatedBuilder(
+          key: key,
+          animation: _runningAnimation,
+          builder: (context, child) => Container(
+                padding: EdgeInsets.all(
+                    (1 - _runningAnimation.value) * timerPaddingr),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: theme.colorScheme.surfaceContainerLowest,
+                ),
+                constraints: BoxConstraints(maxHeight: 49, maxWidth: 49),
+                child: child,
               ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            fit: StackFit.expand,
+            children: [
+              if (expandingHindCircle != null) expandingHindCircle,
+              // there's a very strange bug where the pie doesn't repaint when the timer is being dragged. Every other animation still works. I checked, and although build is being called, shouldRepaint isn't. I'm gonna ignore it for now.
+              // oh! and I notice the numbers don't update either!
+              Pie(
+                backgroundColor: backgroundColor,
+                color: primaryColor,
+                value: pieCompletion,
+              ),
+            ],
+          ));
+    }
+
+    Widget result = AnimatedBuilder(
+      animation: _runningAnimation,
+      builder: (context, child) => Container(
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+              shape: BoxShape.rectangle,
+              // the animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
+              color: _runningAnimation.value == 1
+                  ? theme.colorScheme.surfaceContainerLowest
+                  : theme.colorScheme.surfaceContainerLowest.withAlpha(0)),
+          child: child),
+      child: GestureDetector(
+        onTap: () {
+          context
+              .findAncestorStateOfType<TimerScreenState>()
+              ?.takeActionOn(widget.key as GlobalKey<TimerState>);
+          // toggleRunning();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          child: Padding(
+            padding: const EdgeInsets.all(timerPaddingr),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                clockDial(_clockKey, expandingHindCircle),
+                SizedBox(width: timerPaddingr),
+                timeText,
+              ],
             ),
           ),
         ),
       ),
     );
+
+    result = SizeReporter(
+        key: transferrableKey, previousSize: previousSize, child: result);
+
+    // final pb = DraggableFeedbackPositionBox();
+    // return LongPressDraggable(
+    //     delay: const Duration(milliseconds: 290),
+    //     feedback: result,
+    //     // I think this requires a second globalkey to narrow in on transferrable or something :/ and a listener
+    //     childWhenDragging: SizeFollower(
+    //       sizeNotifier: previousSize,
+    //     ),
+    //     child: result);
+
+    return DraggableWidget(child: result);
+
+    // return result;
   }
+}
+
+class DraggableFeedbackPositionBox {
+  Offset begin = Offset.zero;
 }
 
 class FadingDial extends AnimatedWidget {
@@ -651,6 +744,55 @@ class DialState extends State<Dial> {
   }
 }
 
+/// a circle of colors sampled from a uniform circle in the hsluv space at lightness 70
+/// for some reason like none of the hsluv apis provide polar coordinates, so you can't get perceptually uniform saturation. I refuse to implement polar coordinates, so I just copied some points at constant saturation from the hsluv site.
+const List<HSLuvColor> colorCircle = [
+  HSLuvColor.fromHSL(0, 67, 70),
+  HSLuvColor.fromHSL(26.7, 54, 70),
+  HSLuvColor.fromHSL(48.1, 58, 70),
+  HSLuvColor.fromHSL(81, 72, 70),
+  HSLuvColor.fromHSL(111, 63, 70),
+  HSLuvColor.fromHSL(134, 60, 70),
+  HSLuvColor.fromHSL(158, 88, 70),
+  HSLuvColor.fromHSL(180, 100, 70),
+  HSLuvColor.fromHSL(205, 94, 70),
+  HSLuvColor.fromHSL(234, 67, 70),
+  HSLuvColor.fromHSL(262, 69, 70),
+  HSLuvColor.fromHSL(294, 61, 70),
+  HSLuvColor.fromHSL(326, 63, 70),
+  HSLuvColor.fromHSL(346, 68, 70),
+];
+
+/// hue is in degrees
+/// we might not need this, hpluv is pretty good.
+HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
+  assert(hue >= 0 && hue <= 360);
+  hue = hue % 360;
+  // then move iHint so that it's lower than or equal tohue
+  int iHint = (hue / 360 * colorCircle.length).floor();
+  while (colorCircle[iHint].hue > hue) {
+    if (iHint == 0) {
+      break;
+    }
+    iHint -= 1;
+  }
+  // but that it's the highest allowable hue
+  while (iHint < colorCircle.length - 1 && colorCircle[iHint + 1].hue <= hue) {
+    iHint += 1;
+  }
+  // now interpolate between the two colors
+  final lower = colorCircle[iHint];
+  final upper = colorCircle[(iHint + 1) % colorCircle.length];
+  final hueDiff = iHint < colorCircle.length - 1
+      ? upper.hue - lower.hue
+      : 360 - lower.hue + upper.hue;
+  final t = (hue - lower.hue) / hueDiff;
+  return HSLuvColor.fromHSL(
+      lerp(lower.hue, upper.hue, t),
+      lerp(lower.saturation, upper.saturation, t),
+      lerp(lower.lightness, upper.lightness, t));
+}
+
 class TimerScreenState extends State<Timerscreen>
     with SignalsMixin, TickerProviderStateMixin {
   GlobalKey<TimerState>? selectedTimer;
@@ -669,6 +811,8 @@ class TimerScreenState extends State<Timerscreen>
   late final AnimationController numeralDragIndicator;
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
+  // a lime green default as the first color
+  double nextHue = 0.252;
 
   @override
   void initState() {
@@ -694,11 +838,25 @@ class TimerScreenState extends State<Timerscreen>
     numeralDragIndicator.dispose();
   }
 
+  void takeActionOn(GlobalKey<TimerState> key) {
+    final timer = key.currentState as TimerState;
+    //todo: take whichever action is currently highlighted
+    timer.toggleRunning();
+  }
+
+  double nextRandomHue() {
+    final ret = nextHue;
+    final increment = 0.06 + Random().nextDouble() * 0.23;
+    nextHue += increment;
+    return (ret * 360) % 360;
+  }
+
   void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
     if (selectedTimer == null) {
       addNewTimer(Timer(
           key: GlobalKey<TimerState>(),
           selected: true,
+          hue: nextRandomHue(),
           digits: stripZeroes(number)));
     } else {
       getStateMaybeDeferring(selectedTimer!, (sc) {
@@ -714,15 +872,15 @@ class TimerScreenState extends State<Timerscreen>
     if (viaKeyboard) {
       final flashAnimation = numeralKeys[number.first].currentState?.longFlash;
       if (flashAnimation != null) {
-        flashAnimation.value = 0;
-        flashAnimation.forward();
+        flashAnimation.forward(from: 0);
       }
     }
   }
 
   void startDragFor(double Function(double) timeFunction, Offset position) {
     final GlobalKey<TimerState> operatingTimer = GlobalKey<TimerState>();
-    addNewTimer(Timer(key: operatingTimer, selected: true));
+    addNewTimer(
+        Timer(key: operatingTimer, selected: true, hue: nextRandomHue()));
     setState(() {
       isCranking = true;
 
@@ -769,7 +927,10 @@ class TimerScreenState extends State<Timerscreen>
           pausePlaySelected();
           break;
         case LogicalKeyboardKey.keyN:
-          addNewTimer(Timer(key: GlobalKey<TimerState>(), selected: true));
+          addNewTimer(Timer(
+              key: GlobalKey<TimerState>(),
+              selected: true,
+              hue: nextRandomHue()));
           break;
       }
     }
@@ -785,10 +946,11 @@ class TimerScreenState extends State<Timerscreen>
     ThemeData theme = Theme.of(context);
 
     //buttons
-    var settingsButton = TimersButton(
-        label: Icon(Icons.settings),
+    var configButton = TimersButton(
+        label: Icon(Icons.edit_rounded),
         onPanDown: (_) {
           JukeBox.jarringSound(context);
+          // SoloudJukebox.jarringSound(context);
         });
 
     //buttons
@@ -836,7 +998,10 @@ class TimerScreenState extends State<Timerscreen>
     final addButton = TimersButton(
         label: Icon(Icons.add_circle),
         onPanDown: (_) {
-          addNewTimer(Timer(key: GlobalKey<TimerState>(), selected: true));
+          addNewTimer(Timer(
+              key: GlobalKey<TimerState>(),
+              selected: true,
+              hue: nextRandomHue()));
         });
 
     // todo: animate the play icon out when playing
@@ -883,7 +1048,7 @@ class TimerScreenState extends State<Timerscreen>
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               Flexible(child: backspaceButton),
-              Flexible(child: addButton),
+              Flexible(child: configButton),
               Flexible(child: stopPlayButton),
               Flexible(child: pausePlayButton),
             ],
@@ -928,7 +1093,7 @@ class TimerScreenState extends State<Timerscreen>
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Flexible(child: settingsButton),
+              Flexible(child: addButton),
               Flexible(child: selectButton),
             ],
           ),
@@ -940,9 +1105,10 @@ class TimerScreenState extends State<Timerscreen>
     final buttonSpan = thumbSpan * 0.7;
 
     // the lower part of the screen
-    var controls = Container(
+    final controls = Container(
       clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(color: theme.colorScheme.primaryContainer),
+      decoration:
+          BoxDecoration(color: theme.colorScheme.surfaceContainerLowest),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -999,6 +1165,56 @@ class TimerScreenState extends State<Timerscreen>
       }
     }
 
+    final numeralDragIndicatorWidget = AnimatedBuilder(
+      animation: Tween(begin: 0.3, end: 1.0).animate(CurvedAnimation(
+        parent: numeralDragIndicator,
+        curve: Curves.easeInCubic,
+      )),
+      builder: (context, child) => Positioned(
+        left: numeralDragStart.dx,
+        top:
+            numeralDragStart.dy - numeralDragDistanceTs * Thumbspan.of(context),
+        child: CustomPaint(
+          painter: DragIndicatorPainter(
+            color: theme.colorScheme.primary,
+            radius: Curves.easeIn.transform(numeralDragIndicator.value) *
+                thumbSpan *
+                0.15,
+          ),
+        ),
+      ),
+    );
+
+    final timersWidget = Expanded(
+      child: Row(
+        children: [
+          // unpinned timers
+          Flexible(
+              flex: 1,
+              child: Container(
+                alignment: Alignment.bottomRight,
+                constraints: BoxConstraints.expand(),
+                clipBehavior: Clip.none,
+                color: theme.colorScheme.surfaceContainerHigh,
+                child: AnimatedWrap.material3(
+                  textDirection: TextDirection.rtl,
+                  clipBehavior: Clip.none,
+                  verticalDirection: VerticalDirection.up,
+                  alignment: WrapAlignment.start,
+                  runAlignment: WrapAlignment.start,
+                  // I don't like cloning this, but ultimately, if we had really large numbers of timers, large enough that this clone operation was a problem, we'd need a viewer rather than a simple AnimatedWrap.
+                  children: timers.toList(),
+                ),
+              )),
+          // pinned timers
+          Container(
+              constraints:
+                  BoxConstraints(minHeight: double.infinity, minWidth: 100),
+              color: theme.colorScheme.surfaceContainer)
+        ],
+      ),
+    );
+
     return Scaffold(
       body: Focus(
         autofocus: true, // Automatically request focus when built
@@ -1009,60 +1225,15 @@ class TimerScreenState extends State<Timerscreen>
         child: Stack(children: [
           Column(
             children: [
-              Expanded(
-                child: Container(
-                  color:
-                      theme.colorScheme.onPrimary, // Slightly grey background
-                  child: ImplicitlyAnimatedList(
-                    insertDuration: Duration(milliseconds: 170),
-                    removeDuration: Duration(milliseconds: 170),
-                    items: timers,
-                    reverse: true,
-                    // this horriffic workaround is here because ImplicitlyAnimatedList doesn't remove items as soon as the list changes, because it uses an asynchronous MyersDiff call, so a removed item may still be in the list and may still be called in itemBuilder for a frame after being removed, and if that removed item contains a Dismissible, it will scream, so we build a Container instead in those cases.
-                    // The following two sections of code differ only in how they behave when the item has no state.
-                    itemBuilder: (context, animation, item, index) {
-                      return drawIfNotDismissed(item, animation,
-                          elseAssumeDismissed: false);
-                    },
-                    removeItemBuilder: (context, animation, item) {
-                      return drawIfNotDismissed(item, animation,
-                          elseAssumeDismissed: true);
-                    },
-                    areItemsTheSame: (oldItem, newItem) =>
-                        oldItem.key == newItem.key,
-                  ),
-                ),
-              ),
+              timersWidget,
               Container(
-                constraints: BoxConstraints(
-                    maxHeight: double.infinity,
-                    minHeight: 0,
-                    maxWidth: double.infinity,
-                    minWidth: double.infinity),
+                constraints: BoxConstraints(minWidth: double.infinity),
                 // the lower part of the screen
                 child: controls,
               )
             ],
           ),
-          AnimatedBuilder(
-            animation: Tween(begin: 0.3, end: 1.0).animate(CurvedAnimation(
-              parent: numeralDragIndicator,
-              curve: Curves.easeInCubic,
-            )),
-            builder: (context, child) => Positioned(
-              left: numeralDragStart.dx,
-              top: numeralDragStart.dy -
-                  numeralDragDistanceTs * Thumbspan.of(context),
-              child: CustomPaint(
-                painter: DragIndicatorPainter(
-                  color: theme.colorScheme.primary,
-                  radius: Curves.easeIn.transform(numeralDragIndicator.value) *
-                      thumbSpan *
-                      0.15,
-                ),
-              ),
-            ),
-          )
+          numeralDragIndicatorWidget
         ]),
       ),
     );
@@ -1254,8 +1425,7 @@ class TimersButtonState extends State<TimersButton>
       onPanDown: (details) {
         if (widget.onPanDown != null) {
           widget.onPanDown?.call(details.globalPosition);
-          shortFlash.value = 0;
-          shortFlash.forward();
+          shortFlash.forward(from: 0);
         }
       },
       onPanUpdate: widget.onPanUpdate != null
@@ -1293,18 +1463,17 @@ class TimersButtonState extends State<TimersButton>
                           : Colors.white.withAlpha(0),
                       Colors.white,
                       flash);
-                  final backing = Padding(
-                      padding: EdgeInsets.all(4),
-                      child: Container(
-                          decoration: BoxDecoration(
-                              color: backingColor,
-                              border: Border.all(
-                                width: standardLineWidth,
-                                color: widget.accented
-                                    ? theme.colorScheme.primary
-                                    : Colors.transparent,
-                              ),
-                              borderRadius: BorderRadius.circular(9))));
+                  final backing = Container(
+                      decoration: BoxDecoration(
+                    color: backingColor,
+                    border: Border.all(
+                      width: standardLineWidth,
+                      color: widget.accented
+                          ? theme.colorScheme.primary
+                          : Colors.transparent,
+                    ),
+                    // borderRadius: BorderRadius.circular(9)
+                  ));
                   final Widget labelWidget;
                   if (widget.label is String) {
                     labelWidget = Text(widget.label as String,

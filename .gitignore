@@ -40,6 +40,17 @@ app.*.symbols
 app.*.map.json
 
 # Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+/ios
+/android/
+/linux/
+/macos/
+/web/
+/windows/
+
+.vscode/settings.json
+.metadata
+analysis_options.yaml
+devtools_options.yaml
+pubspec.lock
+flake.lock
+build.gradle

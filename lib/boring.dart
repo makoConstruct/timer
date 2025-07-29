@@ -3,20 +3,27 @@
 import 'dart:math';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hsluv/hsluvcolor.dart';
 import 'package:provider/provider.dart';
+// import 'package:flutter_soloud/flutter_soloud.dart' as SL;
 
 const tau = 2 * pi;
 
 class JukeBox {
   static final AssetSource pianoSound =
-      AssetSource('sounds/piano sound 448552__tedagame__g4.ogg');
+      AssetSource('sounds/jarring piano sound 448552__tedagame__g4.ogg');
+  static final AssetSource steel15 =
+      AssetSource('sounds/jingles_STEEL15_kenney.ogg');
+  static final AssetSource forcefield =
+      AssetSource('sounds/forceField_002_kenney.ogg');
   // static const String jarringSound = 'assets/jarring.mp3';
   late AudioPool jarringPlayers;
   static Future<JukeBox> create() async {
     return AudioPool.create(
-      source: pianoSound,
+      source: forcefield,
       maxPlayers: 4,
     ).then((pool) => JukeBox()..jarringPlayers = pool);
   }
@@ -28,6 +35,30 @@ class JukeBox {
   }
 }
 
+Rect? boxRect(GlobalKey key) {
+  final box = key.currentContext?.findRenderObject() as RenderBox?;
+  if (box == null) {
+    return null;
+  } else {
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+}
+
+// disabled because it couldn't find its plugin .so, see pubspec
+// class SoloudJukebox {
+//   late Future<SL.AudioSource> forcefield;
+//   SoloudJukebox() {
+//     final si = SL.SoLoud.instance;
+//     forcefield = si.loadAsset('sounds/forceField_002_kenney.ogg');
+//   }
+
+//   static void jarringSound(BuildContext context) {
+//     context.read<SoloudJukebox>().forcefield.then((f) {
+//       SL.SoLoud.instance.play(f);
+//     });
+//   }
+// }
+
 /// only defers once, assumes it'll be there on the next frame
 void getStateMaybeDeferring<T extends State>(
     GlobalKey<T> k, void Function(T) to) {
@@ -38,6 +69,60 @@ void getStateMaybeDeferring<T extends State>(
     });
   } else {
     to(tk);
+  }
+}
+
+class DraggableWidget extends StatefulWidget {
+  final Widget child;
+  const DraggableWidget({super.key, required this.child});
+  @override
+  State<DraggableWidget> createState() => _DraggableWidgetState();
+}
+
+class _DraggableWidgetState extends State<DraggableWidget>
+    with TickerProviderStateMixin {
+  final previousSize = ValueNotifier<Size>(Size.zero);
+  late final AnimationController popAnimation;
+  @override
+  void initState() {
+    super.initState();
+    popAnimation =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 100));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: previousSize,
+      builder: (context, size, child) {
+        return LongPressDraggable(
+            delay: Duration(milliseconds: 180),
+            feedback: AnimatedBuilder(
+              animation: popAnimation,
+              builder: (context, child) => Transform.translate(
+                offset: Offset(
+                    0, Curves.easeOut.transform(popAnimation.value) * 20),
+                // the Material is a workaround for https://github.com/flutter/flutter/issues/39379
+                child: Material(
+                  color: Colors.transparent,
+                  child: widget.child,
+                ),
+              ),
+            ),
+            onDragStarted: () {
+              previousSize.value = context.size ?? Size.zero;
+              popAnimation.forward(from: 0);
+            },
+            childWhenDragging: SizedBox(width: size.width, height: size.height),
+            child: widget.child);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    previousSize.dispose();
+    super.dispose();
   }
 }
 
@@ -126,6 +211,11 @@ Color lerpColor(Color a, Color b, double t) {
   );
 }
 
+Color darkenColor(Color c, double amount) {
+  final hsl = HSLuvColor.fromColor(c);
+  return hsl.addLightness(-amount * 100).toColor();
+}
+
 double unlerp(double a, double b, double t) {
   return (t - a) / (b - a);
 }
@@ -139,6 +229,16 @@ double clampUnit(double t) {
     return 0;
   } else if (t > 1) {
     return 1;
+  } else {
+    return t;
+  }
+}
+
+double clampDouble(double t, double min, double max) {
+  if (t < min) {
+    return min;
+  } else if (t > max) {
+    return max;
   } else {
     return t;
   }
@@ -467,21 +567,21 @@ class Pie extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
+    return AspectRatio(
+      aspectRatio: 1,
       child: Stack(
         alignment: Alignment.center,
+        fit: StackFit.expand,
         children: [
           CustomPaint(
-            size: Size(size, size),
+            // size: Size(size, size),
             painter: PiePainter(
               value: 1.0, // Full circle for the background
               color: backgroundColor,
             ),
           ),
           CustomPaint(
-            size: Size(size, size),
+            // size: Size(size, size),
             painter: PiePainter(
               value: value.clamp(0.0, 1.0),
               color: color,

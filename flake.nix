@@ -40,7 +40,7 @@
         #     "google-gdk-license"
         #     "intel-android-extra-license"
         #     "intel-android-sysimage-license"
-        #     "mips-android-sysimage-license"            
+        #     "mips-android-sysimage-license"
           # ];
         };
       in {
@@ -51,26 +51,36 @@
               jdk17
               android.platform-tools
               gst_all_1.gstreamer
+              gst_all_1.gstreamer.dev
               gst_all_1.gst-plugins-base
               gst_all_1.gst-plugins-good
               gst_all_1.gst-libav
-              glibc
-              # you may need this for linux
-              # pkg-config gtk3 gtk3.dev ninja clang glibc
+              # included for SoLoud
+              # alsa-lib
+              # alsa-lib.dev
+              pkg-config
+              gtk3
+              gtk3.dev
+              # actually including glibc breaks glibc functionality lmao
+              # glibc
+              ninja
             ];
-            
-            nativeBuildInputs = [pkgs.pkg-config];
-            
+
+            # nativeBuildInputs = with pkgs; [
+            #   pkg-config
+            # ];
+
             shellHook = ''
-              export PKG_CONFIG_PATH="${pkgs.gst_all_1.gstreamer.dev}/lib/pkgconfig:${pkgs.gst_all_1.gst-plugins-base.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+              export PS1="$PS1 (❄ "
             '';
+              # export PKG_CONFIG_PATH="${pkgs.gst_all_1.gstreamer.dev}/lib/pkgconfig:${pkgs.gst_all_1.gst-plugins-base.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
 
             ANDROID_HOME = android.androidsdk + /libexec/android-sdk;
             JAVA_HOME = pkgs.jdk17;
             ANDROID_AVD_HOME = (toString ./.) + "/.android/avd";
             ANDROID_SDK_ROOT = android.androidsdk + /libexec/android-sdk;
           };
-        
+
         # needed because gradle wants to use dynamic linking or something. I don't understand why this is a problem.
         # this isn't working. can't accept licenses. Unsure what happened with the above.
         devShells.fhs = (pkgs.buildFHSEnv {
@@ -86,19 +96,22 @@
               gst_all_1.gst-libav
               glibc
               pkg-config
-              # Add any other dependencies you need
             ];
-            
+
             # profile = ''
             #   export ANDROID_HOME=${pkgs.android.androidsdk}/libexec/android-sdk
             #   export JAVA_HOME=${pkgs.jdk17}
             #   export ANDROID_AVD_HOME=$PWD/.android/avd
             #   export ANDROID_SDK_ROOT=${pkgs.android.androidsdk}/libexec/android-sdk
             # '';
-            
+
+            shellHook = ''
+              export PS1="$PS1 (❄ "
+            '';
+
             runScript = "bash";
           }).env;
       });
-      
-      
+
+
 }
