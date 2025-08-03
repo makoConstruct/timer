@@ -2,35 +2,64 @@
 
 import 'dart:math';
 
-import 'package:audioplayers/audioplayers.dart';
+// import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:provider/provider.dart';
-// import 'package:flutter_soloud/flutter_soloud.dart' as SL;
+import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
 const tau = 2 * pi;
 
+// for audioplayers
+// class JukeBox {
+//   static final AssetSource pianoSound =
+//       AssetSource('sounds/jarring piano sound 448552__tedagame__g4.ogg');
+//   static final AssetSource steel15 =
+//       AssetSource('sounds/jingles_STEEL15_kenney.ogg');
+//   static final AssetSource forcefield =
+//       AssetSource('sounds/forceField_002_kenney.ogg');
+//   // static const String jarringSound = 'assets/jarring.mp3';
+//   late AudioPool jarringPlayers;
+//   static Future<JukeBox> create() async {
+//     return AudioPool.create(
+//       source: forcefield,
+//       maxPlayers: 4,
+//     ).then((pool) => JukeBox()..jarringPlayers = pool);
+//   }
+
+//   static void jarringSound(BuildContext context) {
+//     context.read<Future<JukeBox>>().then((jb) {
+//       jb.jarringPlayers.start();
+//     });
+//   }
+// }
+
+// this is different to the above, we don't create an instance of the jukebox, it's all static. Not sure why it shouldn't be. Some of the code still passes us a context we don't need, and we still initialize and instance that doesn't get used
+// replace with soloud
 class JukeBox {
-  static final AssetSource pianoSound =
-      AssetSource('sounds/jarring piano sound 448552__tedagame__g4.ogg');
-  static final AssetSource steel15 =
-      AssetSource('sounds/jingles_STEEL15_kenney.ogg');
-  static final AssetSource forcefield =
-      AssetSource('sounds/forceField_002_kenney.ogg');
-  // static const String jarringSound = 'assets/jarring.mp3';
-  late AudioPool jarringPlayers;
+  static final String pianoSound =
+      'sounds/jarring piano sound 448552__tedagame__g4.ogg';
+  static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
+  static final String forcefield = 'sounds/forceField_002_kenney.ogg';
+  static final Future<sl.AudioSource> briefSound =
+      soloud.then((s) => s.loadAsset(forcefield));
+  static final Future<sl.SoLoud> soloud = Future.microtask(() {
+    final r = sl.SoLoud.instance;
+    r.init();
+    return r;
+  });
+
   static Future<JukeBox> create() async {
-    return AudioPool.create(
-      source: forcefield,
-      maxPlayers: 4,
-    ).then((pool) => JukeBox()..jarringPlayers = pool);
+    return Future.value(JukeBox());
   }
 
-  static void jarringSound(BuildContext context) {
-    context.read<Future<JukeBox>>().then((jb) {
-      jb.jarringPlayers.start();
+  static void jarringSound(BuildContext contex) {
+    soloud.then((s) {
+      briefSound.then((so) {
+        s.play(so);
+      });
     });
   }
 }
@@ -72,16 +101,26 @@ void getStateMaybeDeferring<T extends State>(
   }
 }
 
-class DraggableWidget extends StatefulWidget {
+class DraggableWidget<T> extends StatefulWidget {
   final Widget child;
-  const DraggableWidget({super.key, required this.child});
+  final T? data;
+  const DraggableWidget({super.key, required this.child, this.data});
   @override
   State<DraggableWidget> createState() => _DraggableWidgetState();
 }
 
-class _DraggableWidgetState extends State<DraggableWidget>
+//produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
+DragAnchorStrategy dragAnchorStrategy(ValueNotifier<Offset> dragStartOffset) =>
+    (Draggable<Object> draggable, BuildContext context, Offset position) {
+      dragStartOffset.value =
+          (context.findRenderObject() as RenderBox).globalToLocal(position);
+      return Offset.zero;
+    };
+
+class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
     with TickerProviderStateMixin {
   final previousSize = ValueNotifier<Size>(Size.zero);
+  final dragStartOffset = ValueNotifier<Offset>(Offset.zero);
   late final AnimationController popAnimation;
   @override
   void initState() {
@@ -92,29 +131,47 @@ class _DraggableWidgetState extends State<DraggableWidget>
 
   @override
   Widget build(BuildContext context) {
+    // don't really need this to be a valuelisteable, but it's easier for dragAnchorStrategy to pass it to us through that
     return ValueListenableBuilder(
-      valueListenable: previousSize,
-      builder: (context, size, child) {
-        return LongPressDraggable(
-            delay: Duration(milliseconds: 180),
-            feedback: AnimatedBuilder(
-              animation: popAnimation,
-              builder: (context, child) => Transform.translate(
-                offset: Offset(
-                    0, Curves.easeOut.transform(popAnimation.value) * 20),
+      valueListenable: dragStartOffset,
+      builder: (context, offset, child) {
+        return ValueListenableBuilder(
+          valueListenable: previousSize,
+          builder: (context, size, child) {
+            return LongPressDraggable<T>(
+                delay: Duration(milliseconds: 180),
+                data: widget.data,
+                // this parameter isn't really supposed to do a mutation when called, but I don't know how else to get the touch point offset
+                dragAnchorStrategy: dragAnchorStrategy(dragStartOffset),
                 // the Material is a workaround for https://github.com/flutter/flutter/issues/39379
-                child: Material(
+                feedback: Material(
                   color: Colors.transparent,
-                  child: widget.child,
+                  child: AnimatedBuilder(
+                    animation: popAnimation,
+                    builder: (context, child) {
+                      return Transform.translate(
+                        offset: lerpOffset(
+                                -dragStartOffset.value,
+                                -sizeToOffset(previousSize.value / 2),
+                                popAnimation.value) +
+                            Offset(
+                                0,
+                                Curves.easeOut.transform(popAnimation.value) *
+                                    20),
+                        child: widget.child,
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ),
-            onDragStarted: () {
-              previousSize.value = context.size ?? Size.zero;
-              popAnimation.forward(from: 0);
-            },
-            childWhenDragging: SizedBox(width: size.width, height: size.height),
-            child: widget.child);
+                onDragStarted: () {
+                  previousSize.value = context.size ?? Size(30, 30);
+                  popAnimation.forward(from: 0);
+                },
+                childWhenDragging:
+                    SizedBox(width: size.width, height: size.height),
+                child: widget.child);
+          },
+        );
       },
     );
   }
@@ -199,6 +256,10 @@ double shortestAngleDistance(double from, double to) {
 
 double lerp(double a, double b, double t) {
   return a + (b - a) * t;
+}
+
+Offset lerpOffset(Offset a, Offset b, double t) {
+  return Offset(lerp(a.dx, b.dx, t), lerp(a.dy, b.dy, t));
 }
 
 /// ceilab is better for interpollation but in most cases it doesn't matter and also the cielab library I tried seemed to have compilation errros in it

@@ -472,7 +472,8 @@ class TimerState extends State<Timer>
     //     ),
     //     child: result);
 
-    return DraggableWidget(child: result);
+    return DraggableWidget<GlobalKey<TimerState>>(
+        data: widget.key as GlobalKey<TimerState>, child: result);
 
     // return result;
   }
@@ -802,11 +803,12 @@ class TimerScreenState extends State<Timerscreen>
   late List<Timer> timers;
 
   GlobalKey controlPadKey = GlobalKey();
+  GlobalKey pinnedTimersKey = GlobalKey();
   late AnimationController dialBloom;
   late GlobalKey dialKey;
   Dial? dial;
-  late final GlobalKey secondCrankButtonKey;
-  late final GlobalKey minuteCrankButtonKey;
+  final GlobalKey secondCrankButtonKey = GlobalKey();
+  final GlobalKey minuteCrankButtonKey = GlobalKey();
   Offset numeralDragStart = Offset.zero;
   late final AnimationController numeralDragIndicator;
   final List<GlobalKey<TimersButtonState>> numeralKeys =
@@ -827,8 +829,6 @@ class TimerScreenState extends State<Timerscreen>
     }
     numeralDragIndicator =
         AnimationController(vsync: this, duration: Duration(milliseconds: 70));
-    secondCrankButtonKey = GlobalKey();
-    minuteCrankButtonKey = GlobalKey();
   }
 
   @override
@@ -846,7 +846,7 @@ class TimerScreenState extends State<Timerscreen>
 
   double nextRandomHue() {
     final ret = nextHue;
-    final increment = 0.06 + Random().nextDouble() * 0.23;
+    final increment = 0.06 + Random().nextDouble() * 0.19;
     nextHue += increment;
     return (ret * 360) % 360;
   }
@@ -1188,25 +1188,28 @@ class TimerScreenState extends State<Timerscreen>
     final timersWidget = Expanded(
       child: Row(
         children: [
-          // unpinned timers
+          // pinned timers
           Flexible(
               flex: 1,
-              child: Container(
-                alignment: Alignment.bottomRight,
-                constraints: BoxConstraints.expand(),
-                clipBehavior: Clip.none,
-                color: theme.colorScheme.surfaceContainerHigh,
-                child: AnimatedWrap.material3(
-                  textDirection: TextDirection.rtl,
-                  clipBehavior: Clip.none,
-                  verticalDirection: VerticalDirection.up,
-                  alignment: WrapAlignment.start,
-                  runAlignment: WrapAlignment.start,
-                  // I don't like cloning this, but ultimately, if we had really large numbers of timers, large enough that this clone operation was a problem, we'd need a viewer rather than a simple AnimatedWrap.
-                  children: timers.toList(),
-                ),
-              )),
-          // pinned timers
+              child: Scrollable(
+                  viewportBuilder: (context, position) => Container(
+                        alignment: Alignment.bottomRight,
+                        constraints: BoxConstraints.expand(),
+                        clipBehavior: Clip.none,
+                        color: theme.colorScheme.surfaceContainerHigh,
+                        child: AnimatedWrap.material3(
+                          key: pinnedTimersKey,
+                          textDirection: TextDirection.ltr,
+                          clipBehavior: Clip.none,
+                          verticalDirection: VerticalDirection.down,
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: AnimatedWrapCrossAlignment.end,
+                          runAlignment: WrapAlignment.end,
+                          // I don't like cloning this, but ultimately, if we had really large numbers of timers, large enough that this clone operation was a problem, we'd need a viewer rather than a simple AnimatedWrap.
+                          children: timers.toList(),
+                        ),
+                      ))),
+          // unpinned timers
           Container(
               constraints:
                   BoxConstraints(minHeight: double.infinity, minWidth: 100),
@@ -1223,16 +1226,26 @@ class TimerScreenState extends State<Timerscreen>
           return KeyEventResult.handled; // Prevent event from propagating
         },
         child: Stack(children: [
-          Column(
-            children: [
-              timersWidget,
-              Container(
-                constraints: BoxConstraints(minWidth: double.infinity),
-                // the lower part of the screen
-                child: controls,
-              )
-            ],
-          ),
+          DragTarget<GlobalKey<TimerState>>(
+              builder: (context, candidateData, rejectedData) {
+            print("builder");
+            return Column(
+              children: [
+                timersWidget,
+                Container(
+                  constraints: BoxConstraints(minWidth: double.infinity),
+                  // the lower part of the screen
+                  child: controls,
+                )
+              ],
+            );
+          }, onMove: (DragTargetDetails<GlobalKey<TimerState>> details) {
+            final index = (pinnedTimersKey.currentState as AnimatedWrapState)
+                .insertionIndexAt((pinnedTimersKey.currentContext!
+                        .findRenderObject() as RenderBox)
+                    .globalToLocal(details.offset));
+            print("details.offset: ${details.offset}, index: ${index.index}");
+          }),
           numeralDragIndicatorWidget
         ]),
       ),
@@ -1240,7 +1253,7 @@ class TimerScreenState extends State<Timerscreen>
   }
 
   void toggleStopPlay() {
-    selectedOrFirstTimerState()?.toggleRunning(true);
+    selectedOrLastTimerState()?.toggleRunning(true);
   }
 
   void pausePlaySelected([bool reset = false]) {
@@ -1252,7 +1265,7 @@ class TimerScreenState extends State<Timerscreen>
       });
     } else {
       if (timers.isNotEmpty) {
-        getStateMaybeDeferring(timers[0].key as GlobalKey<TimerState>, (ts) {
+        getStateMaybeDeferring(timers.last.key as GlobalKey<TimerState>, (ts) {
           ts.toggleRunning(reset);
         });
       }
@@ -1261,7 +1274,7 @@ class TimerScreenState extends State<Timerscreen>
 
   void addNewTimer(Timer nt) {
     setState(() {
-      timers.insert(0, nt);
+      timers.add(nt);
       _selectTimer(nt.key as GlobalKey<TimerState>);
     });
   }
@@ -1286,7 +1299,7 @@ class TimerScreenState extends State<Timerscreen>
       }
     } else {
       if (timers.isNotEmpty) {
-        removeTimer(timers[0].key as GlobalKey<TimerState>);
+        removeTimer(timers.last.key as GlobalKey<TimerState>);
       }
     }
   }
@@ -1300,15 +1313,9 @@ class TimerScreenState extends State<Timerscreen>
     });
   }
 
-  TimerState? selectedOrFirstTimerState() {
-    if (selectedTimer != null) {
-      return selectedTimer!.currentState;
-    } else {
-      return timers.isNotEmpty
-          ? (timers[0].key as GlobalKey<TimerState>).currentState
-          : null;
-    }
-  }
+  TimerState? selectedOrLastTimerState() =>
+      selectedTimer?.currentState ??
+      (timers.lastOrNull?.key as GlobalKey<TimerState>?)?.currentState;
 }
 
 class NumberButton extends StatefulWidget {

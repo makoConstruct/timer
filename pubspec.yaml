@@ -40,9 +40,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   workmanager: ^0.5.2
   # there's a bug https://github.com/bluefireteam/audioplayers/issues/1749 on linux, random delay when starting playback for the second time, maintainers say they'll get to it.
-  audioplayers: ^6.4.0
+  # audioplayers: ^6.4.0
   # so I tried this instead of the above audioplayers, but couldn't get it to run, apparently it was failing to find the plugin .so it was generating during build. No idea why. It's right there. It has all of its dependencies. (alsa)
-  # flutter_soloud: ^3.1.8
+  flutter_soloud: ^3.2.2
   provider: ^6.1.4
   nb_utils: ^7.1.4
   animated_to: ^0.3.2

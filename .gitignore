@@ -31,7 +31,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
+build/
 
 # Symbolication related
 app.*.symbols
@@ -40,12 +40,15 @@ app.*.symbols
 app.*.map.json
 
 # Android Studio will place build artifacts here
-/ios
-/android/
-/linux/
-/macos/
-/web/
-/windows/
+ios
+android/
+linux/
+macos/
+web/
+windows/
+
+# temporary, haven't decided which binaries we're keeping yet
+assets/
 
 .vscode/settings.json
 .metadata

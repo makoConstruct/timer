@@ -4,7 +4,7 @@ A better design for timers.
 
 Usable with just one hand.
 
-Requires one fewer keystroke in the making of timers.
+Requires one fewer keystroke in the making of a timer.
 
 Maintains stable colors and positions for pinned timers, while making them small enough to fit on the first screen, so that you'll always be able to quickly find the one you're looking for.
 

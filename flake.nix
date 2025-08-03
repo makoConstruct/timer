@@ -17,11 +17,11 @@
         };
         android = pkgs.androidenv.composeAndroidPackages {
           toolsVersion = "26.1.1";
-          platformToolsVersion = "34.0.1";
+          platformToolsVersion = "36.0.0";
           buildToolsVersions = [ "30.0.1" "33.0.1" ];
           includeEmulator = true;
-          emulatorVersion = "34.1.9";
-          platformVersions = [ "28" "29" "33" "34" "35" ];
+          # emulatorVersion = "36.1.2";
+          platformVersions = [ "36" ];
           includeSources = false;
           includeSystemImages = true;
           # we need "google_apis" here but it doesn't build, nix hashes are wrong
@@ -29,7 +29,7 @@
           abiVersions = [ "armeabi-v7a" "arm64-v8a" ];
           cmakeVersions = [ "3.10.2" ];
           includeNDK = true;
-          ndkVersions = [ "22.0.7026061" ];
+          ndkVersions = [ "28.1.13356709" ];
           useGoogleAPIs = true;
           useGoogleTVAddOns = false;
         #   extraLicenses = [
@@ -47,20 +47,22 @@
         devShells.default =
           pkgs.mkShell {
             buildInputs = with pkgs; [
-              flutter327
+              flutter329
+              # flutter327
               jdk17
               android.platform-tools
+              android.androidsdk
               gst_all_1.gstreamer
               gst_all_1.gstreamer.dev
               gst_all_1.gst-plugins-base
               gst_all_1.gst-plugins-good
               gst_all_1.gst-libav
               # included for SoLoud
-              # alsa-lib
-              # alsa-lib.dev
+              alsa-lib
+              alsa-lib.dev
               pkg-config
-              gtk3
-              gtk3.dev
+              # gtk3
+              # gtk3.dev
               # actually including glibc breaks glibc functionality lmao
               # glibc
               ninja
@@ -72,7 +74,9 @@
 
             shellHook = ''
               export PS1="$PS1 (❄ "
+              export LD_LIBRARY_PATH="./lib/:$LD_LIBRARY_PATH"
             '';
+              # export LD_LIBRARY_PATH="./build/linux/x64/debug/plugins/flutter_soloud/:$LD_LIBRARY_PATH"
               # export PKG_CONFIG_PATH="${pkgs.gst_all_1.gstreamer.dev}/lib/pkgconfig:${pkgs.gst_all_1.gst-plugins-base.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
 
             ANDROID_HOME = android.androidsdk + /libexec/android-sdk;
