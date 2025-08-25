@@ -3,6 +3,8 @@ import 'dart:async';
 
 import 'package:animated_containers/animated_wrap.dart';
 import 'package:animated_to/animated_to.dart';
+// imported as because there's a name collision with Column, lmao
+import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -10,10 +12,14 @@ import 'package:hsluv/extensions.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
+import 'package:makos_timer/database.dart';
+import 'package:makos_timer/database.dart' as DB;
 import 'package:makos_timer/raise_animation.dart';
 import 'package:makos_timer/size_reporter.dart';
+import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:uuid/v4.dart';
 import 'package:workmanager/workmanager.dart';
 
 @pragma('vm:entry-point')
@@ -29,7 +35,20 @@ void callbackDispatcher() {
   });
 }
 
-void main() {
+final ObjID timerListID = '159e8ae1-19f6-4fe1-bdb3-5198f5e35b1b';
+
+Future<void> torchDatabase(TheDatabase db) async {
+  print('WARNING: Clearing all data from the database!');
+  await db.kVs.deleteAll();
+}
+
+void main() async {
+  final db = TheDatabase();
+  await torchDatabase(db);
+  // the db will be accessed via this singleton from then on
+  await MobjRegistry.initialize(db);
+  MobjRegistry.insertIfNotPresent(timerListID,
+      TypeRegistry.getTypeHelp(['list', 'string']), () => <ObjID>[]);
   runApp(const TimersApp());
 }
 
@@ -111,16 +130,23 @@ class Thumbspan {
   }
 }
 
-class TimersApp extends StatelessWidget {
+class TimersApp extends StatefulWidget {
   const TimersApp({super.key});
 
+  @override
+  State<TimersApp> createState() => _TimersAppState();
+}
+
+class _TimersAppState extends State<TimersApp> {
+  late Future<JukeBox> jukeBox;
+  _TimersAppState() {
+    WidgetsFlutterBinding.ensureInitialized();
+    jukeBox = JukeBox.create();
+  }
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     final initialTimers = <Timer>[];
-
-    final jukeBox = JukeBox.create();
-
     return MaterialApp(
       title: 'timer',
       theme: ThemeData(
@@ -131,7 +157,6 @@ class TimersApp extends StatelessWidget {
             Provider<Thumbspan>(
                 create: (context) => Thumbspan(lpixPerThumbspan(context))),
             Provider<Future<JukeBox>>(create: (_) => jukeBox),
-            // Provider<SoloudJukebox>(create: (_) => SoloudJukebox())
           ],
           child: Timerscreen(
             timers: initialTimers,
@@ -141,22 +166,77 @@ class TimersApp extends StatelessWidget {
   }
 }
 
-class Timer extends StatefulWidget {
-  final bool selected;
-  final bool animateIn;
-  final List<int> digits;
-  final bool running;
+class TimerData {
+  /// represents, if runningState is 0, the time it was paused at, otherwise, the time it started
+  final DateTime? startTime;
 
-  /// hue is in degrees
+  /// whether it's paused/playing/completed
+  final int runningState;
+  bool get isRunning => runningState == running;
+  bool get isCompleted => runningState == completed;
+  static const paused = 0;
+  static const running = 1;
+  static const completed = 2;
+
+  /// the hue of the (pastel) color, in [0,1)
   final double hue;
+
+  /// whether it's currently being edited (shouldn't that be persisted via "currently selected")
+  final bool selected;
+
+  /// the digit form of duration. Used when tapping out or backspacing numbers. Not always kept up to date with duration..
+  final List<int> digits;
+
+  /// the amount of time it ran in before being paused (ignored if not paused, or if completed)
+  final double ranTime;
+
+  /// if the alarm is currently screaming and needs to be acknowledged by the user
+  final bool isGoingOff;
+
+  /// in seconds, computed from digits
+  double get duration => digitsToDuration(digits).inMilliseconds / 1000.0;
+
+  TimerData({
+    this.startTime,
+    this.runningState = paused,
+    required this.hue,
+    required this.selected,
+    this.digits = const [],
+    this.ranTime = 0,
+    this.isGoingOff = false,
+  });
+
+  TimerData withChanges({
+    // fortunately we never need to set startTime to null :/ dart's optional parameter syntax doesn't support that
+    DateTime? startTime,
+    int? runningState,
+    double? hue,
+    bool? selected,
+    List<int>? digits,
+    double? ranTime,
+    bool? isGoingOff,
+  }) {
+    return TimerData(
+      startTime: startTime ?? this.startTime,
+      runningState: runningState ?? this.runningState,
+      hue: hue ?? this.hue,
+      selected: selected ?? this.selected,
+      digits: digits ?? this.digits,
+      ranTime: ranTime ?? this.ranTime,
+      isGoingOff: isGoingOff ?? this.isGoingOff,
+    );
+  }
+}
+
+/// Timer widget, contrast with Timer row from the database orm
+class Timer extends StatefulWidget {
+  final ObjID timerID;
+  final bool animateIn;
   const Timer({
     required GlobalKey<TimerState> key,
-    this.selected = false,
+    required this.timerID,
     this.animateIn = true,
-    this.digits = const [],
-    required this.hue,
-  })  : running = false,
-        super(key: key);
+  }) : super(key: key);
 
   @override
   State<Timer> createState() => TimerState();
@@ -165,92 +245,66 @@ class Timer extends StatefulWidget {
 class TimerState extends State<Timer>
     with SignalsMixin, TickerProviderStateMixin {
   // we actually do need to keep both forms of these around, as each form can represent information the other can't. Duration can be millisecond precise, while digits can have abnormal numbers in, say, the seconds segment, eg, more than 60 seconds.
-  bool isDigitMode = true;
-  // the digit form of duration. Used when tapping out or backspacing numbers. Not always kept up to date with duration..
-  late List<int> _digits;
-  bool isGoingOff = false;
-  Duration _duration = Duration.zero;
-  DateTime? _startTime;
-  Key dismissableKey = GlobalKey();
-  bool wasDismissed = false;
+  late Mobj<TimerData> s;
   late Ticker _ticker;
-  Duration currentTime = Duration.zero;
-  late bool _selected;
-  late double hue;
-  bool isRunning = false;
-  bool isCompleted = false;
+  // in seconds
+  double currentTime = 0;
   late AnimationController _runningAnimation;
   final GlobalKey _clockKey = GlobalKey();
-  var timerLayerLink = LayerLink();
   final previousSize = ValueNotifier<Size?>(null);
   final transferrableKey = GlobalKey();
 
   set selected(bool v) {
-    setState(() {
-      _selected = v;
-    });
+    s.value = s.peek()!.withChanges(selected: v);
   }
 
-  set duration(Duration d) {
-    setState(() {
-      d - currentTime;
-      isDigitMode = false;
-      _duration = d;
-      if (currentTime >= d) {
-        currentTime = d;
-        isCompleted = true;
-      } else {
-        isCompleted = false;
-      }
-    });
-  }
+  // not sure we use this
+  // set duration(double d) {
+  //   final digits = durationToDigits(d);
+  //   if (currentTime >= d) {
+  //     currentTime = d;
+  //     isCompleted = true;
+  //   } else {
+  //     isCompleted = false;
+  //   }
+  // }
 
-  Duration get duration {
-    if (isDigitMode) {
-      _duration = digitsToDuration(_digits);
-    }
-    return _duration;
+  /// in seconds
+  double get duration {
+    return s.peek()!.duration;
   }
 
   set digits(List<int> value) {
-    setState(() {
-      isDigitMode = true;
-      _digits = value;
-    });
+    s.value = s.peek()!.withChanges(digits: value);
   }
 
-  List<int> get digits {
-    if (!isDigitMode) {
-      _digits = durationToDigits(duration);
-    }
-    return _digits.toList();
-  }
+  static Color backgroundColor(double hue) =>
+      hpluvToRGBColor([hue * 360, 100, 90]);
+  static Color primaryColor(double hue) =>
+      hpluvToRGBColor([hue * 360, 100, 30]);
 
-  Color get backgroundColor => hpluvToRGBColor([widget.hue, 100, 90]);
-  Color get primaryColor => hpluvToRGBColor([widget.hue, 100, 30]);
-
-  @override
-  void didUpdateWidget(Timer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.hue != oldWidget.hue) {
-      setState(() {
-        hue = widget.hue;
-      });
-    }
-  }
+  // the timerID should never change, we don't respond to widget updates
+  // @override
+  // void didUpdateWidget(Timer oldWidget) {
+  //   super.didUpdateWidget(oldWidget);
+  //   if (widget.hue != oldWidget.hue) {
+  //     setState(() {
+  //       hue = widget.hue;
+  //     });
+  //   }
+  // }
 
   @override
   void initState() {
     super.initState();
+    // todo remove
     testTimeConversions();
-    _selected = widget.selected;
-    _digits = widget.digits;
-    isRunning = widget.running;
-    hue = widget.hue;
+    s = MobjRegistry.get<TimerData>(widget.timerID)!;
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
     _ticker = createTicker((d) {
-      setTime(DateTime.now().difference(_startTime!));
+      setTime(
+          durationToSeconds(DateTime.now().difference(s.peek()!.startTime!)));
     });
   }
 
@@ -259,81 +313,71 @@ class TimerState extends State<Timer>
     _runningAnimation.dispose();
     _ticker.dispose();
     previousSize.dispose();
+    s.dispose();
     super.dispose();
   }
 
-  void setDigitMode(bool v) {
-    if (v != isDigitMode) {
-      setState(() {
-        isDigitMode = v;
-        if (v) {
-          _digits = durationToDigits(_duration);
-        } else {
-          _duration = digitsToDuration(_digits);
-        }
-      });
-    }
-  }
-
-  void setTime(Duration n) {
-    if (currentTime == n) {
+  void setTime(double nd) {
+    if (currentTime == nd) {
       return;
     }
+    final d = s.peek()!;
     setState(() {
-      currentTime = n;
-      setDigitMode(false);
-      if (isRunning && n.inSeconds >= duration.inSeconds && !isCompleted) {
+      currentTime = nd;
+      if (d.isRunning && nd >= d.duration && !d.isCompleted) {
         triggerAlert();
       }
     });
   }
 
   void triggerAlert() {
-    setState(() {
-      isCompleted = true;
-      //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
+    JukeBox.jarringSound(context);
+    _runningAnimation.reverse();
+    _ticker.stop();
+    setTime(0);
+    s.value = s.peek()!.withChanges(
+          runningState: 2,
+          // here to note that we don't have this feature (prolonged alarms) in
+          isGoingOff: false,
+        );
 
-      JukeBox.jarringSound(context);
-
-      _ticker.stop();
-
-      isGoingOff = false;
-      toggleRunning(true);
-    });
+    //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
   }
 
   /// returns true iff the timer was caused to start by this call
   bool toggleRunning([bool reset = false]) {
-    setState(() {
-      isRunning = !isRunning;
-    });
-    final ret = isRunning;
-    if (isRunning) {
+    final d = s.peek()!;
+    final ret = !d.isRunning;
+    final trs = ret ? TimerData.running : TimerData.paused;
+    if (ret) {
       _runningAnimation.forward();
-      setDigitMode(false);
-      if (isCompleted || reset) {
-        _startTime = DateTime.now();
-        isCompleted = false;
-      } else {
-        _startTime = DateTime.now().subtract(currentTime);
-      }
       _ticker.start();
+      bool resetting = d.isCompleted || reset;
+      if (resetting) {
+        setState(() {
+          setTime(0);
+        });
+      }
+      s.value = s.peek()!.withChanges(
+          runningState: trs,
+          // restart only if it was completed, or if we're in reset mode
+          startTime: resetting
+              ? DateTime.now()
+              : DateTime.now().subtract(secondsToDuration(currentTime)));
     } else {
       _runningAnimation.reverse();
       _ticker.stop();
       if (reset) {
-        setTime(Duration.zero);
+        setTime(0);
       }
+      s.value = s.peek()!.withChanges(runningState: trs);
     }
     return ret;
   }
 
   void reset() {
     setState(() {
-      setTime(Duration.zero);
-      if (!isRunning) {
-        toggleRunning();
-      }
+      setTime(0);
     });
   }
 
@@ -343,12 +387,13 @@ class TimerState extends State<Timer>
     final mover = 0.1;
     final thumbSpan = Thumbspan.of(context);
 
-    double pieCompletion = currentTime.inMilliseconds <= 0
-        ? 0
-        : clampUnit(currentTime.inMilliseconds.toDouble() /
-            duration.inMilliseconds.toDouble());
-    final durationDigits =
-        isDigitMode ? digits : durationToDigits(duration, padLevel: 1);
+    TimerData? d = s.value;
+    if (d == null) {
+      return SizedBox();
+    }
+
+    double pieCompletion = clampUnit(currentTime / d.duration);
+    final durationDigits = d.digits;
     final timeDigits = durationToDigits(currentTime,
         padLevel: padLevelFor(durationDigits.length));
 
@@ -415,8 +460,8 @@ class TimerState extends State<Timer>
               // there's a very strange bug where the pie doesn't repaint when the timer is being dragged. Every other animation still works. I checked, and although build is being called, shouldRepaint isn't. I'm gonna ignore it for now.
               // oh! and I notice the numbers don't update either!
               Pie(
-                backgroundColor: backgroundColor,
-                color: primaryColor,
+                backgroundColor: backgroundColor(d.hue),
+                color: primaryColor(d.hue),
                 value: pieCompletion,
               ),
             ],
@@ -442,18 +487,16 @@ class TimerState extends State<Timer>
           // toggleRunning();
         },
         behavior: HitTestBehavior.opaque,
-        child: Container(
-          child: Padding(
-            padding: const EdgeInsets.all(timerPaddingr),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                clockDial(_clockKey, expandingHindCircle),
-                SizedBox(width: timerPaddingr),
-                timeText,
-              ],
-            ),
+        child: Padding(
+          padding: const EdgeInsets.all(timerPaddingr),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              clockDial(_clockKey, expandingHindCircle),
+              SizedBox(width: timerPaddingr),
+              timeText,
+            ],
           ),
         ),
       ),
@@ -590,161 +633,6 @@ class Timerscreen extends StatefulWidget {
   State<Timerscreen> createState() => TimerScreenState();
 }
 
-class Dial extends StatefulWidget {
-  // relative to screen
-  final Offset center;
-  // relative to screen
-  final Offset dragStart;
-  final GlobalKey<TimerState> selectedTimer;
-  final AnimationController fadeBloom;
-  // milliseconds as a function of radians
-  final double Function(double) timeFunction;
-  final GlobalKey controlPadKey;
-  final GlobalKey dialHost = GlobalKey();
-  Dial(
-      {super.key,
-      required this.center,
-      required this.dragStart,
-      required this.fadeBloom,
-      required this.timeFunction,
-      required this.controlPadKey,
-      required this.selectedTimer});
-  @override
-  State<Dial> createState() => DialState();
-}
-
-class DialState extends State<Dial> {
-  late Offset currentDrag;
-  double timeAtStart = 0; // milliseconds
-  late double initialAngle;
-  // the number of times the dial has been rotated 360 degrees, with sign.
-  int rounds = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    // Transform.rotate(
-    //               angle: 0.9,
-    //               child: AnimatedScale(
-    //                 duration: const Duration(
-    //                     milliseconds: falcrumAnimationDurationMs),
-    //                 curve: Curves.easeOut,
-    //                 scale: 1.0,
-    //                 child: FittedBox(
-    //                     fit: BoxFit.none,
-    //                     alignment: Alignment.centerLeft,
-    //                     child: Row(children: [
-    //                       SizedBox(width: 20, height: 3),
-    //                       Text("100")
-    //                     ]).animate().scaleY(
-    //                         duration: Duration(
-    //                             milliseconds: falcrumAnimationDurationMs),
-    //                         curve: Curves.easeOut)),
-    //               ))
-    initialAngle = angleFrom(widget.dragStart, widget.center);
-    rounds = 0;
-    currentDrag = widget.dragStart;
-    timeAtStart = (widget.selectedTimer.currentState?.duration ?? Duration.zero)
-            .inMilliseconds
-            .toDouble() /
-        1000;
-  }
-
-  //issue: It's not calling startDrag when it starts a new drag. Replacing the widget probably isn't the way.
-
-  void updateDrag(Offset newDrag) {
-    double olda = angleFrom(currentDrag, widget.center);
-    double newa = angleFrom(newDrag, widget.center);
-    // double d = shortestAngleDistance(olda, newa);
-    // we could just set cumulativeAngle to the sum of all ds, but that could accumulate error. Instead we do something more complicated. Gesturally: rounds is the higher digit and currentRound is the lower digit. cumulativeAngle is tau*rounds + currentRound.
-
-    int nextRounds = rounds;
-    final double so = shortestAngleDistance(initialAngle, olda);
-    final double sn = shortestAngleDistance(initialAngle, newa);
-    //detect a crossing of the initialAngle
-    // (we use an || instead of an && because if the angle is spinning so fast (at a rate of pi per frame) that we can't tell whether it crossed the initialAngle, the preferred behavior is for the crossing to occur rather than never occur)
-
-    if (so.sign.isNegative != sn.sign.isNegative &&
-        (so.abs() < pi / 2 || sn.abs() < pi / 2)) {
-      nextRounds += (sn - so).sign.toInt();
-    }
-    double currentRound = (newa - initialAngle) % tau;
-
-    final nextAngle = tau * nextRounds + currentRound;
-
-    double nextTime = timeAtStart + widget.timeFunction(nextAngle);
-    if (nextTime < 0) {
-      // refuse to update any settings if it would make the time go negative
-      nextTime = 0;
-      initialAngle = newa;
-    } else {
-      rounds = nextRounds;
-    }
-    final ts = widget.selectedTimer.currentState;
-    if (ts != null) {
-      ts.setState(() {
-        // rounds down to the nearest second
-        ts.duration = Duration(milliseconds: nextTime.toInt() * 1000);
-        if (ts.currentTime > ts.duration) {
-          ts.setTime(ts.duration);
-        }
-      });
-    }
-
-    setState(() {
-      currentDrag = newDrag;
-    });
-  }
-
-  void endDrag() {
-    setState(() {
-      rounds = 0;
-      final ts = widget.selectedTimer.currentState;
-      if (ts != null && !ts.isRunning && ts.duration > Duration.zero) {
-        ts.toggleRunning();
-      }
-      widget.fadeBloom.reverse();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    double angle = angleFrom(widget.center, currentDrag);
-    // Get the screen width from the MediaQuery
-    final double screenWidth = MediaQuery.of(context).size.width;
-    double r = max(widget.center.dx, screenWidth - widget.center.dx) * 1.6;
-    Offset positionRelControlPad = widget.center -
-        (widget.controlPadKey.currentContext!.findRenderObject()! as RenderBox)
-            .localToGlobal(Offset.zero);
-    HSLuvColor midColor =
-        HSLuvColor.fromColor(Theme.of(context).colorScheme.primaryContainer);
-    double midl = midColor.lightness;
-    Color topColor = midColor.withLightness(midl + 2).toColor();
-    Color bottomColor = midColor.withLightness(midl - 5).toColor();
-    return Positioned(
-      left: positionRelControlPad.dx,
-      top: positionRelControlPad.dy,
-      child: FadingDial(
-          listenable: widget.fadeBloom,
-          angle: angle,
-          radius: r,
-          topColor: topColor,
-          bottomColor: bottomColor,
-          holeRadius: 0),
-    );
-  }
-
-  @override
-  void didUpdateWidget(Dial oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.center != oldWidget.center || currentDrag != widget.dragStart) {
-      setState(() {
-        currentDrag = widget.dragStart;
-      });
-    }
-  }
-}
-
 /// a circle of colors sampled from a uniform circle in the hsluv space at lightness 70
 /// for some reason like none of the hsluv apis provide polar coordinates, so you can't get perceptually uniform saturation. I refuse to implement polar coordinates, so I just copied some points at constant saturation from the hsluv site.
 const List<HSLuvColor> colorCircle = [
@@ -804,11 +692,6 @@ class TimerScreenState extends State<Timerscreen>
 
   GlobalKey controlPadKey = GlobalKey();
   GlobalKey pinnedTimersKey = GlobalKey();
-  late AnimationController dialBloom;
-  late GlobalKey dialKey;
-  Dial? dial;
-  final GlobalKey secondCrankButtonKey = GlobalKey();
-  final GlobalKey minuteCrankButtonKey = GlobalKey();
   Offset numeralDragStart = Offset.zero;
   late final AnimationController numeralDragIndicator;
   final List<GlobalKey<TimersButtonState>> numeralKeys =
@@ -819,8 +702,6 @@ class TimerScreenState extends State<Timerscreen>
   @override
   void initState() {
     super.initState();
-    dialBloom =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 140));
     timers = List.from(widget.timers);
     if (timers.isNotEmpty && widget.selectLastTimer) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -834,7 +715,6 @@ class TimerScreenState extends State<Timerscreen>
   @override
   void dispose() {
     super.dispose();
-    dialBloom.dispose();
     numeralDragIndicator.dispose();
   }
 
@@ -853,14 +733,13 @@ class TimerScreenState extends State<Timerscreen>
 
   void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
     if (selectedTimer == null) {
-      addNewTimer(Timer(
-          key: GlobalKey<TimerState>(),
-          selected: true,
-          hue: nextRandomHue(),
-          digits: stripZeroes(number)));
+      addNewTimer(
+        selected: true,
+        digits: stripZeroes(number),
+      );
     } else {
       getStateMaybeDeferring(selectedTimer!, (sc) {
-        List<int> ct = sc.digits;
+        List<int> ct = List.from(sc.s.peek()!.digits);
         sc.setState(() {
           for (int n in number) {
             ct.add(n);
@@ -875,36 +754,6 @@ class TimerScreenState extends State<Timerscreen>
         flashAnimation.forward(from: 0);
       }
     }
-  }
-
-  void startDragFor(double Function(double) timeFunction, Offset position) {
-    final GlobalKey<TimerState> operatingTimer = GlobalKey<TimerState>();
-    addNewTimer(
-        Timer(key: operatingTimer, selected: true, hue: nextRandomHue()));
-    setState(() {
-      isCranking = true;
-
-      // we rectify the dial center to make sure it's always positioned exactly relative to touch down. A user can learn to be more accurate relative to touchdown than they can be relative to the screen
-      Offset controlPadCenter = widgetCenter(controlPadKey);
-      Offset crankButtonCenter = widgetCenter(secondCrankButtonKey);
-      Offset dialCenter =
-          position + Offset(controlPadCenter.dx - crankButtonCenter.dx, 0);
-
-      // make sure it knows it's a new dial/runs initState. The old dial will just abruptly disappear if you unpress and press too fast which isn't ideal, solvable with will but probably warrants a RemovableHost pattern which I don't want to think about right now
-      dialKey = GlobalKey();
-
-      dial = Dial(
-        key: dialKey,
-        controlPadKey: controlPadKey,
-        timeFunction: timeFunction,
-        dragStart: position,
-        fadeBloom: dialBloom,
-        selectedTimer: operatingTimer,
-        center: dialCenter,
-      );
-
-      dialBloom.forward();
-    });
   }
 
   // Add new method to handle key events
@@ -927,10 +776,7 @@ class TimerScreenState extends State<Timerscreen>
           pausePlaySelected();
           break;
         case LogicalKeyboardKey.keyN:
-          addNewTimer(Timer(
-              key: GlobalKey<TimerState>(),
-              selected: true,
-              hue: nextRandomHue()));
+          addNewTimer(selected: true);
           break;
       }
     }
@@ -950,7 +796,6 @@ class TimerScreenState extends State<Timerscreen>
         label: Icon(Icons.edit_rounded),
         onPanDown: (_) {
           JukeBox.jarringSound(context);
-          // SoloudJukebox.jarringSound(context);
         });
 
     //buttons
@@ -968,40 +813,10 @@ class TimerScreenState extends State<Timerscreen>
           _backspace();
         });
 
-    TimersButton crankButton(bool accented, String name,
-        double Function(double) timeFunction, GlobalKey key) {
-      return TimersButton(
-          key: key,
-          label: name,
-          accented: accented,
-          onPanDown: (Offset position) {
-            startDragFor(timeFunction, position);
-          },
-          onPanUpdate: (Offset position) {
-            ((dial?.key as GlobalKey).currentState as DialState?)
-                ?.updateDrag(position);
-          },
-          onPanEnd: () {
-            setState(() {
-              ((dial?.key as GlobalKey).currentState as DialState?)?.endDrag();
-              isCranking = false;
-              _selectTimer(null);
-            });
-          });
-    }
-
-    final crankMinutesButton =
-        crankButton(false, "m+↻", angleToTimeMinutes, minuteCrankButtonKey);
-    final crankSecondsButton =
-        crankButton(false, "s+↻", angleToTimeSeconds, secondCrankButtonKey);
-
     final addButton = TimersButton(
         label: Icon(Icons.add_circle),
         onPanDown: (_) {
-          addNewTimer(Timer(
-              key: GlobalKey<TimerState>(),
-              selected: true,
-              hue: nextRandomHue()));
+          addNewTimer(selected: true);
         });
 
     // todo: animate the play icon out when playing
@@ -1118,7 +933,6 @@ class TimerScreenState extends State<Timerscreen>
               fit: StackFit.passthrough,
               alignment: Alignment.bottomRight,
               children: [
-                if (dial != null) dial!,
                 Container(
                   key: controlPadKey,
                   child: Row(
@@ -1137,33 +951,6 @@ class TimerScreenState extends State<Timerscreen>
         ],
       ),
     );
-
-    Widget drawIfNotDismissed(Widget item, Animation<double> animation,
-        {required bool elseAssumeDismissed}) {
-      final tk = item.key as GlobalKey<TimerState>?;
-      if (tk == null) {
-        return item;
-      } else {
-        final tks = tk.currentState;
-        final raise = RaiseAnimation(
-          animation: animation,
-          child: item,
-        );
-        if (tks != null) {
-          if (tks.wasDismissed) {
-            return Container();
-          } else {
-            return raise;
-          }
-        } else {
-          if (elseAssumeDismissed) {
-            return Container();
-          } else {
-            return raise;
-          }
-        }
-      }
-    }
 
     final numeralDragIndicatorWidget = AnimatedBuilder(
       animation: Tween(begin: 0.3, end: 1.0).animate(CurvedAnimation(
@@ -1244,7 +1031,31 @@ class TimerScreenState extends State<Timerscreen>
                 .insertionIndexAt((pinnedTimersKey.currentContext!
                         .findRenderObject() as RenderBox)
                     .globalToLocal(details.offset));
-            print("details.offset: ${details.offset}, index: ${index.index}");
+            print(
+                "details.offset: ${details.offset}, insertionIndex: ${index.insertionIndex}");
+          }, onAcceptWithDetails: (details) {
+            final insertion =
+                (pinnedTimersKey.currentState as AnimatedWrapState)
+                    .insertionIndexAt((pinnedTimersKey.currentContext!
+                            .findRenderObject() as RenderBox)
+                        .globalToLocal(details.offset));
+            final tkey = details.data;
+            final insertionIndex = insertion.insertionIndex;
+            final currentIndex = timers.indexWhere((t) => t.key == tkey);
+            // do the insertion only if the item being inserted is new or if it's not right next to its current position
+            if (currentIndex == -1 ||
+                (insertionIndex != currentIndex &&
+                    insertionIndex != currentIndex + 1)) {
+              setState(() {
+                Timer t = tkey.currentWidget! as Timer;
+                timers.insert(insertionIndex, t);
+                if (currentIndex != -1) {
+                  timers.removeAt(insertionIndex < currentIndex
+                      ? currentIndex + 1
+                      : currentIndex);
+                }
+              });
+            }
           }),
           numeralDragIndicatorWidget
         ]),
@@ -1272,10 +1083,40 @@ class TimerScreenState extends State<Timerscreen>
     }
   }
 
-  void addNewTimer(Timer nt) {
+  void addNewTimer({
+    int? runningState,
+    bool? selected,
+    List<int>? digits,
+  }) {
+    final ntid = UuidV4().generate();
+
+    bool selecting = selected ?? false;
+
+    // we leak this. By not deleting it, it will stay in the db and registry as a root object
+    Mobj<TimerData>.create(
+      ntid,
+      const TimerDataType(),
+      initial: TimerData(
+        startTime: null,
+        runningState: runningState ?? TimerData.paused,
+        hue: nextRandomHue(),
+        selected: selecting,
+        digits: digits ?? const [],
+        ranTime: 0,
+        isGoingOff: false,
+      ),
+    );
+
+    final newTimer = Timer(
+      key: GlobalKey<TimerState>(),
+      timerID: ntid,
+    );
+
     setState(() {
-      timers.add(nt);
-      _selectTimer(nt.key as GlobalKey<TimerState>);
+      timers.add(newTimer);
+      if (selecting) {
+        _selectTimer(newTimer.key as GlobalKey<TimerState>);
+      }
     });
   }
 
@@ -1289,7 +1130,7 @@ class TimerScreenState extends State<Timerscreen>
     if (selectedTimer != null) {
       final sc = selectedTimer!.currentState!;
 
-      List<int> digits = sc.digits;
+      List<int> digits = List.from(sc.s.peek()!.digits);
 
       if (digits.isEmpty) {
         removeTimer(selectedTimer!);
@@ -1425,8 +1266,6 @@ class TimersButtonState extends State<TimersButton>
   Widget build(BuildContext context) {
     ThemeData theme = Theme.of(context);
     final buttonSpan = 0.7 * Thumbspan.of(context);
-    Animation<double> dialBloom = widget.dialBloomAnimation ??
-        context.findAncestorStateOfType<TimerScreenState>()!.dialBloom;
     return GestureDetector(
       // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
       onPanDown: (details) {
@@ -1454,19 +1293,16 @@ class TimersButtonState extends State<TimersButton>
             focusColor: widget.accented ? Colors.transparent : null,
             // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
             child: AnimatedBuilder(
-                animation: Listenable.merge([dialBloom, shortFlash, longFlash]),
+                animation: Listenable.merge([shortFlash, longFlash]),
                 builder: (context, child) {
                   double flash = max(
                       (1 - Curves.easeIn.transform(shortFlash.value)),
                       (1 - Curves.easeInOutCubic.transform(longFlash.value)));
-                  Color? textColor = widget.accented
-                      ? lerpColor(theme.colorScheme.primary,
-                          theme.colorScheme.onPrimary, 1 - dialBloom.value)
-                      : null;
+                  Color? textColor =
+                      widget.accented ? theme.colorScheme.primary : null;
                   final backingColor = lerpColor(
                       widget.accented
                           ? theme.colorScheme.primary
-                              .withAlpha(((1 - dialBloom.value) * 255).toInt())
                           : Colors.white.withAlpha(0),
                       Colors.white,
                       flash);
@@ -1491,17 +1327,11 @@ class TimersButtonState extends State<TimersButton>
                   } else {
                     labelWidget = widget.label as Widget;
                   }
-                  return Opacity(
-                    opacity: widget.accented ? 1 : 1 - dialBloom.value * 1,
-                    child: Center(
-                        child: Transform.scale(
-                            scale:
-                                widget.accented ? 1 - dialBloom.value * 0.3 : 1,
-                            // 1,
-                            child: Stack(
-                                alignment: Alignment.center,
-                                clipBehavior: Clip.none,
-                                children: [backing, labelWidget]))),
+                  return Center(
+                    child: Stack(
+                        alignment: Alignment.center,
+                        clipBehavior: Clip.none,
+                        children: [backing, labelWidget]),
                   );
                 })),
       ),

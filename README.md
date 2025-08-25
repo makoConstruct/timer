@@ -17,3 +17,7 @@ Supports timers that don't require the user to spend time getting them out and d
 These are currently not committed, as I haven't decided which ones I want to include.
 
 credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects.
+
+## building
+
+`flutter pub run build_runner build` to build database.g.dart

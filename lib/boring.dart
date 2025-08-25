@@ -1,14 +1,18 @@
 // the boring file is where we put things that're either self-explanatory or just small and fragmented and not very relevant to understanding the core structure of the application
 
+import 'dart:convert';
 import 'dart:math';
 
 // import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
+import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
-import 'package:provider/provider.dart';
-import 'package:flutter_soloud/flutter_soloud.dart' as sl;
+import 'package:makos_timer/database.dart';
+import 'package:makos_timer/type_help.dart';
+import 'package:signals/signals_flutter.dart';
+
+// import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
 const tau = 2 * pi;
 
@@ -38,29 +42,46 @@ const tau = 2 * pi;
 
 // this is different to the above, we don't create an instance of the jukebox, it's all static. Not sure why it shouldn't be. Some of the code still passes us a context we don't need, and we still initialize and instance that doesn't get used
 // replace with soloud
+// soloud also doesn't work with the most recent flutter nix package
+// class JukeBox {
+//   static final String pianoSound =
+//       'sounds/jarring piano sound 448552__tedagame__g4.ogg';
+//   static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
+//   static final String forcefield = 'sounds/forceField_002_kenney.ogg';
+//   static final Future<sl.AudioSource> briefSound =
+//       soloud.then((s) => s.loadAsset(forcefield));
+//   static final Future<sl.SoLoud> soloud = Future.microtask(() {
+//     final r = sl.SoLoud.instance;
+//     r.init();
+//     return r;
+//   });
+
+//   static Future<JukeBox> create() async {
+//     return Future.value(JukeBox());
+//   }
+
+//   static void jarringSound(BuildContext contex) {
+//     soloud.then((s) {
+//       briefSound.then((so) {
+//         s.play(so);
+//       });
+//     });
+//   }
+// }
+
+// mock
 class JukeBox {
-  static final String pianoSound =
-      'sounds/jarring piano sound 448552__tedagame__g4.ogg';
-  static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
-  static final String forcefield = 'sounds/forceField_002_kenney.ogg';
-  static final Future<sl.AudioSource> briefSound =
-      soloud.then((s) => s.loadAsset(forcefield));
-  static final Future<sl.SoLoud> soloud = Future.microtask(() {
-    final r = sl.SoLoud.instance;
-    r.init();
-    return r;
-  });
+  // static final String pianoSound =
+  //     'sounds/jarring piano sound 448552__tedagame__g4.ogg';
+  // static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
+  // static final String forcefield = 'sounds/forceField_002_kenney.ogg';
 
   static Future<JukeBox> create() async {
     return Future.value(JukeBox());
   }
 
   static void jarringSound(BuildContext contex) {
-    soloud.then((s) {
-      briefSound.then((so) {
-        s.play(so);
-      });
-    });
+    // ideally there'd be a visual indicator when the sound is made
   }
 }
 
@@ -167,6 +188,8 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
                   previousSize.value = context.size ?? Size(30, 30);
                   popAnimation.forward(from: 0);
                 },
+                // onDragEnd: (details) {
+                // },
                 childWhenDragging:
                     SizedBox(width: size.width, height: size.height),
                 child: widget.child);
@@ -186,6 +209,165 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
 Offset widgetCenter(GlobalKey k) {
   final cpro = k.currentContext!.findRenderObject() as RenderBox;
   return cpro.localToGlobal(Offset.zero) + sizeToOffset(cpro.size / 2);
+}
+
+typedef ObjID = String;
+
+class MobjRegistry {
+  static bool isInitialized = false;
+  static late TheDatabase db;
+
+  static final Map<ObjID, Mobj> _signals = {};
+
+  static void register(ObjID id, Mobj signal) {
+    _signals[id] = signal;
+  }
+
+  static void unregister(ObjID id) {
+    _signals.remove(id);
+  }
+
+  static Mobj<T>? get<T>(ObjID id) {
+    return _signals[id] as Mobj<T>?;
+  }
+
+  static Mobj insertIfNotPresent<T>(
+      ObjID id, TypeHelp<T> type, T Function() init) {
+    return get(id) ?? Mobj.create(id, type, initial: init());
+  }
+
+  // none of these ever deload/they're made root objects, they're essentially leaked here once
+  static Future<void> initialize(TheDatabase db) {
+    if (isInitialized) {
+      throw StateError("PersistedSignalRegistry already initialized");
+    }
+    isInitialized = true;
+    MobjRegistry.db = db;
+    return db.kVs.all().get().then((v) {
+      for (final KV kv in v) {
+        Map<String, Object> v = jsonDecode(kv.value);
+        TypeHelp t = TypeRegistry.getTypeHelp(v['type']!);
+        // this registers it, and we leak it, which makes it a root
+        Mobj.create(kv.id, t, initial: t.fromJson(v['value']!));
+      }
+    });
+  }
+}
+
+/// Modular Object, but not actually Modular, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
+class Mobj<T> extends Signal<T?> {
+  final ObjID _id;
+  final TypeHelp<T> _type;
+  int _refCount = 1;
+  bool _currentlyReadingFromDb = false;
+
+  Mobj._(
+    this._id,
+    this._type, {
+    T? initial,
+    String? debugLabel,
+    bool autoDispose = false,
+  }) : super(initial, debugLabel: debugLabel, autoDispose: autoDispose) {
+    MobjRegistry.register(_id, this);
+    // a Mobj writes back to db whenever it changes
+    subscribe((v) {
+      if (_currentlyReadingFromDb) {
+        return;
+      }
+      if (v != null) {
+        MobjRegistry.db.kVs.insertOnConflictUpdate(
+            KV(id: _id, value: jsonEncode(_type.toJson(v))));
+      } else {
+        MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
+      }
+    });
+    // inital load from db
+    (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(_id)))
+        .getSingleOrNull()
+        .then(
+      (v) {
+        if (v != null) {
+          _currentlyReadingFromDb = true;
+          value = _type.fromJson(v.value);
+          _currentlyReadingFromDb = false;
+        }
+      },
+    );
+  }
+
+  /// you only construct through this to make sure you don't duplicate an already loaded persistedsignal.
+  factory Mobj.create(
+    ObjID id,
+    TypeHelp<T> type, {
+    T? initial,
+    String? debugLabel,
+    bool autoDispose = false,
+  }) {
+    // Check if signal already exists
+    final existing = MobjRegistry.get(id);
+    if (existing != null && existing is Mobj<T>) {
+      existing.addRef();
+      return existing;
+    } else {
+      return Mobj._(
+        id,
+        type,
+        initial: initial,
+        debugLabel: debugLabel,
+        autoDispose: autoDispose,
+      );
+    }
+  }
+
+  void _setupDbWrites() {
+    subscribe((v) {
+      if (_currentlyReadingFromDb) {
+        return;
+      }
+      if (v != null) {
+        MobjRegistry.db.kVs.insertOnConflictUpdate(
+            KV(id: _id, value: _type.toJson(v).toString()));
+      } else {
+        MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
+      }
+    });
+  }
+
+  void addRef() {
+    _refCount++;
+  }
+
+  void removeRef() {
+    _refCount--;
+    if (_refCount == 0) {
+      // this deletes from the store
+      set(null);
+      MobjRegistry.unregister(_id);
+    }
+  }
+
+  // this currently functions as deletion because it removes the original bonus refcount that root objects get for free. This is a slightly janky way to implement this and could eventually be replaced with something that does proper error reporting.
+  void deleteRoot() {
+    removeRef();
+  }
+
+  @override
+  void dispose() {
+    removeRef();
+    super.dispose();
+  }
+}
+
+/// creates a signal that reads from db once then writes to the db whenever it changes. It does not subscribe to the db, so the signal becomes the authoratative representation of the persisted value.
+Signal<T?> persistedSignal<T>(TheDatabase db, ObjID id, TypeHelp<T> type,
+    {T? initial, String? debugLabel, bool autoDispose = false}) {
+  return Mobj.create(
+    id,
+    type,
+    initial: initial,
+    debugLabel: debugLabel,
+    autoDispose: autoDispose,
+  );
 }
 
 class EnspiralPainter extends CustomPainter {
@@ -317,7 +499,7 @@ int padLevelFor(int digitLength) {
 /// d: `List<int> | Duration`
 String formatTime(Object d, {int padLevel = 0}) {
   List<int> digits =
-      d is List<int> ? d : durationToDigits(d as Duration, padLevel: padLevel);
+      d is List<int> ? d : durationToDigits(d as double, padLevel: padLevel);
 
   String ret = "";
   // the index of the next digit to be printed
@@ -386,10 +568,11 @@ void pushDigits(List<int> digitsOut, int number, int digitsInSection,
 }
 
 /// where padLevel is the number of figures to include as 0 values if the duration isn't really that long
-List<int> durationToDigits(Duration d, {int padLevel = 1}) {
+List<int> durationToDigits(double d, {int padLevel = 1}) {
   List<int> digits = [];
   bool started = false;
-  int days = d.inDays;
+  Duration dur = Duration(microseconds: (d * 1000000).toInt());
+  int days = dur.inDays;
   // Years
   if (days >= 365 || padLevel > 4) {
     pushDigits(digits, days ~/ 365, 4, indefinite: true);
@@ -402,18 +585,18 @@ List<int> durationToDigits(Duration d, {int padLevel = 1}) {
     started = true;
   }
   // Hours
-  if (started || d.inHours % 24 > 0 || padLevel > 2) {
-    pushDigits(digits, d.inHours % 24, 2);
+  if (started || dur.inHours % 24 > 0 || padLevel > 2) {
+    pushDigits(digits, dur.inHours % 24, 2);
     started = true;
   }
   // Minutes
-  if (started || d.inMinutes % 60 > 0 || padLevel > 1) {
-    pushDigits(digits, d.inMinutes % 60, 2);
+  if (started || dur.inMinutes % 60 > 0 || padLevel > 1) {
+    pushDigits(digits, dur.inMinutes % 60, 2);
     started = true;
   }
   // Seconds
-  if (started || d.inSeconds % 60 > 0 || padLevel > 0) {
-    pushDigits(digits, d.inSeconds % 60, 2);
+  if (started || dur.inSeconds % 60 > 0 || padLevel > 0) {
+    pushDigits(digits, dur.inSeconds % 60, 2);
   }
 
   return digits;
@@ -466,6 +649,14 @@ Duration digitsToDuration(List<int> digits) {
   return Duration(seconds: seconds);
 }
 
+double durationToSeconds(Duration v) {
+  return v.inMicroseconds / 1000000;
+}
+
+Duration secondsToDuration(double v) {
+  return Duration(microseconds: (v * 1000000) as int);
+}
+
 /// the number of logical pixels per degree, like, from the user's eye, a degree over from the center of the screen, the number of pixels that would be in that arc. This is *the* salient metric for deciding how big to make things, logical pixels are *supposed* to track along with it, but they're actually wildly inaccurate so we might want a better metric at some point.
 double lpixPerDegree(BuildContext context) {
   return 30;
@@ -507,7 +698,7 @@ void testTimeConversions() {
   assert(formatted == '20173:001:02:03:04');
 
   final d = Duration(days: 1 + 2017 * 365, hours: 2, minutes: 3, seconds: 4);
-  final digits = durationToDigits(d);
+  final digits = durationToDigits(d.inSeconds.toDouble());
   final convertedBack = digitsToDuration(digits);
   assert(d == convertedBack);
 }

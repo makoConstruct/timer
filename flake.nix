@@ -60,9 +60,11 @@
               # included for SoLoud
               alsa-lib
               alsa-lib.dev
+              
               pkg-config
-              # gtk3
-              # gtk3.dev
+              gtk3
+              gtk3.dev
+              sysprof
               # actually including glibc breaks glibc functionality lmao
               # glibc
               ninja
@@ -74,8 +76,9 @@
 
             shellHook = ''
               export PS1="$PS1 (❄ "
-              export LD_LIBRARY_PATH="./lib/:$LD_LIBRARY_PATH"
             '';
+              # relative paths don't work :/
+              # export LD_LIBRARY_PATH="$PWD/lib/:$LD_LIBRARY_PATH"
               # export LD_LIBRARY_PATH="./build/linux/x64/debug/plugins/flutter_soloud/:$LD_LIBRARY_PATH"
               # export PKG_CONFIG_PATH="${pkgs.gst_all_1.gstreamer.dev}/lib/pkgconfig:${pkgs.gst_all_1.gst-plugins-base.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
 
