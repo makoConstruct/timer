@@ -1,16 +1,11 @@
 // the boring file is where we put things that're either self-explanatory or just small and fragmented and not very relevant to understanding the core structure of the application
 
-import 'dart:convert';
 import 'dart:math';
 
 // import 'package:audioplayers/audioplayers.dart';
-import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
-import 'package:makos_timer/database.dart';
-import 'package:makos_timer/type_help.dart';
-import 'package:signals/signals_flutter.dart';
 
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
@@ -122,6 +117,27 @@ void getStateMaybeDeferring<T extends State>(
   }
 }
 
+/// a FutureBuilder that basically assumes it wont have to show a loading image, and has a way of displaying errors.
+/// shows a red screen on error or during loading. (I'll probably change the loading behavior)
+class FutureAssumer<T> extends StatelessWidget {
+  final Future<T> future;
+  final Widget Function(BuildContext, T) builder;
+  const FutureAssumer({super.key, required this.future, required this.builder});
+  @override
+  build(BuildContext context) => FutureBuilder(
+      future: future,
+      builder: (context, snapshot) {
+        final theme = Theme.of(context);
+        return snapshot.hasError
+            ? Container(
+                color: theme.colorScheme.errorContainer,
+                child: Text(snapshot.error.toString()))
+            : snapshot.hasData
+                ? builder(context, snapshot.data as T)
+                : Container(color: theme.colorScheme.errorContainer);
+      });
+}
+
 class DraggableWidget<T> extends StatefulWidget {
   final Widget child;
   final T? data;
@@ -209,165 +225,6 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
 Offset widgetCenter(GlobalKey k) {
   final cpro = k.currentContext!.findRenderObject() as RenderBox;
   return cpro.localToGlobal(Offset.zero) + sizeToOffset(cpro.size / 2);
-}
-
-typedef ObjID = String;
-
-class MobjRegistry {
-  static bool isInitialized = false;
-  static late TheDatabase db;
-
-  static final Map<ObjID, Mobj> _signals = {};
-
-  static void register(ObjID id, Mobj signal) {
-    _signals[id] = signal;
-  }
-
-  static void unregister(ObjID id) {
-    _signals.remove(id);
-  }
-
-  static Mobj<T>? get<T>(ObjID id) {
-    return _signals[id] as Mobj<T>?;
-  }
-
-  static Mobj insertIfNotPresent<T>(
-      ObjID id, TypeHelp<T> type, T Function() init) {
-    return get(id) ?? Mobj.create(id, type, initial: init());
-  }
-
-  // none of these ever deload/they're made root objects, they're essentially leaked here once
-  static Future<void> initialize(TheDatabase db) {
-    if (isInitialized) {
-      throw StateError("PersistedSignalRegistry already initialized");
-    }
-    isInitialized = true;
-    MobjRegistry.db = db;
-    return db.kVs.all().get().then((v) {
-      for (final KV kv in v) {
-        Map<String, Object> v = jsonDecode(kv.value);
-        TypeHelp t = TypeRegistry.getTypeHelp(v['type']!);
-        // this registers it, and we leak it, which makes it a root
-        Mobj.create(kv.id, t, initial: t.fromJson(v['value']!));
-      }
-    });
-  }
-}
-
-/// Modular Object, but not actually Modular, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
-class Mobj<T> extends Signal<T?> {
-  final ObjID _id;
-  final TypeHelp<T> _type;
-  int _refCount = 1;
-  bool _currentlyReadingFromDb = false;
-
-  Mobj._(
-    this._id,
-    this._type, {
-    T? initial,
-    String? debugLabel,
-    bool autoDispose = false,
-  }) : super(initial, debugLabel: debugLabel, autoDispose: autoDispose) {
-    MobjRegistry.register(_id, this);
-    // a Mobj writes back to db whenever it changes
-    subscribe((v) {
-      if (_currentlyReadingFromDb) {
-        return;
-      }
-      if (v != null) {
-        MobjRegistry.db.kVs.insertOnConflictUpdate(
-            KV(id: _id, value: jsonEncode(_type.toJson(v))));
-      } else {
-        MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
-      }
-    });
-    // inital load from db
-    (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(_id)))
-        .getSingleOrNull()
-        .then(
-      (v) {
-        if (v != null) {
-          _currentlyReadingFromDb = true;
-          value = _type.fromJson(v.value);
-          _currentlyReadingFromDb = false;
-        }
-      },
-    );
-  }
-
-  /// you only construct through this to make sure you don't duplicate an already loaded persistedsignal.
-  factory Mobj.create(
-    ObjID id,
-    TypeHelp<T> type, {
-    T? initial,
-    String? debugLabel,
-    bool autoDispose = false,
-  }) {
-    // Check if signal already exists
-    final existing = MobjRegistry.get(id);
-    if (existing != null && existing is Mobj<T>) {
-      existing.addRef();
-      return existing;
-    } else {
-      return Mobj._(
-        id,
-        type,
-        initial: initial,
-        debugLabel: debugLabel,
-        autoDispose: autoDispose,
-      );
-    }
-  }
-
-  void _setupDbWrites() {
-    subscribe((v) {
-      if (_currentlyReadingFromDb) {
-        return;
-      }
-      if (v != null) {
-        MobjRegistry.db.kVs.insertOnConflictUpdate(
-            KV(id: _id, value: _type.toJson(v).toString()));
-      } else {
-        MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
-      }
-    });
-  }
-
-  void addRef() {
-    _refCount++;
-  }
-
-  void removeRef() {
-    _refCount--;
-    if (_refCount == 0) {
-      // this deletes from the store
-      set(null);
-      MobjRegistry.unregister(_id);
-    }
-  }
-
-  // this currently functions as deletion because it removes the original bonus refcount that root objects get for free. This is a slightly janky way to implement this and could eventually be replaced with something that does proper error reporting.
-  void deleteRoot() {
-    removeRef();
-  }
-
-  @override
-  void dispose() {
-    removeRef();
-    super.dispose();
-  }
-}
-
-/// creates a signal that reads from db once then writes to the db whenever it changes. It does not subscribe to the db, so the signal becomes the authoratative representation of the persisted value.
-Signal<T?> persistedSignal<T>(TheDatabase db, ObjID id, TypeHelp<T> type,
-    {T? initial, String? debugLabel, bool autoDispose = false}) {
-  return Mobj.create(
-    id,
-    type,
-    initial: initial,
-    debugLabel: debugLabel,
-    autoDispose: autoDispose,
-  );
 }
 
 class EnspiralPainter extends CustomPainter {
@@ -496,11 +353,7 @@ int padLevelFor(int digitLength) {
 }
 
 /// if d is greater than the number of given padLevel, eg, if it's 25 hours and place is 3 (which means show seconds, minutes and hours), it will still automatically show 1 day, 1 hour, and zero minutes and seconds. padLevel is for making sure enough places are shown in numbers that are too low.
-/// d: `List<int> | Duration`
-String formatTime(Object d, {int padLevel = 0}) {
-  List<int> digits =
-      d is List<int> ? d : durationToDigits(d as double, padLevel: padLevel);
-
+String formatTime(List<int> digits, {int padLevel = 0}) {
   String ret = "";
   // the index of the next digit to be printed
   int underLevel = max(
@@ -654,7 +507,7 @@ double durationToSeconds(Duration v) {
 }
 
 Duration secondsToDuration(double v) {
-  return Duration(microseconds: (v * 1000000) as int);
+  return Duration(microseconds: (v * 1000000).toInt());
 }
 
 /// the number of logical pixels per degree, like, from the user's eye, a degree over from the center of the screen, the number of pixels that would be in that arc. This is *the* salient metric for deciding how big to make things, logical pixels are *supposed* to track along with it, but they're actually wildly inaccurate so we might want a better metric at some point.
@@ -694,12 +547,15 @@ List<int> stripZeroes(List<int> digits) {
 
 void testTimeConversions() {
   final sd = Duration(days: 1 + 20173 * 365, hours: 2, minutes: 3, seconds: 4);
-  String formatted = formatTime(sd, padLevel: 3);
+  final int padLevel = 3;
+  List<int> digits =
+      durationToDigits(durationToSeconds(sd), padLevel: padLevel);
+  String formatted = formatTime(digits, padLevel: padLevel);
   assert(formatted == '20173:001:02:03:04');
 
   final d = Duration(days: 1 + 2017 * 365, hours: 2, minutes: 3, seconds: 4);
-  final digits = durationToDigits(d.inSeconds.toDouble());
-  final convertedBack = digitsToDuration(digits);
+  final ndigits = durationToDigits(durationToSeconds(d));
+  final convertedBack = digitsToDuration(ndigits);
   assert(d == convertedBack);
 }
 

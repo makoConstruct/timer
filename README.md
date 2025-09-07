@@ -20,4 +20,12 @@ credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects.
 
 ## building
 
+You'll need to fetch those audio assets.
+
+`flutter create .`
+
+`flutter pub get` to get build runner
+
 `flutter pub run build_runner build` to build database.g.dart
+
+`flutter run`

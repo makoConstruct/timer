@@ -2,7 +2,6 @@ import 'dart:math';
 import 'dart:async';
 
 import 'package:animated_containers/animated_wrap.dart';
-import 'package:animated_to/animated_to.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
@@ -13,10 +12,8 @@ import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/database.dart';
-import 'package:makos_timer/database.dart' as DB;
-import 'package:makos_timer/raise_animation.dart';
 import 'package:makos_timer/size_reporter.dart';
-import 'package:makos_timer/type_help.dart';
+import 'package:makos_timer/mobj.dart';
 import 'package:provider/provider.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:uuid/v4.dart';
@@ -38,17 +35,18 @@ void callbackDispatcher() {
 final ObjID timerListID = '159e8ae1-19f6-4fe1-bdb3-5198f5e35b1b';
 
 Future<void> torchDatabase(TheDatabase db) async {
-  print('WARNING: Clearing all data from the database!');
+  print('CRITICAL ERROR: Clearing all data from the database!');
   await db.kVs.deleteAll();
 }
 
 void main() async {
   final db = TheDatabase();
-  await torchDatabase(db);
+  // await torchDatabase(db);
   // the db will be accessed via this singleton from then on
   await MobjRegistry.initialize(db);
-  MobjRegistry.insertIfNotPresent(timerListID,
-      TypeRegistry.getTypeHelp(['list', 'string']), () => <ObjID>[]);
+  // we know that the data required for the app is minimal enough that we should wait until it's loaded before showing anything... idk not sure I believe this
+  await Mobj.getOrCreate(timerListID,
+      type: ListType(const StringType()), initial: () => <ObjID>[]);
   runApp(const TimersApp());
 }
 
@@ -146,7 +144,6 @@ class _TimersAppState extends State<TimersApp> {
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    final initialTimers = <Timer>[];
     return MaterialApp(
       title: 'timer',
       theme: ThemeData(
@@ -158,10 +155,31 @@ class _TimersAppState extends State<TimersApp> {
                 create: (context) => Thumbspan(lpixPerThumbspan(context))),
             Provider<Future<JukeBox>>(create: (_) => jukeBox),
           ],
-          child: Timerscreen(
-            timers: initialTimers,
-            selectLastTimer: true,
-          )),
+          child: FutureAssumer<List<Mobj>>(
+              // awaiting the list and also all of the timers
+              future: Mobj.getOrCreate<List<String>>(timerListID,
+                      type: ListType(const StringType()),
+                      initial: () => [],
+                      debugLabel: "list")
+                  .then((v) {
+                return Future.wait(<Future<Mobj>>[Future.value(v)] +
+                    v.value!
+                        .map(
+                            (ti) => Mobj.fetch(ti, type: const TimerDataType()))
+                        .toList());
+              }),
+              builder: (context, v) => Timerscreen(
+                    timerList: v[0] as Mobj<List<ObjID>>,
+                    timers: Map.fromEntries(
+                        v.sublist(1, v.length).map((mt) => MapEntry(
+                            mt.id,
+                            Timer(
+                              key: GlobalKey(),
+                              mobj: mt as Mobj<TimerData>,
+                              animateIn: false,
+                            )))),
+                    selectLastTimer: true,
+                  ))),
     );
   }
 }
@@ -230,11 +248,11 @@ class TimerData {
 
 /// Timer widget, contrast with Timer row from the database orm
 class Timer extends StatefulWidget {
-  final ObjID timerID;
+  final Mobj<TimerData> mobj;
   final bool animateIn;
   const Timer({
     required GlobalKey<TimerState> key,
-    required this.timerID,
+    required this.mobj,
     this.animateIn = true,
   }) : super(key: key);
 
@@ -244,8 +262,15 @@ class Timer extends StatefulWidget {
 
 class TimerState extends State<Timer>
     with SignalsMixin, TickerProviderStateMixin {
-  // we actually do need to keep both forms of these around, as each form can represent information the other can't. Duration can be millisecond precise, while digits can have abnormal numbers in, say, the seconds segment, eg, more than 60 seconds.
-  late Mobj<TimerData> s;
+  set d(TimerData v) {
+    widget.mobj.value = v;
+  }
+
+  // peek mobj data
+  TimerData get p => widget.mobj.peek()!;
+
+  /// subscribe to mobj data
+  TimerData get d => widget.mobj.value!;
   late Ticker _ticker;
   // in seconds
   double currentTime = 0;
@@ -254,8 +279,12 @@ class TimerState extends State<Timer>
   final previousSize = ValueNotifier<Size?>(null);
   final transferrableKey = GlobalKey();
 
+  // maybe I should just use an animated_to like approach. I'm pretty sure the current approach (AnimatedContainers) wont work because when we transfer between two containers a remove will play that will mount the same globalkey twice. Terrible.
+  // /// set at the end of a drag animation with the position of the drag item relative to the parent
+  // Offset? comingHomeFrom;
+
   set selected(bool v) {
-    s.value = s.peek()!.withChanges(selected: v);
+    widget.mobj.value = p.withChanges(selected: v);
   }
 
   // not sure we use this
@@ -271,11 +300,11 @@ class TimerState extends State<Timer>
 
   /// in seconds
   double get duration {
-    return s.peek()!.duration;
+    return p.duration;
   }
 
   set digits(List<int> value) {
-    s.value = s.peek()!.withChanges(digits: value);
+    d = p.withChanges(digits: value);
   }
 
   static Color backgroundColor(double hue) =>
@@ -299,12 +328,10 @@ class TimerState extends State<Timer>
     super.initState();
     // todo remove
     testTimeConversions();
-    s = MobjRegistry.get<TimerData>(widget.timerID)!;
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
     _ticker = createTicker((d) {
-      setTime(
-          durationToSeconds(DateTime.now().difference(s.peek()!.startTime!)));
+      setTime(durationToSeconds(DateTime.now().difference(p.startTime!)));
     });
   }
 
@@ -313,7 +340,8 @@ class TimerState extends State<Timer>
     _runningAnimation.dispose();
     _ticker.dispose();
     previousSize.dispose();
-    s.dispose();
+    // timers aren't deloaded so don't ref down I guess
+    // widget.mobj.dispose();
     super.dispose();
   }
 
@@ -321,7 +349,7 @@ class TimerState extends State<Timer>
     if (currentTime == nd) {
       return;
     }
-    final d = s.peek()!;
+    final d = p;
     setState(() {
       currentTime = nd;
       if (d.isRunning && nd >= d.duration && !d.isCompleted) {
@@ -335,30 +363,29 @@ class TimerState extends State<Timer>
     _runningAnimation.reverse();
     _ticker.stop();
     setTime(0);
-    s.value = s.peek()!.withChanges(
-          runningState: 2,
-          // here to note that we don't have this feature (prolonged alarms) in
-          isGoingOff: false,
-        );
+    d = p.withChanges(
+      runningState: 2,
+      // here to note that we don't have this feature (prolonged alarms) in
+      isGoingOff: false,
+    );
 
     //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
   }
 
   /// returns true iff the timer was caused to start by this call
   bool toggleRunning([bool reset = false]) {
-    final d = s.peek()!;
-    final ret = !d.isRunning;
+    final ret = !p.isRunning;
     final trs = ret ? TimerData.running : TimerData.paused;
     if (ret) {
       _runningAnimation.forward();
       _ticker.start();
-      bool resetting = d.isCompleted || reset;
+      bool resetting = p.isCompleted || reset;
       if (resetting) {
         setState(() {
           setTime(0);
         });
       }
-      s.value = s.peek()!.withChanges(
+      d = p.withChanges(
           runningState: trs,
           // restart only if it was completed, or if we're in reset mode
           startTime: resetting
@@ -370,7 +397,7 @@ class TimerState extends State<Timer>
       if (reset) {
         setTime(0);
       }
-      s.value = s.peek()!.withChanges(runningState: trs);
+      d = p.withChanges(runningState: trs);
     }
     return ret;
   }
@@ -387,12 +414,8 @@ class TimerState extends State<Timer>
     final mover = 0.1;
     final thumbSpan = Thumbspan.of(context);
 
-    TimerData? d = s.value;
-    if (d == null) {
-      return SizedBox();
-    }
-
-    double pieCompletion = clampUnit(currentTime / d.duration);
+    double pieCompletion =
+        d.duration == 0 ? 0 : clampUnit(currentTime / d.duration);
     final durationDigits = d.digits;
     final timeDigits = durationToDigits(currentTime,
         padLevel: padLevelFor(durationDigits.length));
@@ -483,7 +506,7 @@ class TimerState extends State<Timer>
         onTap: () {
           context
               .findAncestorStateOfType<TimerScreenState>()
-              ?.takeActionOn(widget.key as GlobalKey<TimerState>);
+              ?.takeActionOn(widget.mobj.id);
           // toggleRunning();
         },
         behavior: HitTestBehavior.opaque,
@@ -623,11 +646,18 @@ class FadingDial extends AnimatedWidget {
 // }
 
 class Timerscreen extends StatefulWidget {
-  final List<Timer> timers;
   final bool selectLastTimer;
+  // we require an exposed Mobj because this has complex state and we really don't want to have to then everything on a future
+  final Mobj<List<ObjID<TimerData>>> timerList;
+
+  /// you have to pass these in because we want to ensure they're pre-loaded as well.
+  final Map<ObjID, Timer> timers;
 
   const Timerscreen(
-      {super.key, this.timers = const [], this.selectLastTimer = true});
+      {super.key,
+      required this.timerList,
+      required this.timers,
+      this.selectLastTimer = true});
 
   @override
   State<Timerscreen> createState() => TimerScreenState();
@@ -684,11 +714,12 @@ HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
 
 class TimerScreenState extends State<Timerscreen>
     with SignalsMixin, TickerProviderStateMixin {
-  GlobalKey<TimerState>? selectedTimer;
+  ObjID<TimerData>? selectedTimer;
 
-  bool isCranking = false;
   bool isRightHanded = true;
-  late List<Timer> timers;
+  // note this subscribes to the mobj
+  List<ObjID<TimerData>> timers() => widget.timerList.value!;
+  Map<ObjID<TimerData>, Timer> timerWidgets = {};
 
   GlobalKey controlPadKey = GlobalKey();
   GlobalKey pinnedTimersKey = GlobalKey();
@@ -702,10 +733,13 @@ class TimerScreenState extends State<Timerscreen>
   @override
   void initState() {
     super.initState();
-    timers = List.from(widget.timers);
-    if (timers.isNotEmpty && widget.selectLastTimer) {
+    timerWidgets = {...widget.timers};
+    if (timers().isNotEmpty && widget.selectLastTimer) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _selectTimer(timers.first.key as GlobalKey<TimerState>);
+        if (timers().isNotEmpty) {
+          final ki = timers().first;
+          _selectTimer(ki);
+        }
       });
     }
     numeralDragIndicator =
@@ -718,10 +752,14 @@ class TimerScreenState extends State<Timerscreen>
     numeralDragIndicator.dispose();
   }
 
-  void takeActionOn(GlobalKey<TimerState> key) {
-    final timer = key.currentState as TimerState;
-    //todo: take whichever action is currently highlighted
-    timer.toggleRunning();
+  void takeActionOn(ObjID<TimerData> timerID) {
+    final timerWidget = timerWidgets[timerID];
+    if (timerWidget != null) {
+      final timer =
+          (timerWidget.key as GlobalKey<TimerState>).currentState as TimerState;
+      //todo: take whichever action is currently highlighted
+      timer.toggleRunning();
+    }
   }
 
   double nextRandomHue() {
@@ -738,8 +776,9 @@ class TimerScreenState extends State<Timerscreen>
         digits: stripZeroes(number),
       );
     } else {
-      getStateMaybeDeferring(selectedTimer!, (sc) {
-        List<int> ct = List.from(sc.s.peek()!.digits);
+      getStateMaybeDeferring(
+          timerWidgets[selectedTimer!]!.key as GlobalKey<TimerState>, (sc) {
+        List<int> ct = List.from(sc.p.digits);
         sc.setState(() {
           for (int n in number) {
             ct.add(n);
@@ -993,7 +1032,8 @@ class TimerScreenState extends State<Timerscreen>
                           crossAxisAlignment: AnimatedWrapCrossAlignment.end,
                           runAlignment: WrapAlignment.end,
                           // I don't like cloning this, but ultimately, if we had really large numbers of timers, large enough that this clone operation was a problem, we'd need a viewer rather than a simple AnimatedWrap.
-                          children: timers.toList(),
+                          children:
+                              timers().map((ki) => timerWidgets[ki]!).toList(),
                         ),
                       ))),
           // unpinned timers
@@ -1015,7 +1055,6 @@ class TimerScreenState extends State<Timerscreen>
         child: Stack(children: [
           DragTarget<GlobalKey<TimerState>>(
               builder: (context, candidateData, rejectedData) {
-            print("builder");
             return Column(
               children: [
                 timersWidget,
@@ -1031,8 +1070,6 @@ class TimerScreenState extends State<Timerscreen>
                 .insertionIndexAt((pinnedTimersKey.currentContext!
                         .findRenderObject() as RenderBox)
                     .globalToLocal(details.offset));
-            print(
-                "details.offset: ${details.offset}, insertionIndex: ${index.insertionIndex}");
           }, onAcceptWithDetails: (details) {
             final insertion =
                 (pinnedTimersKey.currentState as AnimatedWrapState)
@@ -1041,19 +1078,22 @@ class TimerScreenState extends State<Timerscreen>
                         .globalToLocal(details.offset));
             final tkey = details.data;
             final insertionIndex = insertion.insertionIndex;
-            final currentIndex = timers.indexWhere((t) => t.key == tkey);
+            final currentIndex = timers()
+                .indexWhere((t) => t == (tkey.currentWidget! as Timer).mobj.id);
             // do the insertion only if the item being inserted is new or if it's not right next to its current position
             if (currentIndex == -1 ||
                 (insertionIndex != currentIndex &&
                     insertionIndex != currentIndex + 1)) {
               setState(() {
                 Timer t = tkey.currentWidget! as Timer;
-                timers.insert(insertionIndex, t);
+                final nv = timers().toList();
+                nv.insert(insertionIndex, t.mobj.id);
                 if (currentIndex != -1) {
-                  timers.removeAt(insertionIndex < currentIndex
+                  nv.removeAt(insertionIndex < currentIndex
                       ? currentIndex + 1
                       : currentIndex);
                 }
+                widget.timerList.value = nv;
               });
             }
           }),
@@ -1069,16 +1109,23 @@ class TimerScreenState extends State<Timerscreen>
 
   void pausePlaySelected([bool reset = false]) {
     if (selectedTimer != null) {
-      getStateMaybeDeferring(selectedTimer!, (ts) {
-        if (ts.toggleRunning(reset)) {
-          _selectTimer(null);
-        }
-      });
-    } else {
-      if (timers.isNotEmpty) {
-        getStateMaybeDeferring(timers.last.key as GlobalKey<TimerState>, (ts) {
-          ts.toggleRunning(reset);
+      final timerWidget = timerWidgets[selectedTimer!];
+      if (timerWidget != null) {
+        getStateMaybeDeferring(timerWidget.key as GlobalKey<TimerState>, (ts) {
+          if (ts.toggleRunning(reset)) {
+            _selectTimer(null);
+          }
         });
+      }
+    } else {
+      if (timers().isNotEmpty) {
+        final lastTimerWidget = timerWidgets[timers().last];
+        if (lastTimerWidget != null) {
+          getStateMaybeDeferring(lastTimerWidget.key as GlobalKey<TimerState>,
+              (ts) {
+            ts.toggleRunning(reset);
+          });
+        }
       }
     }
   }
@@ -1093,10 +1140,10 @@ class TimerScreenState extends State<Timerscreen>
     bool selecting = selected ?? false;
 
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
-    Mobj<TimerData>.create(
+    final mobj = Mobj<TimerData>.clobberCreate(
       ntid,
-      const TimerDataType(),
-      initial: TimerData(
+      type: const TimerDataType(),
+      initial: () => TimerData(
         startTime: null,
         runningState: runningState ?? TimerData.paused,
         hue: nextRandomHue(),
@@ -1109,54 +1156,85 @@ class TimerScreenState extends State<Timerscreen>
 
     final newTimer = Timer(
       key: GlobalKey<TimerState>(),
-      timerID: ntid,
+      mobj: mobj,
+      animateIn: true,
     );
 
     setState(() {
-      timers.add(newTimer);
+      widget.timerList.value = timers().toList()..add(ntid);
+      timerWidgets[ntid] = newTimer;
       if (selecting) {
-        _selectTimer(newTimer.key as GlobalKey<TimerState>);
+        _selectTimer(ntid);
       }
     });
   }
 
-  void _selectTimer(GlobalKey<TimerState>? key) {
-    selectedTimer?.currentState?.selected = false;
-    selectedTimer = key;
-    key?.currentState?.selected = true;
-  }
-
-  void _backspace() {
+  void _selectTimer(ObjID<TimerData>? timerID) {
     if (selectedTimer != null) {
-      final sc = selectedTimer!.currentState!;
-
-      List<int> digits = List.from(sc.s.peek()!.digits);
-
-      if (digits.isEmpty) {
-        removeTimer(selectedTimer!);
-      } else {
-        digits.removeLast();
-        sc.digits = digits;
+      final oldTimer = timerWidgets[selectedTimer!];
+      if (oldTimer != null) {
+        (oldTimer.key as GlobalKey<TimerState>).currentState?.selected = false;
       }
-    } else {
-      if (timers.isNotEmpty) {
-        removeTimer(timers.last.key as GlobalKey<TimerState>);
+    }
+    selectedTimer = timerID;
+    if (timerID != null) {
+      final newTimer = timerWidgets[timerID];
+      if (newTimer != null) {
+        (newTimer.key as GlobalKey<TimerState>).currentState?.selected = true;
       }
     }
   }
 
-  void removeTimer(GlobalKey<TimerState> key) {
+  void _backspace() {
+    if (selectedTimer != null) {
+      final timerWidget = timerWidgets[selectedTimer!];
+      if (timerWidget != null) {
+        final sc = (timerWidget.key as GlobalKey<TimerState>).currentState!;
+
+        List<int> digits = List.from(sc.p.digits);
+
+        if (digits.isEmpty) {
+          removeTimer(selectedTimer!);
+        } else {
+          digits.removeLast();
+          sc.digits = digits;
+        }
+      }
+    } else {
+      if (timers().isNotEmpty) {
+        removeTimer(timers().last);
+      }
+    }
+  }
+
+  void removeTimer(ObjID ki) {
+    if (timerWidgets[ki] == null) {
+      return;
+    }
+    timerWidgets.remove(ki);
     setState(() {
-      timers.removeWhere((timer) => timer.key == key);
-      if (selectedTimer == key) {
+      widget.timerList.value = timers().toList()
+        ..removeWhere((timer) => timer == ki);
+      if (selectedTimer == ki) {
         _selectTimer(null);
       }
     });
   }
 
-  TimerState? selectedOrLastTimerState() =>
-      selectedTimer?.currentState ??
-      (timers.lastOrNull?.key as GlobalKey<TimerState>?)?.currentState;
+  TimerState? selectedOrLastTimerState() {
+    if (selectedTimer != null) {
+      final timerWidget = timerWidgets[selectedTimer!];
+      return timerWidget != null
+          ? (timerWidget.key as GlobalKey<TimerState>).currentState
+          : null;
+    } else if (timers().isNotEmpty) {
+      final lastTimerWidget = timerWidgets[timers().last];
+      return lastTimerWidget != null
+          ? (lastTimerWidget.key as GlobalKey<TimerState>).currentState
+          : null;
+    }
+    return null;
+  }
 }
 
 class NumberButton extends StatefulWidget {
