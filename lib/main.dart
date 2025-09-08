@@ -420,6 +420,9 @@ class TimerState extends State<Timer>
     final timeDigits = durationToDigits(currentTime,
         padLevel: padLevelFor(durationDigits.length));
 
+    List<int> withDigitsReplacedWith(List<int> v, int d) =>
+        List.filled(v.length, d);
+
     final Widget timeText = DefaultTextStyle.merge(
         style: TextStyle(color: theme.colorScheme.onSurface),
         child: AnimatedBuilder(
@@ -433,10 +436,17 @@ class TimerState extends State<Timer>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Transform.scale(
-                          alignment: Alignment.bottomLeft,
-                          scale: lerp(0.6, 1, v),
-                          child: Text(boring.formatTime(timeDigits))),
+                      // adding a second layer underneath the top text so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
+                      Stack(children: [
+                        Opacity(
+                            opacity: 0,
+                            child: Text(boring.formatTime(
+                                withDigitsReplacedWith(timeDigits, 0)))),
+                        Transform.scale(
+                            alignment: Alignment.bottomLeft,
+                            scale: lerp(0.6, 1, v),
+                            child: Text(boring.formatTime(timeDigits)))
+                      ]),
                       Transform.scale(
                           alignment: Alignment.topLeft,
                           scale: lerp(1, 0.6, v),
