@@ -1,3 +1,5 @@
+# THIS DOESN'T WORK. I was never able to get the flutter audio plugin to build on nixos.
+
 {
   description = "the flutter devshell definition for nixos developers";
 

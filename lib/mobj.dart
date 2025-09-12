@@ -6,10 +6,7 @@ import 'package:signals/signals_flutter.dart';
 
 import 'main.dart';
 
-/// The TypeHelp class is extended type information that's used to convert to and from json in the database, as well as to encode the type information.
-/// type description has to be taken from the top level TypeHelp rather than from each individual object (heterogenously) because we want the top level dart runtime types to be correct too
-/// TypeHelp type descriptions are stored with the values in the db to allow fully pre-parsing the objects up front
-
+/// these are just parser combinators. They used to be self-describing so that we could put type descriptions in the DB and use those to pre-parse any root objects, but it turned out that's impossible in dart (you can't construct a new generic type at runtime, which, since dart has runtime type information, means you also can't construct values of that type), and would only be elegant with dependent types.
 abstract class TypeHelp<T> {
   final Object typeDescription;
 
@@ -170,70 +167,16 @@ class DateTimeType extends TypeHelp<DateTime> {
   }
 }
 
-class TimerDataType extends TypeHelp<TimerData> {
-  const TimerDataType() : super('TimerData');
-
-  @override
-  TimerData fromJsonValue(Object? json) {
-    if (json is Map<String, dynamic>) {
-      return TimerData(
-        startTime: Nullable(const DateTimeType()).fromJson(json['startTime']),
-        runningState: const IntType().fromJson(json['runningState']),
-        hue: const DoubleType().fromJson(json['hue']),
-        selected: const BoolType().fromJson(json['selected']),
-        digits: ListType(const IntType()).fromJson(json['digits']),
-        ranTime: const DoubleType().fromJson(json['ranTime']),
-        isGoingOff: const BoolType().fromJson(json['isGoingOff']),
-      );
-    }
-    throw ArgumentError('Cannot convert $json to TimerData');
-  }
-
-  @override
-  Object? toJsonValue(TimerData object) {
-    return {
-      'startTime': Nullable(const DateTimeType()).toJson(object.startTime),
-      'runningState': const IntType().toJson(object.runningState),
-      'hue': const DoubleType().toJson(object.hue),
-      'selected': const BoolType().toJson(object.selected),
-      'digits': ListType(const IntType()).toJson(object.digits),
-      'ranTime': const DoubleType().toJson(object.ranTime),
-      'isGoingOff': const BoolType().toJson(object.isGoingOff),
-    };
-  }
-}
-
-TimerData cloneTimerDataWithChanges(
-  TimerData old, {
-  DateTime? startTime,
-  int? runningState,
-  double? hue,
-  bool? selected,
-  List<int>? digits,
-  double? ranTime,
-  bool? isGoingOff,
-}) {
-  return TimerData(
-    startTime: startTime ?? old.startTime,
-    runningState: runningState ?? old.runningState,
-    hue: hue ?? old.hue,
-    selected: selected ?? old.selected,
-    digits: digits ?? old.digits,
-    ranTime: ranTime ?? old.ranTime,
-    isGoingOff: isGoingOff ?? old.isGoingOff,
-  );
-}
-
-typedef ObjID<T> = String;
+typedef MobjID<T> = String;
 
 class MobjRegistry {
   static bool isInitialized = false;
   static late TheDatabase db;
 
   // an object should always be removed from its previous caching levels when being moved to the next. _loadedMobjs is the final level atop _loading an _preloaded
-  static final Map<ObjID, Mobj> _loadedMobjs = {};
-  static final Map<ObjID, Future<Mobj>> _loadingMobjs = {};
-  static final Map<ObjID, String> _preloadedMobjEncodings = {};
+  static final Map<MobjID, Mobj> _loadedMobjs = {};
+  static final Map<MobjID, Future<Mobj>> _loadingMobjs = {};
+  static final Map<MobjID, String> _preloadedMobjEncodings = {};
 
   // remember to await the future to make sure the root objects will be ready before other stuff happens
   // none of these ever deload/they're made root objects, they're essentially leaked here once
@@ -251,24 +194,24 @@ class MobjRegistry {
     });
   }
 
-  static Mobj<T>? seek<T>(ObjID<T> id) {
+  static Mobj<T>? seek<T>(MobjID<T> id) {
     return _loadedMobjs[id] as Mobj<T>?;
   }
 
-  static void unregister(ObjID id) {
+  static void unregister(MobjID id) {
     _loadedMobjs.remove(id);
     _loadingMobjs.remove(id);
     _preloadedMobjEncodings.remove(id);
   }
 }
 
+/// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.
 /// It was made just for this app, because the author couldn't find anything else that would do, and because the author intends to contribute to the development of a much more serious dynamic persistence system soon.
-
-/// Modular Object, but not actually Modular, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
+/// Doesn't support transactions right now, though note that both Signal and Drift do support transactions, so it should be possible?
 class Mobj<T> extends Signal<T?> {
-  final ObjID _id;
-  ObjID get id => _id;
+  final MobjID _id;
+  MobjID get id => _id;
   final TypeHelp<T> _type;
   int _refCount = 1;
   bool _currentlyReadingFromDb = false;
@@ -302,7 +245,7 @@ class Mobj<T> extends Signal<T?> {
     });
   }
 
-  factory Mobj.fromEncoding(ObjID id, String encoding, TypeHelp<T> type) {
+  factory Mobj.fromEncoding(MobjID id, String encoding, TypeHelp<T> type) {
     final v = type.fromJson(jsonDecode(encoding));
     return Mobj._createAndRegister(id, type,
         initial: v, debugLabel: id, autoDispose: false);
@@ -310,7 +253,7 @@ class Mobj<T> extends Signal<T?> {
 
   /// only returns non-null if the mobj has already been loaded from the db
   /// type is needed in case the object is in the _loadedMobjEncodings stage
-  static Mobj<T>? seekAlreadyLoaded<T>(ObjID id, TypeHelp<T> type) {
+  static Mobj<T>? seekAlreadyLoaded<T>(MobjID id, TypeHelp<T> type) {
     final pr = MobjRegistry._preloadedMobjEncodings[id];
     if (pr != null) {
       final p = Mobj.fromEncoding(id, pr, type);
@@ -328,7 +271,7 @@ class Mobj<T> extends Signal<T?> {
 
   /// assumes the mobj has already been loaded from the db
   /// type is needed in case the object is in the _loadedMobjEncodings stage
-  factory Mobj.getAlreadyLoaded(ObjID id, TypeHelp<T> type) {
+  factory Mobj.getAlreadyLoaded(MobjID id, TypeHelp<T> type) {
     final m = seekAlreadyLoaded(id, type);
     if (m == null) {
       throw StateError(
@@ -339,7 +282,7 @@ class Mobj<T> extends Signal<T?> {
 
   /// unsafe, *may or may not* overwrite a value that's in the db, but gets you a mobj instantly without a Future, so you may choose to do it when you know the mobj hasn't been created before.
   factory Mobj.clobberCreate(
-    ObjID id, {
+    MobjID id, {
     required TypeHelp<T> type,
     T Function()? initial,
     String? debugLabel,
@@ -366,7 +309,7 @@ class Mobj<T> extends Signal<T?> {
   }
 
   /// like createIfNotLoaded but delayed because it checks the db
-  static Future<Mobj<T>> getOrCreate<T>(ObjID id,
+  static Future<Mobj<T>> getOrCreate<T>(MobjID id,
       {required T Function() initial,
       required TypeHelp<T> type,
       String? debugLabel,
@@ -405,7 +348,7 @@ class Mobj<T> extends Signal<T?> {
     }
   }
 
-  static Future<Mobj<T>> fetch<T>(ObjID id,
+  static Future<Mobj<T>> fetch<T>(MobjID id,
       {required TypeHelp<T> type,
       String? debugLabel,
       bool autoDispose = false}) {

@@ -31,9 +31,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  signals: ^6.0.2
-  # animated_list_plus: ^0.5.2
-  flutter_animate: ^4.5.2
+  # flutter_animate: ^4.5.2
   hsluv: ^1.1.3
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -46,7 +44,9 @@ dependencies:
   provider: ^6.1.4
   nb_utils: ^7.1.4
   animated_to: ^0.4.0
-  animated_containers: ^1.2.0
+  improved_wrap:
+    path: /home/mako/programming/improved_wrap
+  # animated_containers: ^1.2.0
   # animated_containers:
   #   path: /home/mako/programming/animated_containers
   # I was considering using this without a remote sync provider (ie, no supabase or rest or graphql), but the maintain suggested not using it at all in that case. Which seemed dumb as hell to me since brick has a bunch of other functionality that's good for persisting values to memory and sqlite but okay.
@@ -58,6 +58,7 @@ dependencies:
   drift_flutter: ^0.2.5
   path_provider: ^2.1.5
   collection: ^1.19.1
+  signals: ^6.0.2
   # path_provider_ffi: ^2.1.5-dev2
 
 

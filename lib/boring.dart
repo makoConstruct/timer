@@ -455,6 +455,7 @@ List<int> durationToDigits(double d, {int padLevel = 1}) {
   return digits;
 }
 
+/// in seconds, computed from digits
 Duration digitsToDuration(List<int> digits) {
   if (digits.isEmpty) {
     return Duration.zero;
