@@ -44,8 +44,7 @@ dependencies:
   provider: ^6.1.4
   nb_utils: ^7.1.4
   animated_to: ^0.4.0
-  improved_wrap:
-    path: /home/mako/programming/improved_wrap
+  improved_wrap: ^1.0.0
   # animated_containers: ^1.2.0
   # animated_containers:
   #   path: /home/mako/programming/animated_containers

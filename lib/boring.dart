@@ -531,6 +531,13 @@ double lpixPerMM(BuildContext context) {
   return samsungS9PlusValue;
 }
 
+void considerUpdating<T, P>(T? prev, T next, P Function(T) property,
+    void Function({required T? from, required T to}) update) {
+  if (prev == null || property(prev) != property(next)) {
+    update(from: prev, to: next);
+  }
+}
+
 /// the span of the user's thumbtip in logical pixels. Defaults to 17mm*lpixPerMM (the span of mako's thumb on a samsung s9+)
 /// use this when you're thinking about touch ergonomics, like, how big should a button be? How accurately can the user click things? How far should they have to drag before something will activate?
 double lpixPerThumbspan(BuildContext context) {

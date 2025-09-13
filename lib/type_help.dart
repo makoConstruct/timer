@@ -1,8 +1,8 @@
 import 'mobj.dart';
 
 class TimerData {
-  /// represents, if runningState is 0, the time it was paused at, otherwise, the time it started
-  final DateTime? startTime;
+  /// the last time the timer was started
+  late final DateTime startTime;
 
   /// whether it's paused/playing/completed
   final int runningState;
@@ -21,21 +21,23 @@ class TimerData {
   /// the digit form of duration. Used when tapping out or backspacing numbers. Not always kept up to date with duration..
   final List<int> digits;
 
-  /// the amount of time it ran in before being paused (ignored if not paused, or if completed)
-  final double ranTime;
+  /// the amount of time in seconds it ran before being paused (ignored if not paused, or if completed)
+  final Duration ranTime;
 
   /// if the alarm is currently screaming and needs to be acknowledged by the user
   final bool isGoingOff;
 
   TimerData({
-    this.startTime,
+    DateTime? startTime,
     this.runningState = paused,
     required this.hue,
     required this.selected,
     this.digits = const [],
-    this.ranTime = 0,
+    this.ranTime = Duration.zero,
     this.isGoingOff = false,
-  });
+  }) {
+    this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
+  }
 
   TimerData withChanges({
     // fortunately we never need to set startTime to null :/ dart's optional parameter syntax doesn't support that
@@ -44,7 +46,7 @@ class TimerData {
     double? hue,
     bool? selected,
     List<int>? digits,
-    double? ranTime,
+    Duration? ranTime,
     bool? isGoingOff,
   }) {
     return TimerData(
@@ -57,6 +59,29 @@ class TimerData {
       isGoingOff: isGoingOff ?? this.isGoingOff,
     );
   }
+
+  TimerData toggleRunning({required bool reset}) => isRunning
+      ? reset
+          ? withChanges(runningState: TimerData.paused, ranTime: Duration.zero)
+          : withChanges(
+              runningState: TimerData.paused,
+              ranTime: DateTime.now().difference(startTime))
+      : reset
+          ? withChanges(
+              runningState: TimerData.running,
+              ranTime: Duration.zero,
+              startTime: DateTime.now())
+          :
+          // still resets if it was completed
+          runningState == TimerData.completed
+              ? withChanges(
+                  runningState: TimerData.running,
+                  ranTime: Duration.zero,
+                  startTime: DateTime.now())
+              : withChanges(
+                  runningState: TimerData.running,
+                  ranTime: ranTime,
+                  startTime: DateTime.now().subtract(ranTime));
 }
 
 class TimerDataType extends TypeHelp<TimerData> {
@@ -71,7 +96,9 @@ class TimerDataType extends TypeHelp<TimerData> {
         hue: const DoubleType().fromJson(json['hue']),
         selected: const BoolType().fromJson(json['selected']),
         digits: ListType(const IntType()).fromJson(json['digits']),
-        ranTime: const DoubleType().fromJson(json['ranTime']),
+        ranTime: Duration(
+            milliseconds:
+                (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
         isGoingOff: const BoolType().fromJson(json['isGoingOff']),
       );
     }
@@ -86,7 +113,8 @@ class TimerDataType extends TypeHelp<TimerData> {
       'hue': const DoubleType().toJson(object.hue),
       'selected': const BoolType().toJson(object.selected),
       'digits': ListType(const IntType()).toJson(object.digits),
-      'ranTime': const DoubleType().toJson(object.ranTime),
+      'ranTime': const DoubleType()
+          .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
     };
   }
@@ -99,7 +127,7 @@ TimerData cloneTimerDataWithChanges(
   double? hue,
   bool? selected,
   List<int>? digits,
-  double? ranTime,
+  Duration? ranTime,
   bool? isGoingOff,
 }) {
   return TimerData(
