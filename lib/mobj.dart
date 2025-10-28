@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
@@ -209,18 +210,43 @@ class MobjRegistry {
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.
 /// It was made just for this app, because the author couldn't find anything else that would do, and because the author intends to contribute to the development of a much more serious dynamic persistence system soon.
 /// Doesn't support transactions right now, though note that both Signal and Drift do support transactions, so it should be possible?
+/// streaming_shared_preferences seems to be the same as this, but using shared_preferences for storage instead of drift.
+/// I think I need this to work across isolates now.
+/// setting it to null causes a deletion. After deletion, undeletion isn't permitted.
 class Mobj<T> extends Signal<T?> {
   final MobjID _id;
+
   MobjID get id => _id;
   final TypeHelp<T> _type;
   int _refCount = 1;
-  bool _currentlyReadingFromDb = false;
+  DateTime _lastTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
+  int _lastSequenceNumber = 0;
+  String _valueEncoded = "";
+  StreamSubscription<KV?>? _dbSubscription;
+  // prevents updates from the db from triggering a write back to the db
+  bool _currentlyTakingFromDb = false;
+  bool _unloaded = true;
 
-  Future<void> writeBack() {
+  /// only actually writes back if the new value has a newer timestamp than the value in the db, this is important for situations where more than one process is doing writes and we want to make sure they all end up agreeing.
+  Future<void> writeBack() async {
     final v = peek();
     if (v != null) {
-      return MobjRegistry.db.kVs.insertOnConflictUpdate(
-          KV(id: _id, value: jsonEncode(_type.toJson(v))));
+      _valueEncoded = jsonEncode(_type.toJson(v));
+      final nextTimestamp = DateTime.now();
+      if (nextTimestamp.isAtSameMomentAs(_lastTimestamp)) {
+        _lastSequenceNumber++;
+      } else {
+        // we don't really have to reset, but we may as well.
+        _lastSequenceNumber = 0;
+      }
+      _lastTimestamp = nextTimestamp;
+      // compares with the current previous value lexicographically before finalizing the insert
+      await MobjRegistry.db.insertIfMoreRecent(
+        _id,
+        _valueEncoded,
+        _lastTimestamp,
+        _lastSequenceNumber,
+      );
     } else {
       MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
       return Future.value();
@@ -233,22 +259,54 @@ class Mobj<T> extends Signal<T?> {
     T? initial,
     String? debugLabel,
     // on reflection I'm not sure we can support autodispose, because of the refcounting stuff
-    bool autoDispose = false,
-  }) : super(initial, debugLabel: debugLabel, autoDispose: autoDispose) {
+    // bool autoDispose = false,
+  }) : super(initial, debugLabel: debugLabel, autoDispose: false) {
     MobjRegistry._loadedMobjs[_id] = this;
+    if (initial != null) {
+      _unloaded = false;
+    }
+
     // a Mobj writes back to db whenever it changes
     subscribe((v) {
-      if (_currentlyReadingFromDb) {
+      if (_currentlyTakingFromDb) {
         return;
       }
       writeBack();
+    });
+
+    // Stream database changes for this id
+    _dbSubscription = (MobjRegistry.db.kVs.select()
+          ..where((t) => t.id.equals(_id)))
+        .watchSingleOrNull()
+        .listen((kv) {
+      if (kv == null) {
+        // Entry was deleted from DB
+        if (internalValue != null) {
+          _currentlyTakingFromDb = true;
+          set(null);
+          _currentlyTakingFromDb = false;
+        }
+      } else {
+        if (kv.timestamp.isAfter(_lastTimestamp) ||
+            (kv.timestamp.isAtSameMomentAs(_lastTimestamp) &&
+                kv.sequenceNumber > _lastSequenceNumber) ||
+            (kv.timestamp.isAtSameMomentAs(_lastTimestamp) &&
+                kv.sequenceNumber == _lastSequenceNumber &&
+                kv.value.compareTo(_valueEncoded) > 0)) {
+          // DB has newer data, update local value
+          _currentlyTakingFromDb = true;
+          _lastTimestamp = kv.timestamp;
+          _lastSequenceNumber = kv.sequenceNumber;
+          set(_type.fromJson(jsonDecode(kv.value)));
+          _currentlyTakingFromDb = false;
+        }
+      }
     });
   }
 
   factory Mobj.fromEncoding(MobjID id, String encoding, TypeHelp<T> type) {
     final v = type.fromJson(jsonDecode(encoding));
-    return Mobj._createAndRegister(id, type,
-        initial: v, debugLabel: id, autoDispose: false);
+    return Mobj._createAndRegister(id, type, initial: v, debugLabel: id);
   }
 
   /// only returns non-null if the mobj has already been loaded from the db
@@ -280,28 +338,24 @@ class Mobj<T> extends Signal<T?> {
     return m;
   }
 
-  /// unsafe, *may or may not* overwrite a value that's in the db, but gets you a mobj instantly without a Future, so you may choose to do it when you know the mobj hasn't been created before.
+  /// unsafe, may overwrite a value that's in the db, but gets you a mobj instantly without an async delay, so you may choose to do it when you know the mobj hasn't been created before and you want it right away
   factory Mobj.clobberCreate(
     MobjID id, {
     required TypeHelp<T> type,
-    T Function()? initial,
+    required T initial,
     String? debugLabel,
-    bool autoDispose = false,
   }) {
     // Check if signal already exists
     final existing = Mobj.seekAlreadyLoaded<T>(id, type);
     if (existing != null) {
-      if (initial != null) {
-        existing.value = initial();
-      }
+      existing.value = initial;
       return existing;
     } else {
       final m = Mobj<T>._createAndRegister(
         id,
         type,
-        initial: initial?.call(),
+        initial: initial,
         debugLabel: debugLabel,
-        autoDispose: autoDispose,
       );
       m.writeBack();
       return m;
@@ -309,11 +363,12 @@ class Mobj<T> extends Signal<T?> {
   }
 
   /// like createIfNotLoaded but delayed because it checks the db
-  static Future<Mobj<T>> getOrCreate<T>(MobjID id,
-      {required T Function() initial,
-      required TypeHelp<T> type,
-      String? debugLabel,
-      bool autoDispose = false}) async {
+  static Future<Mobj<T>> getOrCreate<T>(
+    MobjID id, {
+    required T Function() initial,
+    required TypeHelp<T> type,
+    String? debugLabel,
+  }) async {
     Mobj<T>? s = Mobj.seekAlreadyLoaded(id, type);
     if (s != null) {
       return s;
@@ -325,21 +380,31 @@ class Mobj<T> extends Signal<T?> {
         final T iv = initial();
         final valueEncoding = jsonEncode(type.toJson(iv));
         final ret = MobjRegistry.db.kVs
-            .insertReturning(KV(id: id, value: valueEncoding),
+            .insertReturning(
+                KV(
+                    id: id,
+                    value: valueEncoding,
+                    timestamp: DateTime.now(),
+                    sequenceNumber: 0),
                 onConflict: DoUpdate((old) => KVsCompanion(
                       id: Value(id), // Keep the same id
                       value: Value.absent(), // Don't change the value
+                      timestamp: Value.absent(), // Don't change the timestamp
+                      sequenceNumber:
+                          Value.absent(), // Don't change the sequence number
                     )))
             .then(
           (v) {
             // [critical] there's an error here, you needed to reparse if there was a conflict
             MobjRegistry._loadingMobjs.remove(id);
-            return Mobj._createAndRegister(id, type,
-                initial: v.value == valueEncoding
-                    ? iv
-                    : type.fromJson(jsonDecode(v.value)),
-                debugLabel: debugLabel,
-                autoDispose: autoDispose);
+            return Mobj._createAndRegister(
+              id,
+              type,
+              initial: v.value == valueEncoding
+                  ? iv
+                  : type.fromJson(jsonDecode(v.value)),
+              debugLabel: debugLabel,
+            );
           },
         );
         MobjRegistry._loadingMobjs[id] = ret;
@@ -348,26 +413,42 @@ class Mobj<T> extends Signal<T?> {
     }
   }
 
-  static Future<Mobj<T>> fetch<T>(MobjID id,
-      {required TypeHelp<T> type,
-      String? debugLabel,
-      bool autoDispose = false}) {
+  /// Reads the current value from the database without creating or loading a Mobj
+  static Future<T> readCurrentValue<T>(
+    MobjID id, {
+    required TypeHelp<T> type,
+  }) async {
+    final kv = await (MobjRegistry.db.kVs.select()
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+
+    if (kv == null) {
+      throw StateError("Mobj $id does not exist in the database");
+    }
+
+    return type.fromJson(jsonDecode(kv.value));
+  }
+
+  /// (can't be called get because Signal already has a method of that name)
+  static Future<Mobj<T>> fetch<T>(
+    MobjID id, {
+    required TypeHelp<T> type,
+    String? debugLabel,
+  }) async {
     Mobj? s = MobjRegistry.seek(id);
     if (s != null) {
-      try {
-        return Future.value(s as Mobj<T>);
-      } catch (e) {
-        return Future.error(e);
-      }
+      return s as Mobj<T>;
     } else {
       return (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(id)))
           .getSingleOrNull()
           .then((s) {
         if (s != null) {
-          return Mobj._createAndRegister(id, type,
-              initial: type.fromJson(jsonDecode(s.value)),
-              debugLabel: debugLabel,
-              autoDispose: autoDispose);
+          return Mobj._createAndRegister(
+            id,
+            type,
+            initial: type.fromJson(jsonDecode(s.value)),
+            debugLabel: debugLabel,
+          );
         } else {
           throw StateError(
               "requested Mobj $id, no such Mobj resides in the database");
@@ -380,6 +461,7 @@ class Mobj<T> extends Signal<T?> {
     _refCount++;
   }
 
+  // ah, problem, there's no way to remove from the store without deleting from the db. That also means there's no way to clean up the callbacks?..
   void removeRef() {
     _refCount--;
     if (_refCount == 0) {
@@ -389,14 +471,15 @@ class Mobj<T> extends Signal<T?> {
     }
   }
 
-  // this currently functions as deletion because it removes the original bonus refcount that root objects get for free. This is a slightly janky way to implement this and could eventually be replaced with something that does proper error reporting.
+  /// this currently functions as deletion because it removes the original bonus refcount that root objects get for free. This is a slightly janky way to implement this and could eventually be replaced with something that does proper error reporting.
   void deleteRoot() {
     removeRef();
   }
 
   @override
   void dispose() {
-    removeRef();
+    _dbSubscription?.cancel();
+    _dbSubscription = null;
     super.dispose();
   }
 }

@@ -22,12 +22,6 @@ version: 1.0.0+1
 environment:
   sdk: ^3.6.2
 
-# Dependencies specify other packages that your package needs in order to work.
-# To automatically upgrade your package dependencies to the latest versions
-# consider running `flutter pub upgrade --major-versions`. Alternatively,
-# dependencies can be manually updated by changing the version numbers below to
-# the latest version available on pub.dev. To see which dependencies have newer
-# versions available, run `flutter pub outdated`.
 dependencies:
   flutter:
     sdk: flutter
@@ -36,14 +30,10 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  workmanager: ^0.5.2
-  # there's a bug https://github.com/bluefireteam/audioplayers/issues/1749 on linux, random delay when starting playback for the second time, maintainers say they'll get to it.
-  # audioplayers: ^6.5.0
-  # so I tried this instead of the above audioplayers, but couldn't get it to run, apparently it was failing to find the plugin .so it was generating during build. No idea why. It's right there. It has all of its dependencies. (alsa)
-  # flutter_soloud: ^3.2.2
   provider: ^6.1.4
   nb_utils: ^7.1.4
   animated_to: ^0.4.0
+  springster: any #tracking animated_to's springster dependency
   improved_wrap: ^1.0.0
   # animated_containers: ^1.2.0
   # animated_containers:
@@ -53,12 +43,22 @@ dependencies:
   
   uuid: ^4.5.1
   
-  drift: ^2.28.1
-  drift_flutter: ^0.2.5
+  # fixed to a specific older version until they fix https://github.com/simolus3/drift/issues/3682
+  drift: ^2.28.2
+  drift_flutter: ^0.2.7
   path_provider: ^2.1.5
   collection: ^1.19.1
   signals: ^6.0.2
-  # path_provider_ffi: ^2.1.5-dev2
+  # openhiit_audioplayers: ^1.0.0
+  # there's a bug https://github.com/bluefireteam/audioplayers/issues/1749 on linux, random delay when starting playback for the second time, maintainers say they'll get to it.
+  audioplayers: ^6.5.1
+  # workmanager: ^0.9.0+3
+  # flutter_soloud: ^3.3.6
+  # I don't like this project, it seems unmaintained, and the documentation is poor
+  flutter_foreground_task: ^9.1.0
+  path: ^1.9.1
+  drift_dev: ^2.28.3
+  flutter_ringtone_manager: ^1.1.2
 
 
 
@@ -72,14 +72,19 @@ dev_dependencies:
   # rules and activating additional ones.
   # brick_offline_first_with_supabase_build: ^2.0.0
   flutter_lints: ^5.0.0
-  build_runner: ^2.7.0
-  drift_dev: ^2.28.1
+  build_runner: ^2.4.13
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
+  # Declare the platform audio plugin
+  # plugin:
+  #   platforms:
+  #     android:
+  #       package: org.dreamshrine.makos_timer
+  #       pluginClass: PlatformAudioPlugin
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

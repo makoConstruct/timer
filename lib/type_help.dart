@@ -1,4 +1,8 @@
+import 'package:makos_timer/boring.dart';
+
 import 'mobj.dart';
+
+// this file is pretty much entirely edited through language models, it's just database boilerplate. In a better programming langauge this stuff would be handled by reflection or codegen. In dart, it's more practical to just make the robot do it.
 
 class TimerData {
   /// the last time the timer was started
@@ -8,6 +12,7 @@ class TimerData {
   final int runningState;
   bool get isRunning => runningState == running;
   bool get isCompleted => runningState == completed;
+  bool get isPaused => !isRunning;
   static const paused = 0;
   static const running = 1;
   static const completed = 2;

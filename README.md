@@ -1,26 +1,42 @@
 # mako's timer
 
-A better design for timers.
+A timer app with optimal ergonomics.
 
-Usable with just one hand.
+The optimizations:
 
-Requires one fewer keystroke in the making of a timer.
+- Timers are visually compact and color-coded, so users can easily find and reuse timers they need often.
 
-Maintains stable colors and positions for pinned timers, while making them small enough to fit on the first screen, so that you'll always be able to quickly find the one you're looking for.
+- Every part of the app is laid out to be easily usable one-handed.
 
-Supports timers that don't require the user to spend time getting them out and dismissing them before they'll shut up.
+- The app pretty much only has one screen, so the user will always be confident that when they open it the app will be in the state they expect.
 
-<!-- Supports chained timers. -->
+- Begining to type on the input pad immediately creates a new timer.
 
-## audio assets
+- Swiping up on the final numeral starts the new timer, and swiping to the left or right [not quite in yet, about to do that] adds zeroes to the end as well, cutting down the number of keypresses needed sometimes by 4x (*eg, you can create and start a 5 minute timer by just touching 5 and swiping right, while the default google app this would require at least four taps, Create, 5, 00, Play*).
+
+- Most timer apps require the user to pull their phone up and interact with the app after the timer goes off to make it shut up. Sometimes you want this, because it makes absolutely sure that the user heard the timer, and we support it [though that isn't in yet], but in many cases a user is confident that they'll hear the timer when it goes off, and they don't want to be forced to get their phone out of their pocket and interact with it to shut it up, so we provide a "notification" mode that lets the timer shut up on its own.
+
+Special features:
+
+- Chained timers [this isn't in yet], which are often useful for, say, executing multi-stage cooking processes, and looping timers [also isn't in yet], which can be used in combination with chaining to make pomodoro timers.
+
+<!-- ## donations
+
+There is going to be a donation nag. In this house we believe that societies grow great by incentivizing good actions. Be the incentive you want to see in the world. (accordingly we will be forwarding some portion of the income to the open source projects that made ours possible). -->
+
+<!-- ## contributions
+
+Contributions that are accepted will be compensated if they're substantial enough. -->
+
+<!-- ## audio assets
 
 These are currently not committed, as I haven't decided which ones I want to include.
 
-credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects.
+credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects. -->
 
 ## building
 
-You'll need to fetch those audio assets.
+<!-- You'll need to fetch those audio assets. -->
 
 `flutter create .`
 

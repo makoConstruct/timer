@@ -1,7 +1,14 @@
+import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:animated_to/animated_to.dart';
+import 'package:drift/drift.dart' hide Column;
+import 'package:drift/isolate.dart';
+import 'package:drift/native.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:improved_wrap/improved_wrap.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
@@ -10,6 +17,10 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/extensions.dart';
 import 'package:hsluv/hsluvcolor.dart';
+import 'package:makos_timer/platform_audio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:makos_timer/background_service_stuff.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/database.dart';
@@ -18,37 +29,45 @@ import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
-import 'package:workmanager/workmanager.dart';
 
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) {
-    switch (task) {
-      case 'wait_for_timer':
-        {
-          final timer = inputData?['timer'];
-        }
-    }
-    return Future.value(true);
-  });
+Future<void> deleteDatabase() async {
+  final directory = await getApplicationSupportDirectory();
+  final file = File(p.join(directory.path, '$databaseName.sqlite'));
+  await file.delete();
+  print("CRITICAL: deleted database file as commanded");
 }
-
-final MobjID timerListID = '0afc1e39-9ed7-4174-8d72-e9319224d6e8';
-final MobjID transientTimerListID = '0c02ee9a-6618-4231-a8c9-36f145970a4c';
-final MobjID dbVersionID = '87012e13-974b-45f6-b0d7-ea8d1a3127ed';
-// some spares
-// cd813df3-bb7b-4b69-a238-89b4971198ef
-// baa10d03-aa7f-4cc6-bd58-0c62bdaa9757
 
 Future<void> torchDatabase(TheDatabase db) async {
   print('CRITICAL ERROR: Clearing all data from the database!');
   await db.kVs.deleteAll();
 }
 
+// think about this later after spawning a foreground task
+// Future<DriftIsolate> createIsolateManually() async {
+//   final receiveIsolate = ReceivePort('receive drift isolate handle');
+//   await Isolate.spawn<SendPort>((message) async {
+//     final server = DriftIsolate.inCurrent(() {
+//       // Again, this needs to return the LazyDatabase or the connection to use.
+//     });
+
+//     // Now, inform the original isolate about the created server:
+//     message.send(server);
+//   }, receiveIsolate.sendPort);
+
+//   final server = await receiveIsolate.first as DriftIsolate;
+//   receiveIsolate.close();
+//   return server;
+// }
+
+final sharedDriftIsolateName = "sharedDrift";
+
+const databaseName = 'mako_timer_db';
+
 Future<void> initializeDatabase() async {
+  WidgetsFlutterBinding.ensureInitialized();
   final db = TheDatabase();
-  // await torchDatabase(db);
   // the db will be accessed via this singleton from then on
   // initialize version one of the db
   await MobjRegistry.initialize(db);
@@ -64,13 +83,31 @@ Future<void> initializeDatabase() async {
         type: ListType(const StringType()),
         initial: () => <MobjID>[],
         debugLabel: "transient timers"),
+    Mobj.getOrCreate(nextHueID,
+        type: const DoubleType(), initial: () => 0.252, debugLabel: "next hue"),
     fversion,
   ]);
 }
 
 void main() async {
+  // await deleteDatabase();
+  print("mako main new message");
+  WidgetsFlutterBinding.ensureInitialized();
+  final audioList =
+      await PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
+  for (final audio in audioList) {
+    print("audio: ${audio.name} ${audio.uri} ${audio.isLong}");
+  }
   await initializeDatabase();
+  FlutterForegroundTask.addTaskDataCallback(onDataReceived);
+  // my impression so far is that apple forbid you from running stuff in the background on iOS unless you're an application for which it would create bad PR for them to kill you, so you can't really make the best timer apps there. On iOS, we're going to have to disable repeat timers.
+  // android will support repeat timers via the foreground service
+  await graspForegroundService();
   runApp(const TimersApp());
+}
+
+void onDataReceived(Object data) {
+  print("data received: $data");
 }
 
 // List<Widget> diffRetainingOrder(List<Widget> old, List<Widget> current) {
@@ -158,55 +195,61 @@ class TimersApp extends StatefulWidget {
   State<TimersApp> createState() => _TimersAppState();
 }
 
-class _TimersAppState extends State<TimersApp> {
+class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late Future<JukeBox> jukeBox;
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
-    jukeBox = JukeBox.create();
   }
+  @override
+  void initState() {
+    super.initState();
+    jukeBox = JukeBox.create();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        graspForegroundService();
+        print("mako regrasping foreground service");
+        break;
+      case AppLifecycleState.paused:
+        FlutterForegroundTask.sendDataToTask({'op': 'goodbye'});
+        print("mako goodbye");
+        break;
+      default:
+        break;
+    }
+  }
+
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'timer',
-      theme: ThemeData(
+      theme: ThemeData.light(
+        useMaterial3: true,
+      ),
+      darkTheme: ThemeData.dark(
         useMaterial3: true,
       ),
       home: MultiProvider(
-          providers: [
-            Provider<Thumbspan>(
-                create: (context) => Thumbspan(lpixPerThumbspan(context))),
-            Provider<Future<JukeBox>>(create: (_) => jukeBox),
-          ],
-          child: FutureAssumer<List<Mobj>>(
-              // awaiting the list and also all of the timers
-              future: Mobj.getOrCreate<List<String>>(timerListID,
-                      type: ListType(const StringType()),
-                      initial: () => [],
-                      debugLabel: "list")
-                  .then((v) {
-                return Future.wait(<Future<Mobj>>[Future.value(v)] +
-                    v.value!
-                        .map(
-                            (ti) => Mobj.fetch(ti, type: const TimerDataType()))
-                        .toList());
-              }),
-              builder: (context, v) {
-                final ml = v[0] as Mobj<List<MobjID>>;
-                return Timerscreen(
-                  timerList: ml,
-                  timers: Map.fromEntries(
-                      v.sublist(1, v.length).map((mt) => MapEntry(
-                          mt.id,
-                          Timer(
-                            key: GlobalKey(),
-                            owningList: ml.id,
-                            mobj: mt as Mobj<TimerData>,
-                            animateIn: false,
-                          )))),
-                  selectLastTimer: true,
-                );
-              })),
+        providers: [
+          Provider<Thumbspan>(
+              create: (context) => Thumbspan(lpixPerThumbspan(context))),
+          Provider<Future<JukeBox>>(create: (_) => jukeBox),
+        ],
+        child: TimerScreen(
+          selectLastTimer: true,
+        ),
+      ),
     );
   }
 }
@@ -235,7 +278,8 @@ class TimerState extends State<Timer>
   late Ticker _ticker;
   // in seconds
   double currentTime = 0;
-  late AnimationController _runningAnimation;
+  late final AnimationController _runningAnimation;
+  late final AnimationController _slideActivateBounceAnimation;
   final GlobalKey _clockKey = GlobalKey();
   final GlobalKey animatedToKey = GlobalKey();
   final previousSize = ValueNotifier<Size?>(null);
@@ -293,6 +337,8 @@ class TimerState extends State<Timer>
     super.initState();
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
+    _slideActivateBounceAnimation = AnimationController(
+        duration: const Duration(milliseconds: 180), vsync: this);
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
@@ -318,12 +364,12 @@ class TimerState extends State<Timer>
     if (currentTime == nd) {
       return;
     }
-    final d = p;
+    final pp = p;
     setState(() {
       currentTime = nd;
-      if (d.isRunning &&
-          nd >= durationToSeconds(digitsToDuration(d.digits)) &&
-          !d.isCompleted) {
+      if (pp.isRunning &&
+          nd >= durationToSeconds(digitsToDuration(pp.digits)) &&
+          !pp.isCompleted) {
         // [todo] after background tasks, let the background task set off the timer instead of doing it here?
         triggerAlert();
       }
@@ -331,14 +377,13 @@ class TimerState extends State<Timer>
   }
 
   void triggerAlert() {
+    print('should play');
     JukeBox.jarringSound(context);
     _runningAnimation.reverse();
     _ticker.stop();
     setTime(0);
     widget.mobj.value = p.withChanges(
-      runningState: 2,
-      // here to note that we don't have this feature (prolonged alarms) in
-      isGoingOff: false,
+      runningState: TimerData.completed,
     );
 
     //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
@@ -366,7 +411,14 @@ class TimerState extends State<Timer>
 
     final dd = durationToSeconds(
         digitsToDuration(watchSignal(context, widget.mobj)!.digits));
-    double pieCompletion = dd == 0 ? 0 : clampUnit(currentTime / dd);
+    // sometimes the background thread completes the timer, the currentTime wont be updated, so in that case it should be ignored.
+    double pieCompletion = d.isCompleted
+        ? 0
+        : d.runningState == TimerData.paused
+            ? (d.ranTime.inMilliseconds.toDouble() / 1000) / dd
+            : dd == 0
+                ? 0
+                : clampUnit(currentTime / dd);
     final durationDigits = d.digits;
     final timeDigits = durationToDigits(currentTime,
         padLevel: padLevelFor(durationDigits.length));
@@ -457,7 +509,6 @@ class TimerState extends State<Timer>
         context
             .findAncestorStateOfType<TimerScreenState>()
             ?.takeActionOn(widget.mobj.id);
-        // toggleRunning();
       },
       behavior: HitTestBehavior.opaque,
       child: Padding(
@@ -480,7 +531,7 @@ class TimerState extends State<Timer>
           clipBehavior: Clip.hardEdge,
           decoration: BoxDecoration(
               shape: BoxShape.rectangle,
-              // the animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
+              // the running animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
               color: _runningAnimation.value == 1
                   ? theme.colorScheme.surfaceContainerLowest
                   : theme.colorScheme.surfaceContainerLowest.withAlpha(0)),
@@ -488,7 +539,20 @@ class TimerState extends State<Timer>
       child: result,
     );
 
-    result = AnimatedTo.spring(globalKey: animatedToKey, child: result);
+    // do a bounce animation to respond to slide to start interactions
+    double bounceDistance =
+        10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
+    result = AnimatedBuilder(
+        animation: _slideActivateBounceAnimation,
+        builder: (context, child) => Transform.translate(
+            offset: Offset(0, -bounceDistance), child: child),
+        child: result);
+
+    result = AnimatedTo.spring(
+        globalKey: animatedToKey,
+        // tighter than default. ios sets this to .55
+        description: const Spring.withDamping(durationSeconds: 0.2),
+        child: result);
 
     result = SizeReporter(
         key: transferrableKey, previousSize: previousSize, child: result);
@@ -541,64 +605,6 @@ class FadingDial extends AnimatedWidget {
                     )))));
   }
 }
-
-// I don't think this works right. It needs to diff children and *also* maintain a separate stateful stack, or have no children at all, or maybe just one.
-// /// something that self-removing widgets can seek and remove themselves from. Example of such a widget: Animated ones that need to be removed when their timer runs down.
-// class RemovalHost extends StatefulWidget {
-//   /// if a new widget is identified with this one that has a different initialChildren, it will be ignored. RemovalHosts manage their children statefully.
-//   final List<Widget> initialChildren;
-//   final Widget Function(BuildContext context, List<Widget> children) builder;
-//   const RemovalHost(
-//       {super.key, required this.initialChildren, required this.builder});
-//   @override
-//   State<RemovalHost> createState() => RemovalHostState();
-
-//   static RemovalHostState? of(BuildContext context) {
-//     return context.findAncestorStateOfType<RemovalHostState>()!;
-//   }
-// }
-
-// class RemovalHostState extends State<RemovalHost> {
-//   List<Widget> children = [];
-//   @override
-//   void initState() {
-//     super.initState();
-//     children = List.from(widget.initialChildren);
-//   }
-
-//   add(Widget w) {
-//     setState(() {
-//       children.add(w);
-//     });
-//   }
-
-//   remove(GlobalKey key) {
-//     setState(() {
-//       children.removeWhere((w) => w.key == key);
-//     });
-//   }
-
-//   // I notice I kinda wanna animate removals, but no, ImplicitlyAnimatedList can't do that, it really has to be a list.
-//   @override
-//   void didUpdateWidget(RemovalHost oldWidget) {
-//     super.didUpdateWidget(oldWidget);
-//     if (widget.initialChildren != oldWidget.initialChildren) {
-//       setState(() {
-//         children = List.from(widget.initialChildren);
-//       });
-//     }
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return widget.builder(context, children);
-//   }
-// }
-
-// class RemovalStack extends RemovalHost {
-//   RemovalStack({super.key, required super.initialChildren})
-//       : super(builder: (context, children) => Stack(children: children));
-// }
 
 final timerListType = ListType(StringType());
 
@@ -763,22 +769,12 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
   }
 }
 
-class Timerscreen extends StatefulWidget {
+class TimerScreen extends StatefulWidget {
   final bool selectLastTimer;
-  // we require an exposed Mobj because this has complex state and we really don't want to have to then everything on a future
-  final Mobj<List<MobjID<TimerData>>> timerList;
-
-  /// you have to pass these in because we want to ensure they're pre-loaded as well.
-  final Map<MobjID, Timer> timers;
-
-  const Timerscreen(
-      {super.key,
-      required this.timerList,
-      required this.timers,
-      this.selectLastTimer = true});
+  const TimerScreen({super.key, this.selectLastTimer = true});
 
   @override
-  State<Timerscreen> createState() => TimerScreenState();
+  State<TimerScreen> createState() => TimerScreenState();
 }
 
 /// a circle of colors sampled from a uniform circle in the hsluv space at lightness 70
@@ -830,26 +826,32 @@ HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
       lerp(lower.lightness, upper.lightness, t));
 }
 
-class TimerScreenState extends State<Timerscreen>
+class TimerScreenState extends State<TimerScreen>
     with SignalsMixin, TickerProviderStateMixin {
   MobjID<TimerData>? selectedTimer;
 
   bool isRightHanded = true;
   // note this subscribes to the mobj
-  List<MobjID<TimerData>> timers() => widget.timerList.value!;
-  List<MobjID<TimerData>> peekTimers() => widget.timerList.peek()!;
+  List<MobjID<TimerData>> timers() => timerListMobj.value!;
+  List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
 
   GlobalKey controlPadKey = GlobalKey();
   Offset numeralDragStart = Offset.zero;
+  GlobalKey timerTrayKey = GlobalKey();
   late final AnimationController numeralDragIndicator;
+  late final Mobj<List<MobjID<TimerData>>> timerListMobj;
+  late final Mobj<List<MobjID<TimerData>>> transientTimerListMobj;
+  late final Mobj<double> nextHueMobj;
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
-  // a lime green default as the first color
-  double nextHue = 0.252;
 
   @override
   void initState() {
     super.initState();
+    timerListMobj = Mobj.getAlreadyLoaded(timerListID, timerListType);
+    transientTimerListMobj =
+        Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
+    nextHueMobj = Mobj.getAlreadyLoaded(nextHueID, const DoubleType());
     numeralDragIndicator =
         AnimationController(vsync: this, duration: Duration(milliseconds: 70));
   }
@@ -866,10 +868,10 @@ class TimerScreenState extends State<Timerscreen>
   }
 
   double nextRandomHue() {
-    final ret = nextHue;
-    final increment = 0.15 + Random().nextDouble() * 0.08;
-    nextHue += increment;
-    return (ret * 360) % 360;
+    final ret = nextHueMobj.value!;
+    final increment = 0.1 + Random().nextDouble() * 0.15;
+    nextHueMobj.value = (ret + increment) % 1;
+    return ret;
   }
 
   void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
@@ -979,7 +981,7 @@ class TimerScreenState extends State<Timerscreen>
     final stopPlayButton = TimersButton(
         label: playIcon(Icon(Icons.restart_alt_rounded)),
         onPanDown: (_) {
-          pausePlaySelected(true);
+          pausePlaySelected(reset: true);
         });
 
     final doubleZeroButton = NumberButton(digits: [0, 0]);
@@ -1120,7 +1122,8 @@ class TimerScreenState extends State<Timerscreen>
             child: Container(
                 constraints: BoxConstraints.expand(),
                 child: TimerTray(
-                  mobj: widget.timerList,
+                  key: timerTrayKey,
+                  mobj: timerListMobj,
                   backgroundColor: theme.colorScheme.surfaceContainerHigh,
                   icon: Icon(Icons.push_pin), // You can customize this icon
                   useScrollView: true,
@@ -1182,11 +1185,12 @@ class TimerScreenState extends State<Timerscreen>
     return !wasRunning;
   }
 
-  void pausePlaySelected([bool reset = false]) {
+  void pausePlaySelected({bool reset = false}) {
     if (selectedTimer != null) {
       if (toggleRunning(selectedTimer!, reset: reset)) {
         _selectTimer(null);
       }
+    } else {
       final last = timers().lastOrNull;
       if (last != null) {
         toggleRunning(last, reset: reset);
@@ -1207,7 +1211,7 @@ class TimerScreenState extends State<Timerscreen>
     Mobj<TimerData>.clobberCreate(
       ntid,
       type: const TimerDataType(),
-      initial: () => TimerData(
+      initial: TimerData(
         startTime: null,
         runningState: runningState ?? TimerData.paused,
         hue: nextRandomHue(),
@@ -1218,7 +1222,7 @@ class TimerScreenState extends State<Timerscreen>
       ),
     );
 
-    widget.timerList.value = timers().toList()..add(ntid);
+    timerListMobj.value = timers().toList()..add(ntid);
     if (selecting) {
       _selectTimer(ntid);
     }
@@ -1260,7 +1264,7 @@ class TimerScreenState extends State<Timerscreen>
       return;
     }
 
-    widget.timerList.value = peekTimers().toList()
+    timerListMobj.value = peekTimers().toList()
       ..removeWhere((timer) => timer == ki);
 
     if (selectedTimer == ki) {
@@ -1326,6 +1330,19 @@ class _NumberButtonState extends State<NumberButton>
             !hasTriggered) {
           final tss = context.findAncestorStateOfType<TimerScreenState>();
           tss?.pausePlaySelected();
+          // trigger bounce animation
+          if (tss != null) {
+            final lti = tss.timerListMobj.value!.lastOrNull;
+            if (lti != null) {
+              final tts = tss.timerTrayKey.currentState as _TimerTrayState?;
+              if (tts != null) {
+                (tts.timerWidgets.value[lti]?.key as GlobalKey<TimerState>?)
+                    ?.currentState
+                    ?._slideActivateBounceAnimation
+                    .forward(from: 0);
+              }
+            }
+          }
           tss?.numeralDragIndicator.reverse();
           hasTriggered = true;
         }
@@ -1458,5 +1475,17 @@ class TimersButtonState extends State<TimersButton>
                 })),
       ),
     );
+  }
+}
+
+Future<bool> hasBackgroundPermission() {
+  if (Platform.isAndroid) {
+    return FlutterForegroundTask.isIgnoringBatteryOptimizations;
+  } else if (Platform.isIOS) {
+    // iOS does not allow persistent background execution for timers.
+    return Future.value(false);
+  } else {
+    // Other platforms (web, desktop) do not support background execution for this app.
+    return Future.value(false);
   }
 }

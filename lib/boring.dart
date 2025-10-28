@@ -2,39 +2,99 @@
 
 import 'dart:math';
 
-// import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_ringtone_manager/flutter_ringtone_manager.dart';
 import 'package:hsluv/hsluvcolor.dart';
 
+// import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:provider/provider.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
+
+import 'platform_audio.dart';
 
 const tau = 2 * pi;
 
-// for audioplayers
+// Using platform audio for content:// URI support (for using system ringtones)
+class JukeBox {
+  static Future<JukeBox> create() async {
+    return Future.value(JukeBox());
+  }
+
+  Future<void> playAudio(AudioInfo a) async {
+    await PlatformAudio.playAudio(a);
+  }
+
+  Future<void> playJarringSound() async {
+    // Get the user's actual default notification sound
+    final defaultSound =
+        await PlatformAudio.getDefaultAudio(PlatformAudioType.notification);
+    await playAudio(defaultSound!);
+  }
+
+  static void jarringSound(BuildContext context) {
+    Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
+      jb.playJarringSound();
+    });
+  }
+}
+
+// Old audioplayers implementation (kept for reference)
 // class JukeBox {
-//   static final AssetSource pianoSound =
-//       AssetSource('sounds/jarring piano sound 448552__tedagame__g4.ogg');
-//   static final AssetSource steel15 =
-//       AssetSource('sounds/jingles_STEEL15_kenney.ogg');
-//   static final AssetSource forcefield =
-//       AssetSource('sounds/forceField_002_kenney.ogg');
+//   static final AssetSource steel15 = AssetSource('sounds/jingles_STEEL15.ogg');
+//   static final AssetSource steel16 = AssetSource('sounds/jingles_STEEL16.ogg');
+//   // minor tombstone, audioplayers can't play ringtone urls. We'll have to use platform audio instead.
+//   // static final UrlSource forbiddenZetaRingtone = UrlSource(
+//   // 'content://media/internal/audio/media/194?title=Zeta&canonical=1');
 //   // static const String jarringSound = 'assets/jarring.mp3';
 //   late AudioPool jarringPlayers;
 //   static Future<JukeBox> create() async {
 //     return AudioPool.create(
-//       source: forcefield,
+//       source: steel16,
 //       maxPlayers: 4,
+//       audioContext: AudioContext(
+//           android: AudioContextAndroid(
+//               audioFocus: AndroidAudioFocus.gainTransient,
+//               contentType: AndroidContentType.sonification,
+//               usageType: AndroidUsageType.alarm),
+//           iOS: AudioContextIOS(category: AVAudioSessionCategory.playAndRecord)),
 //     ).then((pool) => JukeBox()..jarringPlayers = pool);
 //   }
-
+//
+//   void playJarringSound() {
+//     jarringPlayers.start();
+//   }
+//
 //   static void jarringSound(BuildContext context) {
-//     context.read<Future<JukeBox>>().then((jb) {
+//     Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
 //       jb.jarringPlayers.start();
 //     });
 //   }
 // }
 
+// ringtone manager is totally inadequate because it doesn't give you control over how it interacts with the currently playing sounds, and of course it gives you no control over which asset specifically is played.
+// // with ringtone manager
+// class JukeBox {
+//   // static const String jarringSound = 'assets/jarring.mp3';
+//   late FlutterRingtoneManager m;
+//   JukeBox(this.m) {}
+//   static Future<JukeBox> create() async {
+//     return Future.value(JukeBox(FlutterRingtoneManager()));
+//   }
+
+//   void playJarringSound() {
+//     m.playNotification();
+//   }
+
+//   static void jarringSound(BuildContext context) {
+//     Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
+//       jb.playJarringSound();
+//     });
+//   }
+// }
+
+// this doesn't even work on arch, trying audioplayers again
 // this is different to the above, we don't create an instance of the jukebox, it's all static. Not sure why it shouldn't be. Some of the code still passes us a context we don't need, and we still initialize and instance that doesn't get used
 // replace with soloud
 // soloud also doesn't work with the most recent flutter nix package
@@ -44,8 +104,9 @@ const tau = 2 * pi;
 //   static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
 //   static final String forcefield = 'sounds/forceField_002_kenney.ogg';
 //   static final Future<sl.AudioSource> briefSound =
-//       soloud.then((s) => s.loadAsset(forcefield));
+//       soloud.then((s) => s.loadAsset(steel15));
 //   static final Future<sl.SoLoud> soloud = Future.microtask(() {
+//     WidgetsFlutterBinding.ensureInitialized();
 //     final r = sl.SoLoud.instance;
 //     r.init();
 //     return r;
@@ -65,20 +126,20 @@ const tau = 2 * pi;
 // }
 
 // mock
-class JukeBox {
-  // static final String pianoSound =
-  //     'sounds/jarring piano sound 448552__tedagame__g4.ogg';
-  // static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
-  // static final String forcefield = 'sounds/forceField_002_kenney.ogg';
+// class JukeBox {
+//   // static final String pianoSound =
+//   //     'sounds/jarring piano sound 448552__tedagame__g4.ogg';
+//   // static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
+//   // static final String forcefield = 'sounds/forceField_002_kenney.ogg';
 
-  static Future<JukeBox> create() async {
-    return Future.value(JukeBox());
-  }
+//   static Future<JukeBox> create() async {
+//     return Future.value(JukeBox());
+//   }
 
-  static void jarringSound(BuildContext contex) {
-    // ideally there'd be a visual indicator when the sound is made
-  }
-}
+//   static void jarringSound(BuildContext contex) {
+//     // ideally there'd be a visual indicator when the sound is made
+//   }
+// }
 
 Rect? boxRect(GlobalKey key) {
   final box = key.currentContext?.findRenderObject() as RenderBox?;
@@ -566,6 +627,15 @@ void testTimeConversions() {
   final convertedBack = digitsToDuration(ndigits);
   assert(d == convertedBack);
 }
+
+double sq(double p) => p * p;
+double easeOut(double p) => 1 - sq(1 - p);
+double easeIn(double p) => sq(p);
+double bounceCurve(double p) => (1 - sq((p - 0.5) * 2)) * (1 - easeIn(p));
+const double _bumpMidpoint = 0.17;
+double defaultPulserFunction(double v) => v < _bumpMidpoint
+    ? sq(v / _bumpMidpoint)
+    : 1 - (v - _bumpMidpoint) / (1 - _bumpMidpoint);
 
 class PiePainter extends CustomPainter {
   final double value;

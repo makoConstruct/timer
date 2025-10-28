@@ -43,7 +43,9 @@ app.*.map.json
 
 # Android Studio will place build artifacts here
 ios
-android/
+# we need AndroidManifest for persistent notification permission
+android/.*
+
 linux/
 macos/
 web/
