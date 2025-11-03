@@ -450,6 +450,7 @@ class Mobj<T> extends Signal<T?> {
             debugLabel: debugLabel,
           );
         } else {
+          // hmm why not just initialize as null
           throw StateError(
               "requested Mobj $id, no such Mobj resides in the database");
         }

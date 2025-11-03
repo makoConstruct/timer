@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:isolate';
+import 'dart:math';
 import 'dart:ui';
 // this doesn't work from background isolates?
 // import 'dart:developer' as developer;
@@ -10,57 +12,161 @@ import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
+import 'package:signals/signals_flutter.dart';
 
 void backthreadLog(String message, {String name = "ForegroundService"}) {
   print("[$name] $message");
 }
 
+void printExceptions(void Function() fn, [String context = ""]) {
+  try {
+    fn();
+  } catch (error, stack) {
+    print("ERROR${context.isEmpty ? '' : ' in $context'}: $error");
+    print("STACK TRACE:\n$stack");
+  }
+}
+
+Future<void> printExceptionsAsync(Future<void> Function() fn,
+    [String context = ""]) async {
+  try {
+    await fn();
+  } catch (error, stack) {
+    print("ERROR${context.isEmpty ? '' : ' in $context'}: $error");
+    print("STACK TRACE:\n$stack");
+  }
+}
+
 // Holds all tracking data for a single timer in the background service
 class TrackedTimer {
   final Mobj<TimerData> mobj;
-  Timer? countdownTimer;
-  Function()? unsubscribe;
+  Timer? secondCountdownIndicatorTimer;
+  Timer? triggerTimer;
+  Function()? mobjUnsubscribe;
 
   TrackedTimer(this.mobj);
+
+  double secondsRemaining() {
+    return max(
+        (mobj.value!.duration -
+                    DateTime.now().difference(mobj.value!.startTime))
+                .inMicroseconds
+                .toDouble() /
+            1000000,
+        0);
+  }
+
+  void endTrackedTimer() {
+    mobjUnsubscribe?.call();
+    triggerTimer?.cancel();
+    triggerTimer = null;
+    secondCountdownIndicatorTimer?.cancel();
+    secondCountdownIndicatorTimer = null;
+  }
 }
 
 // entrypoint for the persistent notification isolate
-// [todo] does this have to be called startCallback
 @pragma('vm:entry-point')
 void foregroundTaskStart() {
   print("mako foregroundTaskStart");
-  FlutterForegroundTask.setTaskHandler(PersistentNotificationTask());
+
+  // Catch all uncaught errors in the isolate (including from Timers, Futures, effects)
+  final errorPort = ReceivePort();
+  Isolate.current.addErrorListener(errorPort.sendPort);
+  errorPort.listen((errorData) {
+    if (errorData is List && errorData.length >= 2) {
+      final error = errorData[0];
+      final stack = errorData[1];
+      print("UNCAUGHT ISOLATE ERROR: $error");
+      print("STACK TRACE:\n$stack");
+    } else {
+      print("UNCAUGHT ISOLATE ERROR (unknown format): $errorData");
+    }
+  });
+
+  FlutterForegroundTask.setTaskHandler(
+      ErrorCatchingTaskHandler(PersistentNotificationTask()));
+}
+
+// Wrapper that catches and logs all errors from the inner handler, since they don't otherwise seem to reach the logcat
+class ErrorCatchingTaskHandler extends TaskHandler {
+  final TaskHandler _inner;
+  ErrorCatchingTaskHandler(this._inner);
+
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) =>
+      printExceptionsAsync(() => _inner.onStart(timestamp, starter), "onStart");
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) =>
+      printExceptionsAsync(
+          () => _inner.onDestroy(timestamp, isTimeout), "onDestroy");
+
+  @override
+  void onRepeatEvent(DateTime timestamp) =>
+      printExceptions(() => _inner.onRepeatEvent(timestamp), "onRepeatEvent");
+
+  @override
+  void onReceiveData(Object data) =>
+      printExceptions(() => _inner.onReceiveData(data), "onReceiveData");
+
+  @override
+  void onNotificationPressed() => printExceptions(
+      () => _inner.onNotificationPressed(), "onNotificationPressed");
+
+  @override
+  void onNotificationButtonPressed(String id) => printExceptions(
+      () => _inner.onNotificationButtonPressed(id),
+      "onNotificationButtonPressed");
+}
+
+abstract class SetEvent<T> {}
+
+class SetAddEvent<T> extends SetEvent<T> {
+  final T item;
+  SetAddEvent(this.item);
+}
+
+class SetRemoveEvent<T> extends SetEvent<T> {
+  final T item;
+  SetRemoveEvent(this.item);
+}
+
+Stream<SetEvent<T>> membershipChanges<T>(Stream<List<T>> source) {
+  Set<T> knownItems = {};
+  return source
+      .transform(StreamTransformer.fromHandlers(handleData: (list, sink) {
+    for (final item in list) {
+      if (!knownItems.contains(item)) {
+        sink.add(SetAddEvent<T>(item));
+        knownItems.add(item);
+      }
+    }
+    for (final item in knownItems) {
+      if (!list.contains(item)) {
+        sink.add(SetRemoveEvent<T>(item));
+        knownItems.remove(item);
+      }
+    }
+  }));
 }
 
 class PersistentNotificationTask extends TaskHandler {
   late JukeBox jukeBox;
-  bool _appActive = false;
   Timer? _heartbeatTimeout;
+  final List<Function()> cleanups = [];
   // increased by running timers and by a grasp from the app isolate
-  int refCount = 0;
-  final Map<MobjID<TimerData>, TrackedTimer> _trackedTimers = {};
-
-  void setAppActive(bool value) {
-    if (_appActive != value) {
-      _appActive = value;
-      if (value) {
-        onAppOpened();
-      } else {
-        onAppClosed();
-      }
-    }
-  }
-
-  void endTrackedTimer(TrackedTimer tracked) {
-    tracked.unsubscribe?.call();
-    tracked.countdownTimer?.cancel();
-    tracked.countdownTimer = null;
-    refCount--;
-    _trackedTimers.remove(tracked.mobj.id);
-    if (refCount <= 0) {
-      FlutterForegroundTask.stopService();
-    }
-  }
+  late Signal<bool> appActive;
+  bool get backgroundThreadActive => !appActive.value;
+  // tracks the number of timers that were running when the app was last closed.
+  late Signal<int> ranTimerCount;
+  late Computed<int> refCount;
+  final List<TrackedTimer> trackedTimers = [];
+  StreamSubscription? timerListSubscription;
+  Function()? listeningProcessCancel;
+  Timer? noTimersCheck;
+  // kept for debouncing notification updates
+  DateTime? lastNotificationUpdate;
 
   void onTimerDataChanged(TrackedTimer tracked) {
     backthreadLog("onTimerDataChanged ${tracked.mobj.id}",
@@ -68,119 +174,200 @@ class PersistentNotificationTask extends TaskHandler {
     final timer = tracked.mobj;
     final ntp = timer.peek()!;
     if (ntp.isRunning) {
-      tracked.countdownTimer?.cancel();
-      backthreadLog("startTimerTimer ${timer.id}", name: "ForegroundService");
-      tracked.countdownTimer = Timer(
+      tracked.triggerTimer?.cancel();
+      tracked.triggerTimer = Timer(
           digitsToDuration(timer.peek()!.digits) -
               DateTime.now().difference(timer.peek()!.startTime), () {
-        // trigger timer
         backthreadLog("timer triggered ${timer.id}", name: "ForegroundService");
+        // trigger timer
         FlutterForegroundTask.sendDataToMain(
             {'op': 'timerTriggered', 'timerId': timer.id});
         jukeBox.playJarringSound();
-        backthreadLog("timer triggered, refCount is $refCount",
-            name: "ForegroundService");
         timer.value =
             timer.value!.withChanges(runningState: TimerData.completed);
-        backthreadLog("timer triggered refCount: $refCount",
-            name: "ForegroundService");
       });
     } else {
-      endTrackedTimer(tracked);
+      tracked.endTrackedTimer();
     }
   }
 
   // so there may be a slight delay when the app is opening or closing where timers wont sound, during the changeover, but this is fine
 
-  void onAppOpened() {
-    backthreadLog("onAppOpened, refCount is $refCount");
-    refCount++;
-    // stop waiting on the timers, assume the app will handle them
-    for (final tracked in _trackedTimers.values) {
-      endTrackedTimer(tracked);
+  // Future<void> checkTimers() async {
+  //   // this method doesn't have to worry about deletion, since deletions will come through as nullifications of the timer mobjs
+  //   final timers = timerList.value;
+  //   if (timers == null) {
+  //     return;
+  //   }
+  //   backthreadLog(
+  //       "checking ${timers.length} timers, refCount is ${refCount.peek()}",
+  //       name: "ForegroundService");
+  //   for (final timerId in timers) {
+  //     backthreadLog("checking timer $timerId", name: "ForegroundService");
+  //     if (trackedTimers[timerId] == null) {
+  //       // Fetch the timer and set up tracking
+  //       final mobj = await Mobj.fetch(timerId, type: TimerDataType());
+  //       final TimerData data = mobj.peek()!;
+  //       if (data.isRunning) {
+  //         ranTimerCount.value++;
+  //         final tracked = TrackedTimer(mobj);
+  //         trackedTimers[timerId] = tracked;
+  //         tracked.mobjUnsubscribe = mobj.subscribe((_) {
+  //           onTimerDataChanged(tracked);
+  //         });
+  //         tracked.secondCountdownIndicatorTimer =
+  //             Timer.periodic(Duration(seconds: 1), (timer) {
+  //           final nv = DateTime.now()
+  //               .difference(tracked.mobj.value!.startTime)
+  //               .inSeconds;
+  //           print("updating seconds for timer ${tracked.mobj.id} to $nv");
+  //           tracked.seconds.value = nv;
+  //         });
+  //       }
+  //     }
+  //   }
+  // }
+
+  void relinquishWork() {
+    timerListSubscription?.cancel();
+    timerListSubscription = null;
+    listeningProcessCancel?.call();
+    listeningProcessCancel = null;
+    for (final tracked in trackedTimers) {
+      tracked.endTrackedTimer();
     }
-    backthreadLog("onAppOpened2, refCount is $refCount");
+    trackedTimers.clear();
+    ranTimerCount.value = 0;
   }
 
-  Future<void> checkTimers() async {
-    // this method doesn't have to worry about deletion, since deletions will come through as nullifications of the timer mobjs
-    final timers = await Mobj.readCurrentValue<List<MobjID<TimerData>>>(
-      timerListID,
-      type: ListType(const StringType()),
+  void updatePersistentNotification(
+      {required String title,
+      required String text,
+      required List<NotificationButton> buttons}) {
+    // Service is already started by graspForegroundService(), only update it
+    FlutterForegroundTask.updateService(
+      notificationTitle: title,
+      notificationText: text,
+      notificationButtons: buttons,
     );
-
-    backthreadLog("checking ${timers.length} timers, refCount is $refCount",
-        name: "ForegroundService");
-    for (final timerId in timers) {
-      backthreadLog("checking timer $timerId", name: "ForegroundService");
-      if (_trackedTimers[timerId] == null) {
-        // Fetch the timer and set up tracking
-        final mobj = await Mobj.fetch(timerId, type: TimerDataType());
-        final TimerData data = mobj.peek()!;
-
-        if (data.isRunning) {
-          refCount++;
-          final tracked = TrackedTimer(mobj);
-          _trackedTimers[timerId] = tracked;
-          tracked.unsubscribe = mobj.subscribe((_) {
-            onTimerDataChanged(tracked);
-          });
-        }
-      }
-    }
   }
 
-  void onAppClosed() async {
-    // take over the work from the app
-    // we don't have to subscribe to the timerlists, monitor for new timers, or anything like that, since no new timers will be created while the app is closed.
-    backthreadLog("onAppClosed, refCount is $refCount",
-        name: "ForegroundService");
-
-    await checkTimers();
-
-    // release the app's refcount
-    refCount--;
-    backthreadLog("onAppClosed refCount: $refCount", name: "ForegroundService");
-    if (refCount <= 0) {
-      FlutterForegroundTask.stopService();
+  void updateRunningTimersNotification() {
+    // debounce to avoid excessive notification updates (no idea if they're expensive but we might as well)
+    final now = DateTime.now();
+    if (lastNotificationUpdate != null &&
+        now.difference(lastNotificationUpdate!) < Duration(milliseconds: 130)) {
+      return;
     }
+    lastNotificationUpdate = now;
+
+    String title =
+        trackedTimers.length == 1 ? "timer running" : "timers running";
+    String body = "";
+    for (final tracked in trackedTimers) {
+      final mv = tracked.mobj.value;
+      body += mv?.isRunning ?? false
+          ? "${formatTime(durationToDigits(tracked.secondsRemaining().toDouble()))}\n"
+          : "timer completed";
+    }
+    updatePersistentNotification(title: title, text: body, buttons: []);
   }
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    // Initialize plugin support for background isolate
-    // [todo] test to see if this works when the isolate is started on reboot. If not, I think we're kinda screwed.
+    print("onStart");
+    appActive = Signal(starter == TaskStarter.developer);
+    ranTimerCount = Signal(0);
+    refCount = computed(() => ranTimerCount.value + (appActive.value ? 1 : 0));
+
+    // this might be useful for plugin support for background isolate?
+    // [todo] test to see if platform audio works when the isolate is started on reboot. If not, I think we're kinda screwed.
+    // [todo] try removing this
     final token = RootIsolateToken.instance!;
     BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-
     FlutterForegroundTask.sendDataToMain({'op': 'onStart Report'});
-    backthreadLog("mako onStart $timestamp $starter, refCount is $refCount",
-        name: "ForegroundService");
     jukeBox = await JukeBox.create();
-    backthreadLog("mako onStart jukebox created", name: "ForegroundService");
     MobjRegistry.initialize(TheDatabase());
-    backthreadLog("mako onStart database initialized",
-        name: "ForegroundService");
-    // assume the app wont have died instantly after spawning this isolate
-    _appActive = starter == TaskStarter.developer;
-    if (_appActive) {
-      onAppOpened();
-    } else {
-      await checkTimers();
-      if (refCount <= 0) {
-        backthreadLog(
-            "stopping service, since the app isn't open and no timers are running, refCount is $refCount",
-            name: "ForegroundService");
-        FlutterForegroundTask.stopService();
+
+    print("registering effect to update notification message");
+    // keeping track of the timers when we need to and forgetting them when we don't
+    cleanups.add(effect(() {
+      print("lifecycle logic");
+      if (appActive.value) {
+        relinquishWork();
+        updatePersistentNotification(
+            title: appName, text: foregroundNotificationText, buttons: []);
+      } else {
+        //(re)start the listening process
+        listeningProcessCancel?.call();
+        bool cancelled = false;
+        listeningProcessCancel = () {
+          cancelled = true;
+          timerListSubscription?.cancel();
+          noTimersCheck?.cancel();
+          noTimersCheck = null;
+        };
+        final futureTimerList =
+            Mobj.fetch(timerListID, type: ListType(const StringType()));
+        futureTimerList.then((timerList) {
+          if (cancelled) {
+            return;
+          }
+          timerListSubscription = membershipChanges<MobjID<TimerData>>(
+            timerList.toStream().map((value) => value ?? []),
+          )
+              .where(
+                (event) => event is SetAddEvent<MobjID<TimerData>>,
+              )
+              .asyncMap(
+                (event) => Mobj.fetch(
+                  (event as SetAddEvent<MobjID<TimerData>>).item,
+                  type: TimerDataType(),
+                ),
+              )
+              .listen((timer) {
+            if (cancelled) {
+              timer.dispose();
+              return;
+            }
+            if (timer.peek()!.isRunning) {
+              ranTimerCount.value++;
+              final tracked = TrackedTimer(timer);
+              tracked.mobjUnsubscribe = timer.subscribe((_) {
+                onTimerDataChanged(tracked);
+              });
+              tracked.secondCountdownIndicatorTimer =
+                  Timer.periodic(Duration(seconds: 1), (timer) {
+                final nv = tracked.secondsRemaining();
+                print("updating seconds for timer ${tracked.mobj.id} to $nv");
+                updateRunningTimersNotification();
+              });
+              trackedTimers.add(tracked);
+            }
+          });
+
+          noTimersCheck = Timer(Duration(seconds: 1), () {
+            if (trackedTimers.isEmpty) {
+              FlutterForegroundTask.stopService();
+            }
+          });
+        });
       }
-    }
+    }));
   }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _heartbeatTimeout?.cancel();
+    for (final cleanup in cleanups) {
+      cleanup();
+    }
+    cleanups.clear();
     backthreadLog("mako onDestroy $timestamp $isTimeout",
         name: "ForegroundService");
+    appActive.dispose();
+    ranTimerCount.dispose();
+    refCount.dispose();
     FlutterForegroundTask.sendDataToMain({'op': 'goodbye'});
   }
 
@@ -195,8 +382,14 @@ class PersistentNotificationTask extends TaskHandler {
 
   @override
   void onNotificationPressed() {
-    // [todo] open the app
     backthreadLog("mako onNotificationPressed", name: "ForegroundService");
+    for (final tracked in trackedTimers) {
+      if (tracked.mobj.value!.isRunning) {
+        tracked.mobj.value = tracked.mobj.value!.withChanges(
+            runningState: TimerData.paused, ranTime: Duration.zero);
+      }
+    }
+    relinquishWork();
   }
 
   @override
@@ -207,26 +400,26 @@ class PersistentNotificationTask extends TaskHandler {
       _heartbeatTimeout?.cancel();
       _heartbeatTimeout = Timer(Duration(seconds: 2), () {
         backthreadLog("heartbeat timeout", name: "ForegroundService");
-        setAppActive(false);
+        appActive.value = false;
       });
     }
 
     switch (op) {
       case 'hello':
-        setAppActive(true);
+        appActive.value = true;
         resetHeartbeatTimeout();
         break;
       // there is no way to be reliably notified when a process is killed, so we do a heartbeat timer as well as the goodbye thing just in case that's killed
       case 'heartbeat':
         // for some reason the heartbeat continues to fire even after the app is closed. The heartbeat shouldn't trigger in that case.
         backthreadLog("heartbeat received", name: "ForegroundService");
-        if (_appActive) {
-          setAppActive(true);
+        if (appActive.peek()) {
+          appActive.value = true;
           resetHeartbeatTimeout();
           break;
         }
       case 'goodbye':
-        setAppActive(false);
+        appActive.value = false;
         _heartbeatTimeout?.cancel();
         break;
     }
@@ -234,7 +427,7 @@ class PersistentNotificationTask extends TaskHandler {
 
   @override
   void onNotificationButtonPressed(String id) {
-    // todo: pause/play the current timer
+    // [todo]: pause/play the current timer
     backthreadLog("notification button pressed $id", name: "ForegroundService");
   }
 }
@@ -273,7 +466,7 @@ Future<void> graspForegroundService() async {
 
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
-      channelId: 'mako_timer_foreground_service',
+      channelId: 'foreground_service',
       channelName: "mako timer's persistent notification",
       channelDescription: "mako timer's persistent notification",
       onlyAlertOnce: true,
@@ -305,12 +498,9 @@ Future<void> graspForegroundService() async {
       //   ForegroundServiceTypes.remoteMessaging,
       // ],
       serviceId: 1,
-      notificationTitle: 'Foreground Service is running',
-      notificationText: 'Tap to return to the app',
+      notificationTitle: appName,
+      notificationText: foregroundNotificationText,
       notificationIcon: null,
-      notificationButtons: [
-        const NotificationButton(id: 'btn_hello', text: 'hello'),
-      ],
       // (see manifest for why specialUse)
       serviceTypes: [ForegroundServiceTypes.specialUse],
       notificationInitialRoute: '/',

@@ -32,6 +32,8 @@ class TimerData {
   /// if the alarm is currently screaming and needs to be acknowledged by the user
   final bool isGoingOff;
 
+  Duration get duration => digitsToDuration(digits);
+
   TimerData({
     DateTime? startTime,
     this.runningState = paused,

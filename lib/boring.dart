@@ -409,6 +409,10 @@ const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
 const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9];
 const List<int> datetimeMaxima = [60, 60, 24, 365];
 
+const appName = "mako timer";
+const foregroundNotificationText =
+    "this foreground task is ready to continue running any active timers in case the app closes. It will close with the app if no timers were running.";
+
 int padLevelFor(int digitLength) {
   return datetimeSectionOffsets.indexWhere((s) => s >= digitLength);
 }
@@ -479,6 +483,22 @@ void pushDigits(List<int> digitsOut, int number, int digitsInSection,
       end--;
     }
   }
+}
+
+Function() cancellableFutureThen<T>(Future<T> future, Function(T) then) {
+  bool cancelled = false;
+  future.then((value) {
+    if (!cancelled) {
+      then(value);
+    }
+  }).catchError((error) {
+    if (!cancelled) {
+      throw error;
+    }
+  });
+  return () {
+    cancelled = true;
+  };
 }
 
 /// where padLevel is the number of figures to include as 0 values if the duration isn't really that long

@@ -45,3 +45,7 @@ credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects. -->
 `flutter pub run build_runner build` to build database.g.dart
 
 `flutter run`
+
+### debugging
+
+Whenever you push a change to the device, the foreground task connection will break. You will likely have to force stop the app and restart before the foreground task will connect correctly. This probably has something to do with hot reloading and sendChannels not surviving it, it may also involve the new install automatically booting the old background task code before the new version is installed. Idk, whatever it is, this fixes it, and it doesn't happen in deployment.
