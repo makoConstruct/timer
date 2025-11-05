@@ -37,7 +37,7 @@ Future<void> printExceptionsAsync(Future<void> Function() fn,
   }
 }
 
-// Holds all tracking data for a single timer in the background service
+/// information regarding a timer that we're currently monitoring/running
 class TrackedTimer {
   final Mobj<TimerData> mobj;
   Timer? secondCountdownIndicatorTimer;
@@ -157,7 +157,6 @@ class PersistentNotificationTask extends TaskHandler {
   final List<Function()> cleanups = [];
   // increased by running timers and by a grasp from the app isolate
   late Signal<bool> appActive;
-  bool get backgroundThreadActive => !appActive.value;
   // tracks the number of timers that were running when the app was last closed.
   late Signal<int> ranTimerCount;
   late Computed<int> refCount;
@@ -188,45 +187,9 @@ class PersistentNotificationTask extends TaskHandler {
       });
     } else {
       tracked.endTrackedTimer();
+      updateRunningTimersNotification();
     }
   }
-
-  // so there may be a slight delay when the app is opening or closing where timers wont sound, during the changeover, but this is fine
-
-  // Future<void> checkTimers() async {
-  //   // this method doesn't have to worry about deletion, since deletions will come through as nullifications of the timer mobjs
-  //   final timers = timerList.value;
-  //   if (timers == null) {
-  //     return;
-  //   }
-  //   backthreadLog(
-  //       "checking ${timers.length} timers, refCount is ${refCount.peek()}",
-  //       name: "ForegroundService");
-  //   for (final timerId in timers) {
-  //     backthreadLog("checking timer $timerId", name: "ForegroundService");
-  //     if (trackedTimers[timerId] == null) {
-  //       // Fetch the timer and set up tracking
-  //       final mobj = await Mobj.fetch(timerId, type: TimerDataType());
-  //       final TimerData data = mobj.peek()!;
-  //       if (data.isRunning) {
-  //         ranTimerCount.value++;
-  //         final tracked = TrackedTimer(mobj);
-  //         trackedTimers[timerId] = tracked;
-  //         tracked.mobjUnsubscribe = mobj.subscribe((_) {
-  //           onTimerDataChanged(tracked);
-  //         });
-  //         tracked.secondCountdownIndicatorTimer =
-  //             Timer.periodic(Duration(seconds: 1), (timer) {
-  //           final nv = DateTime.now()
-  //               .difference(tracked.mobj.value!.startTime)
-  //               .inSeconds;
-  //           print("updating seconds for timer ${tracked.mobj.id} to $nv");
-  //           tracked.seconds.value = nv;
-  //         });
-  //       }
-  //     }
-  //   }
-  // }
 
   void relinquishWork() {
     timerListSubscription?.cancel();
@@ -336,17 +299,25 @@ class PersistentNotificationTask extends TaskHandler {
               tracked.mobjUnsubscribe = timer.subscribe((_) {
                 onTimerDataChanged(tracked);
               });
-              tracked.secondCountdownIndicatorTimer =
-                  Timer.periodic(Duration(seconds: 1), (timer) {
-                final nv = tracked.secondsRemaining();
-                print("updating seconds for timer ${tracked.mobj.id} to $nv");
-                updateRunningTimersNotification();
-              });
+              tracked.secondCountdownIndicatorTimer = PeriodicTimerFromEpoch(
+                  period: Duration(seconds: 1),
+                  epoch: tracked.mobj.peek()!.startTime,
+                  callback: (timer) {
+                    final nv = tracked.secondsRemaining();
+                    print(
+                        "updating seconds for timer ${tracked.mobj.id} to $nv");
+                    updateRunningTimersNotification();
+                  });
               trackedTimers.add(tracked);
             }
           });
 
           noTimersCheck = Timer(Duration(seconds: 1), () {
+            // make the decision as to whether to wait for any timers coming in or not
+            if (appActive.value) {
+              // never mind, app has resumed control
+              return;
+            }
             if (trackedTimers.isEmpty) {
               FlutterForegroundTask.stopService();
             }

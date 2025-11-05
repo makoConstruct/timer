@@ -3,8 +3,10 @@ import 'dart:isolate';
 import 'dart:math';
 import 'dart:async';
 import 'dart:ui';
+import 'dart:collection';
 
 import 'package:animated_to/animated_to.dart';
+import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:drift/isolate.dart';
 import 'package:drift/native.dart';
@@ -93,11 +95,6 @@ void main() async {
   // await deleteDatabase();
   print("mako main new message");
   WidgetsFlutterBinding.ensureInitialized();
-  final audioList =
-      await PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
-  for (final audio in audioList) {
-    print("audio: ${audio.name} ${audio.uri} ${audio.isLong}");
-  }
   await initializeDatabase();
   FlutterForegroundTask.addTaskDataCallback(onDataReceived);
   // my impression so far is that apple forbid you from running stuff in the background on iOS unless you're an application for which it would create bad PR for them to kill you, so you can't really make the best timer apps there. On iOS, we're going to have to disable repeat timers.
@@ -279,6 +276,7 @@ class TimerState extends State<Timer>
   // in seconds
   double currentTime = 0;
   late final AnimationController _runningAnimation;
+  Offset _slideBounceDirection = Offset(0, -1);
   late final AnimationController _slideActivateBounceAnimation;
   final GlobalKey _clockKey = GlobalKey();
   final GlobalKey animatedToKey = GlobalKey();
@@ -337,6 +335,7 @@ class TimerState extends State<Timer>
     super.initState();
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
+    _slideBounceDirection = Offset(0, -1);
     _slideActivateBounceAnimation = AnimationController(
         duration: const Duration(milliseconds: 180), vsync: this);
     _ticker = createTicker((d) {
@@ -545,7 +544,7 @@ class TimerState extends State<Timer>
     result = AnimatedBuilder(
         animation: _slideActivateBounceAnimation,
         builder: (context, child) => Transform.translate(
-            offset: Offset(0, -bounceDistance), child: child),
+            offset: _slideBounceDirection * bounceDistance, child: child),
         child: result);
 
     result = AnimatedTo.spring(
@@ -826,11 +825,32 @@ HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
       lerp(lower.lightness, upper.lightness, t));
 }
 
+final List<double> radialActivatorPositions = [
+  0,
+  -pi / 2,
+  -pi,
+];
+final List<Function(TimerScreenState)> radialActivatorFunctions = [
+  (TimerScreenState tss) {
+    tss.numeralPressed([0, 0]);
+    tss.pausePlaySelected();
+    HapticFeedback.lightImpact();
+  },
+  (TimerScreenState tss) {
+    tss.pausePlaySelected();
+    HapticFeedback.lightImpact();
+  },
+  (TimerScreenState tss) {
+    tss.numeralPressed([0]);
+    tss.pausePlaySelected();
+    HapticFeedback.lightImpact();
+  },
+];
+
 class TimerScreenState extends State<TimerScreen>
     with SignalsMixin, TickerProviderStateMixin {
   MobjID<TimerData>? selectedTimer;
-
-  bool isRightHanded = true;
+  late final Signal<bool> isRightHanded = createSignal(true);
   // note this subscribes to the mobj
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
@@ -838,7 +858,7 @@ class TimerScreenState extends State<TimerScreen>
   GlobalKey controlPadKey = GlobalKey();
   Offset numeralDragStart = Offset.zero;
   GlobalKey timerTrayKey = GlobalKey();
-  late final AnimationController numeralDragIndicator;
+  late final UpDownAnimationController numeralDragIndicator;
   late final Mobj<List<MobjID<TimerData>>> timerListMobj;
   late final Mobj<List<MobjID<TimerData>>> transientTimerListMobj;
   late final Mobj<double> nextHueMobj;
@@ -852,8 +872,9 @@ class TimerScreenState extends State<TimerScreen>
     transientTimerListMobj =
         Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
     nextHueMobj = Mobj.getAlreadyLoaded(nextHueID, const DoubleType());
-    numeralDragIndicator =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 70));
+    numeralDragIndicator = UpDownAnimationController(
+        riseDuration: Duration(milliseconds: 400),
+        fallDuration: Duration(milliseconds: 200));
   }
 
   @override
@@ -1078,10 +1099,10 @@ class TimerScreenState extends State<TimerScreen>
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: isRightHanded
+                    mainAxisAlignment: isRightHanded.value
                         ? MainAxisAlignment.end
                         : MainAxisAlignment.start,
-                    children: controlPadWidgets(isRightHanded),
+                    children: controlPadWidgets(isRightHanded.value),
                   ),
                 )
               ]),
@@ -1092,25 +1113,106 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
-    final numeralDragIndicatorWidget = AnimatedBuilder(
-      animation: Tween(begin: 0.3, end: 1.0).animate(CurvedAnimation(
-        parent: numeralDragIndicator,
-        curve: Curves.easeInCubic,
-      )),
-      builder: (context, child) => Positioned(
-        left: numeralDragStart.dx,
-        top:
-            numeralDragStart.dy - numeralDragDistanceTs * Thumbspan.of(context),
-        child: CustomPaint(
-          painter: DragIndicatorPainter(
-            color: theme.colorScheme.primary,
-            radius: Curves.easeIn.transform(numeralDragIndicator.value) *
-                thumbSpan *
-                0.15,
+    // numeral drag action overlay stuff
+    Color numeralDragIndicatorBackColor = theme.colorScheme.primary;
+    Color numeralDragIndicatorIconColor = theme.colorScheme.onPrimary;
+    Widget dragChoiceWidget(Widget child, BuildContext context) {
+      final theme = Theme.of(context);
+      return Container(
+        constraints:
+            BoxConstraints.tight(Size(thumbSpan * 0.6, thumbSpan * 0.6)),
+        decoration: BoxDecoration(
+          color: numeralDragIndicatorBackColor,
+          shape: BoxShape.circle,
+        ),
+        padding: EdgeInsets.all(8),
+        child: IconTheme(
+          data: IconThemeData(
+            color: numeralDragIndicatorIconColor,
+          ),
+          child: DefaultTextStyle(
+            style: controlPadTextStyle
+                .merge(TextStyle(color: numeralDragIndicatorIconColor)),
+            child: child,
           ),
         ),
-      ),
-    );
+      );
+    }
+
+    List<Widget> radialActivatorWidgets = reverseIfNot(isRightHanded.value, [
+      dragChoiceWidget(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [Icon(Icons.play_arrow_rounded), Text('+0')],
+          ),
+          context),
+      dragChoiceWidget(Icon(Icons.play_arrow_rounded), context),
+      dragChoiceWidget(
+          FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: 0,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [Icon(Icons.play_arrow_rounded), Text('+00')])),
+          context),
+    ]);
+
+    final extensionDistanceTarget = Thumbspan.of(context) * (0.5 + 0.17);
+    final Widget radialActivationRing = AnimatedBuilder(
+        animation: numeralDragIndicator,
+        builder: (context, child) {
+          final ringu = unlerpUnit(0.1, 0.4, numeralDragIndicator.value.$1);
+          // as soon as the down fade starts, make sure you don't show the ring at all, it's already faded out.
+          final fadeDown =
+              (1 - Curves.easeIn.transform(numeralDragIndicator.value.$2)) *
+                  (1 - unlerpUnit(0.7, 1, numeralDragIndicator.value.$1));
+          final fadeUp = unlerpUnit(0.3, 1, Curves.easeIn.transform(ringu));
+          final opacity = fadeDown * fadeUp;
+          final radius = lerp(extensionDistanceTarget * 0.4,
+              extensionDistanceTarget, Curves.easeIn.transform(ringu));
+          return Positioned(
+            left: numeralDragStart.dx,
+            top: numeralDragStart.dy,
+            child: IgnorePointer(
+                child: FractionalTranslation(
+                    translation: Offset(-0.5, -0.5),
+                    child: Container(
+                      constraints:
+                          BoxConstraints.tight(Size(radius * 2, radius * 2)),
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: numeralDragIndicatorBackColor
+                                .withAlpha(lerp(0, 255, opacity).toInt()),
+                            width: 2),
+                      ),
+                    ))),
+          );
+        });
+    final List<Widget> numeralDragRadialActivators = reverseIfNotGenerate(
+        isRightHanded.value, radialActivatorFunctions.length, (i) {
+      final angle = radialActivatorPositions[i];
+      return AnimatedBuilder(
+        animation: numeralDragIndicator,
+        builder: (context, child) {
+          final v = unlerpUnit(0.7, 1, numeralDragIndicator.value.$1);
+          Offset o = numeralDragStart +
+              Offset.fromDirection(angle, extensionDistanceTarget);
+          return Positioned(
+            left: o.dx,
+            top: o.dy,
+            child: FractionalTranslation(
+                translation: Offset(-0.5, -0.5),
+                child: Transform.scale(
+                    scale: lerp(0, 1, Curves.easeIn.transform(v)),
+                    child: radialActivatorWidgets[i])),
+          );
+        },
+      );
+    });
 
     final timersWidget = Expanded(
       child: Row(
@@ -1161,7 +1263,9 @@ class TimerScreenState extends State<TimerScreen>
               )
             ],
           ),
-          numeralDragIndicatorWidget
+          // numeralDragIndicatorWidget
+          radialActivationRing,
+          ...numeralDragRadialActivators
         ]),
       ),
     );
@@ -1249,7 +1353,11 @@ class TimerScreenState extends State<TimerScreen>
         removeTimer(selectedTimer!);
       } else {
         digits.removeLast();
-        mobj.value = mobj.peek()!.withChanges(digits: digits);
+        if (digits.isEmpty) {
+          removeTimer(selectedTimer!);
+        } else {
+          mobj.value = mobj.peek()!.withChanges(digits: digits);
+        }
       }
     } else {
       if (timers().isNotEmpty) {
@@ -1325,22 +1433,33 @@ class _NumberButtonState extends State<NumberButton>
         tss?.numeralDragIndicator.forward();
       },
       onPanUpdate: (Offset p) {
-        if ((p - _startDrag).dy <=
-                -numeralDragDistanceTs * Thumbspan.of(context) &&
+        Offset dp = p - _startDrag;
+        if (dp.distance >
+                numeralDragDistanceTs * Thumbspan.of(context) * 0.17 &&
             !hasTriggered) {
           final tss = context.findAncestorStateOfType<TimerScreenState>();
-          tss?.pausePlaySelected();
+          if (tss == null) {
+            return;
+          }
+          final angle = offsetAngle(dp);
+          int dragResult = radialDragResult(
+              reverseIfNot(tss.isRightHanded.value, radialActivatorPositions),
+              angle,
+              hitSpan: pi / 2);
+          if (dragResult != -1) {
+            getReversedIfNot(tss.isRightHanded.value, radialActivatorFunctions,
+                dragResult)(tss);
+          }
           // trigger bounce animation
-          if (tss != null) {
-            final lti = tss.timerListMobj.value!.lastOrNull;
-            if (lti != null) {
-              final tts = tss.timerTrayKey.currentState as _TimerTrayState?;
-              if (tts != null) {
-                (tts.timerWidgets.value[lti]?.key as GlobalKey<TimerState>?)
-                    ?.currentState
-                    ?._slideActivateBounceAnimation
-                    .forward(from: 0);
-              }
+          final lti = tss.timerListMobj.value!.lastOrNull;
+          if (lti != null) {
+            final tts = tss.timerTrayKey.currentState as _TimerTrayState?;
+            if (tts != null) {
+              final ts =
+                  (tts.timerWidgets.value[lti]?.key as GlobalKey<TimerState>?)
+                      ?.currentState;
+              ts?._slideActivateBounceAnimation.forward(from: 0);
+              ts?._slideBounceDirection = Offset.fromDirection(angle, 1);
             }
           }
           tss?.numeralDragIndicator.reverse();
@@ -1354,6 +1473,11 @@ class _NumberButtonState extends State<NumberButton>
     );
   }
 }
+
+final controlPadTextStyle = TextStyle(
+  fontSize: 20,
+  fontWeight: FontWeight.bold,
+);
 
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
@@ -1410,7 +1534,7 @@ class TimersButtonState extends State<TimersButton>
       onPanDown: (details) {
         if (widget.onPanDown != null) {
           widget.onPanDown?.call(details.globalPosition);
-          shortFlash.forward(from: 0);
+          // shortFlash.forward(from: 0);
         }
       },
       onPanUpdate: widget.onPanUpdate != null
@@ -1459,10 +1583,8 @@ class TimersButtonState extends State<TimersButton>
                   final Widget labelWidget;
                   if (widget.label is String) {
                     labelWidget = Text(widget.label as String,
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: textColor));
+                        style: controlPadTextStyle
+                            .merge(TextStyle(color: textColor)));
                   } else {
                     labelWidget = widget.label as Widget;
                   }

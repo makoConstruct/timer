@@ -1,7 +1,10 @@
 // the boring file is where we put things that're either self-explanatory or just small and fragmented and not very relevant to understanding the core structure of the application
 
+import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_ringtone_manager/flutter_ringtone_manager.dart';
@@ -16,27 +19,72 @@ import 'platform_audio.dart';
 
 const tau = 2 * pi;
 
+bool platformIsDesktop() =>
+    Platform.isLinux || Platform.isWindows || Platform.isMacOS;
+
 // Using platform audio for content:// URI support (for using system ringtones)
+// On Linux, uses audioplayers instead since platform_audio doesn't work there, though audioplayers doesn't work perfectly, we're not actually doing a linux target, linux is just for testing
 class JukeBox {
+  static final AssetSource _defaultSound =
+      AssetSource('sounds/jingles_STEEL16.ogg');
+  AudioPlayer? _audioPlayer; // Only used on Linux
+
   static Future<JukeBox> create() async {
-    return Future.value(JukeBox());
+    final jukebox = JukeBox();
+    if (platformIsDesktop()) {
+      jukebox._audioPlayer = AudioPlayer();
+    }
+    return jukebox;
   }
 
   Future<void> playAudio(AudioInfo a) async {
-    await PlatformAudio.playAudio(a);
+    if (platformIsDesktop()) {
+      // Use audioplayers on Linux
+      if (a.uri == null) {
+        return;
+      }
+
+      // Convert URI to appropriate Source
+      Source source;
+      if (a.uri!.startsWith('asset://')) {
+        // Flutter asset
+        final assetPath = a.uri!.replaceFirst('asset://', '');
+        source = AssetSource(assetPath);
+      } else if (a.uri!.startsWith('file://')) {
+        // Local file
+        source = DeviceFileSource(a.uri!.replaceFirst('file://', ''));
+      } else {
+        // Try as file path
+        source = DeviceFileSource(a.uri!);
+      }
+
+      await _audioPlayer!.play(source);
+    } else {
+      // Use platform audio on other platforms
+      await PlatformAudio.playAudio(a);
+    }
   }
 
   Future<void> playJarringSound() async {
-    // Get the user's actual default notification sound
-    final defaultSound =
-        await PlatformAudio.getDefaultAudio(PlatformAudioType.notification);
-    await playAudio(defaultSound!);
+    if (platformIsDesktop()) {
+      // Use default asset sound on Linux
+      await _audioPlayer!.play(_defaultSound);
+    } else {
+      // Get the user's actual default notification sound
+      final defaultSound =
+          await PlatformAudio.getDefaultAudio(PlatformAudioType.notification);
+      await playAudio(defaultSound!);
+    }
   }
 
   static void jarringSound(BuildContext context) {
     Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
       jb.playJarringSound();
     });
+  }
+
+  void dispose() {
+    _audioPlayer?.dispose();
   }
 }
 
@@ -207,6 +255,54 @@ class DraggableWidget<T> extends StatefulWidget {
   State<DraggableWidget> createState() => _DraggableWidgetState();
 }
 
+Duration normalizeDuration(Duration duration, Duration interval) {
+  final totalMs = duration.inMicroseconds;
+  final intervalMs = interval.inMicroseconds;
+  // Proper modulo that handles negatives: ((n % m) + m) % m
+  final normalizedMs = ((totalMs % intervalMs) + intervalMs) % intervalMs;
+  return Duration(microseconds: normalizedMs);
+}
+
+class PeriodicTimerFromEpoch implements Timer {
+  final Duration period;
+
+  /// epoch is allowed to be in the past, we'll correctly trigger on the modulo since then
+  final DateTime epoch;
+  final Function(Timer) callback;
+  Timer? firstTickTimer;
+  Timer? periodicTimer;
+  PeriodicTimerFromEpoch(
+      {required this.period, required this.epoch, required this.callback}) {
+    firstTickTimer =
+        Timer(normalizeDuration(epoch.difference(DateTime.now()), period), () {
+      firstTickTimer = null;
+      periodicTimer = Timer.periodic(period, (timer) {
+        callback(this);
+      });
+    });
+  }
+
+  @override
+  bool get isActive => true;
+
+  @override
+  int get tick => periodicTimer?.tick ?? 0;
+
+  @override
+  void cancel() {
+    firstTickTimer?.cancel();
+    periodicTimer?.cancel();
+    periodicTimer = null;
+  }
+}
+
+List<T> reverseIfNotGenerate<T>(
+    bool condition, int length, T Function(int) generator) {
+  return condition
+      ? List.generate(length, (i) => generator(i))
+      : List.generate(length, (i) => generator(length - i - 1));
+}
+
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
 DragAnchorStrategy dragAnchorStrategy(ValueNotifier<Offset> dragStartOffset) =>
     (Draggable<Object> draggable, BuildContext context, Offset position) {
@@ -332,9 +428,11 @@ class EnspiralPainter extends CustomPainter {
 /// Calculates the angle in radians from the center point to the given point.
 /// The angle is measured clockwise from the positive x-axis.
 double angleFrom(Offset from, Offset to) {
-  final dx = to.dx - from.dx;
-  final dy = to.dy - from.dy;
-  return atan2(dy, dx);
+  return offsetAngle(to - from);
+}
+
+double offsetAngle(Offset offset) {
+  return atan2(offset.dy, offset.dx);
 }
 
 /// Converts a Size to an Offset by using the width as x and height as y.
@@ -405,6 +503,179 @@ double clampDouble(double t, double min, double max) {
   }
 }
 
+/// tracks two components, a rise time and a fall time. Sometimes you want an animation to look different on the way down. Use the second component (the falling one) of the animation value to smoothly overrule the rising component so that there's no stutter or interruption when the animation changes direction. However, when the animation goes from falling to rising, there will be a discontinuity.
+/// when you call forward(), the rise component will start to move towards 1. When you call reverse(), the fall component will start to move towards 1. The next time you call forward, the rise component will start from roughly min(rise, fall), and the fall component will be 0.
+class UpDownAnimationController extends ValueListenable<(double, double)>
+    with ChangeNotifier
+    implements Animation<(double, double)> {
+  DateTime? _riseTime;
+  DateTime? _fallTime;
+  final Duration riseDuration;
+  final Duration fallDuration;
+  final List<AnimationStatusListener> _statusListeners = [];
+  AnimationStatus _lastStatus = AnimationStatus.dismissed;
+  Timer? _updateTimer;
+
+  UpDownAnimationController({
+    required this.riseDuration,
+    required this.fallDuration,
+  });
+
+  void _startUpdateTimer() {
+    _updateTimer?.cancel();
+    _updateTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
+      final prevStatus = _lastStatus;
+      notifyListeners();
+      _updateStatus();
+
+      // Stop timer when animation completes
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        timer.cancel();
+        _updateTimer = null;
+      }
+    });
+  }
+
+  void forward() {
+    if (_riseTime != null) {
+      // tries to start from where it currently is.
+      double riseProgress = durationToSeconds(_riseTime != null
+          ? DateTime.now().difference(_riseTime!)
+          : Duration.zero);
+      double fallProgress = durationToSeconds(_fallTime != null
+          ? DateTime.now().difference(_fallTime!)
+          : Duration.zero);
+      if (riseProgress >= durationToSeconds(riseDuration)) {
+        return;
+      }
+      double forwardPosition = min(
+              riseProgress,
+              fallProgress /
+                  durationToSeconds(fallDuration) *
+                  durationToSeconds(riseDuration)) /
+          durationToSeconds(riseDuration);
+      _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
+    } else {
+      _riseTime = DateTime.now();
+    }
+    _fallTime = null;
+    _startUpdateTimer();
+    notifyListeners();
+    _updateStatus();
+  }
+
+  void reverse() {
+    _fallTime = DateTime.now();
+    _startUpdateTimer();
+    notifyListeners();
+    _updateStatus();
+  }
+
+  void reset() {
+    _riseTime = null;
+    _fallTime = null;
+    _updateTimer?.cancel();
+    _updateTimer = null;
+    notifyListeners();
+    _updateStatus();
+  }
+
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  (double, double) get value {
+    final now = DateTime.now();
+
+    double riseValue = 0.0;
+    if (_riseTime != null) {
+      final elapsed = now.difference(_riseTime!);
+      riseValue =
+          clampUnit(elapsed.inMicroseconds / riseDuration.inMicroseconds);
+    }
+
+    double fallValue = 0.0;
+    if (_fallTime != null) {
+      final elapsed = now.difference(_fallTime!);
+      fallValue =
+          clampUnit(elapsed.inMicroseconds / fallDuration.inMicroseconds);
+    }
+
+    return (riseValue, fallValue);
+  }
+
+  @override
+  AnimationStatus get status {
+    if (_fallTime != null) {
+      final elapsed = DateTime.now().difference(_fallTime!);
+      if (elapsed >= fallDuration) {
+        return AnimationStatus.dismissed;
+      }
+      return AnimationStatus.reverse;
+    }
+
+    if (_riseTime != null) {
+      final elapsed = DateTime.now().difference(_riseTime!);
+      if (elapsed >= riseDuration) {
+        return AnimationStatus.completed;
+      }
+      return AnimationStatus.forward;
+    }
+
+    return AnimationStatus.dismissed;
+  }
+
+  void _updateStatus() {
+    final newStatus = status;
+    if (newStatus != _lastStatus) {
+      _lastStatus = newStatus;
+      for (final listener in _statusListeners.toList()) {
+        listener(newStatus);
+      }
+    }
+  }
+
+  @override
+  void addStatusListener(AnimationStatusListener listener) {
+    _statusListeners.add(listener);
+  }
+
+  @override
+  void removeStatusListener(AnimationStatusListener listener) {
+    _statusListeners.remove(listener);
+  }
+
+  @override
+  Animation<U> drive<U>(Animatable<U> child) {
+    return UpDownAnimationController(
+            riseDuration: riseDuration, fallDuration: fallDuration)
+        .drive(child);
+  }
+
+  @override
+  bool get isAnimating =>
+      status == AnimationStatus.forward || status == AnimationStatus.reverse;
+
+  @override
+  bool get isCompleted => status == AnimationStatus.completed;
+
+  @override
+  bool get isDismissed => status == AnimationStatus.dismissed;
+
+  @override
+  bool get isForwardOrCompleted =>
+      status == AnimationStatus.forward || status == AnimationStatus.completed;
+
+  @override
+  String toStringDetails() {
+    final (rise, fall) = value;
+    return '${super.toString()} rise: ${rise.toStringAsFixed(3)}, fall: ${fall.toStringAsFixed(3)}, $status';
+  }
+}
+
 const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
 const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9];
 const List<int> datetimeMaxima = [60, 60, 24, 365];
@@ -447,6 +718,27 @@ String formatTime(List<int> digits, {int padLevel = 0}) {
   }
   return ret;
 }
+
+///returns the index of the angleRadius segment that angle intersects, otherwise, returns -1
+int radialDragResult(List<double> angleRadius, double angle,
+
+    /// hitspan is the span of the radial drag targets, if a drag is within this span, it will be considered a hit.
+    {double hitSpan = double.infinity}) {
+  int closestAngle = -1;
+  double closestDistance = double.infinity;
+  for (int i = 0; i < angleRadius.length; i++) {
+    final angleCenter = angleRadius[i];
+    double d = shortestAngleDistance(angleCenter, angle);
+    if (d.abs() <= hitSpan / 2) {
+      closestAngle = i;
+      closestDistance = d.abs();
+    }
+  }
+  return closestAngle;
+}
+
+Function getReversedIfNot(bool condition, List<Function> list, int index) =>
+    !condition ? list[index] : list[list.length - index - 1];
 
 // format is highest significance digit to lowest significance digit, the order in which they'd be typed or displayed
 void pushDigits(List<int> digitsOut, int number, int digitsInSection,
