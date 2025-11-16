@@ -6,8 +6,8 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_ringtone_manager/flutter_ringtone_manager.dart';
 import 'package:hsluv/hsluvcolor.dart';
 
 // import 'package:audioplayers/audioplayers.dart';
@@ -296,11 +296,67 @@ class PeriodicTimerFromEpoch implements Timer {
   }
 }
 
-List<T> reverseIfNotGenerate<T>(
+List<T> generatedReverseIfNot<T>(
     bool condition, int length, T Function(int) generator) {
   return condition
       ? List.generate(length, (i) => generator(i))
       : List.generate(length, (i) => generator(length - i - 1));
+}
+
+// automatically removes children when the associated animation is dismissed
+class EphemeralAnimationHost extends StatefulWidget {
+  final List<Widget> children;
+  final Widget Function(List<Widget>, BuildContext) builder;
+  const EphemeralAnimationHost(
+      {super.key, this.children = const [], required this.builder});
+  @override
+  State<EphemeralAnimationHost> createState() => EphemeralAnimationHostState();
+}
+
+class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
+  List<Widget> ephemeralChildren = [];
+
+  /// adds a child to this that's removed when the animation completes
+  void add(Widget child, Animation animation) {
+    ephemeralChildren.add(child);
+    animation.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        setState(() {
+          ephemeralChildren.remove(child);
+        });
+      }
+    });
+  }
+
+  /// use this when the animation completion isn't really the trigger of removal. In this case, you might wonder what EphemeralAnimationHost is even providing, but imo what it provides is a State type that helps you find the right removal host when you do the removal.
+  void addWithoutAutomaticRemoval(Widget child) {
+    setState(() {
+      ephemeralChildren.add(child);
+    });
+  }
+
+  bool remove(Widget child) {
+    if (ephemeralChildren.remove(child)) {
+      setState(() {});
+      return true;
+    }
+    return false;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(widget.children + ephemeralChildren, context);
+  }
+}
+
+void addToEphemeralAnimatioHost(
+    GlobalKey key, Widget child, Animation animation) {
+  (key.currentState! as EphemeralAnimationHostState).add(child, animation);
 }
 
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
@@ -475,6 +531,11 @@ Color darkenColor(Color c, double amount) {
   return hsl.addLightness(-amount * 100).toColor();
 }
 
+Color grey(double v) {
+  final vo = (255 * v).toInt();
+  return Color.fromARGB(255, vo, vo, vo);
+}
+
 double unlerp(double a, double b, double t) {
   return (t - a) / (b - a);
 }
@@ -514,59 +575,69 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   final Duration fallDuration;
   final List<AnimationStatusListener> _statusListeners = [];
   AnimationStatus _lastStatus = AnimationStatus.dismissed;
-  Timer? _updateTimer;
+  late final Ticker _ticker;
 
   UpDownAnimationController({
     required this.riseDuration,
     required this.fallDuration,
-  });
-
-  void _startUpdateTimer() {
-    _updateTimer?.cancel();
-    _updateTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
-      final prevStatus = _lastStatus;
-      notifyListeners();
-      _updateStatus();
-
-      // Stop timer when animation completes
-      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
-        timer.cancel();
-        _updateTimer = null;
-      }
-    });
+    required TickerProvider vsync,
+  }) {
+    _ticker = vsync.createTicker(_tick);
   }
 
-  void forward() {
-    if (_riseTime != null) {
-      // tries to start from where it currently is.
-      double riseProgress = durationToSeconds(_riseTime != null
-          ? DateTime.now().difference(_riseTime!)
-          : Duration.zero);
-      double fallProgress = durationToSeconds(_fallTime != null
-          ? DateTime.now().difference(_fallTime!)
-          : Duration.zero);
-      if (riseProgress >= durationToSeconds(riseDuration)) {
-        return;
-      }
-      double forwardPosition = min(
-              riseProgress,
-              fallProgress /
-                  durationToSeconds(fallDuration) *
-                  durationToSeconds(riseDuration)) /
-          durationToSeconds(riseDuration);
-      _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
-    } else {
+  void _tick(Duration elapsed) {
+    notifyListeners();
+    _updateStatus();
+
+    // Stop ticker when animation completes
+    if (status == AnimationStatus.completed ||
+        status == AnimationStatus.dismissed) {
+      _ticker.stop();
+    }
+  }
+
+  void forward({double? from}) {
+    if (_riseTime == null) {
       _riseTime = DateTime.now();
+      if (from != null) {
+        _riseTime = DateTime.now().subtract(Duration(
+            milliseconds: (from * riseDuration.inMilliseconds).toInt()));
+      }
+    } else {
+      // tries to start from where it currently is.
+      double riseProgress =
+          durationToSeconds(DateTime.now().difference(_riseTime!));
+      double fallProgress = _fallTime != null
+          ? durationToSeconds(DateTime.now().difference(_fallTime!))
+          : 0;
+      double forwardPosition = max(
+          0,
+          min(
+                  riseProgress,
+                  durationToSeconds(riseDuration) -
+                      fallProgress /
+                          durationToSeconds(fallDuration) *
+                          durationToSeconds(riseDuration)) /
+              durationToSeconds(riseDuration));
+      _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
     }
     _fallTime = null;
-    _startUpdateTimer();
+    if (!_ticker.isActive) {
+      _ticker.start();
+    }
     notifyListeners();
     _updateStatus();
   }
 
   void reverse() {
+    // do nothing if already falling
+    if (_fallTime != null) {
+      return;
+    }
     _fallTime = DateTime.now();
-    _startUpdateTimer();
+    if (!_ticker.isActive) {
+      _ticker.start();
+    }
     notifyListeners();
     _updateStatus();
   }
@@ -574,15 +645,14 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   void reset() {
     _riseTime = null;
     _fallTime = null;
-    _updateTimer?.cancel();
-    _updateTimer = null;
+    _ticker.stop();
     notifyListeners();
     _updateStatus();
   }
 
   @override
   void dispose() {
-    _updateTimer?.cancel();
+    _ticker.dispose();
     super.dispose();
   }
 
@@ -593,15 +663,15 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     double riseValue = 0.0;
     if (_riseTime != null) {
       final elapsed = now.difference(_riseTime!);
-      riseValue =
-          clampUnit(elapsed.inMicroseconds / riseDuration.inMicroseconds);
+      riseValue = clampUnit(elapsed.inMicroseconds.toDouble() /
+          riseDuration.inMicroseconds.toDouble());
     }
 
     double fallValue = 0.0;
     if (_fallTime != null) {
       final elapsed = now.difference(_fallTime!);
-      fallValue =
-          clampUnit(elapsed.inMicroseconds / fallDuration.inMicroseconds);
+      fallValue = clampUnit(elapsed.inMicroseconds.toDouble() /
+          fallDuration.inMicroseconds.toDouble());
     }
 
     return (riseValue, fallValue);
@@ -649,13 +719,6 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   }
 
   @override
-  Animation<U> drive<U>(Animatable<U> child) {
-    return UpDownAnimationController(
-            riseDuration: riseDuration, fallDuration: fallDuration)
-        .drive(child);
-  }
-
-  @override
   bool get isAnimating =>
       status == AnimationStatus.forward || status == AnimationStatus.reverse;
 
@@ -674,6 +737,27 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     final (rise, fall) = value;
     return '${super.toString()} rise: ${rise.toStringAsFixed(3)}, fall: ${fall.toStringAsFixed(3)}, $status';
   }
+
+  @override
+  Animation<U> drive<U>(Animatable<U> child) {
+    return child.animate(_UpDownToDoubleAdapter(this));
+  }
+}
+
+/// Adapter that converts Animation<(double, double)> to Animation<double>
+/// by computing min(rise, 1 - fall)
+class _UpDownToDoubleAdapter extends Animation<double>
+    with AnimationWithParentMixin<(double, double)> {
+  _UpDownToDoubleAdapter(this.parent);
+
+  @override
+  final Animation<(double, double)> parent;
+
+  @override
+  double get value {
+    final (rise, fall) = parent.value;
+    return min(rise, 1 - fall);
+  }
 }
 
 const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
@@ -691,7 +775,7 @@ int padLevelFor(int digitLength) {
 /// if d is greater than the number of given padLevel, eg, if it's 25 hours and place is 3 (which means show seconds, minutes and hours), it will still automatically show 1 day, 1 hour, and zero minutes and seconds. padLevel is for making sure enough places are shown in numbers that are too low.
 String formatTime(List<int> digits, {int padLevel = 0}) {
   String ret = "";
-  // the index of the next digit to be printed
+  // the index of the next digit to be printe
   int underLevel = max(
       0,
       max(padLevel - 1,
@@ -729,7 +813,7 @@ int radialDragResult(List<double> angleRadius, double angle,
   for (int i = 0; i < angleRadius.length; i++) {
     final angleCenter = angleRadius[i];
     double d = shortestAngleDistance(angleCenter, angle);
-    if (d.abs() <= hitSpan / 2) {
+    if (d.abs() <= hitSpan / 2 && d.abs() < closestDistance) {
       closestAngle = i;
       closestDistance = d.abs();
     }
@@ -894,7 +978,6 @@ double lpixPerMM(BuildContext context) {
 
   // final dpi = MediaQuery.devicePixelRatioOf(context);
   // final s = MediaQuery.sizeOf(context);
-  // print("${s.width}x${s.height}dpi:$dpi");
   // return s.width / mm * 25.4 * dpi;
   // return px / mm * 25.4 * dpi;
 

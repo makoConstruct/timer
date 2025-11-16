@@ -5,8 +5,6 @@ import 'package:drift/drift.dart';
 import 'package:makos_timer/database.dart';
 import 'package:signals/signals_flutter.dart';
 
-import 'main.dart';
-
 /// these are just parser combinators. They used to be self-describing so that we could put type descriptions in the DB and use those to pre-parse any root objects, but it turned out that's impossible in dart (you can't construct a new generic type at runtime, which, since dart has runtime type information, means you also can't construct values of that type), and would only be elegant with dependent types.
 abstract class TypeHelp<T> {
   final Object typeDescription;
