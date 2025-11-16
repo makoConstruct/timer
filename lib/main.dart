@@ -72,15 +72,10 @@ Future<void> initializeDatabase() async {
   await Future.wait([
     // we know that the data required for the app is minimal enough that we should wait until it's loaded before showing anything... idk not sure I believe this
     Mobj.getOrCreate(timerListID,
-        type: ListType(const StringType()),
-        initial: () => <MobjID>[],
-        debugLabel: "pinned timers"),
+        type: ListType(const StringType()), initial: () => <MobjID>[]),
     Mobj.getOrCreate(transientTimerListID,
-        type: ListType(const StringType()),
-        initial: () => <MobjID>[],
-        debugLabel: "transient timers"),
-    Mobj.getOrCreate(nextHueID,
-        type: const DoubleType(), initial: () => 0.252, debugLabel: "next hue"),
+        type: ListType(const StringType()), initial: () => <MobjID>[]),
+    Mobj.getOrCreate(nextHueID, type: const DoubleType(), initial: () => 0.252),
     Mobj.getOrCreate(isRightHandedID,
         type: const BoolType(),
         initial: () => true,
@@ -852,32 +847,38 @@ final List<Function(TimerScreenState)> radialActivatorFunctions = [
   },
 ];
 
-class NumeralDragIndicator extends StatefulWidget {
+class NumeralDragActionRing extends StatefulWidget {
   final Offset position;
-  final UpDownAnimationController upDownAnimation;
-  final AnimationController optionActivationAnimation;
-  const NumeralDragIndicator(
-      {super.key,
-      required this.position,
-      required this.upDownAnimation,
-      required this.optionActivationAnimation});
+  final Signal<int?> dragEvents;
+  const NumeralDragActionRing(
+      {super.key, required this.position, required this.dragEvents});
 
   @override
-  State<NumeralDragIndicator> createState() => _NumeralDragIndicatorState();
+  State<NumeralDragActionRing> createState() => NumeralDragActionRingState();
 }
 
-class _NumeralDragIndicatorState extends State<NumeralDragIndicator> {
+class NumeralDragActionRingState extends State<NumeralDragActionRing>
+    with TickerProviderStateMixin, SignalsMixin {
+  double actionSizepAtSelection = 0;
   int numberSelected = -1;
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
+  late final UpDownAnimationController upDownAnimation;
+  late final AnimationController optionActivationAnimation;
+  Function()? dragEventsSubscription;
 
   @override
   void initState() {
     super.initState();
-    widget.optionActivationAnimation.addStatusListener((status) {
+    upDownAnimation = UpDownAnimationController(
+      vsync: this,
+      riseDuration: Duration(milliseconds: 350),
+      fallDuration: Duration(milliseconds: 190),
+    );
+    upDownAnimation.forward();
+    optionActivationAnimation = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 600),
+    );
+    optionActivationAnimation.addStatusListener((status) {
       if (!mounted) {
         return;
       }
@@ -887,8 +888,10 @@ class _NumeralDragIndicatorState extends State<NumeralDragIndicator> {
             ?.remove(widget);
       }
     });
-    widget.upDownAnimation.addStatusListener((status) {
-      if (status == AnimationStatus.dismissed) {
+    upDownAnimation.addStatusListener((status) {
+      // wait for option activation if it's going
+      if (!optionActivationAnimation.isAnimating &&
+          status == AnimationStatus.dismissed) {
         if (!mounted) {
           return;
         }
@@ -897,13 +900,33 @@ class _NumeralDragIndicatorState extends State<NumeralDragIndicator> {
             ?.remove(widget);
       }
     });
+    dragEventsSubscription = widget.dragEvents.subscribe((v) {
+      if (v == null) {
+        upDownAnimation.reverse();
+        dragEventsSubscription?.call();
+      } else if (v != -1) {
+        setState(() {
+          numberSelected = v;
+          actionSizepAtSelection = currentActionSize();
+          optionActivationAnimation.forward();
+        });
+      } else {
+        upDownAnimation.forward();
+      }
+    });
   }
 
-  void selectOption(int v) {
-    setState(() {
-      numberSelected = v;
-      widget.optionActivationAnimation.forward();
-    });
+  @override
+  void dispose() {
+    optionActivationAnimation.dispose();
+    upDownAnimation.dispose();
+    dragEventsSubscription?.call();
+    super.dispose();
+  }
+
+  double currentActionSize() {
+    return Curves.easeIn.transform(unlerpUnit(
+        0.7, 1, upDownAnimation.value.$1 * (1 - upDownAnimation.value.$2)));
   }
 
   @override
@@ -936,6 +959,41 @@ class _NumeralDragIndicatorState extends State<NumeralDragIndicator> {
       );
     }
 
+    final extensionDistanceTarget = thumbSpan * (0.5 + 0.17);
+    final Widget radialActivationRing = AnimatedBuilder(
+        animation: upDownAnimation,
+        builder: (context, child) {
+          final ringu = unlerpUnit(0.1, 0.4, upDownAnimation.value.$1);
+          // as soon as the down fade starts, make sure you don't show the ring at all, it's already faded out.
+          final fadeDown =
+              (1 - Curves.easeIn.transform(upDownAnimation.value.$2)) *
+                  (1 - unlerpUnit(0.7, 1, upDownAnimation.value.$1));
+          final fadeUp = unlerpUnit(0.3, 1, Curves.easeIn.transform(ringu));
+          final opacity = fadeDown * fadeUp;
+          final radius = lerp(extensionDistanceTarget * 0.4,
+              extensionDistanceTarget, Curves.easeIn.transform(ringu));
+          return Positioned(
+            left: 0,
+            top: 0,
+            child: FractionalTranslation(
+                translation: Offset(-0.5, -0.5),
+                child: Container(
+                  constraints:
+                      BoxConstraints.tight(Size(radius * 2, radius * 2)),
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: theme.colorScheme.primary
+                            // .withAlpha(lerp(0, 255, opacity).toInt()),
+                            .withAlpha(
+                                lerp(0, 255, opacity == 0 ? 0 : 1).toInt()),
+                        width: 3.2 * ringu * opacity),
+                  ),
+                )),
+          );
+        });
+
     List<Widget> radialActivatorWidgets = reverseIfNot(isRightHanded, [
       dragChoiceWidget(Row(
         mainAxisSize: MainAxisSize.min,
@@ -951,61 +1009,31 @@ class _NumeralDragIndicatorState extends State<NumeralDragIndicator> {
             children: [Icon(Icons.play_arrow_rounded), Text('+00')]),
       ),
     ]);
-
-    final extensionDistanceTarget = thumbSpan * (0.5 + 0.17);
-    final Widget radialActivationRing = AnimatedBuilder(
-        animation: widget.upDownAnimation,
-        builder: (context, child) {
-          final ringu = unlerpUnit(0.1, 0.4, widget.upDownAnimation.value.$1);
-          // as soon as the down fade starts, make sure you don't show the ring at all, it's already faded out.
-          final fadeDown =
-              (1 - Curves.easeIn.transform(widget.upDownAnimation.value.$2)) *
-                  (1 - unlerpUnit(0.7, 1, widget.upDownAnimation.value.$1));
-          final fadeUp = unlerpUnit(0.3, 1, Curves.easeIn.transform(ringu));
-          final opacity = fadeDown * fadeUp;
-          final radius = lerp(extensionDistanceTarget * 0.4,
-              extensionDistanceTarget, Curves.easeIn.transform(ringu));
-          return Positioned(
-            left: 0,
-            top: 0,
-            child: IgnorePointer(
-                child: FractionalTranslation(
-                    translation: Offset(-0.5, -0.5),
-                    child: Container(
-                      constraints:
-                          BoxConstraints.tight(Size(radius * 2, radius * 2)),
-                      decoration: BoxDecoration(
-                        color: Colors.transparent,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: theme.colorScheme.primary
-                                .withAlpha(lerp(0, 255, opacity).toInt()),
-                            width: 3.2 * ringu),
-                      ),
-                    ))),
-          );
-        });
-
     final List<Widget> numeralDragRadialActivators = generatedReverseIfNot(
         isRightHanded, radialActivatorFunctions.length, (i) {
       final angle = radialActivatorPositions[i];
       return AnimatedBuilder(
-        animation: widget.upDownAnimation,
+        animation: upDownAnimation,
         builder: (context, child) {
-          final v = unlerpUnit(
-              0.7,
-              1,
-              widget.upDownAnimation.value.$1 *
-                  (1 - widget.upDownAnimation.value.$2));
           Offset o = Offset.fromDirection(angle, extensionDistanceTarget);
           return Positioned(
             left: o.dx,
             top: o.dy,
             child: FractionalTranslation(
-                translation: Offset(-0.5, -0.5),
-                child: Transform.scale(
-                    scale: lerp(0, 1, Curves.easeIn.transform(v)),
-                    child: radialActivatorWidgets[i])),
+              translation: Offset(-0.5, -0.5),
+              child: AnimatedBuilder(
+                  animation: optionActivationAnimation,
+                  builder: (context, child) {
+                    final selectionv = optionActivationAnimation.value;
+                    final double scale = i == numberSelected
+                        ? lerp(actionSizepAtSelection, 1,
+                                unlerpUnit(0, 0.2, selectionv)) *
+                            (1 - unlerpUnit(0.8, 1, selectionv))
+                        : currentActionSize();
+                    return Transform.scale(
+                        scale: scale, child: radialActivatorWidgets[i]);
+                  }),
+            ),
           );
         },
       );
@@ -1014,14 +1042,15 @@ class _NumeralDragIndicatorState extends State<NumeralDragIndicator> {
     return Positioned(
         left: widget.position.dx,
         top: widget.position.dy,
-        child: Container(
-            width: 0,
-            height: 0,
-            clipBehavior: Clip.none,
-            child: Stack(clipBehavior: Clip.none, children: [
-              radialActivationRing,
-              ...numeralDragRadialActivators
-            ])));
+        child: IgnorePointer(
+            child: Container(
+                width: 0,
+                height: 0,
+                clipBehavior: Clip.none,
+                child: Stack(clipBehavior: Clip.none, children: [
+                  radialActivationRing,
+                  ...numeralDragRadialActivators
+                ]))));
   }
 }
 
@@ -1108,11 +1137,6 @@ class TimerScreenState extends State<TimerScreen>
 
   @override
   Widget build(BuildContext context) {
-    // todo: trying to determine the physical dimensions of the screen so that we know how many logical pixels to assign to ergonomic controls
-    const int falcrumAnimationDurationMs = 140;
-
-    double lpixPerMM = boring.lpixPerMM(context);
-
     ThemeData theme = Theme.of(context);
 
     //buttons
@@ -1464,9 +1488,14 @@ class NumberButton extends StatefulWidget {
 }
 
 class _NumberButtonState extends State<NumberButton>
-    with TickerProviderStateMixin {
-  late UpDownAnimationController? numeralDragIndicator;
-  late AnimationController? numeralDragIndicatorSelect;
+    with TickerProviderStateMixin, SignalsMixin {
+  /// -1 means mousedown, number means item has been selected, null means dismissed
+  late Signal<int?> dragEvents = createSignal(-1, debugLabel: 'dragEvents');
+  // UpDownAnimationController? get numeralDragIndicator =>
+  //     numeralDragActionRing?.currentState?.widget.upDownAnimation;
+  // AnimationController? get numeralDragIndicatorSelect =>
+  //     numeralDragActionRing?.currentState?.widget.optionActivationAnimation;
+  // GlobalKey<NumeralDragActionRingState>? numeralDragActionRing;
   Offset _startDrag = Offset.zero;
   bool hasTriggered = false;
   @override
@@ -1484,26 +1513,20 @@ class _NumberButtonState extends State<NumberButton>
         _startDrag = p;
         final tss = context.findAncestorStateOfType<TimerScreenState>();
         tss?.numeralPressed(widget.digits);
-        numeralDragIndicator = UpDownAnimationController(
-            vsync: this,
-            riseDuration: Duration(milliseconds: 400),
-            fallDuration: Duration(milliseconds: 200));
-        numeralDragIndicatorSelect = AnimationController(
-            vsync: this, duration: Duration(milliseconds: 600));
-        numeralDragIndicator!.forward();
+        dragEvents.value = -1;
+        final numeralDragActionRing = NumeralDragActionRing(
+          position: p,
+          dragEvents: dragEvents,
+        );
         context
             .findAncestorStateOfType<EphemeralAnimationHostState>()
-            ?.addWithoutAutomaticRemoval(NumeralDragIndicator(
-                position: p,
-                upDownAnimation: numeralDragIndicator!,
-                optionActivationAnimation: numeralDragIndicatorSelect!));
+            ?.addWithoutAutomaticRemoval(numeralDragActionRing);
       },
       onPanUpdate: (Offset p) {
         Offset dp = p - _startDrag;
-        if (dp.distance >
-                numeralDragDistanceTs * Thumbspan.of(context) * 0.17 &&
+        if (dp.distance > numeralDragDistanceTs * Thumbspan.of(context) * 0.2 &&
             !hasTriggered) {
-          // trigger
+          hasTriggered = true;
           final tss = context.findAncestorStateOfType<TimerScreenState>();
           if (tss == null) {
             return;
@@ -1513,29 +1536,31 @@ class _NumberButtonState extends State<NumberButton>
           int dragResult = radialDragResult(
               reverseIfNot(isRightHanded, radialActivatorPositions), angle,
               hitSpan: pi / 2);
-          if (dragResult != -1) {
+          if (dragResult == -1) {
+            dragEvents.value = null;
+          } else {
+            // activate
             getReversedIfNot(
                 isRightHanded, radialActivatorFunctions, dragResult)(tss);
-          }
-          // bounce animation
-          final lti = tss.timerListMobj.value!.lastOrNull;
-          if (lti != null) {
-            final tts = tss.timerTrayKey.currentState as _TimerTrayState?;
-            if (tts != null) {
-              final ts =
-                  (tts.timerWidgets.value[lti]?.key as GlobalKey<TimerState>?)
-                      ?.currentState;
-              ts?._slideActivateBounceAnimation.forward(from: 0);
-              ts?._slideBounceDirection = Offset.fromDirection(angle, 1);
+            dragEvents.value = dragResult;
+            dragEvents.value = null;
+            // bounce animation
+            final lti = tss.timerListMobj.value!.lastOrNull;
+            if (lti != null) {
+              final tts = tss.timerTrayKey.currentState as _TimerTrayState?;
+              if (tts != null) {
+                final ts =
+                    (tts.timerWidgets.value[lti]?.key as GlobalKey<TimerState>?)
+                        ?.currentState;
+                ts?._slideActivateBounceAnimation.forward(from: 0);
+                ts?._slideBounceDirection = Offset.fromDirection(angle, 1);
+              }
             }
           }
-          numeralDragIndicator!.reverse();
-          numeralDragIndicatorSelect!.forward();
-          hasTriggered = true;
         }
       },
       onPanEnd: () {
-        numeralDragIndicator?.reverse();
+        dragEvents.value = null;
       },
     );
   }
