@@ -86,40 +86,11 @@ Future<void> initializeDatabase() async {
 }
 
 Future<void> enableHighRefreshRate() async {
-  final _refreshRateControl = FlutterRefreshRateControl();
-
+  final refreshRateControl = FlutterRefreshRateControl();
   // Request high refresh rate
-  try {
-    bool success = await _refreshRateControl.requestHighRefreshRate();
-    if (success) {
-      print('High refresh rate enabled');
-    } else {
-      print('Failed to enable high refresh rate');
-    }
-  } catch (e) {
-    print('Error: $e');
-  }
-
-  // Get refresh rate information
-  try {
-    Map<String, dynamic> info = await _refreshRateControl.getRefreshRateInfo();
-    print('Current refresh rate: ${info['currentRefreshRate']}');
-    print('Maximum refresh rate: ${info['maximumFramesPerSecond']}');
-  } catch (e) {
-    print('Error getting refresh rate info: $e');
-  }
-
-  // Stop high refresh rate mode
-  // try {
-  //   print(
-  //       "CRITICAL QUESTION: why are we stopping high refresh rate mode, and why doesn't that actually lower the refresh rate?");
-  //   bool success = await _refreshRateControl.stopHighRefreshRate();
-  //   if (success) {
-  //     print('Returned to normal refresh rate');
-  //   }
-  // } catch (e) {
-  //   print('Error: $e');
-  // }
+  await refreshRateControl.requestHighRefreshRate();
+  // How to stop high refresh rate mode:
+  // bool success = await _refreshRateControl.stopHighRefreshRate();
 }
 
 void main() async {
@@ -1241,7 +1212,7 @@ class TimerScreenState extends State<TimerScreen>
     List<Widget> controlPadWidgets(bool isRightHanded) {
       /// the number pad isn't flipped for lefthanded mode
       Widget pad(int column, int row) {
-        row = isRightHanded ? row : 2 - row;
+        column = isRightHanded ? column : 2 - column;
         final n = row * 3 + column + 1;
         return NumberButton(digits: [n], timerButtonKey: numeralKeys[n]);
       }
