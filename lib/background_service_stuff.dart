@@ -119,37 +119,6 @@ class ErrorCatchingTaskHandler extends TaskHandler {
       "onNotificationButtonPressed");
 }
 
-abstract class SetEvent<T> {}
-
-class SetAddEvent<T> extends SetEvent<T> {
-  final T item;
-  SetAddEvent(this.item);
-}
-
-class SetRemoveEvent<T> extends SetEvent<T> {
-  final T item;
-  SetRemoveEvent(this.item);
-}
-
-Stream<SetEvent<T>> membershipChanges<T>(Stream<List<T>> source) {
-  Set<T> knownItems = {};
-  return source
-      .transform(StreamTransformer.fromHandlers(handleData: (list, sink) {
-    for (final item in list) {
-      if (!knownItems.contains(item)) {
-        sink.add(SetAddEvent<T>(item));
-        knownItems.add(item);
-      }
-    }
-    for (final item in knownItems) {
-      if (!list.contains(item)) {
-        sink.add(SetRemoveEvent<T>(item));
-        knownItems.remove(item);
-      }
-    }
-  }));
-}
-
 class PersistentNotificationTask extends TaskHandler {
   late JukeBox jukeBox;
   Timer? _heartbeatTimeout;
@@ -275,44 +244,32 @@ class PersistentNotificationTask extends TaskHandler {
           if (cancelled) {
             return;
           }
-          timerListSubscription = membershipChanges<MobjID<TimerData>>(
-            timerList.toStream().map((value) => value ?? []),
-          )
-              .where(
-                (event) => event is SetAddEvent<MobjID<TimerData>>,
-              )
-              .asyncMap(
-                (event) => Mobj.fetch(
-                  (event as SetAddEvent<MobjID<TimerData>>).item,
-                  type: TimerDataType(),
-                ),
-              )
-              .listen((timer) {
-            if (cancelled) {
-              timer.dispose();
-              return;
+          // tombstone: I at one point tried to make this reactive, so that if any timers were added during the running of the background task, we'd notice them and add them to the list. It could have worked, but there was a little bit of difficulty in adapting a Signal<List<Timer>> to a stream of events, and it was totally unneeded (nothing is adding timers while the background task is active), so I cut it, we just check the timer list once. Generally, streams in dart are annoying to deal with because dart lacks weak refs so you have to clean up every stream subscription.
+          Future.wait(timerList
+                  .peek()!
+                  .map((id) => Mobj.fetch(id, type: TimerDataType()))
+                  .toList())
+              .then((timers) {
+            for (final timer in timers) {
+              if (cancelled) {
+                timer.dispose();
+                return;
+              }
+              if (timer.peek()!.isRunning) {
+                ranTimerCount.value++;
+                final tracked = TrackedTimer(timer);
+                tracked.mobjUnsubscribe = timer.subscribe((_) {
+                  onTimerDataChanged(tracked);
+                });
+                tracked.secondCountdownIndicatorTimer = PeriodicTimerFromEpoch(
+                    period: Duration(seconds: 1),
+                    epoch: tracked.mobj.peek()!.startTime,
+                    callback: (timer) {
+                      updateRunningTimersNotification();
+                    });
+                trackedTimers.add(tracked);
+              }
             }
-            if (timer.peek()!.isRunning) {
-              ranTimerCount.value++;
-              final tracked = TrackedTimer(timer);
-              tracked.mobjUnsubscribe = timer.subscribe((_) {
-                onTimerDataChanged(tracked);
-              });
-              tracked.secondCountdownIndicatorTimer = PeriodicTimerFromEpoch(
-                  period: Duration(seconds: 1),
-                  epoch: tracked.mobj.peek()!.startTime,
-                  callback: (timer) {
-                    final nv = tracked.secondsRemaining();
-                    print(
-                        "updating seconds for timer ${tracked.mobj.id} to $nv");
-                    updateRunningTimersNotification();
-                  });
-              trackedTimers.add(tracked);
-            }
-          });
-
-          noTimersCheck = Timer(Duration(seconds: 1), () {
-            // make the decision as to whether to wait for any timers coming in or not
             if (appActive.value) {
               // never mind, app has resumed control
               return;

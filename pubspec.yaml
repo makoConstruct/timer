@@ -40,9 +40,7 @@ dependencies:
   #   path: /home/mako/programming/animated_containers
   # I was considering using this without a remote sync provider (ie, no supabase or rest or graphql), but the maintain suggested not using it at all in that case. Which seemed dumb as hell to me since brick has a bunch of other functionality that's good for persisting values to memory and sqlite but okay.
   # brick_offline_first_with_supabase: ^2.1.0
-  
   uuid: ^4.5.1
-  
   # fixed to a specific older version until they fix https://github.com/simolus3/drift/issues/3682
   drift: ^2.28.2
   drift_flutter: ^0.2.7
@@ -59,6 +57,7 @@ dependencies:
   path: ^1.9.1
   drift_dev: ^2.28.3
   flutter_ringtone_manager: ^1.1.2
+  flutter_refresh_rate_control: ^0.0.4+1
 
 
 

@@ -6,6 +6,7 @@ import 'package:animated_to/animated_to.dart';
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:improved_wrap/improved_wrap.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
@@ -84,10 +85,47 @@ Future<void> initializeDatabase() async {
   ]);
 }
 
+Future<void> enableHighRefreshRate() async {
+  final _refreshRateControl = FlutterRefreshRateControl();
+
+  // Request high refresh rate
+  try {
+    bool success = await _refreshRateControl.requestHighRefreshRate();
+    if (success) {
+      print('High refresh rate enabled');
+    } else {
+      print('Failed to enable high refresh rate');
+    }
+  } catch (e) {
+    print('Error: $e');
+  }
+
+  // Get refresh rate information
+  try {
+    Map<String, dynamic> info = await _refreshRateControl.getRefreshRateInfo();
+    print('Current refresh rate: ${info['currentRefreshRate']}');
+    print('Maximum refresh rate: ${info['maximumFramesPerSecond']}');
+  } catch (e) {
+    print('Error getting refresh rate info: $e');
+  }
+
+  // Stop high refresh rate mode
+  // try {
+  //   print(
+  //       "CRITICAL QUESTION: why are we stopping high refresh rate mode, and why doesn't that actually lower the refresh rate?");
+  //   bool success = await _refreshRateControl.stopHighRefreshRate();
+  //   if (success) {
+  //     print('Returned to normal refresh rate');
+  //   }
+  // } catch (e) {
+  //   print('Error: $e');
+  // }
+}
+
 void main() async {
   // await deleteDatabase();
-  print("mako main new message");
   WidgetsFlutterBinding.ensureInitialized();
+  await enableHighRefreshRate();
   await initializeDatabase();
   FlutterForegroundTask.addTaskDataCallback(onDataReceived);
   // my impression so far is that apple forbid you from running stuff in the background on iOS unless you're an application for which it would create bad PR for them to kill you, so you can't really make the best timer apps there. On iOS, we're going to have to disable repeat timers.
@@ -442,17 +480,21 @@ class TimerState extends State<Timer>
                       Stack(children: [
                         Opacity(
                             opacity: 0,
-                            child: Text(boring.formatTime(
-                                withDigitsReplacedWith(timeDigits, 0)))),
+                            child: Text(
+                                boring.formatTime(
+                                    withDigitsReplacedWith(timeDigits, 0)),
+                                overflow: TextOverflow.clip)),
                         Transform.scale(
                             alignment: Alignment.bottomLeft,
                             scale: lerp(0.6, 1, v),
-                            child: Text(boring.formatTime(timeDigits)))
+                            child: Text(boring.formatTime(timeDigits),
+                                overflow: TextOverflow.clip))
                       ]),
                       Transform.scale(
                           alignment: Alignment.topLeft,
                           scale: lerp(1, 0.6, v),
-                          child: Text(boring.formatTime(durationDigits))),
+                          child: Text(boring.formatTime(durationDigits),
+                              overflow: TextOverflow.clip)),
                     ]));
           },
         ));
@@ -512,14 +554,18 @@ class TimerState extends State<Timer>
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.all(timerPaddingr),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            clockDial(_clockKey, expandingHindCircle),
-            SizedBox(width: timerPaddingr),
-            timeText,
-          ],
+        child: ClipRect(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              clockDial(_clockKey, expandingHindCircle),
+              SizedBox(width: timerPaddingr),
+              Flexible(
+                child: timeText,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -826,22 +872,21 @@ HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
 }
 
 final List<double> radialActivatorPositions = [
-  0,
   -pi / 2,
   -pi,
 ];
 final List<Function(TimerScreenState)> radialActivatorFunctions = [
+  // (TimerScreenState tss) {
+  //   tss.numeralPressed([0]);
+  //   tss.pausePlaySelected();
+  //   HapticFeedback.lightImpact();
+  // },
+  (TimerScreenState tss) {
+    tss.pausePlaySelected();
+    HapticFeedback.lightImpact();
+  },
   (TimerScreenState tss) {
     tss.numeralPressed([0, 0]);
-    tss.pausePlaySelected();
-    HapticFeedback.lightImpact();
-  },
-  (TimerScreenState tss) {
-    tss.pausePlaySelected();
-    HapticFeedback.lightImpact();
-  },
-  (TimerScreenState tss) {
-    tss.numeralPressed([0]);
     tss.pausePlaySelected();
     HapticFeedback.lightImpact();
   },
@@ -994,12 +1039,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
           );
         });
 
-    List<Widget> radialActivatorWidgets = reverseIfNot(isRightHanded, [
-      dragChoiceWidget(Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [Icon(Icons.play_arrow_rounded), Text('+0')],
-      )),
+    List<Widget> radialActivatorWidgets = [
       dragChoiceWidget(Icon(Icons.play_arrow_rounded)),
       dragChoiceWidget(
         Row(
@@ -1008,35 +1048,36 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [Icon(Icons.play_arrow_rounded), Text('+00')]),
       ),
-    ]);
-    final List<Widget> numeralDragRadialActivators = generatedReverseIfNot(
-        isRightHanded, radialActivatorFunctions.length, (i) {
-      final angle = radialActivatorPositions[i];
+    ];
+    final List<Widget> numeralDragRadialActivators =
+        List.generate(radialActivatorFunctions.length, (i) {
+      final angle = isRightHanded
+          ? radialActivatorPositions[i]
+          : flipAngleHorizontally(radialActivatorPositions[i]);
       return AnimatedBuilder(
-        animation: upDownAnimation,
-        builder: (context, child) {
-          Offset o = Offset.fromDirection(angle, extensionDistanceTarget);
-          return Positioned(
-            left: o.dx,
-            top: o.dy,
-            child: FractionalTranslation(
-              translation: Offset(-0.5, -0.5),
-              child: AnimatedBuilder(
-                  animation: optionActivationAnimation,
-                  builder: (context, child) {
-                    final selectionv = optionActivationAnimation.value;
-                    final double scale = i == numberSelected
-                        ? lerp(actionSizepAtSelection, 1,
-                                unlerpUnit(0, 0.2, selectionv)) *
-                            (1 - unlerpUnit(0.8, 1, selectionv))
-                        : currentActionSize();
-                    return Transform.scale(
-                        scale: scale, child: radialActivatorWidgets[i]);
-                  }),
-            ),
-          );
-        },
-      );
+          animation: upDownAnimation,
+          builder: (context, child) {
+            Offset o = Offset.fromDirection(angle, extensionDistanceTarget);
+            return Positioned(
+              left: o.dx,
+              top: o.dy,
+              child: FractionalTranslation(
+                translation: Offset(-0.5, -0.5),
+                child: AnimatedBuilder(
+                    animation: optionActivationAnimation,
+                    builder: (context, child) {
+                      final selectionv = optionActivationAnimation.value;
+                      final double scale = i == numberSelected
+                          ? lerp(actionSizepAtSelection, 1,
+                                  unlerpUnit(0, 0.2, selectionv)) *
+                              (1 - unlerpUnit(0.8, 1, selectionv))
+                          : currentActionSize();
+                      return Transform.scale(
+                          scale: scale, child: radialActivatorWidgets[i]);
+                    }),
+              ),
+            );
+          });
     });
 
     return Positioned(
@@ -1138,6 +1179,7 @@ class TimerScreenState extends State<TimerScreen>
   @override
   Widget build(BuildContext context) {
     ThemeData theme = Theme.of(context);
+    watchSignal(context, isRightHanded)!;
 
     //buttons
     var configButton = TimersButton(
@@ -1152,7 +1194,7 @@ class TimerScreenState extends State<TimerScreen>
         // label: Icon(Icons.border_outer_rounded),
         label: Icon(Icons.center_focus_strong),
         onPanDown: (_) {
-          JukeBox.jarringSound(context);
+          isRightHanded.value = !isRightHanded.peek()!;
         });
 
     var backspaceButton = TimersButton(
@@ -1274,7 +1316,9 @@ class TimerScreenState extends State<TimerScreen>
           BoxDecoration(color: theme.colorScheme.surfaceContainerLowest),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: isRightHanded.value!
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           Stack(
               clipBehavior: Clip.none,
@@ -1515,6 +1559,7 @@ class _NumberButtonState extends State<NumberButton>
         tss?.numeralPressed(widget.digits);
         dragEvents.value = -1;
         final numeralDragActionRing = NumeralDragActionRing(
+          key: UniqueKey(),
           position: p,
           dragEvents: dragEvents,
         );
@@ -1524,7 +1569,8 @@ class _NumberButtonState extends State<NumberButton>
       },
       onPanUpdate: (Offset p) {
         Offset dp = p - _startDrag;
-        if (dp.distance > numeralDragDistanceTs * Thumbspan.of(context) * 0.2 &&
+        if (dp.distance >
+                numeralDragDistanceTs * Thumbspan.of(context) * 0.31 &&
             !hasTriggered) {
           hasTriggered = true;
           final tss = context.findAncestorStateOfType<TimerScreenState>();
@@ -1534,14 +1580,18 @@ class _NumberButtonState extends State<NumberButton>
           final angle = offsetAngle(dp);
           bool isRightHanded = tss.isRightHanded.value!;
           int dragResult = radialDragResult(
-              reverseIfNot(isRightHanded, radialActivatorPositions), angle,
+              isRightHanded
+                  ? radialActivatorPositions
+                  : radialActivatorPositions
+                      .map(flipAngleHorizontally)
+                      .toList(),
+              angle,
               hitSpan: pi / 2);
           if (dragResult == -1) {
             dragEvents.value = null;
           } else {
             // activate
-            getReversedIfNot(
-                isRightHanded, radialActivatorFunctions, dragResult)(tss);
+            radialActivatorFunctions[dragResult](tss);
             dragEvents.value = dragResult;
             dragEvents.value = null;
             // bounce animation

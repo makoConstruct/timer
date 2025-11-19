@@ -821,7 +821,11 @@ int radialDragResult(List<double> angleRadius, double angle,
   return closestAngle;
 }
 
-Function getReversedIfNot(bool condition, List<Function> list, int index) =>
+// assumes angle is in [0, tau)
+double flipAngleHorizontally(double angle) =>
+    angle < pi ? pi - angle : tau - (angle - pi);
+
+T getReversedIfNot<T>(bool condition, List<T> list, int index) =>
     !condition ? list[index] : list[list.length - index - 1];
 
 // format is highest significance digit to lowest significance digit, the order in which they'd be typed or displayed
@@ -1228,5 +1232,178 @@ int? recognizeDigitPress(LogicalKeyboardKey k) {
       return 9;
     default:
       return null;
+  }
+}
+
+/// Currently unused lol. I decided to just cut the reactive stuff from list tracking since the timer lists are really not supposed to change while the app is closed lmao. Should probably delete on next commit.
+/// A stream controller that replays all previous items (including initial list)
+/// plus any additional items whenever a new listener subscribes
+class ReplayingStreamController<T> implements StreamController<T> {
+  final StreamController<T> _controller;
+  final List<T> _replayList;
+  final StreamController<T> _outputController;
+  StreamSubscription<T>? _subscription;
+  final Completer<void> _doneCompleter = Completer<void>();
+
+  ReplayingStreamController(List<T> initialList)
+      : _controller = StreamController<T>.broadcast(),
+        _replayList = <T>[...initialList],
+        _outputController = StreamController<T>.broadcast() {
+    _subscription = _controller.stream.listen(
+      (value) {
+        if (isClosed) return;
+        _replayList.add(value);
+        if (!_outputController.isClosed) {
+          _outputController.add(value);
+        }
+      },
+      onError: (error, stackTrace) {
+        if (isClosed || _outputController.isClosed) return;
+        _outputController.addError(error, stackTrace);
+      },
+      onDone: () {
+        close();
+      },
+    );
+
+    // Track when the output controller is done
+    _outputController.done.then((_) {
+      if (!_doneCompleter.isCompleted) {
+        _doneCompleter.complete();
+      }
+    }).catchError((error, stackTrace) {
+      if (!_doneCompleter.isCompleted) {
+        _doneCompleter.completeError(error, stackTrace);
+      }
+    });
+
+    // Set up initial callbacks (will be updated via setters)
+    _updateCallbacks();
+  }
+
+  void _updateCallbacks() {
+    _outputController.onListen = _onListenCallback;
+    _outputController.onCancel = _onCancelCallback;
+  }
+
+  void _onListenCallback() {
+    _onListen?.call();
+  }
+
+  FutureOr<void> _onCancelCallback() {
+    return _onCancel?.call();
+  }
+
+  @override
+  Stream<T> get stream {
+    if (isClosed) {
+      throw StateError('ReplayingStreamController has been closed');
+    }
+    return Stream.multi((listenerController) {
+      // Immediately emit all previous values to the new listener
+      for (final value in _replayList) {
+        listenerController.add(value);
+      }
+
+      // Then forward all new values from the output controller
+      final listenerSubscription = _outputController.stream.listen(
+        (value) {
+          listenerController.add(value);
+        },
+        onError: (error, stackTrace) {
+          listenerController.addError(error, stackTrace);
+        },
+        onDone: () {
+          listenerController.close();
+        },
+      );
+
+      listenerController.onCancel = () {
+        listenerSubscription.cancel();
+      };
+    }).cast<T>();
+  }
+
+  @override
+  void add(T value) {
+    if (isClosed) {
+      throw StateError('Cannot add to a closed ReplayingStreamController');
+    }
+    _controller.add(value);
+  }
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) {
+    if (isClosed) {
+      throw StateError(
+          'Cannot add error to a closed ReplayingStreamController');
+    }
+    _controller.addError(error, stackTrace);
+  }
+
+  @override
+  Future<void> close() {
+    if (isClosed) return done;
+    _subscription?.cancel();
+    _subscription = null;
+    if (!_controller.isClosed) {
+      _controller.close();
+    }
+    if (!_outputController.isClosed) {
+      _outputController.close();
+    }
+    return done;
+  }
+
+  @override
+  Future<void> get done => _doneCompleter.future;
+
+  @override
+  bool get isClosed => _controller.isClosed;
+
+  @override
+  bool get isPaused => false; // Broadcast controllers are never paused
+
+  @override
+  bool get hasListener => _outputController.hasListener;
+
+  @override
+  StreamSink<T> get sink => this;
+
+  void Function()? _onListen;
+
+  @override
+  void Function()? get onListen => _onListen;
+
+  @override
+  set onListen(void Function()? callback) {
+    _onListen = callback;
+    _updateCallbacks();
+  }
+
+  @override
+  void Function()? onPause; // Not supported for broadcast
+
+  @override
+  void Function()? onResume; // Not supported for broadcast
+
+  FutureOr<void> Function()? _onCancel;
+
+  @override
+  FutureOr<void> Function()? get onCancel => _onCancel;
+
+  @override
+  set onCancel(FutureOr<void> Function()? callback) {
+    _onCancel = callback;
+    _updateCallbacks();
+  }
+
+  @override
+  Future<void> addStream(Stream<T> source, {bool? cancelOnError}) {
+    if (isClosed) {
+      throw StateError(
+          'Cannot add stream to a closed ReplayingStreamController');
+    }
+    return _controller.addStream(source, cancelOnError: cancelOnError ?? false);
   }
 }
