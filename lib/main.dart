@@ -982,10 +982,10 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
           final ringu = unlerpUnit(0.1, 0.4, upDownAnimation.value.$1);
           // as soon as the down fade starts, make sure you don't show the ring at all, it's already faded out.
           final fadeDown =
-              (1 - Curves.easeIn.transform(upDownAnimation.value.$2)) *
-                  (1 - unlerpUnit(0.7, 1, upDownAnimation.value.$1));
+              (1 - Curves.easeIn.transform(upDownAnimation.value.$2));
           final fadeUp = unlerpUnit(0.3, 1, Curves.easeIn.transform(ringu));
           final opacity = fadeDown * fadeUp;
+          // [todo] if ring is sent in a direction, dismiss in an angle way instead
           final radius = lerp(extensionDistanceTarget * 0.4,
               extensionDistanceTarget, Curves.easeIn.transform(ringu));
           return Positioned(
