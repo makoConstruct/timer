@@ -487,6 +487,14 @@ double angleFrom(Offset from, Offset to) {
   return offsetAngle(to - from);
 }
 
+Offset angleToOffset(double angle) {
+  return Offset(cos(angle), sin(angle));
+}
+
+Offset orthClockwise(Offset v) {
+  return Offset(-v.dy, v.dx);
+}
+
 double offsetAngle(Offset offset) {
   return atan2(offset.dy, offset.dx);
 }
@@ -562,6 +570,10 @@ double clampDouble(double t, double min, double max) {
   } else {
     return t;
   }
+}
+
+double moduloProperly(double t, double m) {
+  return ((t % m) + m) % m;
 }
 
 /// tracks two components, a rise time and a fall time. Sometimes you want an animation to look different on the way down. Use the second component (the falling one) of the animation value to smoothly overrule the rising component so that there's no stutter or interruption when the animation changes direction. However, when the animation goes from falling to rising, there will be a discontinuity.
@@ -827,6 +839,9 @@ double flipAngleHorizontally(double angle) =>
 
 T getReversedIfNot<T>(bool condition, List<T> list, int index) =>
     !condition ? list[index] : list[list.length - index - 1];
+
+T conditionallyApplyIf<T>(bool condition, T Function(T) function, T value) =>
+    condition ? function(value) : value;
 
 // format is highest significance digit to lowest significance digit, the order in which they'd be typed or displayed
 void pushDigits(List<int> digitsOut, int number, int digitsInSection,
@@ -1235,175 +1250,65 @@ int? recognizeDigitPress(LogicalKeyboardKey k) {
   }
 }
 
-/// Currently unused lol. I decided to just cut the reactive stuff from list tracking since the timer lists are really not supposed to change while the app is closed lmao. Should probably delete on next commit.
-/// A stream controller that replays all previous items (including initial list)
-/// plus any additional items whenever a new listener subscribes
-class ReplayingStreamController<T> implements StreamController<T> {
-  final StreamController<T> _controller;
-  final List<T> _replayList;
-  final StreamController<T> _outputController;
-  StreamSubscription<T>? _subscription;
-  final Completer<void> _doneCompleter = Completer<void>();
+/// Custom clipper for directional wipe-out effect using a rectangle. Wipes in the cardinal direction nearest to the given angle.
+class DirectionalWipeClipper extends CustomClipper<Path> {
+  final double width;
+  final double height;
+  final double visibleHeight;
+  final double? angle;
 
-  ReplayingStreamController(List<T> initialList)
-      : _controller = StreamController<T>.broadcast(),
-        _replayList = <T>[...initialList],
-        _outputController = StreamController<T>.broadcast() {
-    _subscription = _controller.stream.listen(
-      (value) {
-        if (isClosed) return;
-        _replayList.add(value);
-        if (!_outputController.isClosed) {
-          _outputController.add(value);
-        }
-      },
-      onError: (error, stackTrace) {
-        if (isClosed || _outputController.isClosed) return;
-        _outputController.addError(error, stackTrace);
-      },
-      onDone: () {
-        close();
-      },
-    );
-
-    // Track when the output controller is done
-    _outputController.done.then((_) {
-      if (!_doneCompleter.isCompleted) {
-        _doneCompleter.complete();
-      }
-    }).catchError((error, stackTrace) {
-      if (!_doneCompleter.isCompleted) {
-        _doneCompleter.completeError(error, stackTrace);
-      }
-    });
-
-    // Set up initial callbacks (will be updated via setters)
-    _updateCallbacks();
-  }
-
-  void _updateCallbacks() {
-    _outputController.onListen = _onListenCallback;
-    _outputController.onCancel = _onCancelCallback;
-  }
-
-  void _onListenCallback() {
-    _onListen?.call();
-  }
-
-  FutureOr<void> _onCancelCallback() {
-    return _onCancel?.call();
-  }
+  DirectionalWipeClipper(
+      {required this.visibleHeight,
+      required this.angle,
+      required this.width,
+      required this.height});
 
   @override
-  Stream<T> get stream {
-    if (isClosed) {
-      throw StateError('ReplayingStreamController has been closed');
+  Path getClip(Size size) {
+    final showp = clampUnit(visibleHeight);
+
+    if (showp <= 0.0) {
+      // Fully clipped - return empty rect
+      return Path();
     }
-    return Stream.multi((listenerController) {
-      // Immediately emit all previous values to the new listener
-      for (final value in _replayList) {
-        listenerController.add(value);
-      }
 
-      // Then forward all new values from the output controller
-      final listenerSubscription = _outputController.stream.listen(
-        (value) {
-          listenerController.add(value);
-        },
-        onError: (error, stackTrace) {
-          listenerController.addError(error, stackTrace);
-        },
-        onDone: () {
-          listenerController.close();
-        },
-      );
+    Path fullVisibilityPath = Path()
+      ..moveTo(-width / 2, -height / 2)
+      ..lineTo(width / 2, -height / 2)
+      ..lineTo(width / 2, height / 2)
+      ..lineTo(-width / 2, height / 2)
+      ..close();
 
-      listenerController.onCancel = () {
-        listenerSubscription.cancel();
-      };
-    }).cast<T>();
-  }
-
-  @override
-  void add(T value) {
-    if (isClosed) {
-      throw StateError('Cannot add to a closed ReplayingStreamController');
+    if (angle == null) {
+      // full visibility
+      return fullVisibilityPath;
     }
-    _controller.add(value);
-  }
 
-  @override
-  void addError(Object error, [StackTrace? stackTrace]) {
-    if (isClosed) {
-      throw StateError(
-          'Cannot add error to a closed ReplayingStreamController');
+    if (showp >= 1.0) {
+      return fullVisibilityPath;
     }
-    _controller.addError(error, stackTrace);
+
+    double na = moduloProperly(angle ?? 0, tau);
+
+    Offset direction = angleToOffset(na);
+    Offset lod = orthClockwise(direction);
+    Offset center = direction * ((1 - showp) * height);
+    Offset ul = center + direction * (height / 2) - lod * (width / 2);
+    Offset ur = center + direction * (height / 2) + lod * (width / 2);
+    Offset ll = center - direction * (height / 2) - lod * (width / 2);
+    Offset lr = center - direction * (height / 2) + lod * (width / 2);
+
+    return Path()
+      ..moveTo(ul.dx, ul.dy)
+      ..lineTo(ur.dx, ur.dy)
+      ..lineTo(lr.dx, lr.dy)
+      ..lineTo(ll.dx, ll.dy)
+      ..close();
   }
 
   @override
-  Future<void> close() {
-    if (isClosed) return done;
-    _subscription?.cancel();
-    _subscription = null;
-    if (!_controller.isClosed) {
-      _controller.close();
-    }
-    if (!_outputController.isClosed) {
-      _outputController.close();
-    }
-    return done;
-  }
-
-  @override
-  Future<void> get done => _doneCompleter.future;
-
-  @override
-  bool get isClosed => _controller.isClosed;
-
-  @override
-  bool get isPaused => false; // Broadcast controllers are never paused
-
-  @override
-  bool get hasListener => _outputController.hasListener;
-
-  @override
-  StreamSink<T> get sink => this;
-
-  void Function()? _onListen;
-
-  @override
-  void Function()? get onListen => _onListen;
-
-  @override
-  set onListen(void Function()? callback) {
-    _onListen = callback;
-    _updateCallbacks();
-  }
-
-  @override
-  void Function()? onPause; // Not supported for broadcast
-
-  @override
-  void Function()? onResume; // Not supported for broadcast
-
-  FutureOr<void> Function()? _onCancel;
-
-  @override
-  FutureOr<void> Function()? get onCancel => _onCancel;
-
-  @override
-  set onCancel(FutureOr<void> Function()? callback) {
-    _onCancel = callback;
-    _updateCallbacks();
-  }
-
-  @override
-  Future<void> addStream(Stream<T> source, {bool? cancelOnError}) {
-    if (isClosed) {
-      throw StateError(
-          'Cannot add stream to a closed ReplayingStreamController');
-    }
-    return _controller.addStream(source, cancelOnError: cancelOnError ?? false);
+  bool shouldReclip(DirectionalWipeClipper oldClipper) {
+    return oldClipper.visibleHeight != visibleHeight ||
+        oldClipper.angle != angle;
   }
 }

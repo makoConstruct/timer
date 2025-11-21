@@ -81,6 +81,10 @@ Future<void> initializeDatabase() async {
         type: const BoolType(),
         initial: () => true,
         debugLabel: "is right handed"),
+    Mobj.getOrCreate(padVerticallyAscendingID,
+        type: const BoolType(),
+        initial: () => false,
+        debugLabel: "pad vertically ascending"),
     fversion,
   ]);
 }
@@ -109,74 +113,9 @@ void onDataReceived(Object data) {
   print("data received: $data");
 }
 
-// List<Widget> diffRetainingOrder(List<Widget> old, List<Widget> current) {
-//   List<Widget> ret = [];
-//   HashSet<Widget> oldSet = HashSet.from(old);
-//   HashSet<Widget> oldKeys = HashSet.from(old.map((w) => w.key));
-//   for (var c in current) {
-//     if (oldSet.contains(c)) {
-// }
-
-/// the angleTime is a set of milestones, points where, when the dial is rotated to that point, the time will be that milestone's time in seconds, and between milestones, the time is interpolated. Milestones will also be shown on the dial as space becomes available (which is going to be complicated to code).
-// or it used to be, we decided to disable that in favor of differen dials with different gearings, which commenting out most of the milestones effectively achieves (the last milestone just gets extrapolated)
-final List<(double, double)> angleTimeSeconds = [
-  (0, 0),
-  (pi, 60),
-  // (2 * pi, 2 * 60),
-  // (3 * pi, 10 * 60),
-  // (4 * pi, 60 * 60),
-  // (5 * pi, 2 * 60 * 60),
-  // (6 * pi, 3 * 60 * 60),
-  // (7 * pi, 4 * 60 * 60),
-  // (8 * pi, 5 * 60 * 60),
-  // (9 * pi, 6 * 60 * 60),
-  // (10 * pi, 12 * 60 * 60),
-  // (11 * pi, 24 * 60 * 60),
-  // (12 * pi, 48 * 60 * 60),
-  // (13 * pi, 7 * 24 * 60 * 60),
-  // (14 * pi, 365 * 24 * 60 * 60),
-  // (15 * pi, 2 * 365 * 24 * 60 * 60),
-  // (16 * pi, 5 * 365 * 24 * 60 * 60),
-  // (17 * pi, 10 * 365 * 24 * 60 * 60),
-  // (18 * pi, 20 * 365 * 24 * 60 * 60),
-  // (19 * pi, 40 * 365 * 24 * 60 * 60),
-  // (20 * pi, 100 * 365 * 24 * 60 * 60),
-  // (21 * pi, 200 * 365 * 24 * 60 * 60),
-];
-
-const double numeralDragDistanceTs = 0.5;
 const double standardLineWidth = 6;
 const double standardButtonSizeMM = 13;
 const double timerPaddingr = 6;
-
-final List<(double, double)> angleTimeMinutes = [(0, 0), (tau, 6 * 60)];
-
-/// basically just linearly interpolates the relevant angleTime segment
-double angleToTimeSeconds(double angle) {
-  return angleToTime(angle, angleTimeSeconds);
-}
-
-/// basically just linearly interpolates the relevant angleTime segment
-double angleToTimeMinutes(double angle) {
-  return angleToTime(angle, angleTimeMinutes);
-}
-
-double angleToTime(double angle, List<(double, double)> angleTimeSeconds) {
-  final sign = angle.sign;
-  angle = angle.abs();
-  var lower = angleTimeSeconds[0];
-  for (int i = 1; i < angleTimeSeconds.length; i++) {
-    final upper = angleTimeSeconds[i];
-    if (angle < upper.$1) {
-      return lerp(lower.$2, upper.$2, unlerpUnit(lower.$1, upper.$1, angle));
-    }
-    lower = upper;
-  }
-  final lp = angleTimeSeconds.last;
-  double lastad = lp.$1 - angleTimeSeconds[angleTimeSeconds.length - 2].$1;
-  double lasttd = lp.$2 - angleTimeSeconds[angleTimeSeconds.length - 2].$2;
-  return sign * (lp.$2 + (angle - lp.$1) / lastad * lasttd);
-}
 
 class Thumbspan {
   /// measured in logical pixels
@@ -580,10 +519,6 @@ class TimerState extends State<Timer>
   }
 }
 
-class DraggableFeedbackPositionBox {
-  Offset begin = Offset.zero;
-}
-
 class FadingDial extends AnimatedWidget {
   final double angle;
   final double radius;
@@ -886,13 +821,13 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     super.initState();
     upDownAnimation = UpDownAnimationController(
       vsync: this,
-      riseDuration: Duration(milliseconds: 350),
-      fallDuration: Duration(milliseconds: 190),
+      riseDuration: Duration(milliseconds: 300),
+      fallDuration: Duration(milliseconds: 140),
     );
     upDownAnimation.forward();
     optionActivationAnimation = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 600),
+      duration: Duration(milliseconds: 300),
     );
     optionActivationAnimation.addStatusListener((status) {
       if (!mounted) {
@@ -941,74 +876,68 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
   }
 
   double currentActionSize() {
+    // disables fade down if action selected
     return Curves.easeIn.transform(unlerpUnit(
-        0.7, 1, upDownAnimation.value.$1 * (1 - upDownAnimation.value.$2)));
+        0.4,
+        0.65,
+        upDownAnimation.value.$1 *
+            (1 - (numberSelected != -1 ? 0 : upDownAnimation.value.$2))));
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget buildGivenAnimationParameters(
+      double risep, double fallp, double swipep) {
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded =
         Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
 
-    // numeral drag action overlay stuff
+    final radialRadiusMax = thumbSpan * (0.5 + 0.17);
+    // disable fade down if a number is selected
+    final double fallpIfNotSelected = numberSelected != -1 ? 0 : fallp;
+    final radius = radialRadiusMax *
+        Curves.easeIn
+            .transform(unlerpUnit(0, 0.6, risep * (1 - fallpIfNotSelected)));
+    // Calculate visible height for directional wipe-out (1.0 = fully visible, 0.0 = fully clipped)
+    final Widget radialActivationRing = Positioned(
+      left: 0,
+      top: 0,
+      child: FractionalTranslation(
+        translation: Offset(-0.5, -0.5),
+        child: Container(
+          constraints: BoxConstraints.tight(Size(radius * 2, radius * 2)),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+
+    final actionRadiusMax = thumbSpan * 0.6;
     Widget dragChoiceWidget(Widget child) {
       return Container(
         constraints:
-            BoxConstraints.tight(Size(thumbSpan * 0.6, thumbSpan * 0.6)),
+            BoxConstraints.tight(Size(actionRadiusMax, actionRadiusMax)),
         decoration: BoxDecoration(
           color: theme.colorScheme.primary,
           shape: BoxShape.circle,
         ),
         padding: EdgeInsets.all(8),
-        child: IconTheme(
-          data: IconThemeData(
-            color: theme.colorScheme.onPrimary,
-          ),
-          child: DefaultTextStyle(
-            style: controlPadTextStyle
-                .merge(TextStyle(color: theme.colorScheme.onPrimary)),
-            child: FittedBox(fit: BoxFit.scaleDown, child: child),
+        child: Opacity(
+          opacity: unlerpUnit(0.6, 1, risep),
+          child: IconTheme(
+            data: IconThemeData(
+              color: theme.colorScheme.onPrimary,
+            ),
+            child: DefaultTextStyle(
+              style: controlPadTextStyle
+                  .merge(TextStyle(color: theme.colorScheme.onPrimary)),
+              child: FittedBox(fit: BoxFit.scaleDown, child: child),
+            ),
           ),
         ),
       );
     }
-
-    final extensionDistanceTarget = thumbSpan * (0.5 + 0.17);
-    final Widget radialActivationRing = AnimatedBuilder(
-        animation: upDownAnimation,
-        builder: (context, child) {
-          final ringu = unlerpUnit(0.1, 0.4, upDownAnimation.value.$1);
-          // as soon as the down fade starts, make sure you don't show the ring at all, it's already faded out.
-          final fadeDown =
-              (1 - Curves.easeIn.transform(upDownAnimation.value.$2));
-          final fadeUp = unlerpUnit(0.3, 1, Curves.easeIn.transform(ringu));
-          final opacity = fadeDown * fadeUp;
-          // [todo] if ring is sent in a direction, dismiss in an angle way instead
-          final radius = lerp(extensionDistanceTarget * 0.4,
-              extensionDistanceTarget, Curves.easeIn.transform(ringu));
-          return Positioned(
-            left: 0,
-            top: 0,
-            child: FractionalTranslation(
-                translation: Offset(-0.5, -0.5),
-                child: Container(
-                  constraints:
-                      BoxConstraints.tight(Size(radius * 2, radius * 2)),
-                  decoration: BoxDecoration(
-                    color: Colors.transparent,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: theme.colorScheme.primary
-                            // .withAlpha(lerp(0, 255, opacity).toInt()),
-                            .withAlpha(
-                                lerp(0, 255, opacity == 0 ? 0 : 1).toInt()),
-                        width: 3.2 * ringu * opacity),
-                  ),
-                )),
-          );
-        });
 
     List<Widget> radialActivatorWidgets = [
       dragChoiceWidget(Icon(Icons.play_arrow_rounded)),
@@ -1022,47 +951,63 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     ];
     final List<Widget> numeralDragRadialActivators =
         List.generate(radialActivatorFunctions.length, (i) {
-      final angle = isRightHanded
-          ? radialActivatorPositions[i]
-          : flipAngleHorizontally(radialActivatorPositions[i]);
-      return AnimatedBuilder(
-          animation: upDownAnimation,
-          builder: (context, child) {
-            Offset o = Offset.fromDirection(angle, extensionDistanceTarget);
-            return Positioned(
-              left: o.dx,
-              top: o.dy,
-              child: FractionalTranslation(
-                translation: Offset(-0.5, -0.5),
-                child: AnimatedBuilder(
-                    animation: optionActivationAnimation,
-                    builder: (context, child) {
-                      final selectionv = optionActivationAnimation.value;
-                      final double scale = i == numberSelected
-                          ? lerp(actionSizepAtSelection, 1,
-                                  unlerpUnit(0, 0.2, selectionv)) *
-                              (1 - unlerpUnit(0.8, 1, selectionv))
-                          : currentActionSize();
-                      return Transform.scale(
-                          scale: scale, child: radialActivatorWidgets[i]);
-                    }),
-              ),
-            );
-          });
+      final angle = conditionallyApplyIf<double>(
+          !isRightHanded, flipAngleHorizontally, radialActivatorPositions[i]);
+      Offset o = Offset.fromDirection(
+          angle,
+          lerp(radius - actionRadiusMax, radius,
+              unlerpUnit(0.6, 1, risep * (1 - fallpIfNotSelected))));
+      return Positioned(
+        left: o.dx,
+        top: o.dy,
+        child: FractionalTranslation(
+            translation: Offset(-0.5, -0.5),
+            child: Transform.scale(
+                scale: currentActionSize(), child: radialActivatorWidgets[i])),
+      );
     });
 
-    return Positioned(
-        left: widget.position.dx,
-        top: widget.position.dy,
-        child: IgnorePointer(
+    double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
+
+    return IgnorePointer(
+        child: ClipPath(
+            clipper: DirectionalWipeClipper(
+              width: totalSpan + 2,
+              height: totalSpan + 2,
+              visibleHeight: 1 - Curves.easeOut.transform(swipep),
+              angle: numberSelected == -1
+                  ? null
+                  : conditionallyApplyIf<double>(
+                      !isRightHanded,
+                      flipAngleHorizontally,
+                      radialActivatorPositions[numberSelected]),
+            ),
             child: Container(
                 width: 0,
                 height: 0,
-                clipBehavior: Clip.none,
                 child: Stack(clipBehavior: Clip.none, children: [
                   radialActivationRing,
                   ...numeralDragRadialActivators
                 ]))));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+        left: widget.position.dx,
+        top: widget.position.dy,
+        child: AnimatedBuilder(
+          animation: upDownAnimation,
+          builder: (context, child) {
+            return AnimatedBuilder(
+              animation: optionActivationAnimation,
+              builder: (context, child) {
+                return buildGivenAnimationParameters(upDownAnimation.value.$1,
+                    upDownAnimation.value.$2, optionActivationAnimation.value);
+              },
+            );
+          },
+        ));
   }
 }
 
@@ -1151,6 +1096,8 @@ class TimerScreenState extends State<TimerScreen>
   Widget build(BuildContext context) {
     ThemeData theme = Theme.of(context);
     watchSignal(context, isRightHanded)!;
+    bool padVerticallyAscending = watchSignal(context,
+        Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType()))!;
 
     //buttons
     var configButton = TimersButton(
@@ -1165,7 +1112,8 @@ class TimerScreenState extends State<TimerScreen>
         // label: Icon(Icons.border_outer_rounded),
         label: Icon(Icons.center_focus_strong),
         onPanDown: (_) {
-          isRightHanded.value = !isRightHanded.peek()!;
+          Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType())
+              .value = !padVerticallyAscending;
         });
 
     var backspaceButton = TimersButton(
@@ -1213,6 +1161,7 @@ class TimerScreenState extends State<TimerScreen>
       /// the number pad isn't flipped for lefthanded mode
       Widget pad(int column, int row) {
         column = isRightHanded ? column : 2 - column;
+        row = padVerticallyAscending ? 2 - row : row;
         final n = row * 3 + column + 1;
         return NumberButton(digits: [n], timerButtonKey: numeralKeys[n]);
       }
@@ -1540,9 +1489,7 @@ class _NumberButtonState extends State<NumberButton>
       },
       onPanUpdate: (Offset p) {
         Offset dp = p - _startDrag;
-        if (dp.distance >
-                numeralDragDistanceTs * Thumbspan.of(context) * 0.31 &&
-            !hasTriggered) {
+        if (dp.distance > Thumbspan.of(context) * 0.18 && !hasTriggered) {
           hasTriggered = true;
           final tss = context.findAncestorStateOfType<TimerScreenState>();
           if (tss == null) {
