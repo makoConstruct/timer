@@ -650,6 +650,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
 
     Widget res = Container(
         // constraints: BoxConstraints(maxheight: double.infinity)
+        color: widget.backgroundColor,
         child: widget.useScrollView
             ? SingleChildScrollView(
                 reverse: true,
@@ -1111,9 +1112,24 @@ class TimerScreenState extends State<TimerScreen>
 
     //buttons
     var configButton = TimersButton(
-        label: Icon(Icons.edit_rounded),
-        onPanDown: (_) {
-          JukeBox.jarringSound(context);
+        label: Hero(
+          tag: 'settings_icon',
+          child: AnimatedScale(
+              scale: 1.0,
+              duration: Duration(milliseconds: 280),
+              child: Icon(
+                Icons.settings_rounded,
+                color: theme.colorScheme.onSurface,
+                size: 30,
+              )),
+        ),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const SettingsScreen(),
+            ),
+          );
         });
 
     //buttons
@@ -1286,7 +1302,7 @@ class TimerScreenState extends State<TimerScreen>
                 child: TimerTray(
                   key: timerTrayKey,
                   mobj: timerListMobj,
-                  backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                  backgroundColor: theme.colorScheme.surfaceContainerLow,
                   icon: Icon(Icons.push_pin), // You can customize this icon
                   useScrollView: true,
                 )),
@@ -1665,6 +1681,278 @@ class TimersButtonState extends State<TimersButton>
                         children: [backing, labelWidget]),
                   );
                 })),
+      ),
+    );
+  }
+}
+
+class _NumpadTypeIndicator extends StatelessWidget {
+  final bool isAscending;
+
+  const _NumpadTypeIndicator({required this.isAscending});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cellSpan = 10.0;
+
+    return SizedBox(
+      width: cellSpan * 3,
+      height: cellSpan * 3,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: List.generate(9, (index) {
+          final widg = Text((index + 1).toString(),
+              style: TextStyle(
+                  fontSize: index == 0 ? 11.0 : 9.0,
+                  color: theme.colorScheme.primary,
+                  fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
+                  fontFamily: 'monospace'));
+          // : Icon(Icons.circle, size: 3.0, color: theme.colorScheme.primary);
+          final x = index % 3;
+          int y = index ~/ 3;
+          int py = isAscending ? 2 - y : y;
+          return AnimatedPositioned(
+            key: ValueKey((x, y)),
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            left: cellSpan / 2 + x * cellSpan,
+            top: cellSpan / 2 + py * cellSpan,
+            child: FractionalTranslation(
+                translation: Offset(-0.5, -0.5), child: widg),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late ScrollController _scrollController;
+  static const double _initialScrollOffset = 100.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController(
+      initialScrollOffset: _initialScrollOffset,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final listItemPadding =
+        const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
+    final crap = List.generate(
+        10,
+        (index) => ListTile(
+            title: Text('Item $index'), contentPadding: listItemPadding));
+
+    Widget trailing(Widget child) =>
+        SizedBox(width: 32.0, child: Center(child: child));
+
+    return Scaffold(
+      body: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          // Collapsible app bar with title
+          SliverAppBar(
+            pinned: true,
+            expandedHeight: 500.0,
+            flexibleSpace: FlexibleSpaceBar(
+              expandedTitleScale:
+                  1.0, // Disable title scaling to prevent Hero discontinuity
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Hero(
+                    tag: 'settings_icon',
+                    child: AnimatedScale(
+                        scale: 1.0,
+                        duration: Duration(milliseconds: 280),
+                        child: Icon(
+                          Icons.settings_rounded,
+                          color: theme.colorScheme.onSurface,
+                          size: 30,
+                        )),
+                  ),
+                  SizedBox(width: 5),
+                  Text('Settings',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      )),
+                ],
+              ),
+              titlePadding: EdgeInsetsDirectional.only(
+                start: 72.0,
+                bottom: 16.0,
+              ),
+            ),
+            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            scrolledUnderElevation: 0,
+          ),
+          // Extra padding at top to allow scrolling content to bottom
+          // SliverPadding(
+          //   padding: EdgeInsets.only(top: _topPadding),
+          // ),
+          // Settings items
+          SliverList(
+            delegate: SliverChildListDelegate([
+              // Right-handed mode setting
+              Watch((context) {
+                final isRightHandedMobj =
+                    Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+                final isRightHanded = isRightHandedMobj.value ?? true;
+                return ListTile(
+                  title: Text('${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                      style: theme.textTheme.bodyLarge),
+                  subtitle: Text(
+                    'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  trailing: trailing(TweenAnimationBuilder<double>(
+                    tween: Tween(
+                      begin: 0.0,
+                      end: isRightHanded ? -1.0 : 1.0,
+                    ),
+                    duration: Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                    builder: (context, scaleX, child) {
+                      return Transform.scale(
+                        scaleX: scaleX,
+                        child: child,
+                      );
+                    },
+                    child: Transform.rotate(
+                      angle: 45 * pi / 180, // 45 degrees clockwise
+                      child: Icon(
+                        Icons.back_hand_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  )),
+                  onTap: () {
+                    isRightHandedMobj.value = !isRightHanded;
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
+              Watch((context) {
+                final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
+                    padVerticallyAscendingID, const BoolType());
+                final padVerticallyAscending =
+                    padVerticallyAscendingMobj.value ?? false;
+                return ListTile(
+                  title: Text('numpad type', style: theme.textTheme.bodyLarge),
+                  subtitle: Text(
+                    padVerticallyAscending
+                        ? 'ascending (like the numpad of a keyboard or pocket calculator)'
+                        : 'descending (like a phone dial pad)',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  trailing: trailing(_NumpadTypeIndicator(
+                    isAscending: padVerticallyAscending,
+                  )),
+                  onTap: () {
+                    padVerticallyAscendingMobj.value = !padVerticallyAscending;
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
+              Divider(height: 1, indent: 16.0, endIndent: 16.0),
+              ListTile(
+                title: Text('About this app', style: theme.textTheme.bodyLarge),
+                trailing: trailing(
+                    Icon(Icons.info_outline, color: theme.colorScheme.primary)),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AboutScreen(),
+                    ),
+                  );
+                },
+                contentPadding: listItemPadding,
+              ),
+              Divider(height: 1, indent: 16.0, endIndent: 16.0),
+              // Add more settings here as needed
+              ...crap,
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AboutScreen extends StatelessWidget {
+  const AboutScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            pinned: true,
+            expandedHeight: 120.0,
+            flexibleSpace: FlexibleSpaceBar(
+              expandedTitleScale: 1.0,
+              title: Text('About',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w500,
+                  )),
+              titlePadding: EdgeInsetsDirectional.only(
+                start: 72.0,
+                bottom: 16.0,
+              ),
+            ),
+            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            scrolledUnderElevation: 0,
+          ),
+          SliverPadding(
+            padding: EdgeInsets.all(24.0),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                Text("About Mako's Timer", style: theme.textTheme.headlineMedium
+                    // ?.copyWith(
+                    //   fontWeight: FontWeight.bold,
+                    // ),
+                    ),
+                SizedBox(height: 24),
+                Text(
+                  "This was made over the span of many months of work and through much experimentation.",
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ]),
+            ),
+          ),
+        ],
       ),
     );
   }
