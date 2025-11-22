@@ -1250,65 +1250,52 @@ int? recognizeDigitPress(LogicalKeyboardKey k) {
   }
 }
 
-/// Custom clipper for directional wipe-out effect using a rectangle. Wipes in the cardinal direction nearest to the given angle.
-class DirectionalWipeClipper extends CustomClipper<Path> {
-  final double width;
-  final double height;
-  final double visibleHeight;
-  final double? angle;
+/// Circular reveal clipper adapted from circular_reveal_animation package
+/// Copyright 2021 Alexander Zhdanov
+/// Licensed under Apache 2.0: http://www.apache.org/licenses/LICENSE-2.0
+/// Custom clipper for circular/oval reveal effect. Circle grows/shrinks from a center point.
+class CircularRevealClipper extends CustomClipper<Path> {
+  final double fraction;
+  final Alignment? centerAlignment;
+  final Offset? centerOffset;
+  final double? minRadius;
+  final double? maxRadius;
 
-  DirectionalWipeClipper(
-      {required this.visibleHeight,
-      required this.angle,
-      required this.width,
-      required this.height});
+  CircularRevealClipper({
+    required this.fraction,
+    this.centerAlignment,
+    this.centerOffset,
+    this.minRadius,
+    this.maxRadius,
+  });
 
   @override
   Path getClip(Size size) {
-    final showp = clampUnit(visibleHeight);
-
-    if (showp <= 0.0) {
-      // Fully clipped - return empty rect
-      return Path();
-    }
-
-    Path fullVisibilityPath = Path()
-      ..moveTo(-width / 2, -height / 2)
-      ..lineTo(width / 2, -height / 2)
-      ..lineTo(width / 2, height / 2)
-      ..lineTo(-width / 2, height / 2)
-      ..close();
-
-    if (angle == null) {
-      // full visibility
-      return fullVisibilityPath;
-    }
-
-    if (showp >= 1.0) {
-      return fullVisibilityPath;
-    }
-
-    double na = moduloProperly(angle ?? 0, tau);
-
-    Offset direction = angleToOffset(na);
-    Offset lod = orthClockwise(direction);
-    Offset center = direction * ((1 - showp) * height);
-    Offset ul = center + direction * (height / 2) - lod * (width / 2);
-    Offset ur = center + direction * (height / 2) + lod * (width / 2);
-    Offset ll = center - direction * (height / 2) - lod * (width / 2);
-    Offset lr = center - direction * (height / 2) + lod * (width / 2);
+    final Offset center = this.centerAlignment?.alongSize(size) ??
+        this.centerOffset ??
+        Offset(size.width / 2, size.height / 2);
+    final minRadius = this.minRadius ?? 0;
+    final maxRadius = this.maxRadius ?? calcMaxRadius(size, center);
 
     return Path()
-      ..moveTo(ul.dx, ul.dy)
-      ..lineTo(ur.dx, ur.dy)
-      ..lineTo(lr.dx, lr.dy)
-      ..lineTo(ll.dx, ll.dy)
-      ..close();
+      ..addOval(
+        Rect.fromCircle(
+          center: center,
+          radius: lerpDouble(minRadius, maxRadius, fraction),
+        ),
+      );
   }
 
   @override
-  bool shouldReclip(DirectionalWipeClipper oldClipper) {
-    return oldClipper.visibleHeight != visibleHeight ||
-        oldClipper.angle != angle;
+  bool shouldReclip(CustomClipper<Path> oldClipper) => true;
+
+  static double calcMaxRadius(Size size, Offset center) {
+    final w = max(center.dx, size.width - center.dx);
+    final h = max(center.dy, size.height - center.dy);
+    return sqrt(w * w + h * h);
+  }
+
+  static double lerpDouble(double a, double b, double t) {
+    return a * (1.0 - t) + b * t;
   }
 }

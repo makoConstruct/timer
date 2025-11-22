@@ -827,7 +827,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     upDownAnimation.forward();
     optionActivationAnimation = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 300),
+      duration: Duration(milliseconds: 160),
     );
     optionActivationAnimation.addStatusListener((status) {
       if (!mounted) {
@@ -895,7 +895,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     // disable fade down if a number is selected
     final double fallpIfNotSelected = numberSelected != -1 ? 0 : fallp;
     final radius = radialRadiusMax *
-        Curves.easeIn
+        Curves.easeOut
             .transform(unlerpUnit(0, 0.6, risep * (1 - fallpIfNotSelected)));
     // Calculate visible height for directional wipe-out (1.0 = fully visible, 0.0 = fully clipped)
     final Widget radialActivationRing = Positioned(
@@ -949,14 +949,22 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
             children: [Icon(Icons.play_arrow_rounded), Text('+00')]),
       ),
     ];
+
+    Offset positionFor(int actionIndex, {double? overrideRisep}) {
+      final angle = conditionallyApplyIf<double>(!isRightHanded,
+          flipAngleHorizontally, radialActivatorPositions[actionIndex]);
+      return Offset.fromDirection(
+          angle,
+          lerp(
+              radius - actionRadiusMax,
+              radius,
+              unlerpUnit(0.6, 1,
+                  (overrideRisep ?? risep) * (1 - fallpIfNotSelected))));
+    }
+
     final List<Widget> numeralDragRadialActivators =
         List.generate(radialActivatorFunctions.length, (i) {
-      final angle = conditionallyApplyIf<double>(
-          !isRightHanded, flipAngleHorizontally, radialActivatorPositions[i]);
-      Offset o = Offset.fromDirection(
-          angle,
-          lerp(radius - actionRadiusMax, radius,
-              unlerpUnit(0.6, 1, risep * (1 - fallpIfNotSelected))));
+      Offset o = positionFor(i);
       return Positioned(
         left: o.dx,
         top: o.dy,
@@ -969,18 +977,20 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
 
     double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
 
+    final double? selectedAngle = numberSelected == -1
+        ? null
+        : conditionallyApplyIf<double>(!isRightHanded, flipAngleHorizontally,
+            radialActivatorPositions[numberSelected]);
+
     return IgnorePointer(
         child: ClipPath(
-            clipper: DirectionalWipeClipper(
-              width: totalSpan + 2,
-              height: totalSpan + 2,
-              visibleHeight: 1 - Curves.easeOut.transform(swipep),
-              angle: numberSelected == -1
-                  ? null
-                  : conditionallyApplyIf<double>(
-                      !isRightHanded,
-                      flipAngleHorizontally,
-                      radialActivatorPositions[numberSelected]),
+            clipper: CircularRevealClipper(
+              fraction: 1 - Curves.easeOut.transform(swipep),
+              centerOffset: numberSelected != -1
+                  ? positionFor(numberSelected, overrideRisep: 1)
+                  : Offset.zero,
+              maxRadius: totalSpan * 0.7,
+              minRadius: 0,
             ),
             child: Container(
                 width: 0,

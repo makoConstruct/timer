@@ -16,6 +16,44 @@ The optimizations:
 
 - Most timer apps require the user to pull their phone up and interact with the app after the timer goes off to make it shut up. Sometimes you want this, because it makes absolutely sure that the user heard the timer, and we support it [though that isn't in yet], but in many cases a user is confident that they'll hear the timer when it goes off, and they don't want to be forced to get their phone out of their pocket and interact with it to shut it up, so we provide a "notification" mode that lets the timer shut up on its own.
 
+<!--
+maybe explicitly count the interactions to make it clear, we're twice as efficient in general
+
+get
+unlock
+open
+create
+first digit
+second digit
+third digit
+start timer
+return to pocket
+[timer goes off] retreive from pocket
+dismiss timer
+
+get
+unlock
+open
+first digit [creates]
+second digit
+third digit [+ start timer]
+
+// or arguably
+
+create
+first digit
+second digit
+third digit
+start timer
+return to pocket
+[timer goes off] retreive from pocket
+dismiss timer
+
+first digit [creates]
+second digit
+third digit [+ start timer]
+-->
+
 Special features:
 
 - Chained timers [this isn't in yet], which are often useful for, say, executing multi-stage cooking processes, and looping timers [also isn't in yet], which can be used in combination with chaining to make pomodoro timers.
