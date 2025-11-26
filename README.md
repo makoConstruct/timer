@@ -80,7 +80,7 @@ credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects. -->
 
 `flutter pub get` to get build runner
 
-`flutter pub run build_runner build` to build database.g.dart
+`flutter pub run build_runner build --delete-conflicting-outputs` to build database.g.dart
 
 `flutter run`
 

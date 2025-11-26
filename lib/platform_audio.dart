@@ -7,15 +7,23 @@ enum PlatformAudioType {
 }
 
 class AudioInfo {
+  /// a null uri means "use the default for the given category"
   final String? uri;
   final String name;
   final bool isLong;
 
-  AudioInfo({
+  const AudioInfo({
     required this.uri,
     required this.name,
     required this.isLong,
   });
+
+  static const defaultRingtone =
+      AudioInfo(uri: null, name: 'Default Ringtone', isLong: true);
+  static const defaultNotification =
+      AudioInfo(uri: null, name: 'Default Notification', isLong: false);
+  static const defaultAlarm =
+      AudioInfo(uri: null, name: 'Default Alarm', isLong: true);
 
   factory AudioInfo.fromMap(Map<dynamic, dynamic> map) {
     return AudioInfo(

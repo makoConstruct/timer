@@ -15,6 +15,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/extensions.dart';
 import 'package:hsluv/hsluvcolor.dart';
+import 'package:makos_timer/platform_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:makos_timer/background_service_stuff.dart';
@@ -70,7 +71,7 @@ Future<void> initializeDatabase() async {
   await MobjRegistry.initialize(db);
   final fversion = Mobj.getOrCreate(dbVersionID,
       type: const IntType(), initial: () => 0, debugLabel: "version");
-  await Future.wait([
+  await Future.wait(<Future>[
     // we know that the data required for the app is minimal enough that we should wait until it's loaded before showing anything... idk not sure I believe this
     Mobj.getOrCreate(timerListID,
         type: ListType(const StringType()), initial: () => <MobjID>[]),
@@ -85,6 +86,10 @@ Future<void> initializeDatabase() async {
         type: const BoolType(),
         initial: () => false,
         debugLabel: "pad vertically ascending"),
+    Mobj.getOrCreate(selectedAudioID,
+        type: const AudioInfoType(),
+        initial: () => AudioInfo.defaultNotification,
+        debugLabel: "selected audio"),
     fversion,
   ]);
 }
@@ -959,8 +964,8 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
           lerp(
               radius - actionRadiusMax,
               radius,
-              unlerpUnit(0.6, 1,
-                  (overrideRisep ?? risep) * (1 - fallpIfNotSelected))));
+              Curves.easeOut.transform(unlerpUnit(0.6, 1,
+                  (overrideRisep ?? risep) * (1 - fallpIfNotSelected)))));
     }
 
     final List<Widget> numeralDragRadialActivators =
@@ -1138,8 +1143,10 @@ class TimerScreenState extends State<TimerScreen>
         // label: Icon(Icons.border_outer_rounded),
         label: Icon(Icons.center_focus_strong),
         onPanDown: (_) {
-          Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType())
-              .value = !padVerticallyAscending;
+          numeralPressed([1]);
+          numeralPressed([2]);
+          numeralPressed([3]);
+          numeralPressed([4]);
         });
 
     var backspaceButton = TimersButton(
@@ -1258,8 +1265,7 @@ class TimerScreenState extends State<TimerScreen>
     // the lower part of the screen
     final controls = Container(
       clipBehavior: Clip.hardEdge,
-      decoration:
-          BoxDecoration(color: theme.colorScheme.surfaceContainerLowest),
+      decoration: BoxDecoration(color: theme.colorScheme.surfaceContainerLow),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: isRightHanded.value!
@@ -1573,12 +1579,14 @@ class TimersButton extends StatefulWidget {
   final Function(Offset globalPosition)? onPanDown;
   final Function(Offset globalPosition)? onPanUpdate;
   final Function()? onPanEnd;
+  final bool solidColor;
   final Animation<double>? dialBloomAnimation;
 
   const TimersButton(
       {super.key,
       required this.label,
       this.onPressed,
+      this.solidColor = false,
       this.accented = false,
       this.onPanDown,
       this.onPanUpdate,
@@ -1652,7 +1660,9 @@ class TimersButtonState extends State<TimersButton>
                   final backingColor = lerpColor(
                       widget.accented
                           ? theme.colorScheme.primary
-                          : Colors.white.withAlpha(0),
+                          : widget.solidColor
+                              ? theme.colorScheme.surfaceContainerLowest
+                              : Colors.white.withAlpha(0),
                       Colors.white,
                       flash);
                   final backing = Container(
@@ -1831,7 +1841,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   trailing: trailing(TweenAnimationBuilder<double>(
                     tween: Tween(
-                      begin: 0.0,
+                      begin: isRightHanded ? -1.0 : 1.0,
                       end: isRightHanded ? -1.0 : 1.0,
                     ),
                     duration: Duration(milliseconds: 300),
@@ -1865,8 +1875,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: Text('numpad type', style: theme.textTheme.bodyLarge),
                   subtitle: Text(
                     padVerticallyAscending
-                        ? 'ascending (like the numpad of a keyboard or pocket calculator)'
-                        : 'descending (like a phone dial pad)',
+                        ? 'calculator/keyboard style'
+                        : 'phone style',
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
@@ -1894,10 +1904,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
                 contentPadding: listItemPadding,
               ),
-              Divider(height: 1, indent: 16.0, endIndent: 16.0),
-              // Add more settings here as needed
+              ListTile(
+                title:
+                    Text('Thank the author', style: theme.textTheme.bodyLarge),
+                trailing: trailing(Icon(
+                  Icons.favorite_rounded,
+                  color: theme.colorScheme.primary,
+                )),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ThankAuthorScreen(),
+                    ),
+                  );
+                },
+                contentPadding: listItemPadding,
+              ),
               ...crap,
             ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ThankAuthorScreen extends StatelessWidget {
+  const ThankAuthorScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            pinned: true,
+            expandedHeight: 120.0,
+            flexibleSpace: FlexibleSpaceBar(
+              expandedTitleScale: 1.0,
+              title: Text('Thank the author',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w500,
+                  )),
+              titlePadding: EdgeInsetsDirectional.only(
+                start: 72.0,
+                bottom: 16.0,
+              ),
+            ),
+            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            scrolledUnderElevation: 0,
+          ),
+          SliverPadding(
+            padding: EdgeInsets.all(24.0),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                Text(
+                  'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
+                  style: theme.textTheme.bodyLarge,
+                ),
+                SizedBox(height: 24),
+                // Add more content here as needed
+              ]),
+            ),
           ),
         ],
       ),
@@ -1920,7 +1994,7 @@ class AboutScreen extends StatelessWidget {
             expandedHeight: 120.0,
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
-              title: Text('About',
+              title: Text("About Mako's Timer",
                   style: TextStyle(
                     color: theme.colorScheme.onSurface,
                     fontWeight: FontWeight.w500,
@@ -1939,11 +2013,6 @@ class AboutScreen extends StatelessWidget {
             padding: EdgeInsets.all(24.0),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                Text("About Mako's Timer", style: theme.textTheme.headlineMedium
-                    // ?.copyWith(
-                    //   fontWeight: FontWeight.bold,
-                    // ),
-                    ),
                 SizedBox(height: 24),
                 Text(
                   "This was made over the span of many months of work and through much experimentation.",

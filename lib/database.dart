@@ -62,8 +62,8 @@ WITH comparison AS (
     :sequence_number,
     CASE 
       WHEN :timestamp > k_vs.timestamp THEN 1
-      WHEN :timestamp = k_vs.timestamp AND :value > k_vs.value THEN 1
-      WHEN :timestamp = k_vs.timestamp AND :value = k_vs.value AND :sequence_number > k_vs.sequence_number THEN 1
+      WHEN :timestamp = k_vs.timestamp AND :sequence_number > k_vs.sequence_number THEN 1
+      WHEN :timestamp = k_vs.timestamp AND :sequence_number = k_vs.sequence_number AND :value > k_vs.value THEN 1
       ELSE 0
     END as should_update
   FROM k_vs
@@ -78,12 +78,51 @@ ON CONFLICT(id) DO UPDATE SET
               THEN excluded.timestamp ELSE k_vs.timestamp END,
   sequence_number = CASE WHEN (SELECT should_update FROM comparison) = 1
                   THEN excluded.sequence_number ELSE k_vs.sequence_number END
+''',
+
+  /// inserts a row if it doesn't exist, returns the final value and whether an insert occurred
+  'insertIfNotExistsAndReturn': '''
+  INSERT INTO k_vs (id, value, timestamp, sequence_number)
+  VALUES (:id, :value, :timestamp, :sequence_number)
+  ON CONFLICT(id) DO NOTHING
+  RETURNING
+    (SELECT COUNT(*) FROM k_vs WHERE id = :id AND timestamp = :timestamp) as was_inserted,
+    (SELECT id FROM k_vs WHERE id = :id) as id,
+    (SELECT value FROM k_vs WHERE id = :id) as value,
+    (SELECT timestamp FROM k_vs WHERE id = :id) as timestamp,
+    (SELECT sequence_number FROM k_vs WHERE id = :id) as sequence_number
 '''
 })
 class TheDatabase extends _$TheDatabase {
   TheDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
   @override
   int get schemaVersion => 1;
+
+  /// Inserts a row if it doesn't exist, returns the final value and whether an insert occurred
+  // Future<({KV row, bool wasInserted})> insertIfNotExistsAndReturn({
+  //   required String id,
+  //   required String value,
+  //   required DateTime timestamp,
+  //   required int sequenceNumber,
+  // }) async {
+  //   final existsBefore =
+  //       await (select(kVs)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  //   if (existsBefore == null) {
+  //     await into(kVs).insert(KVsCompanion.insert(
+  //       id: id,
+  //       value: value,
+  //       timestamp: timestamp,
+  //       sequenceNumber: Value(sequenceNumber),
+  //     ));
+  //     final row =
+  //         await (select(kVs)..where((t) => t.id.equals(id))).getSingle();
+  //     return (row: row, wasInserted: true);
+  //   } else {
+  //     return (row: existsBefore, wasInserted: false);
+  //   }
+  // }
+
   static QueryExecutor _openConnection() {
     return driftDatabase(
       name: 'mako_timer_db',

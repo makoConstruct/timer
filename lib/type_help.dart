@@ -1,4 +1,5 @@
 import 'package:makos_timer/boring.dart';
+import 'package:makos_timer/platform_audio.dart';
 
 import 'mobj.dart';
 
@@ -146,4 +147,31 @@ TimerData cloneTimerDataWithChanges(
     ranTime: ranTime ?? old.ranTime,
     isGoingOff: isGoingOff ?? old.isGoingOff,
   );
+}
+
+class AudioInfoType extends TypeHelp<AudioInfo> {
+  const AudioInfoType() : super('AudioInfo');
+
+  @override
+  AudioInfo fromJsonValue(Object? json) {
+    if (json is Map<String, dynamic>) {
+      return AudioInfo(
+        uri: json['uri'] != null
+            ? const StringType().fromJson(json['uri'])
+            : null,
+        name: const StringType().fromJson(json['name']),
+        isLong: const BoolType().fromJson(json['isLong']),
+      );
+    }
+    throw ArgumentError('Cannot convert $json to AudioInfo');
+  }
+
+  @override
+  Object? toJsonValue(AudioInfo object) {
+    return {
+      'uri': object.uri != null ? const StringType().toJson(object.uri!) : null,
+      'name': const StringType().toJson(object.name),
+      'isLong': const BoolType().toJson(object.isLong),
+    };
+  }
 }

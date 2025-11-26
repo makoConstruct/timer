@@ -206,7 +206,8 @@ class MobjRegistry {
 
 /// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.
-/// It was made just for this app, because the author couldn't find anything else that would do, and because the author intends to contribute to the development of a much more serious dynamic persistence system soon.
+/// It was made just for this app, because the author couldn't find anything else that would do, and because the author intends to contribute to the development of a much more serious dynamic persistence system soon, so they need to get interested in making their own.
+/// This is currently quite bad, for a couple of reasons, but mainly because drift's streaming queries will update whenever any of their values update. This will presumably be a performance problem if you have a lot of active mobjs. It wont come through in the behavior of the mobjs (we don't notify on redundant updates) though.
 /// Doesn't support transactions right now, though note that both Signal and Drift do support transactions, so it should be possible?
 /// streaming_shared_preferences seems to be the same as this, but using shared_preferences for storage instead of drift.
 /// I think I need this to work across isolates now.
@@ -223,11 +224,14 @@ class Mobj<T> extends Signal<T?> {
   StreamSubscription<KV?>? _dbSubscription;
   // prevents updates from the db from triggering a write back to the db
   bool _currentlyTakingFromDb = false;
+  bool _blockInitialWriteBack = false;
   bool _unloaded = true;
 
   /// only actually writes back if the new value has a newer timestamp than the value in the db, this is important for situations where more than one process is doing writes and we want to make sure they all end up agreeing.
   Future<void> writeBack() async {
     final v = peek();
+    print(
+        "writeBack: id=${_id}, value=${v}, _valueEncoded=${_valueEncoded}, _lastTimestamp=${_lastTimestamp}, _lastSequenceNumber=${_lastSequenceNumber}");
     if (v != null) {
       _valueEncoded = jsonEncode(_type.toJson(v));
       final nextTimestamp = DateTime.now();
@@ -256,17 +260,32 @@ class Mobj<T> extends Signal<T?> {
     this._type, {
     T? initial,
     String? debugLabel,
+    DateTime? timestamp,
+    int? sequenceNumber,
+    required bool initialWriteBack,
     // on reflection I'm not sure we can support autodispose, because of the refcounting stuff
     // bool autoDispose = false,
   }) : super(initial, debugLabel: debugLabel, autoDispose: false) {
     MobjRegistry._loadedMobjs[_id] = this;
+    _blockInitialWriteBack = !initialWriteBack;
     if (initial != null) {
       _unloaded = false;
+    }
+
+    if (timestamp != null) {
+      _lastTimestamp = timestamp;
+    }
+    if (sequenceNumber != null) {
+      _lastSequenceNumber = sequenceNumber;
     }
 
     // a Mobj writes back to db whenever it changes
     subscribe((v) {
       if (_currentlyTakingFromDb) {
+        return;
+      }
+      if (_blockInitialWriteBack) {
+        _blockInitialWriteBack = false;
         return;
       }
       writeBack();
@@ -285,6 +304,8 @@ class Mobj<T> extends Signal<T?> {
           _currentlyTakingFromDb = false;
         }
       } else {
+        print(
+            "readBack: id=${_id}, kv.timestamp=${kv.timestamp}, _lastTimestamp=${_lastTimestamp}, kv.sequenceNumber=${kv.sequenceNumber}, _lastSequenceNumber=${_lastSequenceNumber}, kv.value=${kv.value}, _valueEncoded=${_valueEncoded}");
         if (kv.timestamp.isAfter(_lastTimestamp) ||
             (kv.timestamp.isAtSameMomentAs(_lastTimestamp) &&
                 kv.sequenceNumber > _lastSequenceNumber) ||
@@ -302,17 +323,15 @@ class Mobj<T> extends Signal<T?> {
     });
   }
 
-  factory Mobj.fromEncoding(MobjID id, String encoding, TypeHelp<T> type) {
-    final v = type.fromJson(jsonDecode(encoding));
-    return Mobj._createAndRegister(id, type, initial: v, debugLabel: id);
-  }
-
   /// only returns non-null if the mobj has already been loaded from the db
   /// type is needed in case the object is in the _loadedMobjEncodings stage
   static Mobj<T>? seekAlreadyLoaded<T>(MobjID id, TypeHelp<T> type) {
     final pr = MobjRegistry._preloadedMobjEncodings[id];
     if (pr != null) {
-      final p = Mobj.fromEncoding(id, pr, type);
+      final p = Mobj._createAndRegister(id, type,
+          initial: type.fromJson(jsonDecode(pr)),
+          debugLabel: id,
+          initialWriteBack: false);
       MobjRegistry._preloadedMobjEncodings.remove(id);
       return p;
     } else {
@@ -354,6 +373,7 @@ class Mobj<T> extends Signal<T?> {
         type,
         initial: initial,
         debugLabel: debugLabel,
+        initialWriteBack: true,
       );
       m.writeBack();
       return m;
@@ -371,38 +391,40 @@ class Mobj<T> extends Signal<T?> {
     if (s != null) {
       return s;
     } else {
+      // I think this implementation is kinda nonsense, this never could have done what you'd wanted
       final pf = MobjRegistry._loadingMobjs[id];
       if (pf != null) {
         return (await pf) as Mobj<T>;
       } else {
         final T iv = initial();
         final valueEncoding = jsonEncode(type.toJson(iv));
-        final ret = MobjRegistry.db.kVs
-            .insertReturning(
-                KV(
-                    id: id,
-                    value: valueEncoding,
-                    timestamp: DateTime.now(),
-                    sequenceNumber: 0),
-                onConflict: DoUpdate((old) => KVsCompanion(
-                      id: Value(id), // Keep the same id
-                      value: Value.absent(), // Don't change the value
-                      timestamp: Value.absent(), // Don't change the timestamp
-                      sequenceNumber:
-                          Value.absent(), // Don't change the sequence number
-                    )))
+        final ret = MobjRegistry.db
+            .insertIfNotExistsAndReturn(id, valueEncoding, DateTime.now(), 0)
             .then(
           (v) {
-            // [critical] there's an error here, you needed to reparse if there was a conflict
             MobjRegistry._loadingMobjs.remove(id);
-            return Mobj._createAndRegister(
-              id,
-              type,
-              initial: v.value == valueEncoding
-                  ? iv
-                  : type.fromJson(jsonDecode(v.value)),
-              debugLabel: debugLabel,
-            );
+            print(v);
+            assert(v.length == 1);
+            final vv = v.first;
+            if (vv.wasInserted == 0) {
+              return Mobj._createAndRegister(
+                id,
+                type,
+                initial: iv,
+                debugLabel: debugLabel,
+                initialWriteBack: true,
+              );
+            } else {
+              return Mobj._createAndRegister(
+                id,
+                type,
+                initial: type.fromJson(jsonDecode(vv.value!)),
+                debugLabel: debugLabel,
+                initialWriteBack: false,
+                timestamp: vv.timestamp!,
+                sequenceNumber: vv.sequenceNumber!,
+              );
+            }
           },
         );
         MobjRegistry._loadingMobjs[id] = ret;
@@ -427,7 +449,7 @@ class Mobj<T> extends Signal<T?> {
     return type.fromJson(jsonDecode(kv.value));
   }
 
-  /// (can't be called get because Signal already has a method of that name)
+  /// (can't be called "get" because Signal already has a method of that name)
   static Future<Mobj<T>> fetch<T>(
     MobjID id, {
     required TypeHelp<T> type,
@@ -446,6 +468,7 @@ class Mobj<T> extends Signal<T?> {
             type,
             initial: type.fromJson(jsonDecode(s.value)),
             debugLabel: debugLabel,
+            initialWriteBack: false,
           );
         } else {
           // hmm why not just initialize as null
