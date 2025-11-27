@@ -51,15 +51,11 @@ class KVs extends Table with UUIDd {
 @DriftDatabase(tables: [
   KVs
 ], queries: {
-  /// updates the value if it's lexicographically (includes chronologically) after the current value
-  // todo, try removing the first listing of :id, :value, :timestamp, :sequence_number, I can't see a reason why they should need to be listed there.
+  /// updates the value if it's lexicographically (includes chronologically) after the current value (drift_dev will produce warnings about the comparison of string-formatted timestamps, but iso8601 is lexicographically ordered in this situation)
+  // the select used to list :id, :value, :timestamp, :sequence_number, but I couldn't see what they were doing, so I removed them. I think claude might have just put them there to control the order the parameters would be in in the generated code. We turned on named parameters so that doesn't matter now.
   'insertIfMoreRecent': '''
 WITH comparison AS (
   SELECT 
-    :id,
-    :value,
-    :timestamp,
-    :sequence_number,
     CASE 
       WHEN :timestamp > k_vs.timestamp THEN 1
       WHEN :timestamp = k_vs.timestamp AND :sequence_number > k_vs.sequence_number THEN 1

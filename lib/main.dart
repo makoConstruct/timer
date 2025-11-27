@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:async';
+import 'dart:async' as async;
 
 import 'package:animated_to/animated_to.dart';
 import 'package:collection/collection.dart';
@@ -138,6 +139,46 @@ class TimersApp extends StatefulWidget {
   State<TimersApp> createState() => _TimersAppState();
 }
 
+void enlivenTimer(Mobj<TimerData> mobj, JukeBox jukeBox) {
+  async.Timer? completionTimer;
+  Function()? ed;
+  void reinitializeCompletionTimer() {
+    completionTimer?.cancel();
+    final d = mobj.value!;
+    completionTimer = async.Timer(
+        Duration(
+            milliseconds: (d.duration - DateTime.now().difference(d.startTime))
+                .inMilliseconds
+                .ceil()), () {
+      completionTimer = null;
+      jukeBox.playJarringSound();
+      mobj.value = mobj.value!.withChanges(
+        runningState: TimerData.completed,
+        // isGoingOff: true,
+      );
+    });
+  }
+
+  TimerData? prev = mobj.value;
+  ed = effect(() {
+    final TimerData? d = mobj.value;
+    if (d == null) {
+      ed?.call();
+      ed = null;
+      return;
+    }
+    if (d.isRunning) {
+      if (prev?.duration != d.duration || (!(prev?.isRunning ?? false))) {
+        reinitializeCompletionTimer();
+      }
+    } else if ((prev?.isRunning ?? false) && !d.isRunning) {
+      completionTimer?.cancel();
+      completionTimer = null;
+    }
+    prev = d;
+  });
+}
+
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late Future<JukeBox> jukeBox;
   _TimersAppState() {
@@ -148,6 +189,23 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     super.initState();
     jukeBox = JukeBox.create();
     WidgetsBinding.instance.addObserver(this);
+
+    // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
+    jukeBox.then((jukeBox) {
+      void enlivenAllTimersInList(Mobj<List<MobjID>> listMobj) {
+        for (final tid in listMobj.peek() ?? []) {
+          Mobj.fetch(tid, type: const TimerDataType())
+              .then((mobj) => enlivenTimer(mobj, jukeBox));
+        }
+      }
+
+      final timerListMobj = Mobj<List<MobjID>>.getAlreadyLoaded(
+          timerListID, ListType(const StringType()));
+      final transientTimerListMobj =
+          Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
+      enlivenAllTimersInList(timerListMobj);
+      enlivenAllTimersInList(transientTimerListMobj);
+    });
   }
 
   @override
@@ -319,26 +377,8 @@ class TimerState extends State<Timer>
     final pp = p;
     setState(() {
       currentTime = nd;
-      if (pp.isRunning &&
-          nd >= durationToSeconds(digitsToDuration(pp.digits)) &&
-          !pp.isCompleted) {
-        // [todo] after background tasks, let the background task set off the timer instead of doing it here?
-        triggerAlert();
-      }
+      // we don't set the timer off/change its state, enlivenTimer bindings do that
     });
-  }
-
-  void triggerAlert() {
-    print('should play');
-    JukeBox.jarringSound(context);
-    _runningAnimation.reverse();
-    _ticker.stop();
-    setTime(0);
-    widget.mobj.value = p.withChanges(
-      runningState: TimerData.completed,
-    );
-
-    //todo: check to see whether the timer is visible in the list view. If not, do a push notification alert. Otherwise just make it do an animation and play a brief sound. Don't require an interaction, the user knows.
   }
 
   void _updateRunning({required TimerData? from, required TimerData to}) {
@@ -1394,7 +1434,7 @@ class TimerScreenState extends State<TimerScreen>
     bool selecting = selected ?? false;
 
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
-    Mobj<TimerData>.clobberCreate(
+    final nt = Mobj<TimerData>.clobberCreate(
       ntid,
       type: const TimerDataType(),
       initial: TimerData(
@@ -1407,6 +1447,9 @@ class TimerScreenState extends State<TimerScreen>
         isGoingOff: false,
       ),
     );
+    Provider.of<Future<JukeBox>>(context, listen: false).then((jukeBox) {
+      enlivenTimer(nt, jukeBox);
+    });
 
     timerListMobj.value = timers().toList()..add(ntid);
     if (selecting) {
