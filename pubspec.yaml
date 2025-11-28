@@ -58,6 +58,7 @@ dependencies:
   drift_dev: ^2.28.3
   flutter_ringtone_manager: ^1.1.2
   flutter_refresh_rate_control: ^0.0.4+1
+  screen_corner_radius: ^3.0.0
 
 
 

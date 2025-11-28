@@ -13,9 +13,11 @@ import 'package:hsluv/hsluvcolor.dart';
 // import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:provider/provider.dart';
+import 'package:screen_corner_radius/screen_corner_radius.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
 import 'platform_audio.dart';
+import 'main.dart' show getCachedCornerRadius;
 
 const tau = 2 * pi;
 
@@ -406,7 +408,7 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
                                 popAnimation.value) +
                             Offset(
                                 0,
-                                Curves.easeOut.transform(popAnimation.value) *
+                                Curves.easeInOut.transform(popAnimation.value) *
                                     20),
                         child: widget.child,
                       );
@@ -548,6 +550,7 @@ double unlerp(double a, double b, double t) {
   return (t - a) / (b - a);
 }
 
+/// the inverse of lerp, clamped to 0-1. returns how far along the travel between a and b t is.
 double unlerpUnit(double a, double b, double t) {
   return clampUnit(unlerp(a, b, t));
 }
@@ -1271,8 +1274,8 @@ class CircularRevealClipper extends CustomClipper<Path> {
 
   @override
   Path getClip(Size size) {
-    final Offset center = this.centerAlignment?.alongSize(size) ??
-        this.centerOffset ??
+    final Offset center = centerAlignment?.alongSize(size) ??
+        centerOffset ??
         Offset(size.width / 2, size.height / 2);
     final minRadius = this.minRadius ?? 0;
     final maxRadius = this.maxRadius ?? calcMaxRadius(size, center);
@@ -1297,5 +1300,261 @@ class CircularRevealClipper extends CustomClipper<Path> {
 
   static double lerpDouble(double a, double b, double t) {
     return a * (1.0 - t) + b * t;
+  }
+}
+
+/// Custom page route that combines circular reveal animation with translation
+class CircularRevealRoute<T> extends PageRoute<T>
+    with MaterialRouteTransitionMixin<T> {
+  final Widget page;
+  final Offset buttonCenter;
+  final GlobalKey iconKey;
+
+  CircularRevealRoute({
+    required this.page,
+    required this.buttonCenter,
+    required this.iconKey,
+  });
+
+  @override
+  Widget buildContent(BuildContext context) => page;
+
+  @override
+  bool get opaque => false;
+
+  // Force our own duration, don't let mixin override it
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 350);
+
+  @override
+  Duration get reverseTransitionDuration => Duration(milliseconds: 350);
+
+  @override
+  bool get maintainState => true;
+
+  @override
+  bool canTransitionFrom(TransitionRoute<dynamic> previousRoute) => true;
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    // Incorporate screen corner scale-down with secondaryAnimation,
+    // and primary animation is still circular reveal.
+    return AnimatedBuilder(
+      animation: secondaryAnimation,
+      builder: (context, child_) {
+        final corners = getCachedCornerRadius();
+        double scale;
+        if (secondaryAnimation.value == 0.0) {
+          scale = 1.0;
+        } else if (platformIsDesktop()) {
+          scale = 1.0;
+        } else {
+          scale =
+              1.0 - Curves.easeOut.transform(secondaryAnimation.value) * 0.13;
+        }
+        return Transform.scale(
+          scale: scale,
+          child: ClipRRect(
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(corners.topLeft),
+              topRight: Radius.circular(corners.topRight),
+              bottomLeft: Radius.circular(corners.bottomLeft),
+              bottomRight: Radius.circular(corners.bottomRight),
+            ),
+            child: _CircularRevealTransition(
+              animation: animation,
+              buttonCenter: buttonCenter,
+              iconKey: iconKey,
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+/// Route for pages that should clip to screen corners and scale when covered
+class ScreenCornerClippedRoute extends MaterialPageRoute {
+  ScreenCornerClippedRoute({required super.builder});
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    // First apply default MaterialPageRoute transition
+    // final materialTransition =
+    //     super.buildTransitions(context, animation, secondaryAnimation, child);
+
+    // When another route is pushed on top, clip to screen corners and scale down
+    return AnimatedBuilder(
+      animation: secondaryAnimation,
+      builder: (context, child) {
+        if (secondaryAnimation.value == 0.0) {
+          return child!;
+        }
+        final corners = getCachedCornerRadius();
+        final double scale;
+        if (platformIsDesktop()) {
+          // scale animations look bad on desktop
+          scale = 1.0;
+        } else {
+          scale =
+              1.0 - Curves.easeOut.transform(secondaryAnimation.value) * 0.13;
+        }
+        return Transform.scale(
+          scale: scale,
+          child: ClipRRect(
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(corners.topLeft),
+              topRight: Radius.circular(corners.topRight),
+              bottomLeft: Radius.circular(corners.bottomLeft),
+              bottomRight: Radius.circular(corners.bottomRight),
+            ),
+            child: child,
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+class _CircularRevealTransition extends StatefulWidget {
+  final Animation<double> animation;
+  final Offset buttonCenter;
+  final GlobalKey iconKey;
+  final Widget child;
+
+  const _CircularRevealTransition({
+    required this.animation,
+    required this.buttonCenter,
+    required this.iconKey,
+    required this.child,
+  });
+
+  @override
+  State<_CircularRevealTransition> createState() =>
+      _CircularRevealTransitionState();
+}
+
+class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
+  Offset? _iconFinalOffset;
+  bool _measured = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureIconPosition();
+    });
+  }
+
+  void _measureIconPosition() {
+    final RenderBox? iconBox =
+        widget.iconKey.currentContext?.findRenderObject() as RenderBox?;
+    if (iconBox != null) {
+      final iconPosition = iconBox.localToGlobal(Offset.zero);
+      final iconSize = iconBox.size;
+      setState(() {
+        _iconFinalOffset =
+            iconPosition + Offset(iconSize.width / 2, iconSize.height / 2);
+        _measured = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_measured || _iconFinalOffset == null) {
+      // Render without animation on first frame to allow measuring the destination of the icon
+      return widget.child;
+    }
+
+    final theme = Theme.of(context);
+    final Color backgroundColor = theme.colorScheme.surfaceContainerHigh;
+    final Color fadedOfBackgroundColor = backgroundColor.withAlpha(117);
+    final Color transparentOfBackgroundColor = backgroundColor.withAlpha(0);
+
+    return Stack(
+      children: [
+        // Black circular gradient
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: widget.animation,
+            builder: (context, child) {
+              final screenSize = MediaQuery.of(context).size;
+              final progress = Curves.easeInOutCubic.transform(
+                unlerpUnit(0.0, 0.8, widget.animation.value),
+              );
+
+              final c = Offset(
+                (widget.buttonCenter.dx / screenSize.width - 0.5) * 2.0,
+                (widget.buttonCenter.dy / screenSize.height - 0.5) * 2.0,
+              );
+
+              return IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      radius: progress * 3.0,
+                      center: Alignment(c.dx, c.dy),
+                      focal: Alignment(c.dx, c.dy),
+                      colors: [
+                        fadedOfBackgroundColor,
+                        fadedOfBackgroundColor,
+                        transparentOfBackgroundColor
+                      ],
+                      stops: [0.0, progress, progress * 2],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        AnimatedBuilder(
+          animation: widget.animation,
+          builder: (context, child) {
+            final fraction = Curves.easeOut.transform(
+              unlerpUnit(0.14, 1.0, widget.animation.value),
+            );
+
+            return ShaderMask(
+              shaderCallback: (Rect bounds) {
+                final center = widget.buttonCenter;
+                final fuzzyEdgeWidth = 40.0; // Width of the gradient edge
+                final maxRadius =
+                    CircularRevealClipper.calcMaxRadius(bounds.size, center) +
+                        fuzzyEdgeWidth;
+                final currentRadius = maxRadius * fraction;
+
+                return RadialGradient(
+                  center: Alignment(
+                    (center.dx / bounds.width) * 2 - 1,
+                    (center.dy / bounds.height) * 2 - 1,
+                  ),
+                  radius: currentRadius / min(bounds.width, bounds.height),
+                  colors: const [
+                    Colors.white,
+                    Colors.white,
+                    Colors.transparent
+                  ],
+                  stops: [
+                    0.0,
+                    max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth)),
+                    1.0,
+                  ],
+                ).createShader(bounds);
+              },
+              blendMode: BlendMode.dstIn,
+              child: child,
+            );
+          },
+          child: widget.child,
+        ),
+      ],
+    );
   }
 }

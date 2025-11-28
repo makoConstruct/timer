@@ -27,6 +27,7 @@ import 'package:makos_timer/size_reporter.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
+import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
@@ -63,6 +64,34 @@ Future<void> torchDatabase(TheDatabase db) async {
 final sharedDriftIsolateName = "sharedDrift";
 
 const databaseName = 'mako_timer_db';
+
+// Custom Hero flight shuttle builder with 60ms delay
+Widget delayedHeroFlightShuttleBuilder(
+  BuildContext flightContext,
+  Animation<double> animation,
+  HeroFlightDirection flightDirection,
+  BuildContext fromHeroContext,
+  BuildContext toHeroContext,
+) {
+  // Create a delayed animation that starts after 60ms
+  // Assuming typical hero animation duration is 300ms, 60ms = 0.2 of duration
+  final delayedAnimation = CurvedAnimation(
+    parent: animation,
+    curve: const Interval(0.3, 1.0, curve: Curves.fastOutSlowIn),
+  );
+
+  // Get the child from the destination hero
+  final Widget toHeroChild = (flightDirection == HeroFlightDirection.push)
+      ? (toHeroContext.widget as Hero).child
+      : (fromHeroContext.widget as Hero).child;
+
+  return AnimatedBuilder(
+    animation: delayedAnimation,
+    builder: (context, child) {
+      return toHeroChild;
+    },
+  );
+}
 
 Future<void> initializeDatabase() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -160,24 +189,48 @@ void enlivenTimer(Mobj<TimerData> mobj, JukeBox jukeBox) {
   }
 
   TimerData? prev = mobj.value;
-  ed = effect(() {
-    final TimerData? d = mobj.value;
-    if (d == null) {
-      ed?.call();
-      ed = null;
-      return;
-    }
-    if (d.isRunning) {
-      if (prev?.duration != d.duration || (!(prev?.isRunning ?? false))) {
-        reinitializeCompletionTimer();
+  // once null always null
+  if (prev != null) {
+    ed = effect(() {
+      final TimerData? d = mobj.value;
+      if (d == null) {
+        ed?.call();
+        ed = null;
+        completionTimer?.cancel();
+        completionTimer = null;
+        prev = null;
+        return;
       }
-    } else if ((prev?.isRunning ?? false) && !d.isRunning) {
-      completionTimer?.cancel();
-      completionTimer = null;
-    }
-    prev = d;
-  });
+      if (d.isRunning) {
+        if (prev?.duration != d.duration || (!(prev?.isRunning ?? false))) {
+          reinitializeCompletionTimer();
+        }
+      } else if ((prev?.isRunning ?? false) && !d.isRunning) {
+        completionTimer?.cancel();
+        completionTimer = null;
+      }
+      prev = d;
+    });
+  }
 }
+
+// Global to cache screen corner radius
+ScreenRadius? _cachedCornerRadius;
+ScreenRadius defaultCornerRadius = ScreenRadius.value(0.0);
+Future<ScreenRadius> _loadCornerRadius() async {
+  if (_cachedCornerRadius != null) return _cachedCornerRadius!;
+  try {
+    _cachedCornerRadius = await ScreenCornerRadius.get() ?? defaultCornerRadius;
+  } on UnimplementedError catch (_) {
+    _cachedCornerRadius = defaultCornerRadius;
+  } on MissingPluginException catch (_) {
+    _cachedCornerRadius = defaultCornerRadius;
+  }
+  return _cachedCornerRadius!;
+}
+
+ScreenRadius getCachedCornerRadius() =>
+    _cachedCornerRadius ?? defaultCornerRadius;
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late Future<JukeBox> jukeBox;
@@ -188,6 +241,11 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     jukeBox = JukeBox.create();
+    _loadCornerRadius();
+
+    // Enable edge-to-edge mode
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
     WidgetsBinding.instance.addObserver(this);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
@@ -248,16 +306,21 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
       title: 'timer',
       theme: makeTheme(Brightness.light),
       darkTheme: makeTheme(Brightness.dark),
-      home: MultiProvider(
-        providers: [
-          Provider<Thumbspan>(
-              create: (context) => Thumbspan(lpixPerThumbspan(context))),
-          Provider<Future<JukeBox>>(create: (_) => jukeBox),
-        ],
-        child: TimerScreen(
-          selectLastTimer: true,
-        ),
-      ),
+      onGenerateRoute: (settings) {
+        if (settings.name == '/') {
+          return ScreenCornerClippedRoute(
+            builder: (context) => MultiProvider(
+              providers: [
+                Provider<Thumbspan>(
+                    create: (context) => Thumbspan(lpixPerThumbspan(context))),
+                Provider<Future<JukeBox>>(create: (_) => jukeBox),
+              ],
+              child: TimerScreen(),
+            ),
+          );
+        }
+        return null;
+      },
     );
   }
 }
@@ -293,6 +356,7 @@ class TimerState extends State<Timer>
   final GlobalKey animatedToKey = GlobalKey();
   final previousSize = ValueNotifier<Size?>(null);
   final transferrableKey = GlobalKey();
+  bool hasDisabled = false;
 
   /// kept so that drag handlers will know to remove it from the lsit
   late MobjID? owningList;
@@ -354,20 +418,37 @@ class TimerState extends State<Timer>
     });
     TimerData? prev;
     createEffect(() {
-      TimerData d = widget.mobj.value!;
-      _updateRunning(from: prev, to: d);
+      TimerData? d = widget.mobj.value;
+      if (d == null) {
+        disable();
+        return;
+      }
+      if ((prev?.isRunning ?? false) == d.isRunning) {
+        return;
+      }
+      if (d.isRunning) {
+        _runningAnimation.forward();
+        _ticker.start();
+      } else {
+        _runningAnimation.reverse();
+        _ticker.stop();
+      }
       prev = d;
     });
   }
 
   @override
   dispose() {
+    disable();
+    super.dispose();
+  }
+
+  void disable() {
+    if (hasDisabled) return;
+    hasDisabled = true;
     _runningAnimation.dispose();
     _ticker.dispose();
     previousSize.dispose();
-    // timers aren't deloaded so don't ref down I guess
-    // widget.mobj.dispose();
-    super.dispose();
   }
 
   void setTime(double nd) {
@@ -379,19 +460,6 @@ class TimerState extends State<Timer>
       currentTime = nd;
       // we don't set the timer off/change its state, enlivenTimer bindings do that
     });
-  }
-
-  void _updateRunning({required TimerData? from, required TimerData to}) {
-    if (from != null && from.isRunning == to.isRunning) {
-      return;
-    }
-    if (to.isRunning) {
-      _runningAnimation.forward();
-      _ticker.start();
-    } else {
-      _runningAnimation.reverse();
-      _ticker.stop();
-    }
   }
 
   @override
@@ -767,8 +835,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
 }
 
 class TimerScreen extends StatefulWidget {
-  final bool selectLastTimer;
-  const TimerScreen({super.key, this.selectLastTimer = true});
+  const TimerScreen({super.key});
 
   @override
   State<TimerScreen> createState() => TimerScreenState();
@@ -1156,9 +1223,13 @@ class TimerScreenState extends State<TimerScreen>
         Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType()))!;
 
     //buttons
+    final configButtonKey = GlobalKey();
+    final settingsIconKey = GlobalKey();
     var configButton = TimersButton(
+        key: configButtonKey,
         label: Hero(
-          tag: 'settings_icon',
+          tag: 'configButton',
+          flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
           child: AnimatedScale(
               scale: 1.0,
               duration: Duration(milliseconds: 280),
@@ -1169,10 +1240,22 @@ class TimerScreenState extends State<TimerScreen>
               )),
         ),
         onPressed: () {
+          // Get button position
+          final RenderBox? buttonBox =
+              configButtonKey.currentContext?.findRenderObject() as RenderBox?;
+          if (buttonBox == null) return;
+
+          final buttonPosition = buttonBox.localToGlobal(Offset.zero);
+          final buttonSize = buttonBox.size;
+          final buttonCenter = buttonPosition +
+              Offset(buttonSize.width / 2, buttonSize.height / 2);
+
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const SettingsScreen(),
+            CircularRevealRoute(
+              page: SettingsScreen(iconKey: settingsIconKey),
+              buttonCenter: buttonCenter,
+              iconKey: settingsIconKey,
             ),
           );
         });
@@ -1367,30 +1450,41 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
-    return Scaffold(
-      body: Focus(
-        autofocus: true, // Automatically request focus when built
-        onKeyEvent: (_, event) {
-          _handleKeyPress(event);
-          return KeyEventResult.handled; // Prevent event from propagating
-        },
-        child: EphemeralAnimationHost(
-            key: ephemeralAnimationLayer,
-            builder: (children, context) => Stack(children: children),
-            children: [
-              Column(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle(
+          systemNavigationBarContrastEnforced: false,
+          systemNavigationBarDividerColor:
+              theme.colorScheme.surfaceContainerLowest.withAlpha(0),
+          systemNavigationBarColor:
+              theme.colorScheme.surfaceContainerLowest.withAlpha(0),
+          systemNavigationBarIconBrightness: theme.brightness == Brightness.dark
+              ? Brightness.light
+              : Brightness.dark,
+        ),
+        child: Scaffold(
+          body: Focus(
+            autofocus: true, // Automatically request focus when built
+            onKeyEvent: (_, event) {
+              _handleKeyPress(event);
+              return KeyEventResult.handled; // Prevent event from propagating
+            },
+            child: EphemeralAnimationHost(
+                key: ephemeralAnimationLayer,
+                builder: (children, context) => Stack(children: children),
                 children: [
-                  timersWidget,
-                  Container(
-                    constraints: BoxConstraints(minWidth: double.infinity),
-                    // the lower part of the screen
-                    child: controls,
-                  )
-                ],
-              ),
-            ]),
-      ),
-    );
+                  Column(
+                    children: [
+                      timersWidget,
+                      Container(
+                        constraints: BoxConstraints(minWidth: double.infinity),
+                        // the lower part of the screen
+                        child: controls,
+                      )
+                    ],
+                  ),
+                ]),
+          ),
+        ));
   }
 
   void toggleStopPlay() {
@@ -1475,20 +1569,25 @@ class TimerScreenState extends State<TimerScreen>
       List<int> digits = List.from(mobj.peek()!.digits);
 
       if (digits.isEmpty) {
-        removeTimer(selectedTimer!);
+        deleteTimer(selectedTimer!);
       } else {
         digits.removeLast();
         if (digits.isEmpty) {
-          removeTimer(selectedTimer!);
+          deleteTimer(selectedTimer!);
         } else {
           mobj.value = mobj.peek()!.withChanges(digits: digits);
         }
       }
     } else {
       if (timers().isNotEmpty) {
-        removeTimer(timers().last);
+        deleteTimer(timers().last);
       }
     }
+  }
+
+  void deleteTimer(MobjID ki) {
+    removeTimer(ki);
+    Mobj.getAlreadyLoaded(ki, TimerDataType()).value = null;
   }
 
   void removeTimer(MobjID ki) {
@@ -1781,7 +1880,8 @@ class _NumpadTypeIndicator extends StatelessWidget {
 }
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final GlobalKey? iconKey;
+  const SettingsScreen({super.key, this.iconKey});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -1789,13 +1889,12 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late ScrollController _scrollController;
-  static const double _initialScrollOffset = 100.0;
 
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController(
-      initialScrollOffset: _initialScrollOffset,
+      initialScrollOffset: 0,
     );
   }
 
@@ -1819,6 +1918,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget trailing(Widget child) =>
         SizedBox(width: 32.0, child: Center(child: child));
 
+    final mq = MediaQuery.of(context);
+    final screenHeight = mq.size.height;
+    final titleSliverHeight = screenHeight / 2 - mq.viewPadding.top;
+    // final titleSliverHeight = screenHeight / 2 - max(mq.padding.top, mq.viewInsets.top);
+
     return Scaffold(
       body: CustomScrollView(
         controller: _scrollController,
@@ -1826,16 +1930,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // Collapsible app bar with title
           SliverAppBar(
             pinned: true,
-            expandedHeight: 500.0,
+            centerTitle: true,
+            expandedHeight: titleSliverHeight,
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale:
                   1.0, // Disable title scaling to prevent Hero discontinuity
               title: Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Hero(
-                    tag: 'settings_icon',
+                    tag: 'configButton',
                     child: AnimatedScale(
+                        key: widget.iconKey,
                         scale: 1.0,
                         duration: Duration(milliseconds: 280),
                         child: Icon(
@@ -1933,6 +2040,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               Divider(height: 1, indent: 16.0, endIndent: 16.0),
+              // Alarm sound setting
+              Watch((context) {
+                final selectedAudioMobj =
+                    Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
+                final selectedAudio = selectedAudioMobj.value ?? AudioInfo.defaultAlarm;
+                return ListTile(
+                  title: Text('Alarm sound', style: theme.textTheme.bodyLarge),
+                  subtitle: Text(
+                    selectedAudio.name,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  trailing: trailing(Icon(Icons.music_note, color: theme.colorScheme.primary)),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AlarmSoundPickerScreen(),
+                      ),
+                    );
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
               ListTile(
                 title: Text('About this app', style: theme.textTheme.bodyLarge),
                 trailing: trailing(
@@ -2066,6 +2197,146 @@ class AboutScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class AlarmSoundPickerScreen extends StatefulWidget {
+  const AlarmSoundPickerScreen({super.key});
+
+  @override
+  State<AlarmSoundPickerScreen> createState() => _AlarmSoundPickerScreenState();
+}
+
+class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
+  List<AudioInfo>? _alarmSounds;
+  List<AudioInfo>? _notificationSounds;
+  List<AudioInfo>? _ringtoneSounds;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSounds();
+  }
+
+  Future<void> _loadSounds() async {
+    try {
+      final alarms = await PlatformAudio.getPlatformAudio(PlatformAudioType.alarm);
+      final notifications = await PlatformAudio.getPlatformAudio(PlatformAudioType.notification);
+      final ringtones = await PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
+
+      setState(() {
+        _alarmSounds = alarms;
+        _notificationSounds = notifications;
+        _ringtoneSounds = ringtones;
+        _loading = false;
+      });
+    } catch (e) {
+      print('Error loading sounds: $e');
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selectedAudioMobj =
+        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
+    final selectedAudio = selectedAudioMobj.value ?? AudioInfo.defaultAlarm;
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            pinned: true,
+            expandedHeight: 120.0,
+            flexibleSpace: FlexibleSpaceBar(
+              expandedTitleScale: 1.0,
+              title: Text('Alarm sound',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w500,
+                  )),
+              titlePadding: EdgeInsetsDirectional.only(
+                start: 72.0,
+                bottom: 16.0,
+              ),
+            ),
+            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            scrolledUnderElevation: 0,
+          ),
+          if (_loading)
+            SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else
+            SliverList(
+              delegate: SliverChildListDelegate([
+                if (_alarmSounds != null && _alarmSounds!.isNotEmpty) ...[
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text('Alarms',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        )),
+                  ),
+                  ..._alarmSounds!.map((audio) => _buildSoundTile(
+                      audio, selectedAudio, selectedAudioMobj, theme)),
+                ],
+                if (_notificationSounds != null &&
+                    _notificationSounds!.isNotEmpty) ...[
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text('Notifications',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        )),
+                  ),
+                  ..._notificationSounds!.map((audio) => _buildSoundTile(
+                      audio, selectedAudio, selectedAudioMobj, theme)),
+                ],
+                if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty) ...[
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text('Ringtones',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        )),
+                  ),
+                  ..._ringtoneSounds!.map((audio) => _buildSoundTile(
+                      audio, selectedAudio, selectedAudioMobj, theme)),
+                ],
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSoundTile(AudioInfo audio, AudioInfo selectedAudio,
+      Mobj<AudioInfo> selectedAudioMobj, ThemeData theme) {
+    final isSelected = audio.uri == selectedAudio.uri;
+
+    return ListTile(
+      title: Text(audio.name),
+      trailing: isSelected
+          ? Icon(Icons.check, color: theme.colorScheme.primary)
+          : null,
+      selected: isSelected,
+      onTap: () async {
+        selectedAudioMobj.value = audio;
+        // Preview the sound
+        try {
+          await PlatformAudio.playAudio(audio);
+        } catch (e) {
+          print('Error playing audio: $e');
+        }
+      },
     );
   }
 }

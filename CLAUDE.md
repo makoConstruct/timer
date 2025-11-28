@@ -8,6 +8,10 @@ If the user is ever confused or ignorant about something that they might want to
 
 The user doesn't have complete confidence in you, try to substantiate your claims with quotes from sources where this might be necessary. The source code of the libraries in package cache is a useful source of information.
 
+## Style
+
+Don't comment excessively.
+
 ## Project Overview
 
 Mako's Timer is an ergonomic Flutter timer app that optimizes the user experience through visual compactness, color-coding, and gesture-based interactions. The app uses a custom reactive persistence system called Mobj that combines Signals for reactivity with Drift (SQLite) for persistence.

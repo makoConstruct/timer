@@ -230,8 +230,6 @@ class Mobj<T> extends Signal<T?> {
   /// only actually writes back if the new value has a newer timestamp than the value in the db, this is important for situations where more than one process is doing writes and we want to make sure they all end up agreeing.
   Future<void> writeBack() async {
     final v = peek();
-    print(
-        "writeBack: id=${_id}, value=${v}, _valueEncoded=${_valueEncoded}, _lastTimestamp=${_lastTimestamp}, _lastSequenceNumber=${_lastSequenceNumber}");
     if (v != null) {
       _valueEncoded = jsonEncode(_type.toJson(v));
       final nextTimestamp = DateTime.now();
@@ -244,10 +242,10 @@ class Mobj<T> extends Signal<T?> {
       _lastTimestamp = nextTimestamp;
       // compares with the current previous value lexicographically before finalizing the insert
       await MobjRegistry.db.insertIfMoreRecent(
-        _id,
-        _valueEncoded,
-        _lastTimestamp,
-        _lastSequenceNumber,
+        id: _id,
+        timestamp: _lastTimestamp,
+        sequenceNumber: _lastSequenceNumber,
+        value: _valueEncoded,
       );
     } else {
       MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
@@ -304,8 +302,6 @@ class Mobj<T> extends Signal<T?> {
           _currentlyTakingFromDb = false;
         }
       } else {
-        print(
-            "readBack: id=${_id}, kv.timestamp=${kv.timestamp}, _lastTimestamp=${_lastTimestamp}, kv.sequenceNumber=${kv.sequenceNumber}, _lastSequenceNumber=${_lastSequenceNumber}, kv.value=${kv.value}, _valueEncoded=${_valueEncoded}");
         if (kv.timestamp.isAfter(_lastTimestamp) ||
             (kv.timestamp.isAtSameMomentAs(_lastTimestamp) &&
                 kv.sequenceNumber > _lastSequenceNumber) ||
@@ -399,7 +395,11 @@ class Mobj<T> extends Signal<T?> {
         final T iv = initial();
         final valueEncoding = jsonEncode(type.toJson(iv));
         final ret = MobjRegistry.db
-            .insertIfNotExistsAndReturn(id, valueEncoding, DateTime.now(), 0)
+            .insertIfNotExistsAndReturn(
+                id: id,
+                value: valueEncoding,
+                timestamp: DateTime.now(),
+                sequenceNumber: 0)
             .then(
           (v) {
             MobjRegistry._loadingMobjs.remove(id);
