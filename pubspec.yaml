@@ -98,6 +98,7 @@ flutter:
     # - assets/sounds/forceField_002_kenney.ogg
     - assets/sounds/jingles_STEEL15.ogg
     - assets/sounds/jingles_STEEL16.ogg
+    - assets/sounds/june_russel_mako_timer_e-piano_1.ogg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

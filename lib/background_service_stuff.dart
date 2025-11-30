@@ -149,7 +149,9 @@ class PersistentNotificationTask extends TaskHandler {
         // trigger timer
         FlutterForegroundTask.sendDataToMain(
             {'op': 'timerTriggered', 'timerId': timer.id});
-        jukeBox.playJarringSound();
+        Mobj.fetch(selectedAudioID, type: AudioInfoType()).then((audio) {
+          jukeBox.playAudio(audio.value!);
+        });
         timer.value =
             timer.value!.withChanges(runningState: TimerData.completed);
       });
@@ -240,6 +242,7 @@ class PersistentNotificationTask extends TaskHandler {
         };
         final futureTimerList =
             Mobj.fetch(timerListID, type: ListType(const StringType()));
+
         futureTimerList.then((timerList) {
           if (cancelled) {
             return;

@@ -31,7 +31,7 @@ class JukeBox {
       AssetSource('sounds/jingles_STEEL16.ogg');
   AudioPlayer? _audioPlayer; // Only used on Linux
 
-  static Future<JukeBox> create() async {
+  static JukeBox create() {
     final jukebox = JukeBox();
     if (platformIsDesktop()) {
       jukebox._audioPlayer = AudioPlayer();
@@ -50,7 +50,7 @@ class JukeBox {
       Source source;
       if (a.uri!.startsWith('asset://')) {
         // Flutter asset
-        final assetPath = a.uri!.replaceFirst('asset://', '');
+        final assetPath = a.uri!.replaceFirst('asset://assets/', '');
         source = AssetSource(assetPath);
       } else if (a.uri!.startsWith('file://')) {
         // Local file
@@ -64,6 +64,14 @@ class JukeBox {
     } else {
       // Use platform audio on other platforms
       await PlatformAudio.playAudio(a);
+    }
+  }
+
+  Future<void> pauseAudio() async {
+    if (platformIsDesktop()) {
+      await _audioPlayer!.pause();
+    } else {
+      await PlatformAudio.pauseAudio();
     }
   }
 
@@ -438,7 +446,10 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
 }
 
 Offset widgetCenter(GlobalKey k) {
-  final cpro = k.currentContext!.findRenderObject() as RenderBox;
+  final cpro = k.currentContext?.findRenderObject() as RenderBox?;
+  if (cpro == null) {
+    return Offset.zero;
+  }
   return cpro.localToGlobal(Offset.zero) + sizeToOffset(cpro.size / 2);
 }
 
@@ -780,8 +791,9 @@ const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9];
 const List<int> datetimeMaxima = [60, 60, 24, 365];
 
 const appName = "mako timer";
-const foregroundNotificationText =
-    "this foreground task is ready to continue running any active timers in case the app closes. It will close with the app if no timers were running.";
+
+/// I'm not sure users really want an explanation. For an explanation to be present suggests that the user ought to read it, which is an unnecessary imposition.
+const foregroundNotificationText = "";
 
 int padLevelFor(int digitLength) {
   return datetimeSectionOffsets.indexWhere((s) => s >= digitLength);
@@ -1307,13 +1319,13 @@ class CircularRevealClipper extends CustomClipper<Path> {
 class CircularRevealRoute<T> extends PageRoute<T>
     with MaterialRouteTransitionMixin<T> {
   final Widget page;
-  final Offset buttonCenter;
-  final GlobalKey iconKey;
+  final Offset? buttonCenter;
+  final GlobalKey? iconKey;
 
   CircularRevealRoute({
     required this.page,
-    required this.buttonCenter,
-    required this.iconKey,
+    this.buttonCenter,
+    this.iconKey,
   });
 
   @override
@@ -1345,14 +1357,13 @@ class CircularRevealRoute<T> extends PageRoute<T>
       builder: (context, child_) {
         final corners = getCachedCornerRadius();
         double scale;
-        if (secondaryAnimation.value == 0.0) {
-          scale = 1.0;
-        } else if (platformIsDesktop()) {
+        if (platformIsDesktop()) {
           scale = 1.0;
         } else {
           scale =
               1.0 - Curves.easeOut.transform(secondaryAnimation.value) * 0.13;
         }
+
         return Transform.scale(
           scale: scale,
           child: ClipRRect(
@@ -1364,8 +1375,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
             ),
             child: _CircularRevealTransition(
               animation: animation,
-              buttonCenter: buttonCenter,
-              iconKey: iconKey,
+              transitionOrigin: buttonCenter ?? Offset.zero,
               child: child,
             ),
           ),
@@ -1401,7 +1411,7 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
           scale = 1.0;
         } else {
           scale =
-              1.0 - Curves.easeOut.transform(secondaryAnimation.value) * 0.13;
+              1.0 - Curves.easeIn.transform(secondaryAnimation.value) * 0.13;
         }
         return Transform.scale(
           scale: scale,
@@ -1423,14 +1433,13 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
 
 class _CircularRevealTransition extends StatefulWidget {
   final Animation<double> animation;
-  final Offset buttonCenter;
-  final GlobalKey iconKey;
+  final Offset transitionOrigin;
+
   final Widget child;
 
   const _CircularRevealTransition({
     required this.animation,
-    required this.buttonCenter,
-    required this.iconKey,
+    required this.transitionOrigin,
     required this.child,
   });
 
@@ -1440,38 +1449,8 @@ class _CircularRevealTransition extends StatefulWidget {
 }
 
 class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
-  Offset? _iconFinalOffset;
-  bool _measured = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _measureIconPosition();
-    });
-  }
-
-  void _measureIconPosition() {
-    final RenderBox? iconBox =
-        widget.iconKey.currentContext?.findRenderObject() as RenderBox?;
-    if (iconBox != null) {
-      final iconPosition = iconBox.localToGlobal(Offset.zero);
-      final iconSize = iconBox.size;
-      setState(() {
-        _iconFinalOffset =
-            iconPosition + Offset(iconSize.width / 2, iconSize.height / 2);
-        _measured = true;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (!_measured || _iconFinalOffset == null) {
-      // Render without animation on first frame to allow measuring the destination of the icon
-      return widget.child;
-    }
-
     final theme = Theme.of(context);
     final Color backgroundColor = theme.colorScheme.surfaceContainerHigh;
     final Color fadedOfBackgroundColor = backgroundColor.withAlpha(117);
@@ -1485,13 +1464,14 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
             animation: widget.animation,
             builder: (context, child) {
               final screenSize = MediaQuery.of(context).size;
-              final progress = Curves.easeInOutCubic.transform(
-                unlerpUnit(0.0, 0.8, widget.animation.value),
-              );
+              final progress =
+                  // Curves.easeInOutCubic.transform(
+                  unlerpUnit(0.0, 0.8, widget.animation.value);
+              // );
 
               final c = Offset(
-                (widget.buttonCenter.dx / screenSize.width - 0.5) * 2.0,
-                (widget.buttonCenter.dy / screenSize.height - 0.5) * 2.0,
+                (widget.transitionOrigin.dx / screenSize.width - 0.5) * 2.0,
+                (widget.transitionOrigin.dy / screenSize.height - 0.5) * 2.0,
               );
 
               return IgnorePointer(
@@ -1523,8 +1503,8 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
 
             return ShaderMask(
               shaderCallback: (Rect bounds) {
-                final center = widget.buttonCenter;
-                final fuzzyEdgeWidth = 40.0; // Width of the gradient edge
+                final center = widget.transitionOrigin;
+                final fuzzyEdgeWidth = 20.0; // Width of the gradient edge
                 final maxRadius =
                     CircularRevealClipper.calcMaxRadius(bounds.size, center) +
                         fuzzyEdgeWidth;

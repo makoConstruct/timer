@@ -180,7 +180,8 @@ void enlivenTimer(Mobj<TimerData> mobj, JukeBox jukeBox) {
                 .inMilliseconds
                 .ceil()), () {
       completionTimer = null;
-      jukeBox.playJarringSound();
+      jukeBox.playAudio(
+          Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType()).value!);
       mobj.value = mobj.value!.withChanges(
         runningState: TimerData.completed,
         // isGoingOff: true,
@@ -233,7 +234,7 @@ ScreenRadius getCachedCornerRadius() =>
     _cachedCornerRadius ?? defaultCornerRadius;
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
-  late Future<JukeBox> jukeBox;
+  late JukeBox jukeBox;
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
   }
@@ -249,21 +250,19 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
-    jukeBox.then((jukeBox) {
-      void enlivenAllTimersInList(Mobj<List<MobjID>> listMobj) {
-        for (final tid in listMobj.peek() ?? []) {
-          Mobj.fetch(tid, type: const TimerDataType())
-              .then((mobj) => enlivenTimer(mobj, jukeBox));
-        }
+    void enlivenAllTimersInList(Mobj<List<MobjID>> listMobj) {
+      for (final tid in listMobj.peek() ?? []) {
+        Mobj.fetch(tid, type: const TimerDataType())
+            .then((mobj) => enlivenTimer(mobj, jukeBox));
       }
+    }
 
-      final timerListMobj = Mobj<List<MobjID>>.getAlreadyLoaded(
-          timerListID, ListType(const StringType()));
-      final transientTimerListMobj =
-          Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
-      enlivenAllTimersInList(timerListMobj);
-      enlivenAllTimersInList(transientTimerListMobj);
-    });
+    final timerListMobj = Mobj<List<MobjID>>.getAlreadyLoaded(
+        timerListID, ListType(const StringType()));
+    final transientTimerListMobj =
+        Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
+    enlivenAllTimersInList(timerListMobj);
+    enlivenAllTimersInList(transientTimerListMobj);
   }
 
   @override
@@ -302,25 +301,25 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
       );
     }
 
-    return MaterialApp(
-      title: 'timer',
-      theme: makeTheme(Brightness.light),
-      darkTheme: makeTheme(Brightness.dark),
-      onGenerateRoute: (settings) {
-        if (settings.name == '/') {
-          return ScreenCornerClippedRoute(
-            builder: (context) => MultiProvider(
-              providers: [
-                Provider<Thumbspan>(
-                    create: (context) => Thumbspan(lpixPerThumbspan(context))),
-                Provider<Future<JukeBox>>(create: (_) => jukeBox),
-              ],
-              child: TimerScreen(),
-            ),
-          );
-        }
-        return null;
-      },
+    return MultiProvider(
+      providers: [
+        Provider<Thumbspan>(
+            create: (context) => Thumbspan(lpixPerThumbspan(context))),
+        Provider<JukeBox>(create: (_) => jukeBox),
+      ],
+      child: MaterialApp(
+        title: 'timer',
+        theme: makeTheme(Brightness.light),
+        darkTheme: makeTheme(Brightness.dark),
+        onGenerateRoute: (settings) {
+          if (settings.name == '/') {
+            return CircularRevealRoute(
+              page: TimerScreen(),
+            );
+          }
+          return null;
+        },
+      ),
     );
   }
 }
@@ -1224,9 +1223,9 @@ class TimerScreenState extends State<TimerScreen>
 
     //buttons
     final configButtonKey = GlobalKey();
-    final settingsIconKey = GlobalKey();
+    final hereConfigButtonKey = GlobalKey();
     var configButton = TimersButton(
-        key: configButtonKey,
+        key: hereConfigButtonKey,
         label: Hero(
           tag: 'configButton',
           flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
@@ -1241,21 +1240,13 @@ class TimerScreenState extends State<TimerScreen>
         ),
         onPressed: () {
           // Get button position
-          final RenderBox? buttonBox =
-              configButtonKey.currentContext?.findRenderObject() as RenderBox?;
-          if (buttonBox == null) return;
-
-          final buttonPosition = buttonBox.localToGlobal(Offset.zero);
-          final buttonSize = buttonBox.size;
-          final buttonCenter = buttonPosition +
-              Offset(buttonSize.width / 2, buttonSize.height / 2);
 
           Navigator.push(
             context,
             CircularRevealRoute(
-              page: SettingsScreen(iconKey: settingsIconKey),
-              buttonCenter: buttonCenter,
-              iconKey: settingsIconKey,
+              page: SettingsScreen(iconKey: configButtonKey),
+              buttonCenter: widgetCenter(hereConfigButtonKey),
+              iconKey: configButtonKey,
             ),
           );
         });
@@ -1541,9 +1532,7 @@ class TimerScreenState extends State<TimerScreen>
         isGoingOff: false,
       ),
     );
-    Provider.of<Future<JukeBox>>(context, listen: false).then((jukeBox) {
-      enlivenTimer(nt, jukeBox);
-    });
+    enlivenTimer(nt, Provider.of<JukeBox>(context, listen: false));
 
     timerListMobj.value = timers().toList()..add(ntid);
     if (selecting) {
@@ -2039,62 +2028,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
-              Divider(height: 1, indent: 16.0, endIndent: 16.0),
               // Alarm sound setting
-              Watch((context) {
-                final selectedAudioMobj =
-                    Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
-                final selectedAudio = selectedAudioMobj.value ?? AudioInfo.defaultAlarm;
+              Builder(builder: (context) {
+                final GlobalKey iconKey = GlobalKey();
+                final hereIconKey = GlobalKey();
                 return ListTile(
                   title: Text('Alarm sound', style: theme.textTheme.bodyLarge),
-                  subtitle: Text(
-                    selectedAudio.name,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  trailing: trailing(Icon(Icons.music_note, color: theme.colorScheme.primary)),
+                  subtitle: Watch((context) {
+                    return Text(
+                      Mobj.getAlreadyLoaded(
+                              selectedAudioID, const AudioInfoType())
+                          .value!
+                          .name,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    );
+                  }),
+                  trailing: trailing(Hero(
+                    tag: 'alarm-sound-icon',
+                    child: Icon(Icons.music_note,
+                        key: hereIconKey, color: theme.colorScheme.primary),
+                  )),
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => const AlarmSoundPickerScreen(),
+                      CircularRevealRoute(
+                        page: AlarmSoundPickerScreen(iconKey: iconKey),
+                        buttonCenter: widgetCenter(hereIconKey),
+                        iconKey: iconKey,
                       ),
                     );
                   },
                   contentPadding: listItemPadding,
                 );
               }),
-              ListTile(
-                title: Text('About this app', style: theme.textTheme.bodyLarge),
-                trailing: trailing(
-                    Icon(Icons.info_outline, color: theme.colorScheme.primary)),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const AboutScreen(),
+              Builder(builder: (context) {
+                // Need a Builder to get the correct context for finding the icon's position
+                final GlobalKey iconKey = GlobalKey();
+                final hereIconKey = GlobalKey();
+                return ListTile(
+                  title:
+                      Text('About this app', style: theme.textTheme.bodyLarge),
+                  trailing: trailing(Hero(
+                    tag: 'about-icon',
+                    child: Icon(Icons.info_outline,
+                        key: hereIconKey, color: theme.colorScheme.primary),
+                  )),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      CircularRevealRoute(
+                        page: AboutScreen(iconKey: iconKey),
+                        buttonCenter: widgetCenter(hereIconKey),
+                        iconKey: iconKey,
+                      ),
+                    );
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
+              Builder(builder: (context) {
+                final GlobalKey iconKey = GlobalKey();
+                final hereIconKey = GlobalKey();
+                return ListTile(
+                  title: Text('Thank the author',
+                      style: theme.textTheme.bodyLarge),
+                  trailing: trailing(Hero(
+                    tag: 'thank-author-icon',
+                    child: Icon(
+                      Icons.favorite_rounded,
+                      key: hereIconKey,
+                      color: theme.colorScheme.primary,
                     ),
-                  );
-                },
-                contentPadding: listItemPadding,
-              ),
-              ListTile(
-                title:
-                    Text('Thank the author', style: theme.textTheme.bodyLarge),
-                trailing: trailing(Icon(
-                  Icons.favorite_rounded,
-                  color: theme.colorScheme.primary,
-                )),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ThankAuthorScreen(),
-                    ),
-                  );
-                },
-                contentPadding: listItemPadding,
-              ),
+                  )),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      CircularRevealRoute(
+                        page: ThankAuthorScreen(iconKey: iconKey),
+                        buttonCenter: widgetCenter(hereIconKey),
+                        iconKey: iconKey,
+                      ),
+                    );
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
               ...crap,
             ]),
           ),
@@ -2105,7 +2124,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class ThankAuthorScreen extends StatelessWidget {
-  const ThankAuthorScreen({super.key});
+  const ThankAuthorScreen({super.key, this.iconKey});
+  final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
@@ -2119,11 +2139,24 @@ class ThankAuthorScreen extends StatelessWidget {
             expandedHeight: 120.0,
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
-              title: Text('Thank the author',
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.w500,
-                  )),
+              title: Row(
+                children: [
+                  Hero(
+                    tag: 'thank-author-icon',
+                    child: Icon(
+                      Icons.favorite_rounded,
+                      color: theme.colorScheme.primary,
+                      size: 32,
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Text('Thank the author',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      )),
+                ],
+              ),
               titlePadding: EdgeInsetsDirectional.only(
                 start: 72.0,
                 bottom: 16.0,
@@ -2154,7 +2187,8 @@ class ThankAuthorScreen extends StatelessWidget {
 }
 
 class AboutScreen extends StatelessWidget {
-  const AboutScreen({super.key});
+  const AboutScreen({super.key, this.iconKey});
+  final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
@@ -2168,11 +2202,24 @@ class AboutScreen extends StatelessWidget {
             expandedHeight: 120.0,
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
-              title: Text("About Mako's Timer",
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.w500,
-                  )),
+              title: Row(
+                children: [
+                  Hero(
+                    tag: 'about-icon',
+                    child: Icon(
+                      Icons.info_outline,
+                      color: theme.colorScheme.primary,
+                      size: 32,
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Text("About Mako's Timer",
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      )),
+                ],
+              ),
               titlePadding: EdgeInsetsDirectional.only(
                 start: 72.0,
                 bottom: 16.0,
@@ -2202,16 +2249,20 @@ class AboutScreen extends StatelessWidget {
 }
 
 class AlarmSoundPickerScreen extends StatefulWidget {
-  const AlarmSoundPickerScreen({super.key});
+  const AlarmSoundPickerScreen({super.key, this.iconKey});
+  final GlobalKey? iconKey;
 
   @override
   State<AlarmSoundPickerScreen> createState() => _AlarmSoundPickerScreenState();
 }
 
-class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
+class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
+    with SignalsMixin {
   List<AudioInfo>? _alarmSounds;
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
+  List<AudioInfo>? _assetSounds;
+  Mobj<List<AudioInfo>>? _fileSounds;
   bool _loading = true;
 
   @override
@@ -2222,16 +2273,36 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
 
   Future<void> _loadSounds() async {
     try {
-      final alarms = await PlatformAudio.getPlatformAudio(PlatformAudioType.alarm);
-      final notifications = await PlatformAudio.getPlatformAudio(PlatformAudioType.notification);
-      final ringtones = await PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
-
-      setState(() {
-        _alarmSounds = alarms;
-        _notificationSounds = notifications;
-        _ringtoneSounds = ringtones;
-        _loading = false;
-      });
+      if (platformIsDesktop()) {
+        final assetSounds = await PlatformAudio.getAssetSounds();
+        setState(() {
+          _assetSounds = assetSounds;
+          _loading = false;
+        });
+        return;
+      } else {
+        final alarmsFuture =
+            PlatformAudio.getPlatformAudio(PlatformAudioType.alarm);
+        final notificationsFuture =
+            PlatformAudio.getPlatformAudio(PlatformAudioType.notification);
+        final ringtonesFuture =
+            PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
+        final assetSoundsFuture = PlatformAudio.getAssetSounds();
+        final [alarms, notifications, ringtones, assetSounds] =
+            await Future.wait([
+          alarmsFuture,
+          notificationsFuture,
+          ringtonesFuture,
+          assetSoundsFuture
+        ]);
+        setState(() {
+          _alarmSounds = alarms;
+          _notificationSounds = notifications;
+          _ringtoneSounds = ringtones;
+          _assetSounds = assetSounds;
+          _loading = false;
+        });
+      }
     } catch (e) {
       print('Error loading sounds: $e');
       setState(() {
@@ -2246,6 +2317,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
     final selectedAudioMobj =
         Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
     final selectedAudio = selectedAudioMobj.value ?? AudioInfo.defaultAlarm;
+    final jukebox = Provider.of<JukeBox>(context, listen: false);
 
     return Scaffold(
       body: CustomScrollView(
@@ -2255,11 +2327,24 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
             expandedHeight: 120.0,
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
-              title: Text('Alarm sound',
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.w500,
-                  )),
+              title: Row(
+                children: [
+                  Hero(
+                    tag: 'alarm-sound-icon',
+                    child: Icon(
+                      Icons.music_note,
+                      color: theme.colorScheme.primary,
+                      size: 32,
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Text('Alarm sound',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      )),
+                ],
+              ),
               titlePadding: EdgeInsetsDirectional.only(
                 start: 72.0,
                 bottom: 16.0,
@@ -2277,6 +2362,16 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
           else
             SliverList(
               delegate: SliverChildListDelegate([
+                if (_assetSounds != null && _assetSounds!.isNotEmpty) ...[
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text('Mako Timer Sounds',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        )),
+                  ),
+                  ..._assetSounds!.map((audio) => SoundTile(audio: audio)),
+                ],
                 if (_alarmSounds != null && _alarmSounds!.isNotEmpty) ...[
                   Padding(
                     padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -2285,8 +2380,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
                           color: theme.colorScheme.primary,
                         )),
                   ),
-                  ..._alarmSounds!.map((audio) => _buildSoundTile(
-                      audio, selectedAudio, selectedAudioMobj, theme)),
+                  ..._alarmSounds!.map((audio) => SoundTile(audio: audio)),
                 ],
                 if (_notificationSounds != null &&
                     _notificationSounds!.isNotEmpty) ...[
@@ -2297,8 +2391,8 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
                           color: theme.colorScheme.primary,
                         )),
                   ),
-                  ..._notificationSounds!.map((audio) => _buildSoundTile(
-                      audio, selectedAudio, selectedAudioMobj, theme)),
+                  ..._notificationSounds!
+                      .map((audio) => SoundTile(audio: audio)),
                 ],
                 if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty) ...[
                   Padding(
@@ -2308,8 +2402,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
                           color: theme.colorScheme.primary,
                         )),
                   ),
-                  ..._ringtoneSounds!.map((audio) => _buildSoundTile(
-                      audio, selectedAudio, selectedAudioMobj, theme)),
+                  ..._ringtoneSounds!.map((audio) => SoundTile(audio: audio)),
                 ],
               ]),
             ),
@@ -2317,24 +2410,55 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen> {
       ),
     );
   }
+}
 
-  Widget _buildSoundTile(AudioInfo audio, AudioInfo selectedAudio,
-      Mobj<AudioInfo> selectedAudioMobj, ThemeData theme) {
-    final isSelected = audio.uri == selectedAudio.uri;
+class SoundTile extends StatefulWidget {
+  const SoundTile({
+    super.key,
+    required this.audio,
+  });
+
+  final AudioInfo audio;
+
+  @override
+  State<SoundTile> createState() => _SoundTileState();
+}
+
+class _SoundTileState extends State<SoundTile> with SignalsMixin {
+  AudioInfo? _currentlyPlayingSound;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selectedAudioMobj =
+        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
+    final jukebox = Provider.of<JukeBox>(context, listen: false);
 
     return ListTile(
-      title: Text(audio.name),
-      trailing: isSelected
-          ? Icon(Icons.check, color: theme.colorScheme.primary)
-          : null,
-      selected: isSelected,
+      title: Text(widget.audio.name),
+      trailing: Watch((context) =>
+          widget.audio.uri == selectedAudioMobj.value!.uri
+              ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
+              : SizedBox.shrink()),
       onTap: () async {
-        selectedAudioMobj.value = audio;
-        // Preview the sound
-        try {
-          await PlatformAudio.playAudio(audio);
-        } catch (e) {
-          print('Error playing audio: $e');
+        selectedAudioMobj.value = widget.audio;
+        jukebox.pauseAudio();
+        if (_currentlyPlayingSound == widget.audio) {
+          // if you click the currently playing one a second time, it just stops it
+          _currentlyPlayingSound = null;
+        } else {
+          _currentlyPlayingSound = widget.audio;
+          try {
+            await (jukebox.playAudio(widget.audio).then((_) {
+              if (mounted) {
+                setState(() {
+                  _currentlyPlayingSound = null;
+                });
+              }
+            }));
+          } catch (e) {
+            print('Error playing audio: $e');
+          }
         }
       },
     );
