@@ -365,6 +365,7 @@ class TimerState extends State<Timer>
   // Offset? comingHomeFrom;
 
   set selected(bool v) {
+    if (p.selected == v) return;
     widget.mobj.value = p.withChanges(selected: v);
   }
 
@@ -471,15 +472,9 @@ class TimerState extends State<Timer>
     final dd = durationToSeconds(
         digitsToDuration(watchSignal(context, widget.mobj)!.digits));
     // sometimes the background thread completes the timer, the currentTime wont be updated, so in that case it should be ignored.
-    double pieCompletion = d.isCompleted
-        ? 0
-        : d.runningState == TimerData.paused
-            ? (d.ranTime.inMilliseconds.toDouble() / 1000) / dd
-            : dd == 0
-                ? 0
-                : clampUnit(currentTime / dd);
+    double pieCompletion = d.transpired / dd;
     final durationDigits = d.digits;
-    final timeDigits = durationToDigits(currentTime,
+    final timeDigits = durationToDigits(d.transpired,
         padLevel: padLevelFor(durationDigits.length));
 
     List<int> withDigitsReplacedWith(List<int> v, int d) =>
@@ -893,20 +888,16 @@ final List<double> radialActivatorPositions = [
   -pi / 2,
   -pi,
 ];
+void pausePlaySelected(TimerScreenState tss) {
+  tss.pausePlaySelected();
+  HapticFeedback.lightImpact();
+}
+
 final List<Function(TimerScreenState)> radialActivatorFunctions = [
-  // (TimerScreenState tss) {
-  //   tss.numeralPressed([0]);
-  //   tss.pausePlaySelected();
-  //   HapticFeedback.lightImpact();
-  // },
-  (TimerScreenState tss) {
-    tss.pausePlaySelected();
-    HapticFeedback.lightImpact();
-  },
-  (TimerScreenState tss) {
+  pausePlaySelected,
+  (tss) {
     tss.numeralPressed([0, 0]);
-    tss.pausePlaySelected();
-    HapticFeedback.lightImpact();
+    pausePlaySelected(tss);
   },
 ];
 
@@ -1868,6 +1859,12 @@ class _NumpadTypeIndicator extends StatelessWidget {
   }
 }
 
+double halfScreenHeight(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  final screenHeight = mq.size.height;
+  return screenHeight / 2 - mq.viewPadding.top;
+}
+
 class SettingsScreen extends StatefulWidget {
   final GlobalKey? iconKey;
   const SettingsScreen({super.key, this.iconKey});
@@ -1899,18 +1896,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final listItemPadding =
         const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
-    final crap = List.generate(
-        10,
-        (index) => ListTile(
-            title: Text('Item $index'), contentPadding: listItemPadding));
 
     Widget trailing(Widget child) =>
         SizedBox(width: 32.0, child: Center(child: child));
-
-    final mq = MediaQuery.of(context);
-    final screenHeight = mq.size.height;
-    final titleSliverHeight = screenHeight / 2 - mq.viewPadding.top;
-    // final titleSliverHeight = screenHeight / 2 - max(mq.padding.top, mq.viewInsets.top);
 
     return Scaffold(
       body: CustomScrollView(
@@ -1920,7 +1908,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SliverAppBar(
             pinned: true,
             centerTitle: true,
-            expandedHeight: titleSliverHeight,
+            expandedHeight: halfScreenHeight(context),
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale:
                   1.0, // Disable title scaling to prevent Hero discontinuity
@@ -2046,6 +2034,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }),
                   trailing: trailing(Hero(
                     tag: 'alarm-sound-icon',
+                    flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
                     child: Icon(Icons.music_note,
                         key: hereIconKey, color: theme.colorScheme.primary),
                   )),
@@ -2071,6 +2060,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Text('About this app', style: theme.textTheme.bodyLarge),
                   trailing: trailing(Hero(
                     tag: 'about-icon',
+                    flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
                     child: Icon(Icons.info_outline,
                         key: hereIconKey, color: theme.colorScheme.primary),
                   )),
@@ -2095,6 +2085,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: theme.textTheme.bodyLarge),
                   trailing: trailing(Hero(
                     tag: 'thank-author-icon',
+                    flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
                     child: Icon(
                       Icons.favorite_rounded,
                       key: hereIconKey,
@@ -2114,7 +2105,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
-              ...crap,
             ]),
           ),
         ],
@@ -2136,7 +2126,7 @@ class ThankAuthorScreen extends StatelessWidget {
         slivers: [
           SliverAppBar(
             pinned: true,
-            expandedHeight: 120.0,
+            expandedHeight: halfScreenHeight(context),
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
               title: Row(
@@ -2167,17 +2157,27 @@ class ThankAuthorScreen extends StatelessWidget {
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
-          SliverPadding(
-            padding: EdgeInsets.all(24.0),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                Text(
-                  'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
-                  style: theme.textTheme.bodyLarge,
-                ),
-                SizedBox(height: 24),
-                // Add more content here as needed
-              ]),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  SizedBox(height: 24),
+                  ...List.generate(
+                    13,
+                    (index) => ListTile(
+                      title: Text('Test item ${index + 1}'),
+                      subtitle: Text('This is test item number ${index + 1}'),
+                      trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -2199,7 +2199,7 @@ class AboutScreen extends StatelessWidget {
         slivers: [
           SliverAppBar(
             pinned: true,
-            expandedHeight: 120.0,
+            expandedHeight: halfScreenHeight(context),
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
               title: Row(
@@ -2324,7 +2324,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         slivers: [
           SliverAppBar(
             pinned: true,
-            expandedHeight: 120.0,
+            expandedHeight: halfScreenHeight(context),
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale: 1.0,
               title: Row(

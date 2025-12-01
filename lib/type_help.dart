@@ -35,6 +35,13 @@ class TimerData {
 
   Duration get duration => digitsToDuration(digits);
 
+  /// in seconds
+  double get transpired => runningState == TimerData.paused
+      ? durationToSeconds(ranTime)
+      : runningState == TimerData.running
+          ? durationToSeconds(DateTime.now().difference(startTime))
+          : 0;
+
   TimerData({
     DateTime? startTime,
     this.runningState = paused,

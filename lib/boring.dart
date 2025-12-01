@@ -12,6 +12,9 @@ import 'package:hsluv/hsluvcolor.dart';
 
 // import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:makos_timer/database.dart';
+import 'package:makos_timer/mobj.dart';
+import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:screen_corner_radius/screen_corner_radius.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
@@ -88,15 +91,79 @@ class JukeBox {
   }
 
   static void jarringSound(BuildContext context) {
-    Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
-      jb.playJarringSound();
-    });
+    Provider.of<JukeBox>(context, listen: false).playJarringSound();
   }
 
   void dispose() {
     _audioPlayer?.dispose();
   }
 }
+
+/// information regarding a timer that we're currently monitoring/running
+class TrackedTimer {
+  final Mobj<TimerData> mobj;
+  Timer? secondCountdownIndicatorTimer;
+  Timer? triggerTimer;
+  Function()? mobjUnsubscribe;
+
+  TrackedTimer(this.mobj);
+
+  double secondsRemaining() {
+    return max(
+        (mobj.value!.duration -
+                    DateTime.now().difference(mobj.value!.startTime))
+                .inMicroseconds
+                .toDouble() /
+            1000000,
+        0);
+  }
+
+  void endTrackedTimer() {
+    mobjUnsubscribe?.call();
+    triggerTimer?.cancel();
+    triggerTimer = null;
+    secondCountdownIndicatorTimer?.cancel();
+    secondCountdownIndicatorTimer = null;
+  }
+}
+
+// class TimerTracking {
+//   late JukeBox jukeBox;
+//   Map<MobjID<TimerData>, TrackedTimer> trackedTimers = {};
+//   void onTimerDataChanged(TrackedTimer tracked) {
+//     final timer = tracked.mobj;
+//     final ntp = timer.peek()!;
+//     if (ntp.isRunning) {
+//       tracked.triggerTimer?.cancel();
+//       tracked.triggerTimer = Timer(
+//           digitsToDuration(timer.peek()!.digits) -
+//               DateTime.now().difference(timer.peek()!.startTime), () {
+//         // trigger timer
+//         Mobj.fetch(selectedAudioID, type: AudioInfoType()).then((audio) {
+//           jukeBox.playAudio(audio.value!);
+//         });
+//         timer.value =
+//             timer.value!.withChanges(runningState: TimerData.completed);
+//       });
+//     } else {
+//       tracked.endTrackedTimer();
+//       // [todo]
+//       // updateRunningTimersNotification();
+//     }
+//   }
+
+//   List<Function()> cleanups = [];
+//   void startTracking(Mobj<List<MobjID>> listMobj) {
+//     cleanups.add(listMobj.subscribe((list) {
+//       for (final tid in list ?? []) {
+//         Mobj.fetch(tid, type: TimerDataType())
+//             .then((mobj) => enlivenTimer(mobj, jukeBox));
+//       }
+//     }));
+//   }
+
+//   void stopTrackingAll() {}
+// }
 
 // Old audioplayers implementation (kept for reference)
 // class JukeBox {

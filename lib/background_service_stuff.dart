@@ -36,34 +36,6 @@ Future<void> printExceptionsAsync(Future<void> Function() fn,
   }
 }
 
-/// information regarding a timer that we're currently monitoring/running
-class TrackedTimer {
-  final Mobj<TimerData> mobj;
-  Timer? secondCountdownIndicatorTimer;
-  Timer? triggerTimer;
-  Function()? mobjUnsubscribe;
-
-  TrackedTimer(this.mobj);
-
-  double secondsRemaining() {
-    return max(
-        (mobj.value!.duration -
-                    DateTime.now().difference(mobj.value!.startTime))
-                .inMicroseconds
-                .toDouble() /
-            1000000,
-        0);
-  }
-
-  void endTrackedTimer() {
-    mobjUnsubscribe?.call();
-    triggerTimer?.cancel();
-    triggerTimer = null;
-    secondCountdownIndicatorTimer?.cancel();
-    secondCountdownIndicatorTimer = null;
-  }
-}
-
 // entrypoint for the persistent notification isolate
 @pragma('vm:entry-point')
 void foregroundTaskStart() {
