@@ -22,7 +22,10 @@ import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'platform_audio.dart';
 import 'main.dart' show getCachedCornerRadius;
 
-const tau = 2 * pi;
+const double tau = 2 * pi;
+const double backingIndicatorCornerRounding = 25.0;
+const double backingIndicatorGap = 8.0;
+const double backingPlusRadius = 5.0;
 
 bool platformIsDesktop() =>
     Platform.isLinux || Platform.isWindows || Platform.isMacOS;
@@ -42,6 +45,7 @@ class JukeBox {
     return jukebox;
   }
 
+  /// unfortunately the future doesn't represent the end of the audio playback, it actually represents the wait for the start. We should probably change that.
   Future<void> playAudio(AudioInfo a) async {
     if (platformIsDesktop()) {
       // Use audioplayers on Linux
@@ -98,6 +102,9 @@ class JukeBox {
     _audioPlayer?.dispose();
   }
 }
+
+Rect negativeInfinityRect() => Rect.fromLTRB(
+    double.infinity, double.infinity, -double.infinity, -double.infinity);
 
 /// information regarding a timer that we're currently monitoring/running
 class TrackedTimer {
@@ -1332,6 +1339,12 @@ int? recognizeDigitPress(LogicalKeyboardKey k) {
   }
 }
 
+double calcMaxRadiusForPointWithinRectangle(Size size, Offset center) {
+  final w = max(center.dx, size.width - center.dx);
+  final h = max(center.dy, size.height - center.dy);
+  return sqrt(w * w + h * h);
+}
+
 /// Circular reveal clipper adapted from circular_reveal_animation package
 /// Copyright 2021 Alexander Zhdanov
 /// Licensed under Apache 2.0: http://www.apache.org/licenses/LICENSE-2.0
@@ -1357,29 +1370,20 @@ class CircularRevealClipper extends CustomClipper<Path> {
         centerOffset ??
         Offset(size.width / 2, size.height / 2);
     final minRadius = this.minRadius ?? 0;
-    final maxRadius = this.maxRadius ?? calcMaxRadius(size, center);
+    final maxRadius =
+        this.maxRadius ?? calcMaxRadiusForPointWithinRectangle(size, center);
 
     return Path()
       ..addOval(
         Rect.fromCircle(
           center: center,
-          radius: lerpDouble(minRadius, maxRadius, fraction),
+          radius: lerp(minRadius, maxRadius, fraction),
         ),
       );
   }
 
   @override
   bool shouldReclip(CustomClipper<Path> oldClipper) => true;
-
-  static double calcMaxRadius(Size size, Offset center) {
-    final w = max(center.dx, size.width - center.dx);
-    final h = max(center.dy, size.height - center.dy);
-    return sqrt(w * w + h * h);
-  }
-
-  static double lerpDouble(double a, double b, double t) {
-    return a * (1.0 - t) + b * t;
-  }
 }
 
 /// Custom page route that combines circular reveal animation with translation
@@ -1399,7 +1403,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
   Widget buildContent(BuildContext context) => page;
 
   @override
-  bool get opaque => false;
+  bool get opaque => animation?.isCompleted ?? false;
 
   // Force our own duration, don't let mixin override it
   @override
@@ -1498,6 +1502,42 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
   }
 }
 
+class FuzzyEdgeShader {
+  /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects
+  static Shader createRadialRevealShader({
+    required Rect bounds,
+
+    /// relative to bounds origin
+    required Offset center,
+    required double fraction,
+    double fuzzyEdgeWidth = 20.0,
+    double? maxRadius,
+  }) {
+    final calculatedMaxRadius = maxRadius ??
+        (calcMaxRadiusForPointWithinRectangle(bounds.size, center) +
+            fuzzyEdgeWidth);
+    final currentRadius = calculatedMaxRadius * fraction;
+
+    return RadialGradient(
+      center: Alignment(
+        (center.dx / bounds.width) * 2 - 1,
+        (center.dy / bounds.height) * 2 - 1,
+      ),
+      radius: currentRadius / min(bounds.width, bounds.height),
+      colors: const [
+        Colors.white,
+        Colors.white,
+        Colors.transparent,
+      ],
+      stops: [
+        0.0,
+        max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth)),
+        1.0,
+      ],
+    ).createShader(bounds);
+  }
+}
+
 class _CircularRevealTransition extends StatefulWidget {
   final Animation<double> animation;
   final Offset transitionOrigin;
@@ -1570,30 +1610,12 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
 
             return ShaderMask(
               shaderCallback: (Rect bounds) {
-                final center = widget.transitionOrigin;
-                final fuzzyEdgeWidth = 20.0; // Width of the gradient edge
-                final maxRadius =
-                    CircularRevealClipper.calcMaxRadius(bounds.size, center) +
-                        fuzzyEdgeWidth;
-                final currentRadius = maxRadius * fraction;
-
-                return RadialGradient(
-                  center: Alignment(
-                    (center.dx / bounds.width) * 2 - 1,
-                    (center.dy / bounds.height) * 2 - 1,
-                  ),
-                  radius: currentRadius / min(bounds.width, bounds.height),
-                  colors: const [
-                    Colors.white,
-                    Colors.white,
-                    Colors.transparent
-                  ],
-                  stops: [
-                    0.0,
-                    max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth)),
-                    1.0,
-                  ],
-                ).createShader(bounds);
+                return FuzzyEdgeShader.createRadialRevealShader(
+                  bounds: bounds,
+                  center: widget.transitionOrigin,
+                  fraction: fraction,
+                  fuzzyEdgeWidth: 20.0,
+                );
               },
               blendMode: BlendMode.dstIn,
               child: child,

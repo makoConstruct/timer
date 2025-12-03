@@ -207,7 +207,7 @@ class MobjRegistry {
 /// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.
 /// It was made just for this app, because the author couldn't find anything else that would do, and because the author intends to contribute to the development of a much more serious dynamic persistence system soon, so they need to get interested in making their own.
-/// This is currently quite bad, for a couple of reasons, but mainly because drift's streaming queries will update whenever any of their values update. This will presumably be a performance problem if you have a lot of active mobjs. It wont come through in the behavior of the mobjs (we don't notify on redundant updates) though.
+/// This is currently quite bad, for a couple of reasons, but mainly because drift's streaming queries update the streams far more often than they need to. Any time a mobj changes on disk, every live mobj's stream will be poked by drift. This will presumably be a performance problem if you have a lot of active mobjs. It wont come through in the behavior of the mobjs (we don't notify on redundant updates) though.
 /// Doesn't support transactions right now, though note that both Signal and Drift do support transactions, so it should be possible?
 /// streaming_shared_preferences seems to be the same as this, but using shared_preferences for storage instead of drift.
 /// I think I need this to work across isolates now.

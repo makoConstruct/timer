@@ -120,6 +120,14 @@ Future<void> initializeDatabase() async {
         type: const AudioInfoType(),
         initial: () => AudioInfo.defaultNotification,
         debugLabel: "selected audio"),
+    Mobj.getOrCreate(timeFirstUsedApp,
+        type: const StringType(),
+        initial: () => '',
+        debugLabel: "first used app"),
+    Mobj.getOrCreate(hasCreatedTimerID,
+        type: const BoolType(),
+        initial: () => false,
+        debugLabel: "has created timer"),
     fversion,
   ]);
 }
@@ -455,7 +463,6 @@ class TimerState extends State<Timer>
     if (currentTime == nd) {
       return;
     }
-    final pp = p;
     setState(() {
       currentTime = nd;
       // we don't set the timer off/change its state, enlivenTimer bindings do that
@@ -467,7 +474,7 @@ class TimerState extends State<Timer>
     final d = watchSignal(context, widget.mobj)!;
     final theme = Theme.of(context);
     final mover = 0.1;
-    final thumbSpan = Thumbspan.of(context);
+    // final thumbSpan = Thumbspan.of(context);
 
     final dd = durationToSeconds(
         digitsToDuration(watchSignal(context, widget.mobj)!.digits));
@@ -1000,7 +1007,6 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     final radius = radialRadiusMax *
         Curves.easeOut
             .transform(unlerpUnit(0, 0.6, risep * (1 - fallpIfNotSelected)));
-    // Calculate visible height for directional wipe-out (1.0 = fully visible, 0.0 = fully clipped)
     final Widget radialActivationRing = Positioned(
       left: 0,
       top: 0,
@@ -1080,28 +1086,38 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
 
     double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
 
-    final double? selectedAngle = numberSelected == -1
-        ? null
-        : conditionallyApplyIf<double>(!isRightHanded, flipAngleHorizontally,
-            radialActivatorPositions[numberSelected]);
+    final revealFraction = 1 - Curves.easeOut.transform(swipep);
+    final revealCenter = numberSelected != -1
+        ? positionFor(numberSelected, overrideRisep: 1)
+        : Offset.zero;
+    final revealMaxRadius = totalSpan;
 
     return IgnorePointer(
-        child: ClipPath(
-            clipper: CircularRevealClipper(
-              fraction: 1 - Curves.easeOut.transform(swipep),
-              centerOffset: numberSelected != -1
-                  ? positionFor(numberSelected, overrideRisep: 1)
-                  : Offset.zero,
-              maxRadius: totalSpan * 0.7,
-              minRadius: 0,
-            ),
-            child: Container(
-                width: 0,
-                height: 0,
-                child: Stack(clipBehavior: Clip.none, children: [
-                  radialActivationRing,
-                  ...numeralDragRadialActivators
-                ]))));
+        child: FractionalTranslation(
+            translation: Offset(-0.5, -0.5),
+            child: ShaderMask(
+              shaderCallback: (bounds) =>
+                  FuzzyEdgeShader.createRadialRevealShader(
+                bounds: bounds,
+                center: bounds.center + revealCenter,
+                fraction: revealFraction,
+                fuzzyEdgeWidth: 20.0,
+                maxRadius: revealMaxRadius,
+              ),
+              child: SizedBox(
+                  width: totalSpan,
+                  height: totalSpan,
+
+                  // so that child contents can still be relative to 0 and be centered within this
+                  child: Transform.translate(
+                    offset: Offset(totalSpan / 2, totalSpan / 2),
+                    // offset: Offset.zero,
+                    child: Stack(clipBehavior: Clip.none, children: [
+                      radialActivationRing,
+                      ...numeralDragRadialActivators
+                    ]),
+                  )),
+            )));
   }
 
   @override
@@ -1126,9 +1142,14 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
 
 class TimerScreenState extends State<TimerScreen>
     with SignalsMixin, TickerProviderStateMixin {
-  MobjID<TimerData>? selectedTimer;
+  late final Signal<MobjID<TimerData>?> selectedTimer = Signal(null);
   late final Mobj<bool> isRightHanded =
       Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+  late final Signal<Rect> numPadBounds = Signal(Rect.zero);
+  late final Signal<Offset> backingPlusCenter = Signal(Offset.zero);
+  late final Signal<bool> backingPlusInhibitor;
+  late AnimationController backingPlusCenterAnimation =
+      AnimationController(duration: Duration(milliseconds: 220), vsync: this);
   // note this subscribes to the mobj
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
@@ -1145,6 +1166,38 @@ class TimerScreenState extends State<TimerScreen>
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
 
+  @override
+  void initState() {
+    super.initState();
+    // only inhibit the backing plus for a second if the user is new to the app
+    backingPlusInhibitor = Signal(
+        !Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value!);
+    if (backingPlusInhibitor.value) {
+      async.Timer(Duration(milliseconds: 1400), () {
+        backingPlusInhibitor.value = false;
+      });
+    }
+    final backingPlusDeployed = Computed(
+        () => !backingPlusInhibitor.value && selectedTimer.value == null);
+    createEffect(() {
+      if (backingPlusDeployed.value) {
+        backingPlusCenterAnimation.forward();
+      } else {
+        backingPlusCenterAnimation.reverse();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    numPadBounds.dispose();
+    backingPlusCenter.dispose();
+    backingPlusInhibitor.dispose();
+    selectedTimer.dispose();
+    backingPlusCenterAnimation.dispose();
+    super.dispose();
+  }
+
   void takeActionOn(MobjID<TimerData> timerID) {
     //todo: take whichever action is currently highlighted
     toggleRunning(timerID, reset: false);
@@ -1158,13 +1211,13 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
-    if (selectedTimer == null) {
+    if (selectedTimer.peek() == null) {
       addNewTimer(
         selected: true,
         digits: stripZeroes(number),
       );
     } else {
-      final mt = Mobj.getAlreadyLoaded(selectedTimer!, TimerDataType());
+      final mt = Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
       List<int> ct = List.from(mt.peek()!.digits);
       for (int n in number) {
         ct.add(n);
@@ -1230,12 +1283,11 @@ class TimerScreenState extends State<TimerScreen>
               )),
         ),
         onPressed: () {
-          // Get button position
-
           Navigator.push(
             context,
             CircularRevealRoute(
-              page: SettingsScreen(iconKey: configButtonKey),
+              page: SettingsScreen(
+                  iconKey: configButtonKey, flipBackgroundColors: false),
               buttonCenter: widgetCenter(hereConfigButtonKey),
               iconKey: configButtonKey,
             ),
@@ -1280,18 +1332,17 @@ class TimerScreenState extends State<TimerScreen>
       ]);
     }
 
-    final pausePlayButton = TimersButton(
-        label: playIcon(Icon(Icons.pause_rounded)),
-        onPanDown: (_) {
-          pausePlaySelected();
-        });
+    // final pausePlayButton = TimersButton(
+    //     label: playIcon(Icon(Icons.pause_rounded)),
+    //     onPanDown: (_) {
+    //       pausePlaySelected();
+    //     });
     final stopPlayButton = TimersButton(
         label: playIcon(Icon(Icons.restart_alt_rounded)),
         onPanDown: (_) {
           pausePlaySelected(reset: true);
         });
 
-    final doubleZeroButton = NumberButton(digits: [0, 0]);
     final zeroButton =
         NumberButton(digits: [0], timerButtonKey: numeralKeys[0]);
 
@@ -1310,10 +1361,10 @@ class TimerScreenState extends State<TimerScreen>
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Flexible(child: backspaceButton),
-              Flexible(child: configButton),
               Flexible(child: stopPlayButton),
-              Flexible(child: pausePlayButton),
+              Flexible(child: backspaceButton),
+              // Flexible(child: pausePlayButton),
+              Flexible(child: selectButton),
             ],
           ),
         ),
@@ -1325,7 +1376,6 @@ class TimerScreenState extends State<TimerScreen>
             Flexible(child: pad(0, 0)),
             Flexible(child: pad(0, 1)),
             Flexible(child: pad(0, 2)),
-            Flexible(child: doubleZeroButton),
           ],
         )),
         Flexible(
@@ -1356,8 +1406,8 @@ class TimerScreenState extends State<TimerScreen>
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              Flexible(child: configButton),
               Flexible(child: addButton),
-              Flexible(child: selectButton),
             ],
           ),
         ),
@@ -1365,8 +1415,55 @@ class TimerScreenState extends State<TimerScreen>
     }
 
     final thumbSpan = Thumbspan.of(context);
-    final buttonSpan = thumbSpan * 0.7;
 
+// Schedule update of numPadBounds after this frame completes
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      Offset controlsPosi =
+          (controlPadKey.currentContext!.findRenderObject() as RenderBox)
+              .localToGlobal(Offset.zero);
+      Rect t = negativeInfinityRect();
+      for (GlobalKey k in numeralKeys) {
+        final b = boxRect(k)!;
+        t = t.expandToInclude((b.topLeft - controlsPosi) & b.size);
+      }
+      if (t.isEmpty) {
+        numPadBounds.value = Rect.fromLTRB(0, 0, 0, 0);
+      } else {
+        numPadBounds.value = t;
+        backingPlusCenter.value = (boxRect(numeralKeys[0])!.center +
+                boxRect(numeralKeys[4])!.center) /
+            2;
+      }
+    });
+    final numberPadBacking = Watch((context) {
+      Rect nr = numPadBounds.value.deflate(backingIndicatorGap / 2);
+      return Positioned.fromRect(
+        rect: nr,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(backingIndicatorCornerRounding),
+          ),
+        ),
+      );
+    });
+    final backingPlusCenterWidget = Watch((context) {
+      return AnimatedBuilder(
+          animation: backingPlusCenterAnimation,
+          builder: (context, child) {
+            return Positioned.fromRect(
+                rect: Rect.fromCenter(
+                    center: backingPlusCenter.peek(),
+                    width: backingPlusCenterAnimation.value *
+                        backingPlusRadius *
+                        2,
+                    height: backingPlusCenterAnimation.value *
+                        backingPlusRadius *
+                        2),
+                child: child!);
+          },
+          child: Icon(Icons.add));
+    });
     // the lower part of the screen
     final controls = Container(
       clipBehavior: Clip.hardEdge,
@@ -1382,6 +1479,8 @@ class TimerScreenState extends State<TimerScreen>
               fit: StackFit.passthrough,
               alignment: Alignment.bottomRight,
               children: [
+                numberPadBacking,
+                backingPlusCenterWidget,
                 Container(
                   key: controlPadKey,
                   child: Row(
@@ -1488,8 +1587,8 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void pausePlaySelected({bool reset = false}) {
-    if (selectedTimer != null) {
-      if (toggleRunning(selectedTimer!, reset: reset)) {
+    if (selectedTimer.peek() != null) {
+      if (toggleRunning(selectedTimer.peek()!, reset: reset)) {
         _selectTimer(null);
       }
     } else {
@@ -1523,6 +1622,7 @@ class TimerScreenState extends State<TimerScreen>
         isGoingOff: false,
       ),
     );
+    Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value = true;
     enlivenTimer(nt, Provider.of<JukeBox>(context, listen: false));
 
     timerListMobj.value = timers().toList()..add(ntid);
@@ -1532,11 +1632,12 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void _selectTimer(MobjID<TimerData>? timerID) {
-    if (selectedTimer != null) {
-      final oldMobj = Mobj.getAlreadyLoaded(selectedTimer!, TimerDataType());
+    if (selectedTimer.peek() != null) {
+      final oldMobj =
+          Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
       oldMobj.value = oldMobj.peek()!.withChanges(selected: false);
     }
-    selectedTimer = timerID;
+    selectedTimer.value = timerID;
     if (timerID != null) {
       final newMobj = Mobj.getAlreadyLoaded(timerID, TimerDataType());
       newMobj.value = newMobj.peek()!.withChanges(selected: true);
@@ -1544,16 +1645,17 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void _backspace() {
-    if (selectedTimer != null) {
-      final mobj = Mobj.getAlreadyLoaded(selectedTimer!, TimerDataType());
+    if (selectedTimer.peek() != null) {
+      final mobj =
+          Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
       List<int> digits = List.from(mobj.peek()!.digits);
 
       if (digits.isEmpty) {
-        deleteTimer(selectedTimer!);
+        deleteTimer(selectedTimer.peek()!);
       } else {
         digits.removeLast();
         if (digits.isEmpty) {
-          deleteTimer(selectedTimer!);
+          deleteTimer(selectedTimer.peek()!);
         } else {
           mobj.value = mobj.peek()!.withChanges(digits: digits);
         }
@@ -1579,14 +1681,14 @@ class TimerScreenState extends State<TimerScreen>
     timerListMobj.value = peekTimers().toList()
       ..removeWhere((timer) => timer == ki);
 
-    if (selectedTimer == ki) {
+    if (selectedTimer.peek() == ki) {
       _selectTimer(null);
     }
   }
 
   Mobj<TimerData>? selectedOrLastTimerState() {
-    if (selectedTimer != null) {
-      return Mobj.getAlreadyLoaded(selectedTimer!, TimerDataType());
+    if (selectedTimer.peek() != null) {
+      return Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
     } else {
       final lt = peekTimers().lastOrNull;
       if (lt != null) {
@@ -1865,9 +1967,32 @@ double halfScreenHeight(BuildContext context) {
   return screenHeight / 2 - mq.viewPadding.top;
 }
 
+// it would also look nice if you used this to size the app bar, but half is better for now
+// double screenWidth(BuildContext context) {
+//   final mq = MediaQuery.of(context);
+//   return mq.size.width;
+// }
+
+(Color, Color) maybeFlippedBackgroundColors(
+    ThemeData theme, bool flipBackgroundColors) {
+  if (flipBackgroundColors) {
+    return (
+      theme.colorScheme.surfaceContainerLow,
+      theme.colorScheme.surfaceContainerLowest
+    );
+  } else {
+    return (
+      theme.colorScheme.surfaceContainerLowest,
+      theme.colorScheme.surfaceContainerLow
+    );
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   final GlobalKey? iconKey;
-  const SettingsScreen({super.key, this.iconKey});
+  final bool flipBackgroundColors;
+  const SettingsScreen(
+      {super.key, this.iconKey, this.flipBackgroundColors = false});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -1893,7 +2018,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    final (backgroundColorA, backgroundColorB) =
+        maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
     final listItemPadding =
         const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
 
@@ -1901,6 +2027,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         SizedBox(width: 32.0, child: Center(child: child));
 
     return Scaffold(
+      backgroundColor: backgroundColorA,
       body: CustomScrollView(
         controller: _scrollController,
         slivers: [
@@ -1941,8 +2068,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 bottom: 16.0,
               ),
             ),
-            backgroundColor: theme.colorScheme.surfaceContainerLow,
-            surfaceTintColor: Colors.transparent,
+            backgroundColor: backgroundColorB,
+            surfaceTintColor: backgroundColorB,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
@@ -2042,7 +2169,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Navigator.push(
                       context,
                       CircularRevealRoute(
-                        page: AlarmSoundPickerScreen(iconKey: iconKey),
+                        page: AlarmSoundPickerScreen(
+                            iconKey: iconKey,
+                            flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
                         iconKey: iconKey,
                       ),
@@ -2068,7 +2197,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Navigator.push(
                       context,
                       CircularRevealRoute(
-                        page: AboutScreen(iconKey: iconKey),
+                        page: AboutScreen(
+                            iconKey: iconKey,
+                            flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
                         iconKey: iconKey,
                       ),
@@ -2087,7 +2218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     tag: 'thank-author-icon',
                     flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
                     child: Icon(
-                      Icons.favorite_rounded,
+                      Icons.heart_broken,
                       key: hereIconKey,
                       color: theme.colorScheme.primary,
                     ),
@@ -2096,7 +2227,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Navigator.push(
                       context,
                       CircularRevealRoute(
-                        page: ThankAuthorScreen(iconKey: iconKey),
+                        page: ThankAuthorScreen(
+                            iconKey: iconKey,
+                            flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
                         iconKey: iconKey,
                       ),
@@ -2114,14 +2247,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class ThankAuthorScreen extends StatelessWidget {
-  const ThankAuthorScreen({super.key, this.iconKey});
+  final bool flipBackgroundColors;
+  const ThankAuthorScreen(
+      {super.key, this.iconKey, this.flipBackgroundColors = false});
   final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    final (backgroundColorA, backgroundColorB) =
+        maybeFlippedBackgroundColors(theme, flipBackgroundColors);
     return Scaffold(
+      backgroundColor: backgroundColorA,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -2134,7 +2271,7 @@ class ThankAuthorScreen extends StatelessWidget {
                   Hero(
                     tag: 'thank-author-icon',
                     child: Icon(
-                      Icons.favorite_rounded,
+                      Icons.heart_broken,
                       color: theme.colorScheme.primary,
                       size: 32,
                     ),
@@ -2152,32 +2289,22 @@ class ThankAuthorScreen extends StatelessWidget {
                 bottom: 16.0,
               ),
             ),
-            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            backgroundColor: backgroundColorB,
             surfaceTintColor: Colors.transparent,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                  SizedBox(height: 24),
-                  ...List.generate(
-                    13,
-                    (index) => ListTile(
-                      title: Text('Test item ${index + 1}'),
-                      subtitle: Text('This is test item number ${index + 1}'),
-                      trailing: Icon(Icons.arrow_forward_ios, size: 16),
-                    ),
-                  ),
-                ],
-              ),
+          SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                Padding(
+                    padding: EdgeInsets.all(24.0),
+                    child: Text(
+                      'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
+                      style: theme.textTheme.bodyLarge,
+                    )),
+                SizedBox(height: 24),
+              ],
             ),
           ),
         ],
@@ -2187,14 +2314,18 @@ class ThankAuthorScreen extends StatelessWidget {
 }
 
 class AboutScreen extends StatelessWidget {
-  const AboutScreen({super.key, this.iconKey});
+  final bool flipBackgroundColors;
+  const AboutScreen(
+      {super.key, this.iconKey, this.flipBackgroundColors = false});
   final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    final (backgroundColorA, backgroundColorB) =
+        maybeFlippedBackgroundColors(theme, flipBackgroundColors);
     return Scaffold(
+      backgroundColor: backgroundColorA,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -2225,7 +2356,7 @@ class AboutScreen extends StatelessWidget {
                 bottom: 16.0,
               ),
             ),
-            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            backgroundColor: backgroundColorB,
             surfaceTintColor: Colors.transparent,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
@@ -2249,7 +2380,9 @@ class AboutScreen extends StatelessWidget {
 }
 
 class AlarmSoundPickerScreen extends StatefulWidget {
-  const AlarmSoundPickerScreen({super.key, this.iconKey});
+  final bool flipBackgroundColors;
+  const AlarmSoundPickerScreen(
+      {super.key, this.iconKey, this.flipBackgroundColors = false});
   final GlobalKey? iconKey;
 
   @override
@@ -2263,6 +2396,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   List<AudioInfo>? _ringtoneSounds;
   List<AudioInfo>? _assetSounds;
   Mobj<List<AudioInfo>>? _fileSounds;
+  late Signal<String?> _currentlyPlayingAudioID = createSignal(null);
   bool _loading = true;
 
   @override
@@ -2318,8 +2452,33 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
     final selectedAudio = selectedAudioMobj.value ?? AudioInfo.defaultAlarm;
     final jukebox = Provider.of<JukeBox>(context, listen: false);
+    final (backgroundColorA, backgroundColorB) =
+        maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
+
+    Widget section(String title, List<AudioInfo> sounds) {
+      return Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+                padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                child: Text(title,
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(color: theme.colorScheme.primary))),
+            Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: sounds
+                    .map((audio) => SoundTile(
+                        audio: audio,
+                        selectedAudioID: selectedAudioID,
+                        currentlyPlayingAudioID: _currentlyPlayingAudioID))
+                    .toList()),
+          ]));
+    }
 
     return Scaffold(
+      backgroundColor: backgroundColorA,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -2350,7 +2509,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                 bottom: 16.0,
               ),
             ),
-            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            backgroundColor: backgroundColorB,
             surfaceTintColor: Colors.transparent,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
@@ -2363,46 +2522,17 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             SliverList(
               delegate: SliverChildListDelegate([
                 if (_assetSounds != null && _assetSounds!.isNotEmpty) ...[
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text('Mako Timer Sounds',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        )),
-                  ),
-                  ..._assetSounds!.map((audio) => SoundTile(audio: audio)),
+                  section('Mako Timer Sounds', _assetSounds!),
                 ],
                 if (_alarmSounds != null && _alarmSounds!.isNotEmpty) ...[
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text('Alarms',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        )),
-                  ),
-                  ..._alarmSounds!.map((audio) => SoundTile(audio: audio)),
+                  section('Alarms', _alarmSounds!),
                 ],
                 if (_notificationSounds != null &&
                     _notificationSounds!.isNotEmpty) ...[
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text('Notifications',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        )),
-                  ),
-                  ..._notificationSounds!
-                      .map((audio) => SoundTile(audio: audio)),
+                  section('Notifications', _notificationSounds!),
                 ],
                 if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty) ...[
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text('Ringtones',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        )),
-                  ),
-                  ..._ringtoneSounds!.map((audio) => SoundTile(audio: audio)),
+                  section('Ringtones', _ringtoneSounds!),
                 ],
               ]),
             ),
@@ -2412,56 +2542,51 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   }
 }
 
-class SoundTile extends StatefulWidget {
+class SoundTile extends StatelessWidget {
+  final AudioInfo audio;
+  final MobjID<AudioInfo> selectedAudioID;
+  final Signal<String?> currentlyPlayingAudioID;
   const SoundTile({
     super.key,
     required this.audio,
+    required this.selectedAudioID,
+    required this.currentlyPlayingAudioID,
   });
 
-  final AudioInfo audio;
-
-  @override
-  State<SoundTile> createState() => _SoundTileState();
-}
-
-class _SoundTileState extends State<SoundTile> with SignalsMixin {
-  AudioInfo? _currentlyPlayingSound;
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final selectedAudioMobj =
         Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
     final jukebox = Provider.of<JukeBox>(context, listen: false);
 
-    return ListTile(
-      title: Text(widget.audio.name),
-      trailing: Watch((context) =>
-          widget.audio.uri == selectedAudioMobj.value!.uri
-              ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
-              : SizedBox.shrink()),
-      onTap: () async {
-        selectedAudioMobj.value = widget.audio;
-        jukebox.pauseAudio();
-        if (_currentlyPlayingSound == widget.audio) {
-          // if you click the currently playing one a second time, it just stops it
-          _currentlyPlayingSound = null;
-        } else {
-          _currentlyPlayingSound = widget.audio;
-          try {
-            await (jukebox.playAudio(widget.audio).then((_) {
-              if (mounted) {
-                setState(() {
-                  _currentlyPlayingSound = null;
-                });
-              }
-            }));
-          } catch (e) {
-            print('Error playing audio: $e');
-          }
-        }
+    return GestureDetector(onTap: () async {
+      jukebox.pauseAudio();
+      selectedAudioMobj.value = audio;
+      if (currentlyPlayingAudioID.peek() == audio.uri) {
+        // if you click the currently playing one a second time, it just stops it
+        currentlyPlayingAudioID.value = null;
+      } else {
+        currentlyPlayingAudioID.value = audio.uri;
+        jukebox.playAudio(audio);
+      }
+    }, child: Watch(
+      (context) {
+        final textTheme = audio.uri == selectedAudioMobj.value!.uri
+            ? theme.textTheme.bodyMedium!.copyWith(
+                color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800)
+            : theme.textTheme.bodyMedium!;
+        final backgroundColor = audio.uri == selectedAudioMobj.value!.uri
+            ? theme.colorScheme.primary
+            : theme.colorScheme.surfaceContainerLowest;
+        return Container(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(audio.name, style: textTheme));
       },
-    );
+    ));
   }
 }
 
