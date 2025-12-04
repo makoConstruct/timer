@@ -107,25 +107,14 @@ class PlatformAudio {
     }
   }
 
-  static Future<List<AudioInfo>> getAssetSounds() async {
-    try {
-      // Hardcoded list based on pubspec.yaml assets
-      // In the future, we could use AssetManifest to dynamically list these
-      // URIs use asset:// prefix which is handled by PlatformAudioPlugin
-      return [
-        const AudioInfo(
-          uri: 'asset://assets/sounds/jingles_STEEL16.ogg',
-          name: 'Steel Jingle 16',
-          isLong: false,
-        ),
-        const AudioInfo(
-          uri: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
-          name: 'JR\'s Announcement',
-          isLong: false,
-        ),
-      ];
-    } catch (e) {
-      throw Exception('Failed to get asset sounds: $e');
-    }
-  }
+  static const List<AudioInfo> assetSounds = [
+    AudioInfo(
+        uri: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
+        name: 'JR - Announcement',
+        isLong: false),
+    AudioInfo(
+        uri: 'asset://assets/sounds/jingles_STEEL16.ogg',
+        name: 'Steel Jingle 16',
+        isLong: false),
+  ];
 }

@@ -387,6 +387,14 @@ List<T> generatedReverseIfNot<T>(
       : List.generate(length, (i) => generator(length - i - 1));
 }
 
+void moveAnimationTowardsState(AnimationController animation, bool forward) {
+  if (forward) {
+    animation.forward();
+  } else {
+    animation.reverse();
+  }
+}
+
 // automatically removes children when the associated animation is dismissed
 class EphemeralAnimationHost extends StatefulWidget {
   final List<Widget> children;

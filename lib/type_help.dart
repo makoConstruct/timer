@@ -33,6 +33,9 @@ class TimerData {
   /// if the alarm is currently screaming and needs to be acknowledged by the user
   final bool isGoingOff;
 
+  /// if not pinned, the timer will be deleted next time a new timer is created, unless it's currently playing
+  final bool pinned;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -50,6 +53,7 @@ class TimerData {
     this.digits = const [],
     this.ranTime = Duration.zero,
     this.isGoingOff = false,
+    this.pinned = false,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -63,6 +67,7 @@ class TimerData {
     List<int>? digits,
     Duration? ranTime,
     bool? isGoingOff,
+    bool? pinned,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -72,6 +77,7 @@ class TimerData {
       digits: digits ?? this.digits,
       ranTime: ranTime ?? this.ranTime,
       isGoingOff: isGoingOff ?? this.isGoingOff,
+      pinned: pinned ?? this.pinned,
     );
   }
 
@@ -111,6 +117,7 @@ class TimerDataType extends TypeHelp<TimerData> {
         hue: const DoubleType().fromJson(json['hue']),
         selected: const BoolType().fromJson(json['selected']),
         digits: ListType(const IntType()).fromJson(json['digits']),
+        pinned: const BoolType().fromJson(json['pinned']),
         ranTime: Duration(
             milliseconds:
                 (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
@@ -128,6 +135,7 @@ class TimerDataType extends TypeHelp<TimerData> {
       'hue': const DoubleType().toJson(object.hue),
       'selected': const BoolType().toJson(object.selected),
       'digits': ListType(const IntType()).toJson(object.digits),
+      'pinned': const BoolType().toJson(object.pinned),
       'ranTime': const DoubleType()
           .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
@@ -144,6 +152,7 @@ TimerData cloneTimerDataWithChanges(
   List<int>? digits,
   Duration? ranTime,
   bool? isGoingOff,
+  bool? pinned,
 }) {
   return TimerData(
     startTime: startTime ?? old.startTime,
@@ -153,6 +162,7 @@ TimerData cloneTimerDataWithChanges(
     digits: digits ?? old.digits,
     ranTime: ranTime ?? old.ranTime,
     isGoingOff: isGoingOff ?? old.isGoingOff,
+    pinned: pinned ?? old.pinned,
   );
 }
 

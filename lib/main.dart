@@ -118,7 +118,7 @@ Future<void> initializeDatabase() async {
         debugLabel: "pad vertically ascending"),
     Mobj.getOrCreate(selectedAudioID,
         type: const AudioInfoType(),
-        initial: () => AudioInfo.defaultNotification,
+        initial: () => PlatformAudio.assetSounds[0],
         debugLabel: "selected audio"),
     Mobj.getOrCreate(timeFirstUsedApp,
         type: const StringType(),
@@ -359,6 +359,8 @@ class TimerState extends State<Timer>
   late final AnimationController _runningAnimation;
   Offset _slideBounceDirection = Offset(0, -1);
   late final AnimationController _slideActivateBounceAnimation;
+  late final AnimationController _unpinnedIndicatorShowing;
+  late final AnimationController _unpinnedIndicatorFullyShowing;
   final GlobalKey _clockKey = GlobalKey();
   final GlobalKey animatedToKey = GlobalKey();
   final previousSize = ValueNotifier<Size?>(null);
@@ -421,6 +423,10 @@ class TimerState extends State<Timer>
     _slideBounceDirection = Offset(0, -1);
     _slideActivateBounceAnimation = AnimationController(
         duration: const Duration(milliseconds: 180), vsync: this);
+    _unpinnedIndicatorShowing = AnimationController(
+        duration: const Duration(milliseconds: 150), vsync: this);
+    _unpinnedIndicatorFullyShowing = AnimationController(
+        duration: const Duration(milliseconds: 150), vsync: this);
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
@@ -431,16 +437,17 @@ class TimerState extends State<Timer>
         disable();
         return;
       }
-      if ((prev?.isRunning ?? false) == d.isRunning) {
-        return;
+      if ((prev?.isRunning ?? false) != d.isRunning) {
+        if (d.isRunning) {
+          _runningAnimation.forward();
+          _ticker.start();
+        } else {
+          _runningAnimation.reverse();
+          _ticker.stop();
+        }
       }
-      if (d.isRunning) {
-        _runningAnimation.forward();
-        _ticker.start();
-      } else {
-        _runningAnimation.reverse();
-        _ticker.stop();
-      }
+      moveAnimationTowardsState(_unpinnedIndicatorShowing, !d.pinned);
+      moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
       prev = d;
     });
   }
@@ -455,6 +462,8 @@ class TimerState extends State<Timer>
     if (hasDisabled) return;
     hasDisabled = true;
     _runningAnimation.dispose();
+    _unpinnedIndicatorShowing.dispose();
+    _unpinnedIndicatorFullyShowing.dispose();
     _ticker.dispose();
     previousSize.dispose();
   }
@@ -539,35 +548,36 @@ class TimerState extends State<Timer>
               )),
             )));
 
-    Widget clockDial(Key? key, Widget? expandingHindCircle) {
-      return AnimatedBuilder(
-          key: key,
-          animation: _runningAnimation,
-          builder: (context, child) => Container(
-                padding: EdgeInsets.all(
-                    (1 - _runningAnimation.value) * timerPaddingr),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: theme.colorScheme.surfaceContainerLowest,
-                ),
-                constraints: BoxConstraints(maxHeight: 49, maxWidth: 49),
-                child: child,
+    double pieRadius = 24;
+
+    Widget clockDial = AnimatedBuilder(
+        key: _clockKey,
+        animation: _runningAnimation,
+        builder: (context, child) => Container(
+              padding:
+                  EdgeInsets.all((1 - _runningAnimation.value) * timerPaddingr),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.colorScheme.surfaceContainerLowest,
               ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            fit: StackFit.expand,
-            children: [
-              if (expandingHindCircle != null) expandingHindCircle,
-              // there's a very strange bug where the pie doesn't repaint when the timer is being dragged. Every other animation still works. I checked, and although build is being called, shouldRepaint isn't. I'm gonna ignore it for now.
-              // oh! and I notice the numbers don't update either!
-              Pie(
-                backgroundColor: backgroundColor(d.hue),
-                color: primaryColor(d.hue),
-                value: pieCompletion,
-              ),
-            ],
-          ));
-    }
+              constraints: BoxConstraints(maxHeight: 49, maxWidth: 49),
+              child: child,
+            ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            expandingHindCircle,
+            // there's a very strange bug where the pie doesn't repaint when the timer is being dragged. Every other animation still works. I checked, and although build is being called, shouldRepaint isn't. I'm gonna ignore it for now.
+            // oh! and I notice the numbers don't update either!
+            Pie(
+              backgroundColor: backgroundColor(d.hue),
+              color: primaryColor(d.hue),
+              value: pieCompletion,
+              size: pieRadius,
+            ),
+          ],
+        ));
 
     Widget result = GestureDetector(
       onTap: () {
@@ -583,7 +593,7 @@ class TimerState extends State<Timer>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              clockDial(_clockKey, expandingHindCircle),
+              clockDial,
               SizedBox(width: timerPaddingr),
               Flexible(
                 child: timeText,
@@ -606,6 +616,61 @@ class TimerState extends State<Timer>
                   : theme.colorScheme.surfaceContainerLowest.withAlpha(0)),
           child: child),
       child: result,
+    );
+
+    Widget unpinnedIndicator = AnimatedBuilder(
+      animation: Listenable.merge([
+        _unpinnedIndicatorShowing,
+        _unpinnedIndicatorFullyShowing,
+      ]),
+      builder: (context, child) {
+        final circleScale =
+            Curves.easeOut.transform(_unpinnedIndicatorShowing.value);
+        final unpinnedFullForm =
+            Curves.easeInOut.transform(_unpinnedIndicatorFullyShowing.value);
+
+        return Center(
+          child: Transform.scale(
+            scale: circleScale,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Transform.scale(
+                    scale: 1 - unpinnedFullForm,
+                    child: Container(
+                      width: 4,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: backgroundColor(d.hue)
+                            .withValues(alpha: 1 - unpinnedFullForm),
+                      ),
+                    )),
+                Transform.scale(
+                  scale: unpinnedFullForm,
+                  child: Icon(
+                    Icons.delete,
+                    size: 15.4,
+                    color: backgroundColor(d.hue),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    result = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        result,
+        Positioned(
+          left: 1.4,
+          bottom: 1.4,
+          child: unpinnedIndicator,
+        ),
+      ],
     );
 
     // do a bounce animation to respond to slide to start interactions
@@ -1126,15 +1191,11 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
         left: widget.position.dx,
         top: widget.position.dy,
         child: AnimatedBuilder(
-          animation: upDownAnimation,
+          animation:
+              Listenable.merge([upDownAnimation, optionActivationAnimation]),
           builder: (context, child) {
-            return AnimatedBuilder(
-              animation: optionActivationAnimation,
-              builder: (context, child) {
-                return buildGivenAnimationParameters(upDownAnimation.value.$1,
-                    upDownAnimation.value.$2, optionActivationAnimation.value);
-              },
-            );
+            return buildGivenAnimationParameters(upDownAnimation.value.$1,
+                upDownAnimation.value.$2, optionActivationAnimation.value);
           },
         ));
   }
@@ -1501,34 +1562,15 @@ class TimerScreenState extends State<TimerScreen>
     );
 
     final timersWidget = Expanded(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // pinned timers
-          Flexible(
-            flex: 1,
-            child: Container(
-                constraints: BoxConstraints.expand(),
-                child: TimerTray(
-                  key: timerTrayKey,
-                  mobj: timerListMobj,
-                  backgroundColor: theme.colorScheme.surfaceContainerLow,
-                  icon: Icon(Icons.push_pin), // You can customize this icon
-                  useScrollView: true,
-                )),
-          ),
-          // unpinned timers (will be another TimerSequence later)
-          Container(
-              constraints:
-                  BoxConstraints(minHeight: double.infinity, minWidth: 100),
-              child: TimerTray(
-                  backgroundColor: theme.colorScheme.surfaceContainer,
-                  mobj: Mobj.getAlreadyLoaded(
-                      transientTimerListID, timerListType),
-                  icon: Icon(Icons.delete),
-                  useScrollView: false))
-        ],
-      ),
+      child: Container(
+          constraints: BoxConstraints.expand(),
+          child: TimerTray(
+            key: timerTrayKey,
+            mobj: timerListMobj,
+            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            icon: Icon(Icons.push_pin), // You can customize this icon
+            useScrollView: true,
+          )),
     );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -1628,6 +1670,18 @@ class TimerScreenState extends State<TimerScreen>
     timerListMobj.value = timers().toList()..add(ntid);
     if (selecting) {
       _selectTimer(ntid);
+    }
+
+    // remove (previous) unpinned nonplaying timers
+    for (final tid in peekTimers()) {
+      if (tid == ntid) continue;
+      final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
+      if (!t.peek()!.pinned && !t.peek()!.isRunning) {
+        // delay slightly to make it clear what's happened (might not be necessary if we introduce deletion animations)
+        async.Timer(Duration(milliseconds: 260), () {
+          deleteTimer(tid);
+        });
+      }
     }
   }
 
@@ -2394,23 +2448,22 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   List<AudioInfo>? _alarmSounds;
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
-  List<AudioInfo>? _assetSounds;
-  Mobj<List<AudioInfo>>? _fileSounds;
-  late Signal<String?> _currentlyPlayingAudioID = createSignal(null);
+  final List<AudioInfo> _assetSounds = PlatformAudio.assetSounds;
+  late final Signal<String?> _currentlyPlayingAudioID = createSignal(null);
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    print("init state");
     _loadSounds();
+    print("after load sounds");
   }
 
   Future<void> _loadSounds() async {
     try {
       if (platformIsDesktop()) {
-        final assetSounds = await PlatformAudio.getAssetSounds();
         setState(() {
-          _assetSounds = assetSounds;
           _loading = false;
         });
         return;
@@ -2421,21 +2474,18 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             PlatformAudio.getPlatformAudio(PlatformAudioType.notification);
         final ringtonesFuture =
             PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
-        final assetSoundsFuture = PlatformAudio.getAssetSounds();
-        final [alarms, notifications, ringtones, assetSounds] =
-            await Future.wait([
+        final [alarms, notifications, ringtones] = await Future.wait([
           alarmsFuture,
           notificationsFuture,
           ringtonesFuture,
-          assetSoundsFuture
         ]);
         setState(() {
           _alarmSounds = alarms;
           _notificationSounds = notifications;
           _ringtoneSounds = ringtones;
-          _assetSounds = assetSounds;
           _loading = false;
         });
+        print("after set state");
       }
     } catch (e) {
       print('Error loading sounds: $e');
@@ -2448,33 +2498,31 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selectedAudioMobj =
-        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
-    final selectedAudio = selectedAudioMobj.value ?? AudioInfo.defaultAlarm;
-    final jukebox = Provider.of<JukeBox>(context, listen: false);
     final (backgroundColorA, backgroundColorB) =
         maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
 
     Widget section(String title, List<AudioInfo> sounds) {
-      return Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Padding(
-                padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
-                child: Text(title,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(color: theme.colorScheme.primary))),
-            Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: sounds
-                    .map((audio) => SoundTile(
-                        audio: audio,
-                        selectedAudioID: selectedAudioID,
-                        currentlyPlayingAudioID: _currentlyPlayingAudioID))
-                    .toList()),
-          ]));
+      return SliverToBoxAdapter(
+        child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(
+                  padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                  child: Text(title,
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(color: theme.colorScheme.primary))),
+              Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: sounds
+                      .map((audio) => SoundTile(
+                          audio: audio,
+                          selectedAudioID: selectedAudioID,
+                          currentlyPlayingAudioID: _currentlyPlayingAudioID))
+                      .toList()),
+            ])),
+      );
     }
 
     return Scaffold(
@@ -2518,24 +2566,19 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),
             )
-          else
-            SliverList(
-              delegate: SliverChildListDelegate([
-                if (_assetSounds != null && _assetSounds!.isNotEmpty) ...[
-                  section('Mako Timer Sounds', _assetSounds!),
-                ],
-                if (_alarmSounds != null && _alarmSounds!.isNotEmpty) ...[
-                  section('Alarms', _alarmSounds!),
-                ],
-                if (_notificationSounds != null &&
-                    _notificationSounds!.isNotEmpty) ...[
-                  section('Notifications', _notificationSounds!),
-                ],
-                if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty) ...[
-                  section('Ringtones', _ringtoneSounds!),
-                ],
-              ]),
+          else ...[
+            if (_assetSounds.isNotEmpty)
+              section('Mako Timer Sounds', _assetSounds),
+            if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+              section('Alarms', _alarmSounds!),
+            if (_notificationSounds != null && _notificationSounds!.isNotEmpty)
+              section('Notifications', _notificationSounds!),
+            if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
+              section('Ringtones', _ringtoneSounds!),
+            SliverToBoxAdapter(
+              child: SizedBox(height: 16),
             ),
+          ],
         ],
       ),
     );
@@ -2553,6 +2596,7 @@ class SoundTile extends StatelessWidget {
     required this.currentlyPlayingAudioID,
   });
 
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final selectedAudioMobj =
