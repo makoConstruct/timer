@@ -503,6 +503,45 @@ class _RunOnceAnimationState extends State<RunOnceAnimation> {
   }
 }
 
+class RunOnce extends StatefulWidget {
+  final AnimationController controller;
+  final Widget child;
+  final Widget Function(BuildContext, Animation<double> progress, Widget child)
+      builder;
+
+  const RunOnce({
+    super.key,
+    required this.controller,
+    required this.child,
+    required this.builder,
+  });
+
+  @override
+  State<RunOnce> createState() => _RunOnceState();
+}
+
+class _RunOnceState extends State<RunOnce> {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = widget.controller;
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(context, _controller, widget.child);
+  }
+}
+
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
 DragAnchorStrategy dragAnchorStrategy(ValueNotifier<Offset> dragStartOffset) =>
     (Draggable<Object> draggable, BuildContext context, Offset position) {
@@ -1566,49 +1605,124 @@ class FuzzyEdgeShader {
   /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects
   static Shader createRadialRevealShader({
     required Rect bounds,
-
-    /// center as an Alignment value (-1 to 1 on each axis, where 0 means center)
     required Alignment center,
     required double fraction,
     double fuzzyEdgeWidth = 20.0,
     double? maxRadius,
+    bool invert = false,
   }) {
     final centerOffset = center.alongSize(bounds.size);
     final calculatedMaxRadius = maxRadius ??
         (calcMaxRadiusForPointWithinRectangle(bounds.size, centerOffset) +
             fuzzyEdgeWidth);
-    final currentRadius = calculatedMaxRadius * fraction;
+    final effectiveFraction = invert ? 1.0 - fraction : fraction;
+    final currentRadius = calculatedMaxRadius * effectiveFraction;
+
+    final colors = invert
+        ? const [Colors.transparent, Colors.transparent, Colors.white]
+        : const [Colors.white, Colors.white, Colors.transparent];
+
+    final solidStop =
+        max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth));
+    final stops = invert ? [0.0, 1.0 - solidStop, 1.0] : [0.0, solidStop, 1.0];
 
     return RadialGradient(
       center: center,
       radius: currentRadius / min(bounds.width, bounds.height),
-      colors: const [
-        Colors.white,
-        Colors.white,
-        Colors.transparent,
-      ],
-      stops: [
-        0.0,
-        max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth)),
-        1.0,
-      ],
+      colors: colors,
+      stops: stops,
     ).createShader(bounds);
   }
 }
 
 class FuzzyCircleReveal extends StatelessWidget {
-  final Alignment center;
+  /// Alignment value (-1 to 1 on each axis, where 0 means center)
+  final double? originAlignX;
+
+  /// Alignment value (-1 to 1 on each axis, where 0 means center)
+  final double? originAlignY;
+
+  /// Origin rightwards from the left edge of the child (can be negative)
+  final double? originLeft;
+
+  /// Origin leftwards from the right edge of the child (can be negative)
+  final double? originRight;
+
+  /// Origin downwards from the top edge of the child (can be negative)
+  final double? originTop;
+
+  /// Origin upwards from the bottom edge of the child (can be negative)
+  final double? originBottom;
   final Animation<double> animation;
   final Widget child;
   final double fuzzyEdgeWidth;
 
-  const FuzzyCircleReveal({
+  /// inverts the gradient so that the transparent side is inside the focus. The smaller side of the animation is still the fully transparent state.
+  final bool invertGradient;
+
+  // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
+  FuzzyCircleReveal({
     super.key,
-    required this.center,
+    this.originAlignX,
+    this.originAlignY,
+    this.originLeft,
+    this.originRight,
+    this.originTop,
+    this.originBottom,
     required this.animation,
     required this.child,
     this.fuzzyEdgeWidth = 20.0,
-  });
+    this.invertGradient = false,
+  })  : assert(
+          !(originAlignX != null && originLeft != null),
+          'Values given for both originAlignX and originLeft, which would contradict.',
+        ),
+        assert(
+          !(originAlignX != null && originRight != null),
+          'Values given for both originAlignX and originRight, which would contradict.',
+        ),
+        assert(
+          !(originLeft != null && originRight != null),
+          'Values given for both originLeft and originRight, which would contradict.',
+        ),
+        assert(
+          !(originAlignY != null && originTop != null),
+          'Values given for both originAlignY and originTop, which would contradict.',
+        ),
+        assert(
+          !(originAlignY != null && originBottom != null),
+          'Values given for both originAlignY and originBottom, which would contradict.',
+        ),
+        assert(
+          !(originTop != null && originBottom != null),
+          'Values given for both originTop and originBottom, which would contradict.',
+        );
+
+  Alignment _computeCenter(Size size) {
+    double x;
+    if (originAlignX != null) {
+      x = originAlignX!;
+    } else if (originLeft != null) {
+      x = (originLeft! / size.width) * 2 - 1;
+    } else if (originRight != null) {
+      x = 1 - (originRight! / size.width) * 2;
+    } else {
+      x = 0;
+    }
+
+    double y;
+    if (originAlignY != null) {
+      y = originAlignY!;
+    } else if (originTop != null) {
+      y = (originTop! / size.height) * 2 - 1;
+    } else if (originBottom != null) {
+      y = 1 - (originBottom! / size.height) * 2;
+    } else {
+      y = 0;
+    }
+
+    return Alignment(x, y);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1619,9 +1733,10 @@ class FuzzyCircleReveal extends StatelessWidget {
           shaderCallback: (Rect bounds) {
             return FuzzyEdgeShader.createRadialRevealShader(
               bounds: bounds,
-              center: center,
+              center: _computeCenter(bounds.size),
               fraction: animation.value,
               fuzzyEdgeWidth: fuzzyEdgeWidth,
+              invert: invertGradient,
             );
           },
           blendMode: BlendMode.dstIn,

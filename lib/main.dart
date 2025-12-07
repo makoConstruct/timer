@@ -512,6 +512,35 @@ class TimerState extends State<Timer>
     List<int> withDigitsReplacedWith(List<int> v, int d) =>
         List.filled(v.length, d);
 
+    // Selected underline animation
+    // why is this still clipping (why does it seem to move down so far)
+    Widget selectionUnderline = AnimatedBuilder(
+      animation: _selectedUnderlineAnimation,
+      builder: (context, child) {
+        final progress =
+            Curves.easeOut.transform(_selectedUnderlineAnimation.value);
+        final underlineHeight = 9.0;
+        final gap = 3.0;
+
+        return Positioned(
+          left: 0,
+          right: 0,
+          bottom: -underlineHeight - gap,
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: progress,
+            child: Container(
+              height: underlineHeight,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(underlineHeight / 2),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
     final Widget timeText = DefaultTextStyle.merge(
         style: TextStyle(color: theme.colorScheme.onSurface),
         child: AnimatedBuilder(
@@ -539,11 +568,14 @@ class TimerState extends State<Timer>
                             child: Text(boring.formatTime(timeDigits),
                                 overflow: TextOverflow.clip))
                       ]),
-                      Transform.scale(
-                          alignment: Alignment.topLeft,
-                          scale: lerp(1, 0.6, v),
-                          child: Text(boring.formatTime(durationDigits),
-                              overflow: TextOverflow.clip)),
+                      Stack(clipBehavior: Clip.none, children: [
+                        Transform.scale(
+                            alignment: Alignment.topLeft,
+                            scale: lerp(1, 0.6, v),
+                            child: Text(boring.formatTime(durationDigits),
+                                overflow: TextOverflow.clip)),
+                        selectionUnderline,
+                      ]),
                     ]));
           },
         ));
@@ -605,18 +637,16 @@ class TimerState extends State<Timer>
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.all(timerPaddingr),
-        child: ClipRect(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              clockDial,
-              SizedBox(width: timerPaddingr),
-              Flexible(
-                child: timeText,
-              ),
-            ],
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            clockDial,
+            SizedBox(width: timerPaddingr),
+            Flexible(
+              child: timeText,
+            ),
+          ],
         ),
       ),
     );
@@ -667,33 +697,6 @@ class TimerState extends State<Timer>
     //   },
     // );
 
-    // Selected underline animation
-    Widget selectedUnderline = AnimatedBuilder(
-      animation: _selectedUnderlineAnimation,
-      builder: (context, child) {
-        final progress =
-            Curves.easeOut.transform(_selectedUnderlineAnimation.value);
-        final underlineHeight = 9.0;
-
-        return Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: progress,
-            child: Container(
-              height: underlineHeight,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(underlineHeight / 2),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
     result = Stack(
       clipBehavior: Clip.none,
       children: [
@@ -703,13 +706,14 @@ class TimerState extends State<Timer>
         //   bottom: 1.4,
         //   child: unpinnedIndicator,
         // ),
-        selectedUnderline,
+        // selectedUnderline,
       ],
     );
 
     result = FuzzyCircleReveal(
       animation: _appearanceAnimation,
-      center: Alignment(0, 0),
+      originBottom: -5,
+      originAlignX: -0.3,
       child: result,
     );
 
@@ -940,26 +944,23 @@ class _TimerDeletionAnimation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    bool isRightHanded =
+        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
     return Positioned(
       left: rect.left,
       top: rect.top,
       child: IgnorePointer(
-        child: RunOnceAnimation(
+        child: RunOnce(
           controller: controller,
           child: timerWidget,
-          builder: (context, progress, child) {
-            return Transform.translate(
-                offset: Offset(-Curves.easeOut.transform(progress) * 50, 0),
-                child: ClipRect(
-                    child: Align(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: 1 - Curves.easeOut.transform(progress),
-                  child: SizedBox(
-                    width: rect.width,
-                    height: rect.height,
-                    child: child,
-                  ),
-                )));
+          builder: (context, animation, child) {
+            return FuzzyCircleReveal(
+              animation: ReverseAnimation(animation),
+              invertGradient: true,
+              originRight: isRightHanded ? -20 : null,
+              originLeft: isRightHanded ? null : -20,
+              child: child,
+            );
           },
         ),
       ),
@@ -2358,12 +2359,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     );
                   }),
-                  trailing: trailing(Hero(
-                    tag: 'alarm-sound-icon',
-                    flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
-                    child: Icon(Icons.music_note,
-                        key: hereIconKey, color: theme.colorScheme.primary),
-                  )),
+                  trailing: trailing(SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: Hero(
+                        tag: 'alarm-sound-icon',
+                        child: ScalingAspectRatio(
+                            child: Icon(Icons.music_note,
+                                key: hereIconKey,
+                                color: theme.colorScheme.primary)),
+                      ))),
                   onTap: () {
                     Navigator.push(
                       context,
@@ -2418,14 +2423,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 return ListTile(
                   title: Text('Thank the author',
                       style: theme.textTheme.bodyLarge),
-                  trailing: trailing(Hero(
-                    tag: 'thank-author-icon',
-                    flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
-                    child: Icon(
-                      Icons.heart_broken,
-                      key: hereIconKey,
-                      color: theme.colorScheme.primary,
-                    ),
+                  trailing: trailing(SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: Hero(
+                        tag: 'thank-author-icon',
+                        child: ScalingAspectRatio(
+                          child: Icon(
+                            Icons.heart_broken,
+                            key: hereIconKey,
+                            color: theme.colorScheme.primary,
+                          ),
+                        )),
                   )),
                   onTap: () {
                     Navigator.push(
@@ -2473,14 +2482,17 @@ class ThankAuthorScreen extends StatelessWidget {
               expandedTitleScale: 1.0,
               title: Row(
                 children: [
-                  Hero(
-                    tag: 'thank-author-icon',
-                    child: Icon(
-                      Icons.heart_broken,
-                      color: theme.colorScheme.primary,
-                      size: 32,
-                    ),
-                  ),
+                  SizedBox(
+                      width: 32,
+                      height: 32,
+                      child: Hero(
+                        tag: 'thank-author-icon',
+                        child: ScalingAspectRatio(
+                            child: Icon(
+                          Icons.heart_broken,
+                          color: theme.colorScheme.primary,
+                        )),
+                      )),
                   SizedBox(width: 16),
                   Text('Thank the author',
                       style: TextStyle(
@@ -2696,12 +2708,16 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
               expandedTitleScale: 1.0,
               title: Row(
                 children: [
-                  Hero(
-                    tag: 'alarm-sound-icon',
-                    child: Icon(
-                      Icons.music_note,
-                      color: theme.colorScheme.primary,
-                      size: 32,
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: Hero(
+                      tag: 'alarm-sound-icon',
+                      child: ScalingAspectRatio(
+                          child: Icon(
+                        Icons.music_note,
+                        color: theme.colorScheme.primary,
+                      )),
                     ),
                   ),
                   SizedBox(width: 16),
@@ -2790,24 +2806,12 @@ class _SectionRevealState extends State<_SectionReveal>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+    return FuzzyCircleReveal(
       animation: _revealController,
-      builder: (context, child) {
-        final fraction = Curves.easeOut.transform(_revealController.value);
-
-        return ShaderMask(
-          shaderCallback: (Rect bounds) {
-            return FuzzyEdgeShader.createRadialRevealShader(
-              bounds: bounds,
-              center: Alignment(0, -1.3),
-              fraction: fraction,
-              fuzzyEdgeWidth: 20.0,
-            );
-          },
-          blendMode: BlendMode.dstIn,
-          child: widget.child,
-        );
-      },
+      originAlignX: 0,
+      originTop: -70,
+      fuzzyEdgeWidth: 20.0,
+      child: widget.child,
     );
   }
 }
