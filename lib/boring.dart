@@ -6,6 +6,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
@@ -25,7 +26,6 @@ import 'main.dart' show getCachedCornerRadius;
 const double tau = 2 * pi;
 const double backingIndicatorCornerRounding = 25.0;
 const double backingIndicatorGap = 8.0;
-const double backingPlusRadius = 5.0;
 
 bool platformIsDesktop() =>
     Platform.isLinux || Platform.isWindows || Platform.isMacOS;
@@ -282,6 +282,19 @@ Rect? boxRect(GlobalKey key) {
   }
 }
 
+/// Gets the Rect of a widget relative to an ancestor RenderBox
+/// This avoids distortion from route transforms by not using global coordinates
+Rect? boxRectRelativeTo(GlobalKey key, RenderBox ancestor) {
+  final box = key.currentContext?.findRenderObject() as RenderBox?;
+  if (box == null) {
+    return null;
+  } else {
+    final globalPos = box.localToGlobal(Offset.zero);
+    final localPos = ancestor.globalToLocal(globalPos);
+    return localPos & box.size;
+  }
+}
+
 // disabled because it couldn't find its plugin .so, see pubspec
 // class SoloudJukebox {
 //   late Future<SL.AudioSource> forcefield;
@@ -410,7 +423,9 @@ class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
 
   /// adds a child to this that's removed when the animation completes
   void add(Widget child, Animation animation) {
-    ephemeralChildren.add(child);
+    setState(() {
+      ephemeralChildren.add(child);
+    });
     animation.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         setState(() {
@@ -449,6 +464,43 @@ class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
 void addToEphemeralAnimatioHost(
     GlobalKey key, Widget child, Animation animation) {
   (key.currentState! as EphemeralAnimationHostState).add(child, animation);
+}
+
+class RunOnceAnimation extends StatefulWidget {
+  final Widget Function(BuildContext, double progress, Widget? child) builder;
+  final Widget? child;
+  final AnimationController controller;
+  const RunOnceAnimation(
+      {super.key, required this.builder, required this.controller, this.child});
+  @override
+  State<RunOnceAnimation> createState() => _RunOnceAnimationState();
+}
+
+class _RunOnceAnimationState extends State<RunOnceAnimation> {
+  @override
+  void didUpdateWidget(RunOnceAnimation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller.value != widget.controller.value) {
+      widget.controller.value = oldWidget.controller.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.controller,
+      child: widget.child,
+      builder: (context, child) {
+        return widget.builder(context, widget.controller.value, child);
+      },
+    );
+  }
 }
 
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
@@ -1259,7 +1311,7 @@ class Pie extends StatelessWidget {
     required this.value,
     required this.backgroundColor,
     required this.color,
-    this.size = 24,
+    required this.size,
   });
 
   @override
@@ -1440,7 +1492,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
           scale = 1.0;
         } else {
           scale =
-              1.0 - Curves.easeOut.transform(secondaryAnimation.value) * 0.13;
+              1.0 - Curves.easeIn.transform(secondaryAnimation.value) * 0.13;
         }
 
         return Transform.scale(
@@ -1452,9 +1504,9 @@ class CircularRevealRoute<T> extends PageRoute<T>
               bottomLeft: Radius.circular(corners.bottomLeft),
               bottomRight: Radius.circular(corners.bottomRight),
             ),
-            child: _CircularRevealTransition(
+            child: _CircularRevealRouteTransition(
               animation: animation,
-              transitionOrigin: buttonCenter ?? Offset.zero,
+              revealOrigin: buttonCenter ?? Offset.zero,
               child: child,
             ),
           ),
@@ -1515,22 +1567,20 @@ class FuzzyEdgeShader {
   static Shader createRadialRevealShader({
     required Rect bounds,
 
-    /// relative to bounds origin
-    required Offset center,
+    /// center as an Alignment value (-1 to 1 on each axis, where 0 means center)
+    required Alignment center,
     required double fraction,
     double fuzzyEdgeWidth = 20.0,
     double? maxRadius,
   }) {
+    final centerOffset = center.alongSize(bounds.size);
     final calculatedMaxRadius = maxRadius ??
-        (calcMaxRadiusForPointWithinRectangle(bounds.size, center) +
+        (calcMaxRadiusForPointWithinRectangle(bounds.size, centerOffset) +
             fuzzyEdgeWidth);
     final currentRadius = calculatedMaxRadius * fraction;
 
     return RadialGradient(
-      center: Alignment(
-        (center.dx / bounds.width) * 2 - 1,
-        (center.dy / bounds.height) * 2 - 1,
-      ),
+      center: center,
       radius: currentRadius / min(bounds.width, bounds.height),
       colors: const [
         Colors.white,
@@ -1546,24 +1596,63 @@ class FuzzyEdgeShader {
   }
 }
 
-class _CircularRevealTransition extends StatefulWidget {
+class FuzzyCircleReveal extends StatelessWidget {
+  final Alignment center;
   final Animation<double> animation;
-  final Offset transitionOrigin;
+  final Widget child;
+  final double fuzzyEdgeWidth;
+
+  const FuzzyCircleReveal({
+    super.key,
+    required this.center,
+    required this.animation,
+    required this.child,
+    this.fuzzyEdgeWidth = 20.0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        return ShaderMask(
+          shaderCallback: (Rect bounds) {
+            return FuzzyEdgeShader.createRadialRevealShader(
+              bounds: bounds,
+              center: center,
+              fraction: animation.value,
+              fuzzyEdgeWidth: fuzzyEdgeWidth,
+            );
+          },
+          blendMode: BlendMode.dstIn,
+          child: child,
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+class _CircularRevealRouteTransition extends StatefulWidget {
+  final Animation<double> animation;
+  final Offset revealOrigin;
 
   final Widget child;
 
-  const _CircularRevealTransition({
+  const _CircularRevealRouteTransition({
+    // super.key,
     required this.animation,
-    required this.transitionOrigin,
+    required this.revealOrigin,
     required this.child,
   });
 
   @override
-  State<_CircularRevealTransition> createState() =>
-      _CircularRevealTransitionState();
+  State<_CircularRevealRouteTransition> createState() =>
+      _CircularRevealRouteTransitionState();
 }
 
-class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
+class _CircularRevealRouteTransitionState
+    extends State<_CircularRevealRouteTransition> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1584,9 +1673,9 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
                   unlerpUnit(0.0, 0.8, widget.animation.value);
               // );
 
-              final c = Offset(
-                (widget.transitionOrigin.dx / screenSize.width - 0.5) * 2.0,
-                (widget.transitionOrigin.dy / screenSize.height - 0.5) * 2.0,
+              final c = Alignment(
+                (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
+                (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
               );
 
               return IgnorePointer(
@@ -1594,8 +1683,8 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
                       radius: progress * 3.0,
-                      center: Alignment(c.dx, c.dy),
-                      focal: Alignment(c.dx, c.dy),
+                      center: c,
+                      focal: c,
                       colors: [
                         fadedOfBackgroundColor,
                         fadedOfBackgroundColor,
@@ -1612,15 +1701,20 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
         AnimatedBuilder(
           animation: widget.animation,
           builder: (context, child) {
+            final screenSize = MediaQuery.of(context).size;
             final fraction = Curves.easeOut.transform(
               unlerpUnit(0.14, 1.0, widget.animation.value),
+            );
+            final centerAlignment = Alignment(
+              (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
+              (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
             );
 
             return ShaderMask(
               shaderCallback: (Rect bounds) {
                 return FuzzyEdgeShader.createRadialRevealShader(
                   bounds: bounds,
-                  center: widget.transitionOrigin,
+                  center: centerAlignment,
                   fraction: fraction,
                   fuzzyEdgeWidth: 20.0,
                 );
@@ -1632,6 +1726,162 @@ class _CircularRevealTransitionState extends State<_CircularRevealTransition> {
           child: widget.child,
         ),
       ],
+    );
+  }
+}
+
+/// A widget that maintains aspect ratio using visual scaling instead of layout constraints.
+/// Unlike AspectRatio which constrains the child during layout, this widget:
+/// 1. Lays out the child to determine its natural size
+/// 2. Calculates a scale factor to maintain the desired aspect ratio
+/// 3. Applies the scale transformation during painting
+///
+/// The widget itself takes up the full space given by its parent constraints,
+/// but the child is visually scaled to maintain the aspect ratio.
+class ScalingAspectRatio extends SingleChildRenderObjectWidget {
+  final double aspectRatio;
+  final Alignment alignment;
+
+  const ScalingAspectRatio({
+    super.key,
+    this.aspectRatio = 1,
+    required Widget child,
+    this.alignment = Alignment.center,
+  }) : super(child: child);
+
+  @override
+  RenderScalingAspectRatio createRenderObject(BuildContext context) {
+    return RenderScalingAspectRatio(
+      aspectRatio: aspectRatio,
+      alignment: alignment,
+    );
+  }
+
+  @override
+  void updateRenderObject(
+      BuildContext context, RenderScalingAspectRatio renderObject) {
+    renderObject
+      ..aspectRatio = aspectRatio
+      ..alignment = alignment;
+  }
+}
+
+class RenderScalingAspectRatio extends RenderProxyBox {
+  RenderScalingAspectRatio({
+    required double aspectRatio,
+    Alignment alignment = Alignment.center,
+  })  : _aspectRatio = aspectRatio,
+        _alignment = alignment;
+
+  double _aspectRatio;
+  double get aspectRatio => _aspectRatio;
+  set aspectRatio(double value) {
+    if (_aspectRatio == value) return;
+    _aspectRatio = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  Alignment _alignment;
+  Alignment get alignment => _alignment;
+  set alignment(Alignment value) {
+    if (_alignment == value) return;
+    _alignment = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  @override
+  void performLayout() {
+    if (child != null) {
+      // Let the child lay itself out with loose constraints to get its natural size
+      child!.layout(constraints.loosen(), parentUsesSize: true);
+      // This widget takes up the full space given by parent
+      size = constraints.biggest;
+    } else {
+      size = constraints.smallest;
+    }
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child != null) {
+      final Size childSize = child!.size;
+
+      // Calculate the scale factor to maintain aspect ratio within our bounds
+      final double childAspectRatio = childSize.width / childSize.height;
+      final double scale;
+
+      if (childAspectRatio > aspectRatio) {
+        // Child is wider than target aspect ratio, scale based on width
+        scale = (size.width / childSize.width);
+      } else {
+        // Child is taller than target aspect ratio, scale based on height
+        scale = (size.height / childSize.height);
+      }
+
+      // Calculate the scaled size
+      final Size scaledSize = childSize * scale;
+
+      // Calculate the offset to align the scaled child
+      final Size remainingSpace =
+          Size(size.width - scaledSize.width, size.height - scaledSize.height);
+      final Offset alignmentOffset = alignment.alongSize(remainingSpace);
+
+      // Apply the transformation
+      final Matrix4 transform = Matrix4.identity()
+        ..translate(alignmentOffset.dx, alignmentOffset.dy)
+        ..scale(scale, scale);
+
+      context.pushTransform(
+        needsCompositing,
+        offset,
+        transform,
+        (context, offset) {
+          context.paintChild(child!, offset);
+        },
+      );
+    }
+  }
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (child == null) return false;
+
+    final Size childSize = child!.size;
+    final double childAspectRatio = childSize.width / childSize.height;
+    final double scale;
+
+    if (childAspectRatio > aspectRatio) {
+      scale = (size.width / childSize.width);
+    } else {
+      scale = (size.height / childSize.height);
+    }
+
+    final Size scaledSize = childSize * scale;
+    final Size remainingSpace =
+        Size(size.width - scaledSize.width, size.height - scaledSize.height);
+    final Offset alignmentOffset = alignment.alongSize(remainingSpace);
+
+    // Transform the hit test position to child coordinates
+    final Matrix4 transform = Matrix4.identity()
+      ..translateByDouble(alignmentOffset.dx, alignmentOffset.dy, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+
+    final Matrix4 inverse = Matrix4.identity();
+    if (transform.invert() == 0.0) {
+      return false;
+    }
+    inverse.copyInverse(transform);
+
+    final Offset childPosition = MatrixUtils.transformPoint(inverse, position);
+
+    return result.addWithPaintTransform(
+      transform: transform,
+      position: position,
+      hitTest: (BoxHitTestResult result, Offset position) {
+        return child!.hitTest(result, position: childPosition);
+      },
     );
   }
 }

@@ -65,7 +65,8 @@ final sharedDriftIsolateName = "sharedDrift";
 
 const databaseName = 'mako_timer_db';
 
-// Custom Hero flight shuttle builder with 60ms delay
+/// Was supposed to be a custom Hero flight shuttle builder with 60ms delay, but I it looks like it does nothing, I can't see how the movement part of the animation would be affected by this, it would only affect an animation over the hero widget
+/// should have been a builder for createRectTween instead
 Widget delayedHeroFlightShuttleBuilder(
   BuildContext flightContext,
   Animation<double> animation,
@@ -73,8 +74,6 @@ Widget delayedHeroFlightShuttleBuilder(
   BuildContext fromHeroContext,
   BuildContext toHeroContext,
 ) {
-  // Create a delayed animation that starts after 60ms
-  // Assuming typical hero animation duration is 300ms, 60ms = 0.2 of duration
   final delayedAnimation = CurvedAnimation(
     parent: animation,
     curve: const Interval(0.3, 1.0, curve: Curves.fastOutSlowIn),
@@ -356,16 +355,19 @@ class TimerState extends State<Timer>
   late Ticker _ticker;
   // in seconds
   double currentTime = 0;
+  late final AnimationController _appearanceAnimation;
   late final AnimationController _runningAnimation;
   Offset _slideBounceDirection = Offset(0, -1);
   late final AnimationController _slideActivateBounceAnimation;
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
+  late final AnimationController _selectedUnderlineAnimation;
   final GlobalKey _clockKey = GlobalKey();
   final GlobalKey animatedToKey = GlobalKey();
   final previousSize = ValueNotifier<Size?>(null);
   final transferrableKey = GlobalKey();
   bool hasDisabled = false;
+  TimerData? previousValue;
 
   /// kept so that drag handlers will know to remove it from the lsit
   late MobjID? owningList;
@@ -418,6 +420,13 @@ class TimerState extends State<Timer>
   void initState() {
     owningList = widget.owningList;
     super.initState();
+    _appearanceAnimation = AnimationController(
+        duration: const Duration(milliseconds: 180), vsync: this);
+    if (widget.animateIn) {
+      _appearanceAnimation.forward();
+    } else {
+      _appearanceAnimation.value = 1;
+    }
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
     _slideBounceDirection = Offset(0, -1);
@@ -427,17 +436,18 @@ class TimerState extends State<Timer>
         duration: const Duration(milliseconds: 150), vsync: this);
     _unpinnedIndicatorFullyShowing = AnimationController(
         duration: const Duration(milliseconds: 150), vsync: this);
+    _selectedUnderlineAnimation = AnimationController(
+        duration: const Duration(milliseconds: 250), vsync: this);
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
-    TimerData? prev;
     createEffect(() {
       TimerData? d = widget.mobj.value;
       if (d == null) {
         disable();
         return;
       }
-      if ((prev?.isRunning ?? false) != d.isRunning) {
+      if ((previousValue?.isRunning ?? false) != d.isRunning) {
         if (d.isRunning) {
           _runningAnimation.forward();
           _ticker.start();
@@ -448,24 +458,31 @@ class TimerState extends State<Timer>
       }
       moveAnimationTowardsState(_unpinnedIndicatorShowing, !d.pinned);
       moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
-      prev = d;
+
+      // Trigger underline animation when selected changes
+      moveAnimationTowardsState(_selectedUnderlineAnimation, d.selected);
+
+      previousValue = d;
     });
   }
 
   @override
   dispose() {
     disable();
+    _appearanceAnimation.dispose();
+    _runningAnimation.dispose();
+    _unpinnedIndicatorShowing.dispose();
+    _unpinnedIndicatorFullyShowing.dispose();
+    _selectedUnderlineAnimation.dispose();
+    previousSize.dispose();
+
     super.dispose();
   }
 
   void disable() {
     if (hasDisabled) return;
     hasDisabled = true;
-    _runningAnimation.dispose();
-    _unpinnedIndicatorShowing.dispose();
-    _unpinnedIndicatorFullyShowing.dispose();
     _ticker.dispose();
-    previousSize.dispose();
   }
 
   void setTime(double nd) {
@@ -480,13 +497,12 @@ class TimerState extends State<Timer>
 
   @override
   Widget build(BuildContext context) {
-    final d = watchSignal(context, widget.mobj)!;
+    final d = watchSignal(context, widget.mobj) ?? previousValue!;
     final theme = Theme.of(context);
     final mover = 0.1;
     // final thumbSpan = Thumbspan.of(context);
 
-    final dd = durationToSeconds(
-        digitsToDuration(watchSignal(context, widget.mobj)!.digits));
+    final dd = durationToSeconds(digitsToDuration(d.digits));
     // sometimes the background thread completes the timer, the currentTime wont be updated, so in that case it should be ignored.
     double pieCompletion = d.transpired / dd;
     final durationDigits = d.digits;
@@ -540,7 +556,8 @@ class TimerState extends State<Timer>
             maintainState: true,
             maintainAnimation: true,
             child: Transform.scale(
-              scale: 1 + _runningAnimation.value * 3,
+              // scale: 1 + _runningAnimation.value * 3,
+              scale: 1,
               child: Container(
                   decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -609,52 +626,68 @@ class TimerState extends State<Timer>
       builder: (context, child) => Container(
           clipBehavior: Clip.hardEdge,
           decoration: BoxDecoration(
-              shape: BoxShape.rectangle,
-              // the running animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
-              color: _runningAnimation.value == 1
-                  ? theme.colorScheme.surfaceContainerLowest
-                  : theme.colorScheme.surfaceContainerLowest.withAlpha(0)),
+            shape: BoxShape.rectangle,
+            // // the running animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
+            // color: _runningAnimation.value == 1
+            //     ? theme.colorScheme.surfaceContainerLowest
+            //     : theme.colorScheme.surfaceContainerLowest.withAlpha(0)
+          ),
           child: child),
       child: result,
     );
 
-    Widget unpinnedIndicator = AnimatedBuilder(
-      animation: Listenable.merge([
-        _unpinnedIndicatorShowing,
-        _unpinnedIndicatorFullyShowing,
-      ]),
-      builder: (context, child) {
-        final circleScale =
-            Curves.easeOut.transform(_unpinnedIndicatorShowing.value);
-        final unpinnedFullForm =
-            Curves.easeInOut.transform(_unpinnedIndicatorFullyShowing.value);
+    // probably just going to use the existing ring (visible when timer isn't playing) for this instead
+    // Widget unpinnedIndicator = AnimatedBuilder(
+    //   animation: Listenable.merge([
+    //     _unpinnedIndicatorShowing,
+    //     _unpinnedIndicatorFullyShowing,
+    //   ]),
+    //   builder: (context, child) {
+    //     final circleSize = lerp(
+    //             3,
+    //             7,
+    //             Curves.easeInOut
+    //                 .transform(_unpinnedIndicatorFullyShowing.value)) *
+    //         Curves.easeOut.transform(_unpinnedIndicatorShowing.value);
 
-        return Center(
-          child: Transform.scale(
-            scale: circleScale,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Transform.scale(
-                    scale: 1 - unpinnedFullForm,
-                    child: Container(
-                      width: 4,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: backgroundColor(d.hue)
-                            .withValues(alpha: 1 - unpinnedFullForm),
-                      ),
-                    )),
-                Transform.scale(
-                  scale: unpinnedFullForm,
-                  child: Icon(
-                    Icons.delete,
-                    size: 15.4,
-                    color: backgroundColor(d.hue),
-                  ),
-                ),
-              ],
+    //     return Container(
+    //         clipBehavior: Clip.none,
+    //         width: 0,
+    //         height: 0,
+    //         child: Center(
+    //           child: Container(
+    //             width: circleSize,
+    //             height: circleSize,
+    //             decoration: BoxDecoration(
+    //               shape: BoxShape.circle,
+    //               color: backgroundColor(d.hue),
+    //             ),
+    //           ),
+    //         ));
+    //   },
+    // );
+
+    // Selected underline animation
+    Widget selectedUnderline = AnimatedBuilder(
+      animation: _selectedUnderlineAnimation,
+      builder: (context, child) {
+        final progress =
+            Curves.easeOut.transform(_selectedUnderlineAnimation.value);
+        final underlineHeight = 9.0;
+
+        return Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: progress,
+            child: Container(
+              height: underlineHeight,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(underlineHeight / 2),
+              ),
             ),
           ),
         );
@@ -665,12 +698,19 @@ class TimerState extends State<Timer>
       clipBehavior: Clip.none,
       children: [
         result,
-        Positioned(
-          left: 1.4,
-          bottom: 1.4,
-          child: unpinnedIndicator,
-        ),
+        // Positioned(
+        //   left: 1.4,
+        //   bottom: 1.4,
+        //   child: unpinnedIndicator,
+        // ),
+        selectedUnderline,
       ],
+    );
+
+    result = FuzzyCircleReveal(
+      animation: _appearanceAnimation,
+      center: Alignment(0, 0),
+      child: result,
     );
 
     // do a bounce animation to respond to slide to start interactions
@@ -748,7 +788,7 @@ class TimerTray extends StatefulWidget {
   final Color backgroundColor;
 
   /// Icon widget that displays above the sequence
-  final Widget icon;
+  final Widget? icon;
 
   /// Whether this sequence should render within a scrollview
   final bool useScrollView;
@@ -760,7 +800,7 @@ class TimerTray extends StatefulWidget {
     super.key,
     required this.mobj,
     required this.backgroundColor,
-    required this.icon,
+    this.icon,
     this.useScrollView = true,
     this.onTimerDropped,
   });
@@ -781,17 +821,19 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
     wrapKey = GlobalKey();
 
     TimerWidgets? prev;
+    bool firstListChange = true;
     timerWidgets = createComputed(() {
       TimerWidgets next = {};
       for (MobjID t in widget.mobj.value!) {
-        next[t] = (prev != null ? prev![t] : null) ??
+        next[t] = prev?[t] ??
             Timer(
                 key: GlobalKey(),
                 mobj: Mobj.getAlreadyLoaded(t, TimerDataType()),
-                animateIn: false,
+                animateIn: !firstListChange,
                 owningList: widget.mobj.id);
       }
       prev = next;
+      firstListChange = false;
       return next;
     });
   }
@@ -814,31 +856,14 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
           .toList(),
     );
 
-    final columnContent = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        // Icon at the top
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: widget.icon,
-        ),
-        timersWrapWidget,
-      ],
-    );
-
-    Widget res = Container(
+    Widget result = Container(
         // constraints: BoxConstraints(maxheight: double.infinity)
         color: widget.backgroundColor,
-        child: widget.useScrollView
-            ? SingleChildScrollView(
-                reverse: true,
-                child: columnContent,
-              )
-            : columnContent);
+        child: Align(
+            alignment: FractionalOffset(0.8, 1), child: timersWrapWidget));
 
     return DragTarget<GlobalKey<TimerState>>(
-      builder: (context, candidateData, rejectedData) => res,
+      builder: (context, candidateData, rejectedData) => result,
       onMove: (DragTargetDetails<GlobalKey<TimerState>> details) {
         // Could add visual feedback here if needed
       },
@@ -896,6 +921,48 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
         widget.onTimerDropped?.call(timerId);
         //transaction end
       },
+    );
+  }
+}
+
+/// Ephemeral animation for timer deletion - swipes the timer left with clipping
+class _TimerDeletionAnimation extends StatelessWidget {
+  final Rect rect;
+  final Widget timerWidget;
+  final AnimationController controller;
+
+  const _TimerDeletionAnimation({
+    super.key,
+    required this.rect,
+    required this.timerWidget,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: rect.left,
+      top: rect.top,
+      child: IgnorePointer(
+        child: RunOnceAnimation(
+          controller: controller,
+          child: timerWidget,
+          builder: (context, progress, child) {
+            return Transform.translate(
+                offset: Offset(-Curves.easeOut.transform(progress) * 50, 0),
+                child: ClipRect(
+                    child: Align(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: 1 - Curves.easeOut.transform(progress),
+                  child: SizedBox(
+                    width: rect.width,
+                    height: rect.height,
+                    child: child,
+                  ),
+                )));
+          },
+        ),
+      ),
     );
   }
 }
@@ -1002,7 +1069,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     upDownAnimation.forward();
     optionActivationAnimation = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 160),
+      duration: Duration(milliseconds: 200),
     );
     optionActivationAnimation.addStatusListener((status) {
       if (!mounted) {
@@ -1164,7 +1231,9 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
               shaderCallback: (bounds) =>
                   FuzzyEdgeShader.createRadialRevealShader(
                 bounds: bounds,
-                center: bounds.center + revealCenter,
+                center: Alignment(
+                    (bounds.center.dx + revealCenter.dx) / bounds.size.width,
+                    (bounds.center.dy + revealCenter.dy) / bounds.size.height),
                 fraction: revealFraction,
                 fuzzyEdgeWidth: 20.0,
                 maxRadius: revealMaxRadius,
@@ -1210,7 +1279,7 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<Offset> backingPlusCenter = Signal(Offset.zero);
   late final Signal<bool> backingPlusInhibitor;
   late AnimationController backingPlusCenterAnimation =
-      AnimationController(duration: Duration(milliseconds: 220), vsync: this);
+      AnimationController(duration: Duration(milliseconds: 190), vsync: this);
   // note this subscribes to the mobj
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
@@ -1262,6 +1331,7 @@ class TimerScreenState extends State<TimerScreen>
   void takeActionOn(MobjID<TimerData> timerID) {
     //todo: take whichever action is currently highlighted
     toggleRunning(timerID, reset: false);
+    _selectTimer(null);
   }
 
   double nextRandomHue() {
@@ -1334,14 +1404,11 @@ class TimerScreenState extends State<TimerScreen>
         label: Hero(
           tag: 'configButton',
           flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
-          child: AnimatedScale(
-              scale: 1.0,
-              duration: Duration(milliseconds: 280),
-              child: Icon(
-                Icons.settings_rounded,
-                color: theme.colorScheme.onSurface,
-                size: 30,
-              )),
+          child: Icon(
+            Icons.settings_rounded,
+            color: theme.colorScheme.onSurface,
+            size: 30,
+          ),
         ),
         onPressed: () {
           Navigator.push(
@@ -1477,23 +1544,32 @@ class TimerScreenState extends State<TimerScreen>
 
     final thumbSpan = Thumbspan.of(context);
 
-// Schedule update of numPadBounds after this frame completes
+    // Schedule update of numPadBounds after this frame completes
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      Offset controlsPosi =
-          (controlPadKey.currentContext!.findRenderObject() as RenderBox)
-              .localToGlobal(Offset.zero);
+      final controlPadRenderBox =
+          controlPadKey.currentContext!.findRenderObject() as RenderBox;
+
       Rect t = negativeInfinityRect();
-      for (GlobalKey k in numeralKeys) {
-        final b = boxRect(k)!;
-        t = t.expandToInclude((b.topLeft - controlsPosi) & b.size);
+      Offset? center1;
+      Offset? center5;
+
+      for (int i = 0; i < numeralKeys.length; i++) {
+        // Get position relative to controlPad to avoid transform distortion from route animations
+        final rect = boxRectRelativeTo(numeralKeys[i], controlPadRenderBox);
+        if (rect != null) {
+          t = t.expandToInclude(rect);
+          if (i == 1) center1 = rect.center;
+          if (i == 5) center5 = rect.center;
+        }
       }
+
       if (t.isEmpty) {
         numPadBounds.value = Rect.fromLTRB(0, 0, 0, 0);
       } else {
         numPadBounds.value = t;
-        backingPlusCenter.value = (boxRect(numeralKeys[0])!.center +
-                boxRect(numeralKeys[4])!.center) /
-            2;
+        if (center1 != null && center5 != null) {
+          backingPlusCenter.value = (center1 + center5) / 2;
+        }
       }
     });
     final numberPadBacking = Watch((context) {
@@ -1512,18 +1588,47 @@ class TimerScreenState extends State<TimerScreen>
       return AnimatedBuilder(
           animation: backingPlusCenterAnimation,
           builder: (context, child) {
-            return Positioned.fromRect(
-                rect: Rect.fromCenter(
-                    center: backingPlusCenter.peek(),
-                    width: backingPlusCenterAnimation.value *
-                        backingPlusRadius *
-                        2,
-                    height: backingPlusCenterAnimation.value *
-                        backingPlusRadius *
-                        2),
-                child: child!);
-          },
-          child: Icon(Icons.add));
+            final double backingPlusRadius = 14.0;
+            final double lineThickness = 7;
+            final Color color = theme.colorScheme.surfaceContainerHighest;
+            double d = backingPlusCenterAnimation.value * backingPlusRadius * 2;
+            return Positioned(
+                left: backingPlusCenter.peek().dx,
+                top: backingPlusCenter.peek().dy,
+                child: FractionalTranslation(
+                    translation: Offset(-0.5, -0.5),
+                    child: SizedBox(
+                        width: d,
+                        height: d,
+                        child: Stack(
+                          children: [
+                            // Horizontal bar
+                            Center(
+                              child: Container(
+                                width: d,
+                                height: lineThickness,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius:
+                                      BorderRadius.circular(lineThickness / 2),
+                                ),
+                              ),
+                            ),
+                            // Vertical bar
+                            Center(
+                              child: Container(
+                                width: lineThickness,
+                                height: d,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius:
+                                      BorderRadius.circular(lineThickness / 2),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ))));
+          });
     });
     // the lower part of the screen
     final controls = Container(
@@ -1541,7 +1646,8 @@ class TimerScreenState extends State<TimerScreen>
               alignment: Alignment.bottomRight,
               children: [
                 numberPadBacking,
-                backingPlusCenterWidget,
+                // disabling this for now, consider removing the whole feature
+                // backingPlusCenterWidget,
                 Container(
                   key: controlPadKey,
                   child: Row(
@@ -1561,16 +1667,12 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
-    final timersWidget = Expanded(
-      child: Container(
-          constraints: BoxConstraints.expand(),
-          child: TimerTray(
-            key: timerTrayKey,
-            mobj: timerListMobj,
-            backgroundColor: theme.colorScheme.surfaceContainerLow,
-            icon: Icon(Icons.push_pin), // You can customize this icon
-            useScrollView: true,
-          )),
+    final timersWidget = TimerTray(
+      key: timerTrayKey,
+      mobj: timerListMobj,
+      backgroundColor: theme.colorScheme.surfaceContainerLow,
+      icon: Icon(Icons.push_pin), // You can customize this icon
+      useScrollView: true,
     );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -1596,8 +1698,9 @@ class TimerScreenState extends State<TimerScreen>
                 builder: (children, context) => Stack(children: children),
                 children: [
                   Column(
+                    mainAxisSize: MainAxisSize.max,
                     children: [
-                      timersWidget,
+                      Flexible(flex: 1, child: timersWidget),
                       Container(
                         constraints: BoxConstraints(minWidth: double.infinity),
                         // the lower part of the screen
@@ -1624,7 +1727,8 @@ class TimerScreenState extends State<TimerScreen>
 
   bool toggleRunningOnMobj(Mobj<TimerData> timer, {bool reset = false}) {
     bool wasRunning = timer.peek()!.isRunning;
-    timer.value = timer.peek()!.toggleRunning(reset: reset);
+    TimerData nv = timer.peek()!.toggleRunning(reset: reset);
+    timer.value = nv;
     return !wasRunning;
   }
 
@@ -1673,14 +1777,13 @@ class TimerScreenState extends State<TimerScreen>
     }
 
     // remove (previous) unpinned nonplaying timers
-    for (final tid in peekTimers()) {
+    final curTimers = peekTimers();
+    for (final tid in curTimers) {
       if (tid == ntid) continue;
       final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
       if (!t.peek()!.pinned && !t.peek()!.isRunning) {
         // delay slightly to make it clear what's happened (might not be necessary if we introduce deletion animations)
-        async.Timer(Duration(milliseconds: 260), () {
-          deleteTimer(tid);
-        });
+        deleteTimer(tid);
       }
     }
   }
@@ -1722,6 +1825,41 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void deleteTimer(MobjID ki) {
+    // Get the timer's position and size using the globalkey, so that we can animate the exit in the EphemeralHost layer
+    final tts = timerTrayKey.currentState as _TimerTrayState;
+    final timerWidget = tts.timerWidgets.value[ki];
+    if (timerWidget != null) {
+      final timerKey = timerWidget.key as GlobalKey<TimerState>;
+      final timerState = timerKey.currentState;
+
+      assert(timerState != null && timerState.mounted);
+      final renderBox = timerState!.context.findRenderObject() as RenderBox?;
+      if (renderBox != null && renderBox.hasSize) {
+        Rect tr = boxRectRelativeTo(
+                timerKey,
+                ephemeralAnimationLayer.currentContext!.findRenderObject()
+                    as RenderBox) ??
+            Rect.zero;
+
+        // Create and add the deletion animation
+        final deleteAnimation = AnimationController(
+          duration: const Duration(milliseconds: 240),
+          vsync: this,
+        );
+        deleteAnimation.forward(from: 0);
+
+        final deletionAnimationWidget = _TimerDeletionAnimation(
+          key: UniqueKey(),
+          rect: tr,
+          timerWidget: timerWidget,
+          controller: deleteAnimation,
+        );
+
+        addToEphemeralAnimatioHost(
+            ephemeralAnimationLayer, deletionAnimationWidget, deleteAnimation);
+      }
+    }
+
     removeTimer(ki);
     Mobj.getAlreadyLoaded(ki, TimerDataType()).value = null;
   }
@@ -2099,15 +2237,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Hero(
                     tag: 'configButton',
-                    child: AnimatedScale(
-                        key: widget.iconKey,
-                        scale: 1.0,
-                        duration: Duration(milliseconds: 280),
-                        child: Icon(
-                          Icons.settings_rounded,
-                          color: theme.colorScheme.onSurface,
-                          size: 30,
-                        )),
+                    child: Icon(
+                      Icons.settings_rounded,
+                      color: theme.colorScheme.onSurface,
+                      size: 30,
+                    ),
                   ),
                   SizedBox(width: 5),
                   Text('Settings',
@@ -2147,6 +2281,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
+                  // splashColor: Colors.black,
+
+                  // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
+                  // focusColor: Colors.red,
+                  // selectedColor: Colors.red,
+                  // // tileColor: Colors.red,
+                  // selectedTileColor: Colors.red,
+                  // textColor: Colors.red,
+                  // hoverColor: Colors.red,
+                  // splashColor: Colors.black,
+
                   trailing: trailing(TweenAnimationBuilder<double>(
                     tween: Tween(
                       begin: isRightHanded ? -1.0 : 1.0,
@@ -2241,11 +2386,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 return ListTile(
                   title:
                       Text('About this app', style: theme.textTheme.bodyLarge),
-                  trailing: trailing(Hero(
-                    tag: 'about-icon',
-                    flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
-                    child: Icon(Icons.info_outline,
-                        key: hereIconKey, color: theme.colorScheme.primary),
+                  trailing: trailing(SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: Hero(
+                        tag: 'about-icon',
+                        child: ScalingAspectRatio(
+                            child: Icon(Icons.info_outline,
+                                key: hereIconKey,
+                                size: 10,
+                                color: theme.colorScheme.primary))),
                   )),
                   onTap: () {
                     Navigator.push(
@@ -2292,6 +2442,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
+              SizedBox(height: MediaQuery.of(context).padding.bottom),
             ]),
           ),
         ],
@@ -2389,15 +2540,18 @@ class AboutScreen extends StatelessWidget {
               expandedTitleScale: 1.0,
               title: Row(
                 children: [
-                  Hero(
-                    tag: 'about-icon',
-                    child: Icon(
-                      Icons.info_outline,
-                      color: theme.colorScheme.primary,
-                      size: 32,
-                    ),
+                  SizedBox(
+                    width: 35,
+                    height: 35,
+                    child: Hero(
+                        tag: 'about-icon',
+                        child: ScalingAspectRatio(
+                            child: Icon(
+                          Icons.info_outline,
+                          color: theme.colorScheme.primary,
+                        ))),
                   ),
-                  SizedBox(width: 16),
+                  SizedBox(width: 9),
                   Text("About Mako's Timer",
                       style: TextStyle(
                         color: theme.colorScheme.onSurface,
@@ -2501,27 +2655,33 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     final (backgroundColorA, backgroundColorB) =
         maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
 
-    Widget section(String title, List<AudioInfo> sounds) {
+    Widget section(String title, List<AudioInfo> sounds,
+        {Duration? fadeDelay}) {
       return SliverToBoxAdapter(
-        child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Padding(
-                  padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
-                  child: Text(title,
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(color: theme.colorScheme.primary))),
-              Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: sounds
-                      .map((audio) => SoundTile(
-                          audio: audio,
-                          selectedAudioID: selectedAudioID,
-                          currentlyPlayingAudioID: _currentlyPlayingAudioID))
-                      .toList()),
-            ])),
+        child: _SectionReveal(
+          fadeDelay: fadeDelay,
+          child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                        padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                        child: Text(title,
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(color: theme.colorScheme.primary))),
+                    Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: sounds
+                            .map((audio) => SoundTile(
+                                audio: audio,
+                                selectedAudioID: selectedAudioID,
+                                currentlyPlayingAudioID:
+                                    _currentlyPlayingAudioID))
+                            .toList()),
+                  ])),
+        ),
       );
     }
 
@@ -2562,25 +2722,92 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
-          if (_loading)
-            SliverFillRemaining(
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else ...[
+          if (!_loading) ...[
             if (_assetSounds.isNotEmpty)
-              section('Mako Timer Sounds', _assetSounds),
+              section('Mako Timer Sounds', _assetSounds,
+                  fadeDelay: Duration(milliseconds: 0)),
             if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-              section('Alarms', _alarmSounds!),
+              section('Alarms', _alarmSounds!,
+                  fadeDelay: Duration(milliseconds: 100)),
             if (_notificationSounds != null && _notificationSounds!.isNotEmpty)
-              section('Notifications', _notificationSounds!),
+              section('Notifications', _notificationSounds!,
+                  fadeDelay: Duration(milliseconds: 200)),
             if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
-              section('Ringtones', _ringtoneSounds!),
+              section('Ringtones', _ringtoneSounds!,
+                  fadeDelay: Duration(milliseconds: 300)),
             SliverToBoxAdapter(
-              child: SizedBox(height: 16),
+              child:
+                  SizedBox(height: 16 + MediaQuery.of(context).padding.bottom),
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+class _SectionReveal extends StatefulWidget {
+  final Duration? fadeDelay;
+  final Widget child;
+
+  const _SectionReveal({
+    this.fadeDelay,
+    required this.child,
+  });
+
+  @override
+  State<_SectionReveal> createState() => _SectionRevealState();
+}
+
+class _SectionRevealState extends State<_SectionReveal>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _revealController;
+
+  @override
+  void initState() {
+    super.initState();
+    _revealController = AnimationController(
+      duration: const Duration(milliseconds: 170),
+      vsync: this,
+    );
+
+    if (widget.fadeDelay != null) {
+      Future.delayed(widget.fadeDelay!, () {
+        if (mounted) {
+          _revealController.forward();
+        }
+      });
+    } else {
+      _revealController.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _revealController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _revealController,
+      builder: (context, child) {
+        final fraction = Curves.easeOut.transform(_revealController.value);
+
+        return ShaderMask(
+          shaderCallback: (Rect bounds) {
+            return FuzzyEdgeShader.createRadialRevealShader(
+              bounds: bounds,
+              center: Alignment(0, -1.3),
+              fraction: fraction,
+              fuzzyEdgeWidth: 20.0,
+            );
+          },
+          blendMode: BlendMode.dstIn,
+          child: widget.child,
+        );
+      },
     );
   }
 }
