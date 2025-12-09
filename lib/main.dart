@@ -1014,57 +1014,69 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
 }
 
 /// Ephemeral animation for timer deletion - swipes the timer left with clipping
-class _TimerDeletionAnimation extends StatelessWidget {
+class _TimerDeletionAnimation extends StatefulWidget {
   final Rect rect;
   final Widget timerWidget;
-  final AnimationController controller;
   final bool direction;
+  final Duration duration;
 
   const _TimerDeletionAnimation({
     super.key,
     required this.rect,
     required this.timerWidget,
     required this.direction,
-    required this.controller,
+    required this.duration,
   });
 
   @override
+  State<_TimerDeletionAnimation> createState() =>
+      _TimerDeletionAnimationState();
+}
+
+class _TimerDeletionAnimationState extends State<_TimerDeletionAnimation> {
+  @override
   Widget build(BuildContext context) {
-    bool isRightHanded =
-        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
+    //    bool isRightHanded =
+    // Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
     return Positioned(
-      left: rect.left,
-      top: rect.top,
+      left: widget.rect.left,
+      top: widget.rect.top,
       child: IgnorePointer(
-        child: RunOnceAnimation(
-          controller: controller,
-          child: timerWidget,
-          builder: (context, progress, child) {
-            if (direction) {
-              return Transform.translate(
-                  // we can't have this, I think it causes animated_to to lag behind the clip rect
-                  offset: Offset(isRightHanded ? -60 : 60, 0) *
-                      Curves.easeOut.transform(progress),
-                  // offset: Offset(isRightHanded ? -40 : 40, 0) * progress,
-                  child: FuzzyExpandingCircle(
-                    progress: 1.0 - progress,
-                    invertGradient: true,
-                    originRight: isRightHanded ? 10 : null,
-                    originLeft: isRightHanded ? null : 10,
-                    child: child!,
-                  ));
-            } else {
-              return Transform.translate(
-                  offset: Offset(0, -10 * Curves.easeOut.transform(progress)),
-                  child: FuzzyExpandingCircle(
-                    progress: 1.0 - progress,
-                    invertGradient: true,
-                    originBottom: -50,
-                    originLeft: 28,
-                    child: child!,
-                  ));
-            }
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: widget.duration,
+          onEnd: () {
+            // Remove this widget from the ephemeral animation host when animation completes
+            context
+                .findAncestorStateOfType<EphemeralAnimationHostState>()
+                ?.remove(widget);
           },
+          builder: (context, progress, child) {
+            // I'm not really sure it's a good idea to have two animations happening inconsistently
+            // if (direction) {
+            // return Transform.translate(
+            //     offset: Offset(isRightHanded ? -70 : 70, 0) *
+            //         Curves.easeOut.transform(progress),
+            //     child: FuzzyExpandingCircle(
+            //       progress: 1.0 - progress,
+            //       invertGradient: true,
+            //       originRight: isRightHanded ? 10 : null,
+            //       originLeft: isRightHanded ? null : 10,
+            //       child: child!,
+            //     ));
+            // } else {
+            return Transform.translate(
+                offset: Offset(0, -30 * Curves.easeOut.transform(progress)),
+                child: FuzzyExpandingCircle(
+                  progress: 1.0 - progress,
+                  invertGradient: true,
+                  originBottom: -90,
+                  originLeft: 27,
+                  child: child!,
+                ));
+            // }
+          },
+          child: widget.timerWidget,
         ),
       ),
     );
@@ -1335,9 +1347,8 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
               shaderCallback: (bounds) =>
                   FuzzyEdgeShader.createRadialRevealShader(
                 bounds: bounds,
-                center: Alignment(
-                    (bounds.center.dx + revealCenter.dx) / bounds.size.width,
-                    (bounds.center.dy + revealCenter.dy) / bounds.size.height),
+                center: Alignment(revealCenter.dx / (bounds.size.width / 2),
+                    revealCenter.dy / (bounds.size.height / 2)),
                 fraction: revealFraction,
                 fuzzyEdgeWidth: 20.0,
                 maxRadius: revealMaxRadius,
@@ -1899,11 +1910,6 @@ class TimerScreenState extends State<TimerScreen>
             Rect.zero;
 
         // Create and add the deletion animation
-        final deleteAnimation = AnimationController(
-          duration: const Duration(milliseconds: 270),
-          vsync: this,
-        );
-        deleteAnimation.forward(from: 0);
         (timerWidget.key as GlobalKey<TimerState>)
             .currentState!
             .animatedToDisabled
@@ -1913,11 +1919,11 @@ class TimerScreenState extends State<TimerScreen>
           direction: pushAside,
           rect: tr,
           timerWidget: timerWidget,
-          controller: deleteAnimation,
+          duration: const Duration(milliseconds: 270),
         );
 
-        addToEphemeralAnimatioHost(
-            ephemeralAnimationLayer, deletionAnimationWidget, deleteAnimation);
+        ephemeralAnimationLayer.currentState!
+            .addWithoutAutomaticRemoval(deletionAnimationWidget);
       }
     }
 
@@ -2673,7 +2679,7 @@ class AlarmSoundPickerScreen extends StatefulWidget {
 }
 
 class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
-    with SignalsMixin {
+    with SignalsMixin, TickerProviderStateMixin {
   List<AudioInfo>? _alarmSounds;
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
@@ -2732,9 +2738,20 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
 
     Widget section(String title, List<AudioInfo> sounds,
         {Duration? fadeDelay}) {
+      final animDuration = Duration(milliseconds: 100);
+      final totalDuration =
+          fadeDelay != null ? fadeDelay + animDuration : animDuration;
+      final delayFraction = fadeDelay != null
+          ? fadeDelay.inMicroseconds / totalDuration.inMicroseconds
+          : 0.0;
+
       return SliverToBoxAdapter(
-        child: _SectionReveal(
-          fadeDelay: fadeDelay,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: totalDuration,
+          curve: Interval(delayFraction, 1.0, curve: Curves.linear),
+          builder: (context, value, child) =>
+              Opacity(opacity: value, child: child!),
           child: Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Column(
@@ -2823,60 +2840,6 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           ],
         ],
       ),
-    );
-  }
-}
-
-class _SectionReveal extends StatefulWidget {
-  final Duration? fadeDelay;
-  final Widget child;
-
-  const _SectionReveal({
-    this.fadeDelay,
-    required this.child,
-  });
-
-  @override
-  State<_SectionReveal> createState() => _SectionRevealState();
-}
-
-class _SectionRevealState extends State<_SectionReveal>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _revealController;
-
-  @override
-  void initState() {
-    super.initState();
-    _revealController = AnimationController(
-      duration: const Duration(milliseconds: 240),
-      vsync: this,
-    );
-
-    if (widget.fadeDelay != null) {
-      Future.delayed(widget.fadeDelay!, () {
-        if (mounted) {
-          _revealController.forward();
-        }
-      });
-    } else {
-      _revealController.value = 1.0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _revealController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FuzzyCircleReveal(
-      animation: _revealController,
-      originAlignX: 0,
-      originTop: -70,
-      fuzzyEdgeWidth: 20.0,
-      child: widget.child,
     );
   }
 }
