@@ -217,6 +217,7 @@ class Mobj<T> extends Signal<T?> {
 
   MobjID get id => _id;
   final TypeHelp<T> _type;
+  // currently not really used [todo] stop leaking into the db maybe (but don't worry about leaking signals into memory..)
   int _refCount = 1;
   DateTime _lastTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastSequenceNumber = 0;

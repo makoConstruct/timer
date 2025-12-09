@@ -175,51 +175,114 @@ class TimersApp extends StatefulWidget {
   State<TimersApp> createState() => _TimersAppState();
 }
 
-void enlivenTimer(Mobj<TimerData> mobj, JukeBox jukeBox) {
-  async.Timer? completionTimer;
-  Function()? ed;
-  void reinitializeCompletionTimer() {
-    completionTimer?.cancel();
-    final d = mobj.value!;
-    completionTimer = async.Timer(
-        Duration(
-            milliseconds: (d.duration - DateTime.now().difference(d.startTime))
-                .inMilliseconds
-                .ceil()), () {
-      completionTimer = null;
-      jukeBox.playAudio(
-          Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType()).value!);
-      mobj.value = mobj.value!.withChanges(
-        runningState: TimerData.completed,
-        // isGoingOff: true,
-      );
+/// this is in charge of running timer sounds in response to changes to the timer list
+/// eventually it will be responsible for doing repeat timer logic
+/// ideally the background thread would also use it
+class TimerHolm {
+  late JukeBox jukeBox;
+  final Mobj<List<MobjID<TimerData>>> list;
+  Map<MobjID<TimerData>, TimerTrack> tracking = {};
+  late Signal<bool> enabled;
+
+  /// when disabled, it behaves as if there are no timers in the list
+  late final Computed<List<MobjID<TimerData>>> currentList;
+  // late EffectCleanup reaction;
+  late EffectCleanup reaction;
+  TimerHolm({required this.list, required this.jukeBox}) {
+    enabled = signal(true);
+    currentList = computed(() => enabled.value ? list.value ?? [] : []);
+    reaction = effect(() {
+      Map<MobjID<TimerData>, TimerTrack> newTracking = {};
+      for (final tid in currentList.value) {
+        if (!tracking.containsKey(tid)) {
+          bool unsubscribedPreFuture = false;
+          final tt = TimerTrack()
+            ..subscription = () {
+              unsubscribedPreFuture = true;
+            };
+          Mobj.fetch(tid, type: const TimerDataType()).then((mobj) {
+            if (unsubscribedPreFuture) {
+              // mobj.reduceRef
+              tt.subscription = null;
+              return;
+            }
+            tt.mobj = mobj;
+            tt.subscription = enlivenTimer(tt, mobj, jukeBox);
+          });
+          newTracking[tid] = tt;
+        } else {
+          newTracking[tid] = tracking[tid]!;
+        }
+      }
+      for (final tt in tracking.entries) {
+        if (!newTracking.containsKey(tt.key)) {
+          tt.value.subscription?.call();
+          tt.value.subscription = null;
+          tt.value.completionTimer?.cancel();
+          tt.value.completionTimer = null;
+          tt.value.mobj = null;
+        }
+      }
+      tracking = newTracking;
     });
   }
 
-  TimerData? prev = mobj.value;
-  // once null always null
-  if (prev != null) {
-    ed = effect(() {
-      final TimerData? d = mobj.value;
-      if (d == null) {
-        ed?.call();
-        ed = null;
-        completionTimer?.cancel();
-        completionTimer = null;
-        prev = null;
-        return;
-      }
-      if (d.isRunning) {
-        if (prev?.duration != d.duration || (!(prev?.isRunning ?? false))) {
-          reinitializeCompletionTimer();
+  /// how each timer is subscribed to and responded to
+  void Function() enlivenTimer(
+      TimerTrack tt, Mobj<TimerData> mobj, JukeBox jukeBox) {
+    void reinitializeCompletionTimer() {
+      tt.completionTimer?.cancel();
+      final d = mobj.value!;
+      tt.completionTimer = async.Timer(
+          Duration(
+              milliseconds:
+                  (d.duration - DateTime.now().difference(d.startTime))
+                      .inMilliseconds
+                      .ceil()), () {
+        tt.completionTimer = null;
+        jukeBox.playAudio(
+            Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
+                .value!);
+        mobj.value = mobj.value!.withChanges(
+          runningState: TimerData.completed,
+          // isGoingOff: true,
+        );
+      });
+    }
+
+    TimerData? prev = mobj.value;
+    // once null always null
+    if (prev != null) {
+      return effect(() {
+        final TimerData? d = mobj.value;
+        if (d == null) {
+          // mobj.reduceRef();
+          // this is never actually called, the list change triggers this listener to be unhooked
+          tt.completionTimer?.cancel();
+          tt.completionTimer = null;
+        } else {
+          bool prevRunning = prev?.isRunning ?? false;
+          if (prevRunning != d.isRunning) {
+            if (prevRunning) {
+              tt.completionTimer?.cancel();
+              tt.completionTimer = null;
+            } else {
+              reinitializeCompletionTimer();
+            }
+          }
         }
-      } else if ((prev?.isRunning ?? false) && !d.isRunning) {
-        completionTimer?.cancel();
-        completionTimer = null;
-      }
-      prev = d;
-    });
+        prev = d;
+      });
+    } else {
+      return () {};
+    }
   }
+}
+
+class TimerTrack {
+  Function()? subscription;
+  async.Timer? completionTimer;
+  Mobj<TimerData>? mobj;
 }
 
 // Global to cache screen corner radius
@@ -242,6 +305,7 @@ ScreenRadius getCachedCornerRadius() =>
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late JukeBox jukeBox;
+  late TimerHolm timerHolm;
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
   }
@@ -257,19 +321,10 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
-    void enlivenAllTimersInList(Mobj<List<MobjID>> listMobj) {
-      for (final tid in listMobj.peek() ?? []) {
-        Mobj.fetch(tid, type: const TimerDataType())
-            .then((mobj) => enlivenTimer(mobj, jukeBox));
-      }
-    }
 
     final timerListMobj = Mobj<List<MobjID>>.getAlreadyLoaded(
         timerListID, ListType(const StringType()));
-    final transientTimerListMobj =
-        Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
-    enlivenAllTimersInList(timerListMobj);
-    enlivenAllTimersInList(transientTimerListMobj);
+    timerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox);
   }
 
   @override
@@ -283,10 +338,12 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     switch (state) {
       case AppLifecycleState.resumed:
         graspForegroundService();
+        timerHolm.enabled.value = true;
         print("mako regrasping foreground service");
         break;
       case AppLifecycleState.paused:
         FlutterForegroundTask.sendDataToTask({'op': 'goodbye'});
+        timerHolm.enabled.value = false;
         print("mako goodbye");
         break;
       default:
@@ -362,8 +419,12 @@ class TimerState extends State<Timer>
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
   late final AnimationController _selectedUnderlineAnimation;
+  // currently inactive. I was considering using this for doing a deletion where most of the deletion animation happens in-place and then it's shunted out into another layer just for the end.
+  late final AnimationController _deletionAnimation;
   final GlobalKey _clockKey = GlobalKey();
   final GlobalKey animatedToKey = GlobalKey();
+  // used to prevent the deletion animation from being interfered with by animated to, which unfortunately only pays attention to paint position, so slows down even non-layout position transforms.
+  late final Signal<bool> animatedToDisabled = createSignal(false);
   final previousSize = ValueNotifier<Size?>(null);
   final transferrableKey = GlobalKey();
   bool hasDisabled = false;
@@ -438,12 +499,16 @@ class TimerState extends State<Timer>
         duration: const Duration(milliseconds: 150), vsync: this);
     _selectedUnderlineAnimation = AnimationController(
         duration: const Duration(milliseconds: 250), vsync: this);
+    _selectedUnderlineAnimation.value = 1;
+    _deletionAnimation = AnimationController(
+        duration: const Duration(milliseconds: 240), vsync: this);
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
     createEffect(() {
       TimerData? d = widget.mobj.value;
       if (d == null) {
+        _deletionAnimation.forward();
         disable();
         return;
       }
@@ -474,6 +539,7 @@ class TimerState extends State<Timer>
     _unpinnedIndicatorShowing.dispose();
     _unpinnedIndicatorFullyShowing.dispose();
     _selectedUnderlineAnimation.dispose();
+    _deletionAnimation.dispose();
     previousSize.dispose();
 
     super.dispose();
@@ -710,12 +776,22 @@ class TimerState extends State<Timer>
       ],
     );
 
-    result = FuzzyCircleReveal(
-      animation: _appearanceAnimation,
-      originBottom: -5,
-      originAlignX: -0.3,
-      child: result,
-    );
+    result = AnimatedBuilder(
+        animation: _appearanceAnimation,
+        child: result,
+        builder: (context, child) => FractionalTranslation(
+              translation: Offset(
+                  0,
+                  0.6 *
+                      (1.0 -
+                          Curves.easeOut
+                              .transform(_appearanceAnimation.value))),
+              child: FuzzyExpandingCircle(
+                originAlignX: -0.3,
+                progress: _appearanceAnimation.value,
+                child: child!,
+              ),
+            ));
 
     // do a bounce animation to respond to slide to start interactions
     double bounceDistance =
@@ -726,8 +802,16 @@ class TimerState extends State<Timer>
             offset: _slideBounceDirection * bounceDistance, child: child),
         child: result);
 
+    // result = AnimatedBuilder(
+    //   animation: _deletionAnimation,
+    //   builder: (context, child) =>
+    //       Opacity(opacity: 1 - _deletionAnimation.value, child: child),
+    //   child: result,
+    // );
+
     result = AnimatedTo.spring(
         globalKey: animatedToKey,
+        enabled: !watchSignal(context, animatedToDisabled)!,
         // tighter than default. ios sets this to .55
         description: const Spring.withDamping(durationSeconds: 0.2),
         child: result);
@@ -934,11 +1018,13 @@ class _TimerDeletionAnimation extends StatelessWidget {
   final Rect rect;
   final Widget timerWidget;
   final AnimationController controller;
+  final bool direction;
 
   const _TimerDeletionAnimation({
     super.key,
     required this.rect,
     required this.timerWidget,
+    required this.direction,
     required this.controller,
   });
 
@@ -950,17 +1036,34 @@ class _TimerDeletionAnimation extends StatelessWidget {
       left: rect.left,
       top: rect.top,
       child: IgnorePointer(
-        child: RunOnce(
+        child: RunOnceAnimation(
           controller: controller,
           child: timerWidget,
-          builder: (context, animation, child) {
-            return FuzzyCircleReveal(
-              animation: ReverseAnimation(animation),
-              invertGradient: true,
-              originRight: isRightHanded ? -20 : null,
-              originLeft: isRightHanded ? null : -20,
-              child: child,
-            );
+          builder: (context, progress, child) {
+            if (direction) {
+              return Transform.translate(
+                  // we can't have this, I think it causes animated_to to lag behind the clip rect
+                  offset: Offset(isRightHanded ? -60 : 60, 0) *
+                      Curves.easeOut.transform(progress),
+                  // offset: Offset(isRightHanded ? -40 : 40, 0) * progress,
+                  child: FuzzyExpandingCircle(
+                    progress: 1.0 - progress,
+                    invertGradient: true,
+                    originRight: isRightHanded ? 10 : null,
+                    originLeft: isRightHanded ? null : 10,
+                    child: child!,
+                  ));
+            } else {
+              return Transform.translate(
+                  offset: Offset(0, -10 * Curves.easeOut.transform(progress)),
+                  child: FuzzyExpandingCircle(
+                    progress: 1.0 - progress,
+                    invertGradient: true,
+                    originBottom: -50,
+                    originLeft: 28,
+                    child: child!,
+                  ));
+            }
           },
         ),
       ),
@@ -1290,8 +1393,8 @@ class TimerScreenState extends State<TimerScreen>
   GlobalKey<EphemeralAnimationHostState> ephemeralAnimationLayer = GlobalKey();
   final Mobj<List<MobjID<TimerData>>> timerListMobj =
       Mobj.getAlreadyLoaded(timerListID, timerListType);
-  final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
-      Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
+  // final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
+  //     Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
   final Mobj<double> nextHueMobj =
       Mobj.getAlreadyLoaded(nextHueID, const DoubleType());
   final List<GlobalKey<TimersButtonState>> numeralKeys =
@@ -1404,7 +1507,6 @@ class TimerScreenState extends State<TimerScreen>
         key: hereConfigButtonKey,
         label: Hero(
           tag: 'configButton',
-          flightShuttleBuilder: delayedHeroFlightShuttleBuilder,
           child: Icon(
             Icons.settings_rounded,
             color: theme.colorScheme.onSurface,
@@ -1585,52 +1687,7 @@ class TimerScreenState extends State<TimerScreen>
         ),
       );
     });
-    final backingPlusCenterWidget = Watch((context) {
-      return AnimatedBuilder(
-          animation: backingPlusCenterAnimation,
-          builder: (context, child) {
-            final double backingPlusRadius = 14.0;
-            final double lineThickness = 7;
-            final Color color = theme.colorScheme.surfaceContainerHighest;
-            double d = backingPlusCenterAnimation.value * backingPlusRadius * 2;
-            return Positioned(
-                left: backingPlusCenter.peek().dx,
-                top: backingPlusCenter.peek().dy,
-                child: FractionalTranslation(
-                    translation: Offset(-0.5, -0.5),
-                    child: SizedBox(
-                        width: d,
-                        height: d,
-                        child: Stack(
-                          children: [
-                            // Horizontal bar
-                            Center(
-                              child: Container(
-                                width: d,
-                                height: lineThickness,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius:
-                                      BorderRadius.circular(lineThickness / 2),
-                                ),
-                              ),
-                            ),
-                            // Vertical bar
-                            Center(
-                              child: Container(
-                                width: lineThickness,
-                                height: d,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius:
-                                      BorderRadius.circular(lineThickness / 2),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ))));
-          });
-    });
+
     // the lower part of the screen
     final controls = Container(
       clipBehavior: Clip.hardEdge,
@@ -1770,7 +1827,6 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
     Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value = true;
-    enlivenTimer(nt, Provider.of<JukeBox>(context, listen: false));
 
     timerListMobj.value = timers().toList()..add(ntid);
     if (selecting) {
@@ -1784,7 +1840,7 @@ class TimerScreenState extends State<TimerScreen>
       final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
       if (!t.peek()!.pinned && !t.peek()!.isRunning) {
         // delay slightly to make it clear what's happened (might not be necessary if we introduce deletion animations)
-        deleteTimer(tid);
+        deleteTimer(tid, pushAside: true);
       }
     }
   }
@@ -1825,7 +1881,7 @@ class TimerScreenState extends State<TimerScreen>
     }
   }
 
-  void deleteTimer(MobjID ki) {
+  void deleteTimer(MobjID ki, {bool pushAside = false}) {
     // Get the timer's position and size using the globalkey, so that we can animate the exit in the EphemeralHost layer
     final tts = timerTrayKey.currentState as _TimerTrayState;
     final timerWidget = tts.timerWidgets.value[ki];
@@ -1844,13 +1900,17 @@ class TimerScreenState extends State<TimerScreen>
 
         // Create and add the deletion animation
         final deleteAnimation = AnimationController(
-          duration: const Duration(milliseconds: 240),
+          duration: const Duration(milliseconds: 270),
           vsync: this,
         );
         deleteAnimation.forward(from: 0);
-
+        (timerWidget.key as GlobalKey<TimerState>)
+            .currentState!
+            .animatedToDisabled
+            .value = true;
         final deletionAnimationWidget = _TimerDeletionAnimation(
           key: UniqueKey(),
+          direction: pushAside,
           rect: tr,
           timerWidget: timerWidget,
           controller: deleteAnimation,
@@ -1863,6 +1923,7 @@ class TimerScreenState extends State<TimerScreen>
 
     removeTimer(ki);
     Mobj.getAlreadyLoaded(ki, TimerDataType()).value = null;
+    // [todo] reduceRef
   }
 
   void removeTimer(MobjID ki) {
@@ -2238,6 +2299,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Hero(
                     tag: 'configButton',
+                    createRectTween: (begin, end) =>
+                        DelayedRectTween(begin: begin, end: end, delay: 0.14),
                     child: Icon(
                       Icons.settings_rounded,
                       color: theme.colorScheme.onSurface,
@@ -2713,6 +2776,8 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                     height: 32,
                     child: Hero(
                       tag: 'alarm-sound-icon',
+                      createRectTween: (begin, end) =>
+                          DelayedRectTween(begin: begin, end: end, delay: 0.14),
                       child: ScalingAspectRatio(
                           child: Icon(
                         Icons.music_note,
@@ -2783,7 +2848,7 @@ class _SectionRevealState extends State<_SectionReveal>
   void initState() {
     super.initState();
     _revealController = AnimationController(
-      duration: const Duration(milliseconds: 170),
+      duration: const Duration(milliseconds: 240),
       vsync: this,
     );
 

@@ -1444,6 +1444,42 @@ double calcMaxRadiusForPointWithinRectangle(Size size, Offset center) {
   return sqrt(w * w + h * h);
 }
 
+/// A RectTween that wraps another RectTween but delays the start of movement,
+/// staying at `begin` until `delay` fraction of the animation has passed.
+class DelayedRectTween extends Tween<Rect?> {
+  final double delay;
+  final RectTween _innerTween;
+
+  DelayedRectTween({
+    required Rect? begin,
+    required Rect? end,
+    this.delay = 0.0,
+    RectTween? innerTween,
+  })  : _innerTween =
+            innerTween ?? MaterialRectArcTween(begin: begin, end: end),
+        super(begin: begin, end: end);
+
+  @override
+  Rect? lerp(double t) {
+    if (t <= delay) {
+      return begin;
+    }
+    final adjustedT = (t - delay) / (1.0 - delay);
+    return _innerTween.lerp(adjustedT);
+  }
+}
+
+/// Factory for Hero.createRectTween that delays movement by a fraction of the animation.
+/// Uses MaterialRectArcTween internally for the same curved path as default Hero.
+/// Usage: `Hero(createRectTween: delayedHeroRectTween(0.1), ...)`
+CreateRectTween delayedHeroRectTween(double delay) {
+  return (Rect? begin, Rect? end) => DelayedRectTween(
+        begin: begin,
+        end: end,
+        delay: delay,
+      );
+}
+
 /// Circular reveal clipper adapted from circular_reveal_animation package
 /// Copyright 2021 Alexander Zhdanov
 /// Licensed under Apache 2.0: http://www.apache.org/licenses/LICENSE-2.0
@@ -1622,9 +1658,9 @@ class FuzzyEdgeShader {
         ? const [Colors.transparent, Colors.transparent, Colors.white]
         : const [Colors.white, Colors.white, Colors.transparent];
 
-    final solidStop =
+    final transitionStop =
         max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth));
-    final stops = invert ? [0.0, 1.0 - solidStop, 1.0] : [0.0, solidStop, 1.0];
+    final stops = [0.0, transitionStop, 1.0];
 
     return RadialGradient(
       center: center,
@@ -1744,6 +1780,99 @@ class FuzzyCircleReveal extends StatelessWidget {
         );
       },
       child: child,
+    );
+  }
+}
+
+double _computeAlignmentAxis(
+    double size, double? fromLeft, double? fromRight, double? alignX) {
+  if (fromLeft != null) {
+    return (fromLeft / size) * 2 - 1;
+  } else if (fromRight != null) {
+    return 1 - (fromRight / size) * 2;
+  } else {
+    return alignX ?? 0;
+  }
+}
+
+Alignment _computeAlignmentForParameters(
+    Size size,
+    double? fromLeft,
+    double? fromRight,
+    double? alignX,
+    double? fromTop,
+    double? fromBottom,
+    double? alignY) {
+  return Alignment(
+    _computeAlignmentAxis(size.width, fromLeft, fromRight, alignX),
+    _computeAlignmentAxis(size.height, fromTop, fromBottom, alignY),
+  );
+}
+
+class FuzzyExpandingCircle extends StatelessWidget {
+  final double progress;
+  final double? originAlignX;
+  final double? originAlignY;
+  final double? originLeft;
+  final double? originRight;
+  final double? originTop;
+  final double? originBottom;
+  final double? fuzzyEdgeWidth;
+  final bool invertGradient;
+  final Widget child;
+  // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
+  FuzzyExpandingCircle({
+    super.key,
+    this.originAlignX,
+    this.originAlignY,
+    this.originLeft,
+    this.originRight,
+    this.originTop,
+    this.originBottom,
+    required this.progress,
+    required this.child,
+    this.fuzzyEdgeWidth = 20.0,
+    this.invertGradient = false,
+  })  : assert(
+          !(originAlignX != null && originLeft != null),
+          'Values given for both originAlignX and originLeft, which would contradict.',
+        ),
+        assert(
+          !(originAlignX != null && originRight != null),
+          'Values given for both originAlignX and originRight, which would contradict.',
+        ),
+        assert(
+          !(originLeft != null && originRight != null),
+          'Values given for both originLeft and originRight, which would contradict.',
+        ),
+        assert(
+          !(originAlignY != null && originTop != null),
+          'Values given for both originAlignY and originTop, which would contradict.',
+        ),
+        assert(
+          !(originAlignY != null && originBottom != null),
+          'Values given for both originAlignY and originBottom, which would contradict.',
+        ),
+        assert(
+          !(originTop != null && originBottom != null),
+          'Values given for both originTop and originBottom, which would contradict.',
+        );
+
+  @override
+  Widget build(BuildContext context) {
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      child: child,
+      shaderCallback: (Rect bounds) {
+        return FuzzyEdgeShader.createRadialRevealShader(
+          bounds: bounds,
+          fraction: progress,
+          fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
+          invert: invertGradient,
+          center: _computeAlignmentForParameters(bounds.size, originLeft,
+              originRight, originAlignX, originTop, originBottom, originAlignY),
+        );
+      },
     );
   }
 }
