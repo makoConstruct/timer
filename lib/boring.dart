@@ -466,82 +466,6 @@ void addToEphemeralAnimatioHost(
   (key.currentState! as EphemeralAnimationHostState).add(child, animation);
 }
 
-class RunOnceAnimation extends StatefulWidget {
-  final Widget Function(BuildContext, double progress, Widget? child) builder;
-  final Widget? child;
-  final AnimationController controller;
-  const RunOnceAnimation(
-      {super.key, required this.builder, required this.controller, this.child});
-  @override
-  State<RunOnceAnimation> createState() => _RunOnceAnimationState();
-}
-
-class _RunOnceAnimationState extends State<RunOnceAnimation> {
-  @override
-  void didUpdateWidget(RunOnceAnimation oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller.value != widget.controller.value) {
-      widget.controller.value = oldWidget.controller.value;
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.controller,
-      child: widget.child,
-      builder: (context, child) {
-        return widget.builder(context, widget.controller.value, child);
-      },
-    );
-  }
-}
-
-class RunOnce extends StatefulWidget {
-  final AnimationController controller;
-  final Widget child;
-  final Widget Function(BuildContext, Animation<double> progress, Widget child)
-      builder;
-
-  const RunOnce({
-    super.key,
-    required this.controller,
-    required this.child,
-    required this.builder,
-  });
-
-  @override
-  State<RunOnce> createState() => _RunOnceState();
-}
-
-class _RunOnceState extends State<RunOnce> {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = widget.controller;
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return widget.builder(context, _controller, widget.child);
-  }
-}
-
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
 DragAnchorStrategy dragAnchorStrategy(ValueNotifier<Offset> dragStartOffset) =>
     (Draggable<Object> draggable, BuildContext context, Offset position) {
@@ -1444,6 +1368,12 @@ double calcMaxRadiusForPointWithinRectangle(Size size, Offset center) {
   return sqrt(w * w + h * h);
 }
 
+double distanceToRectangle(double width, double height, Offset fromTopLeft) {
+  final dx = max(0.0, max(-fromTopLeft.dx, fromTopLeft.dx - width));
+  final dy = max(0.0, max(-fromTopLeft.dy, fromTopLeft.dy - height));
+  return sqrt(dx * dx + dy * dy);
+}
+
 /// A RectTween that wraps another RectTween but delays the start of movement,
 /// staying at `begin` until `delay` fraction of the animation has passed.
 class DelayedRectTween extends Tween<Rect?> {
@@ -1638,21 +1568,27 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
 }
 
 class FuzzyEdgeShader {
-  /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects
+  /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects.
+  /// By default, minRadius is the distance from center to the nearest edge of bounds,
+  /// and maxRadius is the distance to the farthest corner.
   static Shader createRadialRevealShader({
     required Rect bounds,
     required Alignment center,
     required double fraction,
     double fuzzyEdgeWidth = 20.0,
+    double? minRadius,
     double? maxRadius,
     bool invert = false,
   }) {
     final centerOffset = center.alongSize(bounds.size);
+    final calculatedMinRadius = minRadius ??
+        distanceToRectangle(bounds.width, bounds.height, centerOffset);
     final calculatedMaxRadius = maxRadius ??
         (calcMaxRadiusForPointWithinRectangle(bounds.size, centerOffset) +
             fuzzyEdgeWidth);
     final effectiveFraction = invert ? 1.0 - fraction : fraction;
-    final currentRadius = calculatedMaxRadius * effectiveFraction;
+    final currentRadius =
+        lerp(calculatedMinRadius, calculatedMaxRadius, effectiveFraction);
 
     final colors = invert
         ? const [Colors.transparent, Colors.transparent, Colors.white]
@@ -1693,6 +1629,9 @@ class FuzzyCircleReveal extends StatelessWidget {
   final Widget child;
   final double fuzzyEdgeWidth;
 
+  /// Minimum radius to start from. Defaults to distance from center to nearest edge.
+  final double? minRadius;
+
   /// inverts the gradient so that the transparent side is inside the focus. The smaller side of the animation is still the fully transparent state.
   final bool invertGradient;
 
@@ -1708,6 +1647,7 @@ class FuzzyCircleReveal extends StatelessWidget {
     required this.animation,
     required this.child,
     this.fuzzyEdgeWidth = 20.0,
+    this.minRadius,
     this.invertGradient = false,
   })  : assert(
           !(originAlignX != null && originLeft != null),
@@ -1772,6 +1712,7 @@ class FuzzyCircleReveal extends StatelessWidget {
               center: _computeCenter(bounds.size),
               fraction: animation.value,
               fuzzyEdgeWidth: fuzzyEdgeWidth,
+              minRadius: minRadius,
               invert: invertGradient,
             );
           },
@@ -1818,6 +1759,7 @@ class FuzzyExpandingCircle extends StatelessWidget {
   final double? originTop;
   final double? originBottom;
   final double? fuzzyEdgeWidth;
+  final double? minRadius;
   final bool invertGradient;
   final Widget child;
   // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
@@ -1832,6 +1774,7 @@ class FuzzyExpandingCircle extends StatelessWidget {
     required this.progress,
     required this.child,
     this.fuzzyEdgeWidth = 20.0,
+    this.minRadius,
     this.invertGradient = false,
   })  : assert(
           !(originAlignX != null && originLeft != null),
@@ -1868,6 +1811,7 @@ class FuzzyExpandingCircle extends StatelessWidget {
           bounds: bounds,
           fraction: progress,
           fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
+          minRadius: minRadius,
           invert: invertGradient,
           center: _computeAlignmentForParameters(bounds.size, originLeft,
               originRight, originAlignX, originTop, originBottom, originAlignY),
