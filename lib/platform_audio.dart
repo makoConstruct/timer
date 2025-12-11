@@ -8,26 +8,26 @@ enum PlatformAudioType {
 
 class AudioInfo {
   /// a null uri means "use the default for the given category"
-  final String? uri;
+  final String? url;
   final String name;
   final bool isLong;
 
   const AudioInfo({
-    required this.uri,
+    required this.url,
     required this.name,
     required this.isLong,
   });
 
   static const defaultRingtone =
-      AudioInfo(uri: null, name: 'Default Ringtone', isLong: true);
+      AudioInfo(url: null, name: 'Default Ringtone', isLong: true);
   static const defaultNotification =
-      AudioInfo(uri: null, name: 'Default Notification', isLong: false);
+      AudioInfo(url: null, name: 'Default Notification', isLong: false);
   static const defaultAlarm =
-      AudioInfo(uri: null, name: 'Default Alarm', isLong: true);
+      AudioInfo(url: null, name: 'Default Alarm', isLong: true);
 
   factory AudioInfo.fromMap(Map<dynamic, dynamic> map) {
     return AudioInfo(
-      uri: map['uri'] as String?,
+      url: map['uri'] as String?,
       name: map['name'] as String,
       isLong: map['isLong'] as bool,
     );
@@ -35,7 +35,7 @@ class AudioInfo {
 
   Map<String, dynamic> toMap() {
     return {
-      'uri': uri,
+      'uri': url,
       'name': name,
       'isLong': isLong,
     };
@@ -77,7 +77,7 @@ class PlatformAudio {
 
   static Future<void> playAudio(AudioInfo a) async {
     try {
-      await _channel.invokeMethod('playAudio', {'uri': a.uri});
+      await _channel.invokeMethod('playAudio', {'uri': a.url});
     } on PlatformException catch (e) {
       throw Exception('Failed to play audio: ${e.message}');
     }
@@ -109,11 +109,11 @@ class PlatformAudio {
 
   static const List<AudioInfo> assetSounds = [
     AudioInfo(
-        uri: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
+        url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
         name: 'JR - Announcement',
         isLong: false),
     AudioInfo(
-        uri: 'asset://assets/sounds/jingles_STEEL16.ogg',
+        url: 'asset://assets/sounds/jingles_STEEL16.ogg',
         name: 'Steel Jingle 16',
         isLong: false),
   ];

@@ -1,3 +1,5 @@
+// this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code, for anyone who enjoys reading code.
+
 import 'dart:io';
 import 'dart:math';
 import 'dart:async';
@@ -127,6 +129,12 @@ Future<void> initializeDatabase() async {
         type: const BoolType(),
         initial: () => false,
         debugLabel: "has created timer"),
+    Mobj.getOrCreate(exitedSetupID,
+        type: const BoolType(), initial: () => false, debugLabel: "left setup"),
+    Mobj.getOrCreate(completedSetupID,
+        type: const BoolType(),
+        initial: () => false,
+        debugLabel: "completed setup"),
     fversion,
   ]);
 }
@@ -378,7 +386,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         onGenerateRoute: (settings) {
           if (settings.name == '/') {
             return CircularRevealRoute(
-              page: TimerScreen(),
+              builder: (context) => TimerScreen(),
             );
           }
           return null;
@@ -786,8 +794,8 @@ class TimerState extends State<Timer>
                       (1.0 -
                           Curves.easeOut
                               .transform(_appearanceAnimation.value))),
-              child: FuzzyExpandingCircle(
-                originAlignX: -0.3,
+              child: FuzzyCircleClip(
+                origin: RelAlignment(originAlignX: -0.3),
                 progress: _appearanceAnimation.value,
                 child: child!,
               ),
@@ -1067,11 +1075,10 @@ class _TimerDeletionAnimationState extends State<_TimerDeletionAnimation> {
             // } else {
             return Transform.translate(
                 offset: Offset(0, -30 * Curves.easeOut.transform(progress)),
-                child: FuzzyExpandingCircle(
+                child: FuzzyCircleClip(
                   progress: 1.0 - progress,
                   invertGradient: true,
-                  originBottom: -90,
-                  originLeft: 27,
+                  origin: RelAlignment(originTop: -90, originLeft: 27),
                   child: child!,
                 ));
             // }
@@ -1345,7 +1352,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
             translation: Offset(-0.5, -0.5),
             child: ShaderMask(
               shaderCallback: (bounds) =>
-                  FuzzyEdgeShader.createRadialRevealShader(
+                  FuzzyCircleShader.createRadialRevealShader(
                 bounds: bounds,
                 center: Alignment(revealCenter.dx / (bounds.size.width / 2),
                     revealCenter.dy / (bounds.size.height / 2)),
@@ -1528,7 +1535,7 @@ class TimerScreenState extends State<TimerScreen>
           Navigator.push(
             context,
             CircularRevealRoute(
-              page: SettingsScreen(
+              builder: (context) => SettingsScreen(
                   iconKey: configButtonKey, flipBackgroundColors: false),
               buttonCenter: widgetCenter(hereConfigButtonKey),
               iconKey: configButtonKey,
@@ -2286,6 +2293,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget trailing(Widget child) =>
         SizedBox(width: 32.0, child: Center(child: child));
 
+    bool completedSetup = watchSignal(
+        context, Mobj.getAlreadyLoaded(completedSetupID, const BoolType()))!;
+
+    Widget setupTile = ListTile(
+      title: Text('Setup', style: theme.textTheme.headlineLarge),
+      subtitle: Text('Resume setup', style: theme.textTheme.bodyLarge),
+      trailing: trailing(Icon(Icons.settings_rounded)),
+      onTap: () {
+        Navigator.push(context,
+            CircularRevealRoute(builder: (context) => OnboardScreen()));
+      },
+    );
+
     return Scaffold(
       backgroundColor: backgroundColorA,
       body: CustomScrollView(
@@ -2335,7 +2355,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // SliverPadding(
           //   padding: EdgeInsets.only(top: _topPadding),
           // ),
-          // Settings items
           SliverList(
             delegate: SliverChildListDelegate([
               // Right-handed mode setting
@@ -2442,7 +2461,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Navigator.push(
                       context,
                       CircularRevealRoute(
-                        page: AlarmSoundPickerScreen(
+                        builder: (context) => AlarmSoundPickerScreen(
                             iconKey: iconKey,
                             flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
@@ -2475,7 +2494,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Navigator.push(
                       context,
                       CircularRevealRoute(
-                        page: AboutScreen(
+                        builder: (context) => AboutScreen(
                             iconKey: iconKey,
                             flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
@@ -2509,7 +2528,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Navigator.push(
                       context,
                       CircularRevealRoute(
-                        page: ThankAuthorScreen(
+                        builder: (context) => ThankAuthorScreen(
                             iconKey: iconKey,
                             flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
@@ -2521,6 +2540,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               SizedBox(height: MediaQuery.of(context).padding.bottom),
+              if (!completedSetup) ...[
+                setupTile,
+              ],
             ]),
           ),
         ],
@@ -2745,6 +2767,45 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           ? fadeDelay.inMicroseconds / totalDuration.inMicroseconds
           : 0.0;
 
+      final selectedAudio =
+          Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
+      final jukeBox = Provider.of<JukeBox>(context, listen: false);
+
+      Widget radioSelector(AudioInfo audio) {
+        bool hasPlayed = false;
+        return RadioItem<AudioInfo?>(
+          equalityComparison: (AudioInfo? a, AudioInfo? b) => a?.url == b?.url,
+          me: audio,
+          selection: selectedAudio,
+          onTap: () {
+            jukeBox.pauseAudio();
+            if (selectedAudio.value?.url != audio.url) {
+              hasPlayed = false;
+            }
+            if (!hasPlayed) {
+              jukeBox.playAudio(audio);
+            }
+            hasPlayed = !hasPlayed;
+          },
+          builder: (context, isOn) {
+            final textTheme = isOn
+                ? theme.textTheme.bodyMedium!
+                    .copyWith(color: theme.colorScheme.onPrimary)
+                : theme.textTheme.bodyMedium!;
+            final backgroundColor = isOn
+                ? theme.colorScheme.primary
+                : theme.colorScheme.surfaceContainerLowest;
+            return Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(audio.name, style: textTheme));
+          },
+        );
+      }
+
       return SliverToBoxAdapter(
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
@@ -2766,11 +2827,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                         spacing: 8,
                         runSpacing: 8,
                         children: sounds
-                            .map((audio) => SoundTile(
-                                audio: audio,
-                                selectedAudioID: selectedAudioID,
-                                currentlyPlayingAudioID:
-                                    _currentlyPlayingAudioID))
+                            .map((audio) => radioSelector(audio))
                             .toList()),
                   ])),
         ),
@@ -2844,55 +2901,6 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   }
 }
 
-class SoundTile extends StatelessWidget {
-  final AudioInfo audio;
-  final MobjID<AudioInfo> selectedAudioID;
-  final Signal<String?> currentlyPlayingAudioID;
-  const SoundTile({
-    super.key,
-    required this.audio,
-    required this.selectedAudioID,
-    required this.currentlyPlayingAudioID,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final selectedAudioMobj =
-        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
-    final jukebox = Provider.of<JukeBox>(context, listen: false);
-
-    return GestureDetector(onTap: () async {
-      jukebox.pauseAudio();
-      selectedAudioMobj.value = audio;
-      if (currentlyPlayingAudioID.peek() == audio.uri) {
-        // if you click the currently playing one a second time, it just stops it
-        currentlyPlayingAudioID.value = null;
-      } else {
-        currentlyPlayingAudioID.value = audio.uri;
-        jukebox.playAudio(audio);
-      }
-    }, child: Watch(
-      (context) {
-        final textTheme = audio.uri == selectedAudioMobj.value!.uri
-            ? theme.textTheme.bodyMedium!.copyWith(
-                color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800)
-            : theme.textTheme.bodyMedium!;
-        final backgroundColor = audio.uri == selectedAudioMobj.value!.uri
-            ? theme.colorScheme.primary
-            : theme.colorScheme.surfaceContainerLowest;
-        return Container(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(audio.name, style: textTheme));
-      },
-    ));
-  }
-}
-
 Future<bool> hasBackgroundPermission() {
   if (Platform.isAndroid) {
     return FlutterForegroundTask.isIgnoringBatteryOptimizations;
@@ -2902,5 +2910,152 @@ Future<bool> hasBackgroundPermission() {
   } else {
     // Other platforms (web, desktop) do not support background execution for this app.
     return Future.value(false);
+  }
+}
+
+class OnboardScreen extends StatefulWidget {
+  const OnboardScreen({super.key});
+
+  @override
+  State<OnboardScreen> createState() => _OnboardScreenState();
+}
+
+class _OnboardScreenState extends State<OnboardScreen> {
+  late ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToNext() {
+    final screenHeight = MediaQuery.of(context).size.height;
+    _scrollController.animateTo(
+      screenHeight,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _setHandedness(bool isRightHanded) {
+    final mobj = Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+    mobj.value = isRightHanded;
+    _scrollToNext();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final screenHeight = MediaQuery.of(context).size.height;
+    final backgroundColor = theme.colorScheme.surfaceContainerLowest;
+
+    Widget handButton({
+      required bool isRight,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            height: 120,
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: isRight
+                  ? [
+                      Text('Right',
+                          style: theme.textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w500)),
+                      const SizedBox(width: 12),
+                      Transform.scale(
+                        scaleX: -1,
+                        child: Transform.rotate(
+                          angle: 45 * pi / 180,
+                          child: Icon(Icons.back_hand_rounded,
+                              size: 48, color: theme.colorScheme.primary),
+                        ),
+                      ),
+                    ]
+                  : [
+                      Transform.rotate(
+                        angle: 45 * pi / 180,
+                        child: Icon(Icons.back_hand_rounded,
+                            size: 48, color: theme.colorScheme.primary),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('Left',
+                          style: theme.textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w500)),
+                    ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: backgroundColor,
+      body: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          // Handedness selection - full screen
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: screenHeight,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('Setup',
+                        style: theme.textTheme.headlineLarge
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 48),
+                    Text('Which hand do you prefer?',
+                        style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        handButton(
+                          isRight: false,
+                          onTap: () => _setHandedness(false),
+                        ),
+                        handButton(
+                          isRight: true,
+                          onTap: () => _setHandedness(true),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Skip button - full screen
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: screenHeight,
+              child: Center(
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Continue'),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

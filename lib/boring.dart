@@ -18,6 +18,7 @@ import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:screen_corner_radius/screen_corner_radius.dart';
+import 'package:signals/signals_flutter.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
 import 'platform_audio.dart';
@@ -49,22 +50,22 @@ class JukeBox {
   Future<void> playAudio(AudioInfo a) async {
     if (platformIsDesktop()) {
       // Use audioplayers on Linux
-      if (a.uri == null) {
+      if (a.url == null) {
         return;
       }
 
       // Convert URI to appropriate Source
       Source source;
-      if (a.uri!.startsWith('asset://')) {
+      if (a.url!.startsWith('asset://')) {
         // Flutter asset
-        final assetPath = a.uri!.replaceFirst('asset://assets/', '');
+        final assetPath = a.url!.replaceFirst('asset://assets/', '');
         source = AssetSource(assetPath);
-      } else if (a.uri!.startsWith('file://')) {
+      } else if (a.url!.startsWith('file://')) {
         // Local file
-        source = DeviceFileSource(a.uri!.replaceFirst('file://', ''));
+        source = DeviceFileSource(a.url!.replaceFirst('file://', ''));
       } else {
         // Try as file path
-        source = DeviceFileSource(a.uri!);
+        source = DeviceFileSource(a.url!);
       }
 
       await _audioPlayer!.play(source);
@@ -1454,18 +1455,18 @@ class CircularRevealClipper extends CustomClipper<Path> {
 /// Custom page route that combines circular reveal animation with translation
 class CircularRevealRoute<T> extends PageRoute<T>
     with MaterialRouteTransitionMixin<T> {
-  final Widget page;
+  final Widget Function(BuildContext context) builder;
   final Offset? buttonCenter;
   final GlobalKey? iconKey;
 
   CircularRevealRoute({
-    required this.page,
+    required this.builder,
     this.buttonCenter,
     this.iconKey,
   });
 
   @override
-  Widget buildContent(BuildContext context) => page;
+  Widget buildContent(BuildContext context) => builder(context);
 
   @override
   bool get opaque => animation?.isCompleted ?? false;
@@ -1567,7 +1568,7 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
   }
 }
 
-class FuzzyEdgeShader {
+class FuzzyCircleShader {
   /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects.
   /// By default, minRadius is the distance from center to the nearest edge of bounds,
   /// and maxRadius is the distance to the farthest corner.
@@ -1607,7 +1608,7 @@ class FuzzyEdgeShader {
   }
 }
 
-class FuzzyCircleReveal extends StatelessWidget {
+class RelAlignment {
   /// Alignment value (-1 to 1 on each axis, where 0 means center)
   final double? originAlignX;
 
@@ -1625,56 +1626,53 @@ class FuzzyCircleReveal extends StatelessWidget {
 
   /// Origin upwards from the bottom edge of the child (can be negative)
   final double? originBottom;
-  final Animation<double> animation;
-  final Widget child;
-  final double fuzzyEdgeWidth;
 
-  /// Minimum radius to start from. Defaults to distance from center to nearest edge.
-  final double? minRadius;
+  static const center = RelAlignment();
 
-  /// inverts the gradient so that the transparent side is inside the focus. The smaller side of the animation is still the fully transparent state.
-  final bool invertGradient;
-
-  // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
-  FuzzyCircleReveal({
-    super.key,
+  const RelAlignment({
     this.originAlignX,
     this.originAlignY,
     this.originLeft,
     this.originRight,
     this.originTop,
     this.originBottom,
-    required this.animation,
-    required this.child,
-    this.fuzzyEdgeWidth = 20.0,
-    this.minRadius,
-    this.invertGradient = false,
-  })  : assert(
-          !(originAlignX != null && originLeft != null),
-          'Values given for both originAlignX and originLeft, which would contradict.',
-        ),
-        assert(
-          !(originAlignX != null && originRight != null),
-          'Values given for both originAlignX and originRight, which would contradict.',
-        ),
-        assert(
-          !(originLeft != null && originRight != null),
-          'Values given for both originLeft and originRight, which would contradict.',
-        ),
-        assert(
-          !(originAlignY != null && originTop != null),
-          'Values given for both originAlignY and originTop, which would contradict.',
-        ),
-        assert(
-          !(originAlignY != null && originBottom != null),
-          'Values given for both originAlignY and originBottom, which would contradict.',
-        ),
-        assert(
-          !(originTop != null && originBottom != null),
-          'Values given for both originTop and originBottom, which would contradict.',
-        );
+  });
 
-  Alignment _computeCenter(Size size) {
+  static RelAlignment fromOffset(Offset offset) {
+    return RelAlignment(
+      originLeft: offset.dx,
+      originTop: offset.dy,
+    );
+  }
+
+  void check() {
+    assert(
+      !(originAlignX != null && originLeft != null),
+      'Values given for both originAlignX and originLeft, which would contradict.',
+    );
+    assert(
+      !(originAlignX != null && originRight != null),
+      'Values given for both originAlignX and originRight, which would contradict.',
+    );
+    assert(
+      !(originLeft != null && originRight != null),
+      'Values given for both originLeft and originRight, which would contradict.',
+    );
+    assert(
+      !(originAlignY != null && originTop != null),
+      'Values given for both originAlignY and originTop, which would contradict.',
+    );
+    assert(
+      !(originAlignY != null && originBottom != null),
+      'Values given for both originAlignY and originBottom, which would contradict.',
+    );
+    assert(
+      !(originTop != null && originBottom != null),
+      'Values given for both originTop and originBottom, which would contradict.',
+    );
+  }
+
+  Alignment computeCenterOver(Size size) {
     double x;
     if (originAlignX != null) {
       x = originAlignX!;
@@ -1700,6 +1698,38 @@ class FuzzyCircleReveal extends StatelessWidget {
     return Alignment(x, y);
   }
 
+  Alignment computeAlignment(Size size) {
+    return Alignment(
+      computeAlignmentAxis(size.width, originLeft, originRight, originAlignX),
+      computeAlignmentAxis(size.height, originTop, originBottom, originAlignY),
+    );
+  }
+}
+
+class FuzzyCircleReveal extends StatelessWidget {
+  /// where the reveal emanates from
+  final RelAlignment origin;
+  final Animation<double> animation;
+  final Widget child;
+  final double fuzzyEdgeWidth;
+
+  /// Minimum radius to start from. Defaults to distance from center to nearest edge.
+  final double? minRadius;
+
+  /// inverts the gradient so that the transparent side is inside the focus. The smaller side of the animation is still the fully transparent state.
+  final bool invertGradient;
+
+  // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
+  FuzzyCircleReveal({
+    super.key,
+    required this.origin,
+    required this.animation,
+    required this.child,
+    this.fuzzyEdgeWidth = 20.0,
+    this.minRadius,
+    this.invertGradient = false,
+  });
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -1707,9 +1737,9 @@ class FuzzyCircleReveal extends StatelessWidget {
       builder: (context, child) {
         return ShaderMask(
           shaderCallback: (Rect bounds) {
-            return FuzzyEdgeShader.createRadialRevealShader(
+            return FuzzyCircleShader.createRadialRevealShader(
               bounds: bounds,
-              center: _computeCenter(bounds.size),
+              center: origin.computeCenterOver(bounds.size),
               fraction: animation.value,
               fuzzyEdgeWidth: fuzzyEdgeWidth,
               minRadius: minRadius,
@@ -1725,7 +1755,7 @@ class FuzzyCircleReveal extends StatelessWidget {
   }
 }
 
-double _computeAlignmentAxis(
+double computeAlignmentAxis(
     double size, double? fromLeft, double? fromRight, double? alignX) {
   if (fromLeft != null) {
     return (fromLeft / size) * 2 - 1;
@@ -1736,70 +1766,23 @@ double _computeAlignmentAxis(
   }
 }
 
-Alignment _computeAlignmentForParameters(
-    Size size,
-    double? fromLeft,
-    double? fromRight,
-    double? alignX,
-    double? fromTop,
-    double? fromBottom,
-    double? alignY) {
-  return Alignment(
-    _computeAlignmentAxis(size.width, fromLeft, fromRight, alignX),
-    _computeAlignmentAxis(size.height, fromTop, fromBottom, alignY),
-  );
-}
-
-class FuzzyExpandingCircle extends StatelessWidget {
+class FuzzyCircleClip extends StatelessWidget {
   final double progress;
-  final double? originAlignX;
-  final double? originAlignY;
-  final double? originLeft;
-  final double? originRight;
-  final double? originTop;
-  final double? originBottom;
+  final RelAlignment origin;
   final double? fuzzyEdgeWidth;
   final double? minRadius;
   final bool invertGradient;
   final Widget child;
   // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
-  FuzzyExpandingCircle({
+  FuzzyCircleClip({
     super.key,
-    this.originAlignX,
-    this.originAlignY,
-    this.originLeft,
-    this.originRight,
-    this.originTop,
-    this.originBottom,
+    required this.origin,
     required this.progress,
     required this.child,
     this.fuzzyEdgeWidth = 20.0,
     this.minRadius,
     this.invertGradient = false,
-  })  : assert(
-          !(originAlignX != null && originLeft != null),
-          'Values given for both originAlignX and originLeft, which would contradict.',
-        ),
-        assert(
-          !(originAlignX != null && originRight != null),
-          'Values given for both originAlignX and originRight, which would contradict.',
-        ),
-        assert(
-          !(originLeft != null && originRight != null),
-          'Values given for both originLeft and originRight, which would contradict.',
-        ),
-        assert(
-          !(originAlignY != null && originTop != null),
-          'Values given for both originAlignY and originTop, which would contradict.',
-        ),
-        assert(
-          !(originAlignY != null && originBottom != null),
-          'Values given for both originAlignY and originBottom, which would contradict.',
-        ),
-        assert(
-          !(originTop != null && originBottom != null),
-          'Values given for both originTop and originBottom, which would contradict.',
-        );
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1807,14 +1790,13 @@ class FuzzyExpandingCircle extends StatelessWidget {
       blendMode: BlendMode.dstIn,
       child: child,
       shaderCallback: (Rect bounds) {
-        return FuzzyEdgeShader.createRadialRevealShader(
+        return FuzzyCircleShader.createRadialRevealShader(
           bounds: bounds,
           fraction: progress,
           fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
           minRadius: minRadius,
           invert: invertGradient,
-          center: _computeAlignmentForParameters(bounds.size, originLeft,
-              originRight, originAlignX, originTop, originBottom, originAlignY),
+          center: origin.computeAlignment(bounds.size),
         );
       },
     );
@@ -1900,7 +1882,7 @@ class _CircularRevealRouteTransitionState
 
             return ShaderMask(
               shaderCallback: (Rect bounds) {
-                return FuzzyEdgeShader.createRadialRevealShader(
+                return FuzzyCircleShader.createRadialRevealShader(
                   bounds: bounds,
                   center: centerAlignment,
                   fraction: fraction,
@@ -2018,8 +2000,8 @@ class RenderScalingAspectRatio extends RenderProxyBox {
 
       // Apply the transformation
       final Matrix4 transform = Matrix4.identity()
-        ..translate(alignmentOffset.dx, alignmentOffset.dy)
-        ..scale(scale, scale);
+        ..translateByDouble(alignmentOffset.dx, alignmentOffset.dy, 0, 1)
+        ..scaleByDouble(scale, scale, 1, 1);
 
       context.pushTransform(
         needsCompositing,
@@ -2071,5 +2053,160 @@ class RenderScalingAspectRatio extends RenderProxyBox {
         return child!.hitTest(result, position: childPosition);
       },
     );
+  }
+}
+
+/// animates from the previous state using an inkwell from epicenter
+/// trivial to implement, so included mostly for illustrative purposes, but also because a lot of you are going to want it
+class InvertToggleButton extends StatelessWidget {
+  final bool isOn;
+
+  /// the place at which the toggle was touched, or from which the
+  final RelAlignment? epicenter;
+  final Duration duration;
+  final Widget Function(BuildContext context, bool isOn) builder;
+  const InvertToggleButton({
+    super.key,
+    this.duration = const Duration(milliseconds: 140),
+    required this.isOn,
+    this.epicenter,
+    required this.builder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final animation = Tween<double>(begin: 0.0, end: 1.0);
+    return TweenAnimationReplacementStack(
+      animation: animation,
+      duration: duration,
+      builder: (context, progress, child) => FuzzyCircleClip(
+          progress: Curves.easeOutCubic.transform(progress),
+          origin: epicenter ?? RelAlignment.center,
+          child: child!),
+      child: builder(context, isOn),
+    );
+  }
+}
+
+/// animates over the previous content, then when the animation is done, drops the previous contents from the state/build
+class TweenAnimationReplacementStack extends StatefulWidget {
+  final Tween animation;
+  final ValueWidgetBuilder builder;
+  final Duration duration;
+  final Widget? child;
+  const TweenAnimationReplacementStack({
+    super.key,
+    required this.animation,
+    required this.builder,
+    required this.duration,
+    this.child,
+  });
+
+  @override
+  State<TweenAnimationReplacementStack> createState() =>
+      _TweenAnimationReplacementStackState();
+}
+
+class _TweenAnimationReplacementStackState
+    extends State<TweenAnimationReplacementStack> {
+  List<TweenAnimationReplacementStack> stack = [];
+
+  @override
+  didUpdateWidget(TweenAnimationReplacementStack oldWidget) {
+    if (widget.animation != oldWidget.animation ||
+        widget.builder != oldWidget.builder) {
+      stack.add(widget);
+    }
+    super.didUpdateWidget(oldWidget);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    stack = [widget];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+        children: stack
+            .map((e) => TweenAnimationBuilder(
+                tween: e.animation,
+                duration: e.duration,
+                builder: e.builder,
+                child: e.child,
+                onEnd: () {
+                  // remove all those prior to us when we complete
+                  int i = 0;
+                  for (final w in stack) {
+                    if (w == e) {
+                      break;
+                    }
+                    ++i;
+                  }
+                  setState(() {
+                    stack.removeRange(0, i);
+                  });
+                }))
+            .toList());
+  }
+}
+
+class RadioItem<T> extends StatefulWidget {
+  final Function()? onTap;
+  final Widget Function(BuildContext context, bool isOn) builder;
+  final bool Function(T a, T b)? equalityComparison;
+  final Signal<T> selection;
+  final T me;
+  const RadioItem({
+    super.key,
+    required this.onTap,
+    required this.builder,
+    required this.selection,
+    required this.me,
+    this.equalityComparison,
+  });
+  @override
+  State<RadioItem<T>> createState() => _RadioItemState<T>();
+}
+
+class _RadioItemState<T> extends State<RadioItem<T>> {
+  bool isOn = false;
+  Offset? tapUpPosition;
+  Function() subscription = () {};
+  @override
+  void dispose() {
+    subscription();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool isOn =
+        widget.equalityComparison?.call(widget.selection.peek(), widget.me) ??
+            (widget.selection.peek() == widget.me);
+    if (isOn) {
+      subscription = widget.selection.subscribe((selection) {
+        if (selection != widget.me) {
+          setState(() {});
+        }
+        subscription();
+      });
+    }
+    return GestureDetector(
+        onTapUp: (details) => tapUpPosition = details.localPosition,
+        onTap: () {
+          widget.onTap?.call();
+          if (widget.selection.value != widget.me) {
+            widget.selection.value = widget.me;
+            setState(() {});
+          }
+        },
+        child: InvertToggleButton(
+            isOn: isOn,
+            epicenter: tapUpPosition != null
+                ? RelAlignment.fromOffset(tapUpPosition!)
+                : RelAlignment.center,
+            builder: widget.builder));
   }
 }

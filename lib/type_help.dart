@@ -173,7 +173,7 @@ class AudioInfoType extends TypeHelp<AudioInfo> {
   AudioInfo fromJsonValue(Object? json) {
     if (json is Map<String, dynamic>) {
       return AudioInfo(
-        uri: json['uri'] != null
+        url: json['uri'] != null
             ? const StringType().fromJson(json['uri'])
             : null,
         name: const StringType().fromJson(json['name']),
@@ -186,7 +186,7 @@ class AudioInfoType extends TypeHelp<AudioInfo> {
   @override
   Object? toJsonValue(AudioInfo object) {
     return {
-      'uri': object.uri != null ? const StringType().toJson(object.uri!) : null,
+      'uri': object.url != null ? const StringType().toJson(object.url!) : null,
       'name': const StringType().toJson(object.name),
       'isLong': const BoolType().toJson(object.isLong),
     };
