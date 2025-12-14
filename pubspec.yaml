@@ -59,7 +59,9 @@ dependencies:
   flutter_ringtone_manager: ^1.1.2
   flutter_refresh_rate_control: ^0.0.4+1
   screen_corner_radius: ^3.0.0
-
+  animated_containers: ^1.2.1
+  # animated_containers:
+  #   path: /home/mako/programming/animated_containers
 
 
 dev_dependencies:

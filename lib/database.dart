@@ -21,8 +21,10 @@ const MobjID hasCreatedTimerID = '2d4b1cab-dd74-4888-bc32-2ebc08ece52f';
 const MobjID exitedSetupID = 'b416f18f-ed48-4520-83ec-2145759f93ec';
 const MobjID completedSetupID = 'ac869383-78d9-4013-b234-1e061e742b24';
 
+/// the span of the buttons in the control pad, in logical pixels
+const MobjID buttonSpanID = '1a6d9d41-3002-48b3-a2a7-7117bfcd67b2';
+
 // some spares
-// 1a6d9d41-3002-48b3-a2a7-7117bfcd67b2
 // 59a00948-75e1-4a87-8f57-42208b03c3a2
 // 71874fd9-f83b-4bc3-a2a4-327298746577
 // 1cf75159-85e7-46eb-aa21-5b06a164b01b

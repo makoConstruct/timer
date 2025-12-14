@@ -283,17 +283,19 @@ Rect? boxRect(GlobalKey key) {
   }
 }
 
+RenderBox? renderBox(GlobalKey key) {
+  return key.currentContext?.findRenderObject() as RenderBox?;
+}
+
 /// Gets the Rect of a widget relative to an ancestor RenderBox
 /// This avoids distortion from route transforms by not using global coordinates
-Rect? boxRectRelativeTo(GlobalKey key, RenderBox ancestor) {
-  final box = key.currentContext?.findRenderObject() as RenderBox?;
-  if (box == null) {
+Rect? boxRectRelativeTo(RenderBox? key, RenderBox? ancestor) {
+  if (key == null || ancestor == null) {
     return null;
-  } else {
-    final globalPos = box.localToGlobal(Offset.zero);
-    final localPos = ancestor.globalToLocal(globalPos);
-    return localPos & box.size;
   }
+  final globalPos = key.localToGlobal(Offset.zero);
+  final localPos = ancestor.globalToLocal(globalPos);
+  return localPos & key.size;
 }
 
 // disabled because it couldn't find its plugin .so, see pubspec
@@ -2079,10 +2081,12 @@ class InvertToggleButton extends StatelessWidget {
     return TweenAnimationReplacementStack(
       animation: animation,
       duration: duration,
-      builder: (context, progress, child) => FuzzyCircleClip(
-          progress: Curves.easeOutCubic.transform(progress),
-          origin: epicenter ?? RelAlignment.center,
-          child: child!),
+      builder: (context, progress, child) {
+        return FuzzyCircleClip(
+            progress: Curves.easeOutCubic.transform(progress),
+            origin: epicenter ?? RelAlignment.center,
+            child: child!);
+      },
       child: builder(context, isOn),
     );
   }
@@ -2158,11 +2162,13 @@ class RadioItem<T> extends StatefulWidget {
   final bool Function(T a, T b)? equalityComparison;
   final Signal<T> selection;
   final T me;
+  final Duration duration;
   const RadioItem({
     super.key,
-    required this.onTap,
+    this.onTap,
     required this.builder,
     required this.selection,
+    this.duration = const Duration(milliseconds: 170),
     required this.me,
     this.equalityComparison,
   });
@@ -2204,9 +2210,27 @@ class _RadioItemState<T> extends State<RadioItem<T>> {
         },
         child: InvertToggleButton(
             isOn: isOn,
+            duration: widget.duration,
             epicenter: tapUpPosition != null
                 ? RelAlignment.fromOffset(tapUpPosition!)
                 : RelAlignment.center,
             builder: widget.builder));
   }
+}
+
+// I wish copyWith wasn't a huge operation
+TextStyle textThemeFor(ThemeData theme, bool isOn) {
+  return isOn
+      ? theme.textTheme.bodyMedium!.copyWith(color: theme.colorScheme.onPrimary)
+      : theme.textTheme.bodyMedium!;
+}
+
+Color foregroundColorFor(ThemeData theme, bool isOn) {
+  return isOn ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+}
+
+Color backgroundColorFor(ThemeData theme, bool isOn) {
+  return isOn
+      ? theme.colorScheme.primary
+      : theme.colorScheme.surfaceContainerLowest;
 }
