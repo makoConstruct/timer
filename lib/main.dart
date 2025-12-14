@@ -5,6 +5,8 @@ import 'dart:math';
 import 'dart:async';
 import 'dart:async' as async;
 
+import 'package:animated_containers/retargetable_easers.dart'
+    hide defaultPulserFunction;
 import 'package:animated_to/animated_to.dart';
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
@@ -135,6 +137,10 @@ Future<void> initializeDatabase() async {
         type: const BoolType(),
         initial: () => false,
         debugLabel: "completed setup"),
+    Mobj.getOrCreate(buttonSpanID,
+        type: const DoubleType(),
+        initial: () => 40.0,
+        debugLabel: "button span"),
     fversion,
   ]);
 }
@@ -164,7 +170,6 @@ void onDataReceived(Object data) {
 }
 
 const double standardLineWidth = 6;
-const double standardButtonSizeMM = 13;
 const double timerPaddingr = 6;
 
 class Thumbspan {
@@ -389,7 +394,22 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
               builder: (context) => TimerScreen(),
             );
           }
+          if (settings.name == '/onboard') {
+            return CircularRevealRoute(
+              builder: (context) => OnboardScreen(),
+            );
+          }
           return null;
+        },
+        onGenerateInitialRoutes: (initialRouteName) {
+          final completedSetup =
+              Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value ??
+                  false;
+          return <Route<dynamic>>[
+            CircularRevealRoute(builder: (context) => TimerScreen()),
+            if (!completedSetup)
+              CircularRevealRoute(builder: (context) => OnboardScreen()),
+          ];
         },
       ),
     );
@@ -954,7 +974,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
 
     Widget result = Container(
         // constraints: BoxConstraints(maxheight: double.infinity)
-        color: widget.backgroundColor,
+        // color: widget.backgroundColor,
         child: Align(
             alignment: FractionalOffset(0.8, 1), child: timersWrapWidget));
 
@@ -1077,8 +1097,9 @@ class _TimerDeletionAnimationState extends State<_TimerDeletionAnimation> {
                 offset: Offset(0, -30 * Curves.easeOut.transform(progress)),
                 child: FuzzyCircleClip(
                   progress: 1.0 - progress,
+                  fuzzyEdgeWidth: 6,
                   invertGradient: true,
-                  origin: RelAlignment(originTop: -90, originLeft: 27),
+                  origin: RelAlignment(originBottom: -90, originLeft: 27),
                   child: child!,
                 ));
             // }
@@ -1249,7 +1270,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
             (1 - (numberSelected != -1 ? 0 : upDownAnimation.value.$2))));
   }
 
-  Widget buildGivenAnimationParameters(
+  Widget buildWithGivenAnimationParameters(
       double risep, double fallp, double swipep) {
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
@@ -1385,7 +1406,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
           animation:
               Listenable.merge([upDownAnimation, optionActivationAnimation]),
           builder: (context, child) {
-            return buildGivenAnimationParameters(upDownAnimation.value.$1,
+            return buildWithGivenAnimationParameters(upDownAnimation.value.$1,
                 upDownAnimation.value.$2, optionActivationAnimation.value);
           },
         ));
@@ -1398,16 +1419,14 @@ class TimerScreenState extends State<TimerScreen>
   late final Mobj<bool> isRightHanded =
       Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
   late final Signal<Rect> numPadBounds = Signal(Rect.zero);
-  late final Signal<Offset> backingPlusCenter = Signal(Offset.zero);
-  late final Signal<bool> backingPlusInhibitor;
-  late AnimationController backingPlusCenterAnimation =
-      AnimationController(duration: Duration(milliseconds: 190), vsync: this);
   // note this subscribes to the mobj
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
 
   GlobalKey controlPadKey = GlobalKey();
   GlobalKey timerTrayKey = GlobalKey();
+  GlobalKey pinButtonKey = GlobalKey();
+  GlobalKey deleteButtonKey = GlobalKey();
   GlobalKey<EphemeralAnimationHostState> ephemeralAnimationLayer = GlobalKey();
   final Mobj<List<MobjID<TimerData>>> timerListMobj =
       Mobj.getAlreadyLoaded(timerListID, timerListType);
@@ -1417,25 +1436,39 @@ class TimerScreenState extends State<TimerScreen>
       Mobj.getAlreadyLoaded(nextHueID, const DoubleType());
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
+  late SmoothOffset modeMovementAnimation = SmoothOffset(
+      vsync: this,
+      initialValue: Offset.zero,
+      duration: Duration(milliseconds: 200));
+  late AnimationController modeLivenessAnimation =
+      AnimationController(vsync: this, duration: Duration(milliseconds: 200));
+
+  /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
+  /// we should probably persist this... but it doesn't matter much.
+  late Signal<String> actionMode = createSignal('play');
 
   @override
   void initState() {
     super.initState();
-    // only inhibit the backing plus for a second if the user is new to the app
-    backingPlusInhibitor = Signal(
-        !Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value!);
-    if (backingPlusInhibitor.value) {
-      async.Timer(Duration(milliseconds: 1400), () {
-        backingPlusInhibitor.value = false;
-      });
-    }
-    final backingPlusDeployed = Computed(
-        () => !backingPlusInhibitor.value && selectedTimer.value == null);
+    // make sure the mode indicator follows the current mode
     createEffect(() {
-      if (backingPlusDeployed.value) {
-        backingPlusCenterAnimation.forward();
+      void moveTo(GlobalKey target) {
+        Offset t =
+            renderBox(controlPadKey)!.globalToLocal(boxRect(target)!.center);
+        if (modeLivenessAnimation.value == 0) {
+          modeMovementAnimation.value = t;
+        } else {
+          modeMovementAnimation.target(t);
+        }
+        modeLivenessAnimation.forward();
+      }
+
+      if (actionMode.value == 'pin') {
+        moveTo(pinButtonKey);
+      } else if (actionMode.value == 'delete') {
+        moveTo(deleteButtonKey);
       } else {
-        backingPlusCenterAnimation.reverse();
+        modeLivenessAnimation.reverse();
       }
     });
   }
@@ -1443,16 +1476,30 @@ class TimerScreenState extends State<TimerScreen>
   @override
   void dispose() {
     numPadBounds.dispose();
-    backingPlusCenter.dispose();
-    backingPlusInhibitor.dispose();
     selectedTimer.dispose();
-    backingPlusCenterAnimation.dispose();
+    actionMode.dispose();
+    modeMovementAnimation.dispose();
+    modeLivenessAnimation.dispose();
     super.dispose();
   }
 
   void takeActionOn(MobjID<TimerData> timerID) {
-    //todo: take whichever action is currently highlighted
-    toggleRunning(timerID, reset: false);
+    String mode = actionMode.peek();
+    if (mode == 'pin') {
+      Mobj.fetch(timerID, type: TimerDataType()).then((mt) {
+        bool pp = mt.peek()!.pinned;
+        if (pp && !mt.peek()!.isRunning) {
+          deleteTimer(timerID);
+        } else {
+          mt.value = mt.peek()!.withChanges(pinned: !pp);
+        }
+      });
+    } else if (mode == 'delete') {
+      deleteTimer(timerID);
+    } else {
+      mode = 'play';
+      toggleRunning(timerID, reset: false);
+    }
     _selectTimer(null);
   }
 
@@ -1531,7 +1578,7 @@ class TimerScreenState extends State<TimerScreen>
             size: 30,
           ),
         ),
-        onPressed: () {
+        onPanDown: (_) {
           Navigator.push(
             context,
             CircularRevealRoute(
@@ -1556,9 +1603,17 @@ class TimerScreenState extends State<TimerScreen>
         });
 
     var backspaceButton = TimersButton(
+        key: deleteButtonKey,
         label: Icon(Icons.backspace),
         onPanDown: (_) {
           _backspace();
+        });
+
+    var pinButton = TimersButton(
+        key: pinButtonKey,
+        label: Icon(Icons.push_pin),
+        onPanDown: (_) {
+          _selectAction('pin');
         });
 
     final addButton = TimersButton(
@@ -1592,156 +1647,115 @@ class TimerScreenState extends State<TimerScreen>
           pausePlaySelected(reset: true);
         });
 
-    final zeroButton =
-        NumberButton(digits: [0], timerButtonKey: numeralKeys[0]);
-
-    List<Widget> controlPadWidgets(bool isRightHanded) {
-      /// the number pad isn't flipped for lefthanded mode
-      Widget pad(int column, int row) {
-        column = isRightHanded ? column : 2 - column;
-        row = padVerticallyAscending ? 2 - row : row;
-        final n = row * 3 + column + 1;
-        return NumberButton(digits: [n], timerButtonKey: numeralKeys[n]);
-      }
-
-      return reverseIfNot(isRightHanded, [
-        Flexible(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Flexible(child: stopPlayButton),
-              Flexible(child: backspaceButton),
-              // Flexible(child: pausePlayButton),
-              Flexible(child: selectButton),
-            ],
-          ),
-        ),
-        Flexible(
-            child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Flexible(child: pad(0, 0)),
-            Flexible(child: pad(0, 1)),
-            Flexible(child: pad(0, 2)),
-          ],
-        )),
-        Flexible(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Flexible(child: pad(1, 0)),
-              Flexible(child: pad(1, 1)),
-              Flexible(child: pad(1, 2)),
-              Flexible(child: zeroButton),
-            ],
-          ),
-        ),
-        Flexible(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Flexible(child: pad(2, 0)),
-              Flexible(child: pad(2, 1)),
-              Flexible(child: pad(2, 2)),
-            ],
-          ),
-        ),
-        Flexible(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Flexible(child: configButton),
-              Flexible(child: addButton),
-            ],
-          ),
-        ),
-      ]);
-    }
-
     final thumbSpan = Thumbspan.of(context);
 
-    // Schedule update of numPadBounds after this frame completes
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      final controlPadRenderBox =
-          controlPadKey.currentContext!.findRenderObject() as RenderBox;
-
-      Rect t = negativeInfinityRect();
-      Offset? center1;
-      Offset? center5;
-
-      for (int i = 0; i < numeralKeys.length; i++) {
-        // Get position relative to controlPad to avoid transform distortion from route animations
-        final rect = boxRectRelativeTo(numeralKeys[i], controlPadRenderBox);
-        if (rect != null) {
-          t = t.expandToInclude(rect);
-          if (i == 1) center1 = rect.center;
-          if (i == 5) center5 = rect.center;
-        }
-      }
-
-      if (t.isEmpty) {
-        numPadBounds.value = Rect.fromLTRB(0, 0, 0, 0);
-      } else {
-        numPadBounds.value = t;
-        if (center1 != null && center5 != null) {
-          backingPlusCenter.value = (center1 + center5) / 2;
-        }
-      }
-    });
-    final numberPadBacking = Watch((context) {
-      Rect nr = numPadBounds.value.deflate(backingIndicatorGap / 2);
-      return Positioned.fromRect(
-        rect: nr,
-        child: Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(backingIndicatorCornerRounding),
-          ),
-        ),
-      );
-    });
-
     // the lower part of the screen
-    final controls = Container(
-      clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(color: theme.colorScheme.surfaceContainerLow),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: isRightHanded.value!
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        children: [
-          Stack(
+    final controls = Watch(key: controlPadKey, (context) {
+      return LayoutBuilder(builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final bottomGutter = thumbSpan * 0.3;
+        final buttonSpan = min(w / 5,
+            Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!);
+        final h = bottomGutter + 4 * buttonSpan;
+        final buttonSize = Size(buttonSpan, buttonSpan);
+        // this code is supposed to nudge things over a little to be perfectly centered if stuff is very close to being centered.
+        double tentativeRightPos = w - buttonSpan / 2;
+        final imperfection = ((tentativeRightPos - 2 * buttonSpan) - w / 2) / w;
+        if (imperfection < 0.08) {
+          tentativeRightPos = w / 2 + 2 * buttonSpan;
+        }
+        final topRightPos = Offset(tentativeRightPos, buttonSpan / 2);
+
+        // final topLeftPos = topRightPos + Offset(-buttonSpan * 5, 0);
+        Rect positionAt(Offset pi, Size spani) {
+          Offset point = (topRightPos + pi * buttonSpan);
+          if (!isRightHanded.value!) {
+            point = Offset(w - point.dx, point.dy);
+          }
+          return ((point - sizeToOffset(buttonSize / 2)) &
+              (spani * buttonSpan));
+        }
+
+        final double e = 0.07 * buttonSpan;
+        Widget numeralBacking = Positioned.fromRect(
+            rect: positionAt(Offset(-3, 0), Size(3, 4)).deflate(e),
+            child: Container(
+                constraints: BoxConstraints.expand(),
+                decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(
+                        backingIndicatorCornerRounding))));
+
+        final double modalHighlightSpan = buttonSpan - 2 * e;
+        Widget modalHighlightBacking = AnimatedBuilder(
+          animation:
+              Listenable.merge([modeMovementAnimation, modeLivenessAnimation]),
+          builder: (context, child) {
+            return Positioned(
+                left: modeMovementAnimation.value.dx,
+                top: modeMovementAnimation.value.dy,
+                child: FractionalTranslation(
+                  translation: Offset(-0.5, -0.5),
+                  child: SizedBox(
+                    width: modalHighlightSpan * modeLivenessAnimation.value,
+                    height: modalHighlightSpan * modeLivenessAnimation.value,
+                    child: Container(
+                        decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(
+                                backingIndicatorCornerRounding))),
+                  ),
+                ));
+          },
+        );
+
+        final numeralPartAnchor = Offset(-3, 0);
+        final outerPaletteAnchor = Offset(-4, 0);
+        final innerPaletteAnchor = Offset(0, 0);
+
+        return SizedBox(
+          width: w,
+          height: h,
+          child: Stack(
               clipBehavior: Clip.none,
               fit: StackFit.passthrough,
-              alignment: Alignment.bottomRight,
               children: [
-                numberPadBacking,
-                // disabling this for now, consider removing the whole feature
-                // backingPlusCenterWidget,
-                Container(
-                  key: controlPadKey,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: isRightHanded.value!
-                        ? MainAxisAlignment.end
-                        : MainAxisAlignment.start,
-                    children: controlPadWidgets(isRightHanded.value!),
-                  ),
-                )
+                modalHighlightBacking,
+                numeralBacking,
+                ...List.generate(9, (i) {
+                  int ix = i % 3;
+                  // double invert
+                  if (!isRightHanded.value!) {
+                    ix = 2 - ix;
+                  }
+                  final ii = i + 1;
+                  return Positioned.fromRect(
+                      rect: positionAt(
+                          numeralPartAnchor +
+                              Offset(ix.toDouble(), (i ~/ 3).toDouble()),
+                          Size(1, 1)),
+                      child: NumberButton(
+                          digits: [ii], timerButtonKey: numeralKeys[ii]));
+                }),
+                Positioned.fromRect(
+                    rect: positionAt(
+                        numeralPartAnchor + Offset(0, 3), Size(1, 1)),
+                    child: NumberButton(
+                        digits: [0], timerButtonKey: numeralKeys[0])),
+                Positioned.fromRect(
+                    rect: positionAt(innerPaletteAnchor, Size(1, 1)),
+                    child: configButton),
+                Positioned.fromRect(
+                    rect: positionAt(outerPaletteAnchor, Size(1, 1)),
+                    child: backspaceButton),
+                Positioned.fromRect(
+                    rect: positionAt(
+                        outerPaletteAnchor + Offset(0, 1), Size(1, 1)),
+                    child: pinButton),
               ]),
-          Container(
-            constraints: BoxConstraints(maxHeight: thumbSpan * 0.3),
-          )
-        ],
-      ),
-    );
+        );
+      });
+    });
 
     final timersWidget = TimerTray(
       key: timerTrayKey,
@@ -1893,9 +1907,18 @@ class TimerScreenState extends State<TimerScreen>
         }
       }
     } else {
-      if (timers().isNotEmpty) {
-        deleteTimer(timers().last);
-      }
+      _selectAction('delete');
+      // if (timers().isNotEmpty) {
+      //   deleteTimer(timers().last);
+      // }
+    }
+  }
+
+  void _selectAction(String action) {
+    if (actionMode.peek() != action) {
+      actionMode.value = action;
+    } else {
+      actionMode.value = 'play';
     }
   }
 
@@ -1910,11 +1933,8 @@ class TimerScreenState extends State<TimerScreen>
       assert(timerState != null && timerState.mounted);
       final renderBox = timerState!.context.findRenderObject() as RenderBox?;
       if (renderBox != null && renderBox.hasSize) {
-        Rect tr = boxRectRelativeTo(
-                timerKey,
-                ephemeralAnimationLayer.currentContext!.findRenderObject()
-                    as RenderBox) ??
-            Rect.zero;
+        Rect tr = boxRectRelativeTo(boring.renderBox(timerKey),
+            boring.renderBox(ephemeralAnimationLayer))!;
 
         // Create and add the deletion animation
         (timerWidget.key as GlobalKey<TimerState>)
@@ -2018,15 +2038,12 @@ class _NumberButtonState extends State<NumberButton>
           if (tss == null) {
             return;
           }
-          final angle = offsetAngle(dp);
           bool isRightHanded = tss.isRightHanded.value!;
+          final rectifiedActivatorPositions = isRightHanded
+              ? radialActivatorPositions
+              : radialActivatorPositions.map(flipAngleHorizontally).toList();
           int dragResult = radialDragResult(
-              isRightHanded
-                  ? radialActivatorPositions
-                  : radialActivatorPositions
-                      .map(flipAngleHorizontally)
-                      .toList(),
-              angle,
+              rectifiedActivatorPositions, offsetAngle(dp),
               hitSpan: pi / 2);
           if (dragResult == -1) {
             dragEvents.value = null;
@@ -2044,7 +2061,8 @@ class _NumberButtonState extends State<NumberButton>
                     (tts.timerWidgets.value[lti]?.key as GlobalKey<TimerState>?)
                         ?.currentState;
                 ts?._slideActivateBounceAnimation.forward(from: 0);
-                ts?._slideBounceDirection = Offset.fromDirection(angle, 1);
+                ts?._slideBounceDirection = Offset.fromDirection(
+                    rectifiedActivatorPositions[dragResult], 1);
               }
             }
           }
@@ -2065,7 +2083,7 @@ final controlPadTextStyle = TextStyle(
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
   final Object label;
-  final VoidCallback? onPressed;
+  final VoidCallback? onTap;
   final bool accented;
   final Function(Offset globalPosition)? onPanDown;
   final Function(Offset globalPosition)? onPanUpdate;
@@ -2076,7 +2094,7 @@ class TimersButton extends StatefulWidget {
   const TimersButton(
       {super.key,
       required this.label,
-      this.onPressed,
+      this.onTap,
       this.solidColor = false,
       this.accented = false,
       this.onPanDown,
@@ -2134,7 +2152,7 @@ class TimersButtonState extends State<TimersButton>
         constraints:
             BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
         child: InkWell(
-            onTap: widget.onPressed,
+            onTap: widget.onTap,
             splashColor: widget.accented ? Colors.transparent : null,
             highlightColor: widget.accented ? Colors.transparent : null,
             hoverColor: widget.accented ? Colors.transparent : null,
@@ -2189,24 +2207,29 @@ class TimersButtonState extends State<TimersButton>
 
 class _NumpadTypeIndicator extends StatelessWidget {
   final bool isAscending;
+  final Color? color;
+  final double width;
 
-  const _NumpadTypeIndicator({required this.isAscending});
+  const _NumpadTypeIndicator(
+      {required this.isAscending, this.color, this.width = 100.0});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cellSpan = 10.0;
+    final cellSpan = width / 3;
+    final fontScale = cellSpan / 10;
+    final color = this.color ?? theme.colorScheme.onSurface;
 
     return SizedBox(
-      width: cellSpan * 3,
-      height: cellSpan * 3,
+      width: width,
+      height: width,
       child: Stack(
         clipBehavior: Clip.none,
         children: List.generate(9, (index) {
           final widg = Text((index + 1).toString(),
               style: TextStyle(
                   fontSize: index == 0 ? 11.0 : 9.0,
-                  color: theme.colorScheme.primary,
+                  color: color,
                   fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
                   fontFamily: 'monospace'));
           // : Icon(Icons.circle, size: 3.0, color: theme.colorScheme.primary);
@@ -2220,7 +2243,8 @@ class _NumpadTypeIndicator extends StatelessWidget {
             left: cellSpan / 2 + x * cellSpan,
             top: cellSpan / 2 + py * cellSpan,
             child: FractionalTranslation(
-                translation: Offset(-0.5, -0.5), child: widg),
+                translation: Offset(-0.5, -0.5),
+                child: Transform.scale(scale: fontScale, child: widg)),
           );
         }),
       ),
@@ -2424,6 +2448,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   trailing: trailing(_NumpadTypeIndicator(
                     isAscending: padVerticallyAscending,
+                    width: 36,
                   )),
                   onTap: () {
                     padVerticallyAscendingMobj.value = !padVerticallyAscending;
@@ -2706,15 +2731,12 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
   final List<AudioInfo> _assetSounds = PlatformAudio.assetSounds;
-  late final Signal<String?> _currentlyPlayingAudioID = createSignal(null);
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    print("init state");
     _loadSounds();
-    print("after load sounds");
   }
 
   Future<void> _loadSounds() async {
@@ -2742,7 +2764,6 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           _ringtoneSounds = ringtones;
           _loading = false;
         });
-        print("after set state");
       }
     } catch (e) {
       print('Error loading sounds: $e');
@@ -2920,87 +2941,166 @@ class OnboardScreen extends StatefulWidget {
   State<OnboardScreen> createState() => _OnboardScreenState();
 }
 
-class _OnboardScreenState extends State<OnboardScreen> {
+const double standardSpacing = 18;
+const spacer = SizedBox(width: standardSpacing, height: standardSpacing);
+const double standardButtonHeight = 80;
+const double buttonCornerRadius = 16;
+
+class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   late ScrollController _scrollController;
+  late Signal<bool?> setIsRightHanded = createSignal(null);
+  final GlobalKey handednessKey = GlobalKey();
+  final GlobalKey skipKey = GlobalKey();
+  final GlobalKey padKey = GlobalKey();
+  late List<GlobalKey> allKeys = [handednessKey, padKey, skipKey];
+  late Signal<bool?> numpadOrientation = createSignal(null);
+  late List<Signal<dynamic>> allChoices = [setIsRightHanded, numpadOrientation];
+  late Signal<bool> allChoicesCompleted = createSignal(false);
+  late async.Timer? autoMoveOn;
 
   @override
   void initState() {
     super.initState();
+    final isRightHanded =
+        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+    createEffect(() {
+      if (setIsRightHanded.value != null) {
+        isRightHanded.value = setIsRightHanded.value!;
+      }
+    });
+    createEffect(() {
+      if (numpadOrientation.value != null) {
+        Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType())
+            .value = numpadOrientation.value!;
+      }
+    });
+    //when all choices are non-null, navigate away
+    createEffect(() {
+      if (allChoices.every((signal) => signal.value != null)) {
+        // redundant but might as well set it as soon as possible, may change it later to only set exit in moveOn
+        Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value = true;
+        autoMoveOn = async.Timer(Duration(milliseconds: 900), () => moveOn());
+        allChoicesCompleted.value = true;
+      }
+    });
     _scrollController = ScrollController();
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    setIsRightHanded.dispose();
+    numpadOrientation.dispose();
     super.dispose();
   }
 
-  void _scrollToNext() {
-    final screenHeight = MediaQuery.of(context).size.height;
-    _scrollController.animateTo(
-      screenHeight,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
+  void _scrollTo(GlobalKey key) {
+    Scrollable.ensureVisible(
+      key.currentContext!,
+      duration: const Duration(milliseconds: 700),
+      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      curve: Interval(0.4, 1.0, curve: Curves.easeInOutCubic),
     );
   }
 
-  void _setHandedness(bool isRightHanded) {
-    final mobj = Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
-    mobj.value = isRightHanded;
-    _scrollToNext();
+  void inputCompleted(GlobalKey key) {
+    // If all choices are non-null, navigate away
+    final idx = allKeys.indexOf(key);
+    if (idx != -1 && idx < allKeys.length - 1) {
+      final nextKey = allKeys[idx + 1];
+      _scrollTo(nextKey);
+    }
+  }
+
+  void moveOn() {
+    autoMoveOn?.cancel();
+    autoMoveOn = null;
+    Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value = true;
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final screenHeight = MediaQuery.of(context).size.height;
-    final backgroundColor = theme.colorScheme.surfaceContainerLowest;
+    final backgroundColor = theme.colorScheme.surfaceContainerLow;
+    final isRightHanded =
+        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
 
     Widget handButton({
       required bool isRight,
-      required VoidCallback onTap,
     }) {
       return Expanded(
-        child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            height: 120,
-            margin: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: isRight
-                  ? [
-                      Text('Right',
-                          style: theme.textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w500)),
-                      const SizedBox(width: 12),
-                      Transform.scale(
-                        scaleX: -1,
-                        child: Transform.rotate(
-                          angle: 45 * pi / 180,
-                          child: Icon(Icons.back_hand_rounded,
-                              size: 48, color: theme.colorScheme.primary),
-                        ),
-                      ),
-                    ]
-                  : [
-                      Transform.rotate(
-                        angle: 45 * pi / 180,
-                        child: Icon(Icons.back_hand_rounded,
-                            size: 48, color: theme.colorScheme.primary),
-                      ),
-                      const SizedBox(width: 12),
-                      Text('Left',
-                          style: theme.textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w500)),
-                    ],
-            ),
-          ),
+        child: RadioItem<bool?>(
+          selection: setIsRightHanded,
+          duration: Duration(milliseconds: 370),
+          me: isRight,
+          onTap: () => inputCompleted(handednessKey),
+          builder: (context, isOn) {
+            final leftHand = Transform.rotate(
+              angle: 1 / 8 * tau,
+              child: Icon(Icons.back_hand_rounded,
+                  size: 36, color: foregroundColorFor(theme, isOn)),
+            );
+            final rightHand = Transform.scale(
+              scaleX: -1,
+              child: leftHand,
+            );
+            return Container(
+              height: standardButtonHeight,
+              decoration: BoxDecoration(
+                color: backgroundColorFor(theme, isOn),
+                borderRadius: BorderRadius.circular(buttonCornerRadius),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: isRight
+                    ? [
+                        Text('right',
+                            style: theme.textTheme.titleMedium!.copyWith(
+                                color: foregroundColorFor(theme, isOn))),
+                        spacer,
+                        rightHand,
+                      ]
+                    : [
+                        leftHand,
+                        spacer,
+                        Text('left',
+                            style: theme.textTheme.titleMedium!.copyWith(
+                                color: foregroundColorFor(theme, isOn))),
+                      ],
+              ),
+            );
+          },
         ),
+      );
+    }
+
+    Widget numpadForSetup(bool isAscending) {
+      return RadioItem<bool?>(
+        selection: numpadOrientation,
+        duration: Duration(milliseconds: 370),
+        onTap: () => inputCompleted(padKey),
+        me: isAscending,
+        builder: (context, isOn) {
+          final theme = Theme.of(context);
+          const double gap = 16;
+          final double diameter = 132;
+          return Container(
+            width: diameter,
+            height: diameter,
+            padding: EdgeInsets.all(gap),
+            decoration: BoxDecoration(
+              color: backgroundColorFor(theme, isOn),
+              borderRadius: BorderRadius.circular(buttonCornerRadius),
+            ),
+            child: _NumpadTypeIndicator(
+              isAscending: isAscending,
+              color: foregroundColorFor(theme, isOn),
+              width: 132 - 2 * gap,
+            ),
+          );
+        },
       );
     }
 
@@ -3011,49 +3111,134 @@ class _OnboardScreenState extends State<OnboardScreen> {
         slivers: [
           // Handedness selection - full screen
           SliverToBoxAdapter(
-            child: SizedBox(
-              height: screenHeight,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('Setup',
-                        style: theme.textTheme.headlineLarge
-                            ?.copyWith(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 48),
-                    Text('Which hand do you prefer?',
-                        style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 24),
-                    Row(
+              key: handednessKey,
+              child: Container(
+                  height: screenHeight,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh,
+                  ),
+                  child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        handButton(
-                          isRight: false,
-                          onTap: () => _setHandedness(false),
-                        ),
-                        handButton(
-                          isRight: true,
-                          onTap: () => _setHandedness(true),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+                        Container(
+                            padding: EdgeInsets.all(standardSpacing),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerHigh,
+                            ),
+                            child: Text("Setup",
+                                style: theme.textTheme.titleMedium)),
+                        Container(
+                            padding: EdgeInsets.all(standardSpacing),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerLow,
+                            ),
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Are you left or right-handed?',
+                                      style: theme.textTheme.titleMedium),
+                                  SizedBox(height: standardSpacing),
+                                  Row(
+                                    children: [
+                                      handButton(
+                                        isRight: false,
+                                      ),
+                                      spacer,
+                                      handButton(
+                                        isRight: true,
+                                      ),
+                                    ],
+                                  )
+                                ]))
+                      ]))),
+          SliverToBoxAdapter(
+              key: padKey,
+              child: Container(
+                  padding: EdgeInsets.all(
+                    standardSpacing,
+                  ),
+                  child: GestureDetector(
+                      onTap: () => inputCompleted(padKey),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                                "Which kind of numpad is more familiar to you?",
+                                style: theme.textTheme.titleMedium!),
+                            spacer,
+                            Watch((context) {
+                              return AnimatedAlign(
+                                duration: Duration(milliseconds: 340),
+                                curve: Curves.easeInOutCubic,
+                                alignment: isRightHanded.value == true
+                                    ? Alignment.centerRight
+                                    : Alignment.centerLeft,
+                                child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Column(
+                                        children: [
+                                          Text(
+                                            "phone style",
+                                            style: theme.textTheme.bodyMedium,
+                                          ),
+                                          spacer,
+                                          numpadForSetup(
+                                            false,
+                                          ),
+                                        ],
+                                      ),
+                                      spacer,
+                                      Column(
+                                        children: [
+                                          Text(
+                                            "calculator style",
+                                            style: theme.textTheme.bodyMedium,
+                                          ),
+                                          spacer,
+                                          numpadForSetup(
+                                            true,
+                                          ),
+                                        ],
+                                      ),
+                                    ]),
+                              );
+                            })
+                          ])))),
           // Skip button - full screen
           SliverToBoxAdapter(
-            child: SizedBox(
-              height: screenHeight,
-              child: Center(
-                child: FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Continue'),
-                ),
-              ),
-            ),
-          ),
+              key: skipKey,
+              child: Padding(
+                  padding: EdgeInsets.only(
+                      left: standardSpacing,
+                      right: standardSpacing,
+                      bottom: standardSpacing),
+                  child: GestureDetector(
+                      onTap: () {
+                        moveOn();
+                      },
+                      child: Container(
+                        height: standardButtonHeight,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerLowest,
+                          borderRadius:
+                              BorderRadius.circular(buttonCornerRadius),
+                        ),
+                        child: Center(
+                            child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                              Watch((context) => Text(
+                                  allChoicesCompleted.value
+                                      ? 'done, continue'
+                                      : 'skip',
+                                  style: theme.textTheme.titleMedium!)),
+                              spacer,
+                              Icon(Icons.arrow_forward_ios,
+                                  size: 16, color: theme.colorScheme.primary),
+                            ])),
+                      )))),
         ],
       ),
     );

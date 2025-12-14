@@ -1788,20 +1788,26 @@ class FuzzyCircleClip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ShaderMask(
-      blendMode: BlendMode.dstIn,
-      child: child,
-      shaderCallback: (Rect bounds) {
-        return FuzzyCircleShader.createRadialRevealShader(
-          bounds: bounds,
-          fraction: progress,
-          fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
-          minRadius: minRadius,
-          invert: invertGradient,
-          center: origin.computeAlignment(bounds.size),
-        );
-      },
-    );
+    if (progress == 0.0) {
+      return Opacity(opacity: 0.0, child: child);
+    } else if (progress == 1.0) {
+      return child;
+    } else {
+      return ShaderMask(
+        blendMode: BlendMode.dstIn,
+        child: child,
+        shaderCallback: (Rect bounds) {
+          return FuzzyCircleShader.createRadialRevealShader(
+            bounds: bounds,
+            fraction: progress,
+            fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
+            minRadius: minRadius,
+            invert: invertGradient,
+            center: origin.computeAlignment(bounds.size),
+          );
+        },
+      );
+    }
   }
 }
 
@@ -1877,6 +1883,9 @@ class _CircularRevealRouteTransitionState
             final fraction = Curves.easeOut.transform(
               unlerpUnit(0.14, 1.0, widget.animation.value),
             );
+            if (fraction == 1.0) {
+              return child!;
+            }
             final centerAlignment = Alignment(
               (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
               (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
