@@ -127,3 +127,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+  fonts:
+    - family: Dongle
+      fonts:
+        - asset: assets/fonts/Dongle-Regular.ttf
+        - asset: assets/fonts/Dongle-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Dongle-Bold.ttf
+          weight: 700

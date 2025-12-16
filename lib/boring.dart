@@ -1475,10 +1475,10 @@ class CircularRevealRoute<T> extends PageRoute<T>
 
   // Force our own duration, don't let mixin override it
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 350);
+  Duration get transitionDuration => const Duration(milliseconds: 400);
 
   @override
-  Duration get reverseTransitionDuration => Duration(milliseconds: 350);
+  Duration get reverseTransitionDuration => Duration(milliseconds: 300);
 
   @override
   bool get maintainState => true;
