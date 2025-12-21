@@ -25,7 +25,6 @@ import 'platform_audio.dart';
 import 'main.dart' show getCachedCornerRadius;
 
 const double tau = 2 * pi;
-const double backingIndicatorCornerRounding = 25.0;
 const double backingIndicatorGap = 8.0;
 
 bool platformIsDesktop() =>
@@ -606,6 +605,10 @@ Offset angleToOffset(double angle) {
 
 Offset orthClockwise(Offset v) {
   return Offset(-v.dy, v.dx);
+}
+
+double dot(Offset a, Offset b) {
+  return a.dx * b.dx + a.dy * b.dy;
 }
 
 double offsetAngle(Offset offset) {
@@ -1200,6 +1203,11 @@ class PiePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(PiePainter oldDelegate) {
+    // oh this would need to be stateful to work
+    // // only repaint if the value is different enough to be noticeable, (or if the color is different)
+    // return (((value - oldDelegate.value).abs() > 0.004) ||
+    //         (value == 0 && oldDelegate.value != 0) ||
+    //         (value == 1 && oldDelegate.value != 1)) ||
     return oldDelegate.value != value || oldDelegate.color != color;
   }
 }
@@ -1282,17 +1290,20 @@ class Pie extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1,
+    return SizedBox(
+      width: size,
+      height: size,
       child: Stack(
-        alignment: Alignment.center,
         fit: StackFit.expand,
         children: [
-          CustomPaint(
-            // size: Size(size, size),
-            painter: PiePainter(
-              value: 1.0, // Full circle for the background
-              color: backgroundColor,
+          // slight (imperceptible)padding to prevent antialiasing artifacts
+          Padding(
+            padding: const EdgeInsets.all(0.5),
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: backgroundColor,
+              ),
             ),
           ),
           CustomPaint(
@@ -1574,40 +1585,109 @@ class FuzzyCircleShader {
   /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects.
   /// By default, minRadius is the distance from center to the nearest edge of bounds,
   /// and maxRadius is the distance to the farthest corner.
-  static Shader createRadialRevealShader({
-    required Rect bounds,
-    required Alignment center,
-    required double fraction,
-    double fuzzyEdgeWidth = 20.0,
-    double? minRadius,
-    double? maxRadius,
-    bool invert = false,
-  }) {
-    final centerOffset = center.alongSize(bounds.size);
-    final calculatedMinRadius = minRadius ??
-        distanceToRectangle(bounds.width, bounds.height, centerOffset);
-    final calculatedMaxRadius = maxRadius ??
-        (calcMaxRadiusForPointWithinRectangle(bounds.size, centerOffset) +
-            fuzzyEdgeWidth);
-    final effectiveFraction = invert ? 1.0 - fraction : fraction;
-    final currentRadius =
-        lerp(calculatedMinRadius, calculatedMaxRadius, effectiveFraction);
+}
 
-    final colors = invert
-        ? const [Colors.transparent, Colors.transparent, Colors.white]
-        : const [Colors.white, Colors.white, Colors.transparent];
+Shader createRadialRevealShader({
+  required Rect bounds,
+  required Alignment center,
+  required double fraction,
+  double fuzzyEdgeWidth = 20.0,
+  double? minRadius,
+  double? maxRadius,
+  bool invert = false,
+}) {
+  final centerOffset = center.alongSize(bounds.size);
+  final calculatedMinRadius = minRadius ??
+      distanceToRectangle(bounds.width, bounds.height, centerOffset);
+  final calculatedMaxRadius = maxRadius ??
+      (calcMaxRadiusForPointWithinRectangle(bounds.size, centerOffset) +
+          fuzzyEdgeWidth);
+  final effectiveFraction = invert ? 1.0 - fraction : fraction;
+  final currentRadius =
+      lerp(calculatedMinRadius, calculatedMaxRadius, effectiveFraction);
 
-    final transitionStop =
-        max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth));
-    final stops = [0.0, transitionStop, 1.0];
+  final colors = invert
+      ? const [Colors.transparent, Colors.transparent, Colors.white]
+      : const [Colors.white, Colors.white, Colors.transparent];
 
-    return RadialGradient(
-      center: center,
-      radius: currentRadius / min(bounds.width, bounds.height),
-      colors: colors,
-      stops: stops,
-    ).createShader(bounds);
+  final transitionStop =
+      max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth));
+  final stops = [0.0, transitionStop, 1.0];
+
+  return RadialGradient(
+    center: center,
+    radius: currentRadius / min(bounds.width, bounds.height),
+    colors: colors,
+    stops: stops,
+  ).createShader(bounds);
+}
+
+/// Creates a linear gradient shader with a fuzzy edge for directional reveal effects.
+/// The gradient progresses in the direction specified by [angle] (in radians).
+/// Angle of 0 is left-to-right, π/2 is top-to-bottom, π is right-to-left, etc.
+Shader linearRevealShader({
+  required Rect bounds,
+  required double angle,
+  required double fraction,
+  double fuzzyEdgeWidth = 20.0,
+  // how long is the path over which the animation moves? Whether to use the full diagonal or else whether to just use the shortest possible sweep for which the animation will start at the nearest corner of the bounds and finish at the furthest (which will have inconsistent travel time when the angle is changed)
+  bool sphericalSweepLength = false,
+}) {
+  // Calculate the diagonal length to ensure full coverage regardless of angle
+  final boundsSize = bounds.size;
+  final diagonal = sqrt(boundsSize.width * boundsSize.width +
+      boundsSize.height * boundsSize.height);
+
+  Offset begin;
+  Offset end;
+
+  final direction = angleToOffset(angle);
+  final center = sizeToOffset(boundsSize) / 2;
+  if (sphericalSweepLength) {
+    // calculate start and finish on the assumption of a roughly circular bounds shape
+    final halfDiagonal = diagonal / 2;
+    begin = center - direction * (halfDiagonal + fuzzyEdgeWidth);
+    end = center + direction * (halfDiagonal + fuzzyEdgeWidth);
+  } else {
+    // calculate begin and end to minimize the distance of travel
+    double nearestBegin = double.infinity;
+    double furthestEnd = -double.infinity;
+    for (final corner in [
+      bounds.topLeft,
+      bounds.topRight,
+      bounds.bottomLeft,
+      bounds.bottomRight
+    ]) {
+      final distance = dot(direction, (corner - center));
+      if (distance < nearestBegin) {
+        nearestBegin = distance;
+      }
+      if (distance > furthestEnd) {
+        furthestEnd = distance;
+      }
+    }
+    begin = center + direction * (nearestBegin - fuzzyEdgeWidth);
+    end = center + direction * (furthestEnd + fuzzyEdgeWidth);
   }
+
+  final colors = const [Colors.white, Colors.white, Colors.transparent];
+
+  final fuzzyRatio = fuzzyEdgeWidth / diagonal;
+  final p = (1 - fuzzyRatio) * fraction;
+  final stops = [0.0, p, p + fuzzyRatio];
+
+  return LinearGradient(
+    begin: Alignment(
+      (begin.dx / boundsSize.width) * 2 - 1,
+      (begin.dy / boundsSize.height) * 2 - 1,
+    ),
+    end: Alignment(
+      (end.dx / boundsSize.width) * 2 - 1,
+      (end.dy / boundsSize.height) * 2 - 1,
+    ),
+    colors: colors,
+    stops: stops,
+  ).createShader(bounds);
 }
 
 class RelAlignment {
@@ -1737,19 +1817,21 @@ class FuzzyCircleReveal extends StatelessWidget {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
-        return ShaderMask(
-          shaderCallback: (Rect bounds) {
-            return FuzzyCircleShader.createRadialRevealShader(
-              bounds: bounds,
-              center: origin.computeCenterOver(bounds.size),
-              fraction: animation.value,
-              fuzzyEdgeWidth: fuzzyEdgeWidth,
-              minRadius: minRadius,
-              invert: invertGradient,
-            );
-          },
-          blendMode: BlendMode.dstIn,
-          child: child,
+        return ClipRect(
+          child: ShaderMask(
+            shaderCallback: (Rect bounds) {
+              return createRadialRevealShader(
+                bounds: bounds,
+                center: origin.computeCenterOver(bounds.size),
+                fraction: animation.value,
+                fuzzyEdgeWidth: fuzzyEdgeWidth,
+                minRadius: minRadius,
+                invert: invertGradient,
+              );
+            },
+            blendMode: BlendMode.dstIn,
+            child: child,
+          ),
         );
       },
       child: child,
@@ -1793,19 +1875,64 @@ class FuzzyCircleClip extends StatelessWidget {
     } else if (progress == 1.0) {
       return child;
     } else {
-      return ShaderMask(
-        blendMode: BlendMode.dstIn,
-        child: child,
-        shaderCallback: (Rect bounds) {
-          return FuzzyCircleShader.createRadialRevealShader(
-            bounds: bounds,
-            fraction: progress,
-            fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
-            minRadius: minRadius,
-            invert: invertGradient,
-            center: origin.computeAlignment(bounds.size),
-          );
-        },
+      return ClipRect(
+        child: ShaderMask(
+          blendMode: BlendMode.dstIn,
+          child: child,
+          shaderCallback: (Rect bounds) {
+            return createRadialRevealShader(
+              bounds: bounds,
+              fraction: progress,
+              fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
+              minRadius: minRadius,
+              invert: invertGradient,
+              center: origin.computeAlignment(bounds.size),
+            );
+          },
+        ),
+      );
+    }
+  }
+}
+
+class FuzzyLinearClip extends StatelessWidget {
+  final double progress;
+  final double angle; // angle in radians
+  final double? fuzzyEdgeWidth;
+  final bool sphericalSweepLength;
+  final Widget child;
+
+  // ignore: prefer_const_constructors_in_immutables
+  FuzzyLinearClip({
+    super.key,
+    required this.angle,
+    required this.progress,
+    required this.child,
+    this.fuzzyEdgeWidth = 20.0,
+    this.sphericalSweepLength = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (progress == 0.0) {
+      return Opacity(opacity: 0.0, child: child);
+    } else if (progress == 1.0) {
+      return child;
+    } else {
+      return ClipRect(
+        child: ShaderMask(
+          blendMode: BlendMode.dstIn,
+          child: child,
+          shaderCallback: (Rect bounds) {
+            return linearRevealShader(
+              bounds: bounds,
+              fraction: progress,
+              fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
+              angle: angle,
+              sphericalSweepLength: sphericalSweepLength,
+            );
+          },
+        ),
       );
     }
   }
@@ -1834,8 +1961,8 @@ class _CircularRevealRouteTransitionState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final Color backgroundColor = theme.colorScheme.surfaceContainerHigh;
-    final Color fadedOfBackgroundColor = backgroundColor.withAlpha(117);
+    final Color backgroundColor = theme.colorScheme.primary;
+    final Color fadedOfBackgroundColor = backgroundColor.withAlpha(24);
     final Color transparentOfBackgroundColor = backgroundColor.withAlpha(0);
 
     return Stack(
@@ -1891,17 +2018,19 @@ class _CircularRevealRouteTransitionState
               (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
             );
 
-            return ShaderMask(
-              shaderCallback: (Rect bounds) {
-                return FuzzyCircleShader.createRadialRevealShader(
-                  bounds: bounds,
-                  center: centerAlignment,
-                  fraction: fraction,
-                  fuzzyEdgeWidth: 20.0,
-                );
-              },
-              blendMode: BlendMode.dstIn,
-              child: child,
+            return ClipRect(
+              child: ShaderMask(
+                shaderCallback: (Rect bounds) {
+                  return createRadialRevealShader(
+                    bounds: bounds,
+                    center: centerAlignment,
+                    fraction: fraction,
+                    fuzzyEdgeWidth: 20.0,
+                  );
+                },
+                blendMode: BlendMode.dstIn,
+                child: child,
+              ),
             );
           },
           child: widget.child,
@@ -2242,4 +2371,40 @@ Color backgroundColorFor(ThemeData theme, bool isOn) {
   return isOn
       ? theme.colorScheme.primary
       : theme.colorScheme.surfaceContainerLowest;
+}
+
+class MakoThemeData {
+  Color lowestBackColor;
+  Color midBackColor;
+  Color foreBackColor;
+  MakoThemeData({
+    required this.lowestBackColor,
+    required this.midBackColor,
+    required this.foreBackColor,
+  });
+  static MakoThemeData fromContext(BuildContext context) {
+    return fromTheme(Theme.of(context));
+  }
+
+  static MakoThemeData fromTheme(ThemeData theme, {Brightness? brightness}) {
+    return (brightness ?? theme.brightness) == Brightness.dark
+        ? MakoThemeData(
+            lowestBackColor: theme.colorScheme.surfaceContainerLowest,
+            midBackColor: theme.colorScheme.surfaceContainerLow,
+            foreBackColor: theme.colorScheme.surfaceContainerHighest,
+          )
+        : MakoThemeData(
+            lowestBackColor: theme.colorScheme.surfaceContainerHighest,
+            midBackColor: theme.colorScheme.surfaceContainerHigh,
+            foreBackColor: theme.colorScheme.surfaceContainerLowest,
+          );
+  }
+}
+
+Positioned positionedAt(Offset offset, Widget child) {
+  return Positioned(
+    left: offset.dx,
+    top: offset.dy,
+    child: child,
+  );
 }

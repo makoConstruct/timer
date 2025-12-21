@@ -34,7 +34,7 @@ dependencies:
   nb_utils: ^7.1.4
   animated_to: ^0.4.0
   springster: any #tracking animated_to's springster dependency
-  improved_wrap: ^1.0.0
+  improved_wrap: ^1.1.1
   # animated_containers: ^1.2.0
   # animated_containers:
   #   path: /home/mako/programming/animated_containers
