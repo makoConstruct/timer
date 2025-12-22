@@ -33,16 +33,16 @@ class CrankGameTheme {
   });
 
   static CrankGameTheme light = CrankGameTheme(
-    tooSlowColor: Colors.orange,
-    withinBoundsColor: darkenColor(Colors.green, 0.2),
+    tooSlowColor: const Color(0xff5bcef5),
+    withinBoundsColor: const Color(0xff17e351),
     wonColor: darkenColor(Colors.amber, 0.1),
-    tooFastColor: darkenColor(Colors.red, 0.07),
+    tooFastColor: const Color(0xffdcd026),
   );
   static CrankGameTheme dark = CrankGameTheme(
-    tooSlowColor: Colors.orange,
-    withinBoundsColor: Colors.green,
+    tooFastColor: const Color(0xFFD7D752),
+    withinBoundsColor: const Color(0xff13bb3a),
     wonColor: Colors.amber,
-    tooFastColor: darkenColor(Colors.red, -0.035),
+    tooSlowColor: const Color(0xFF5bcdf5),
   );
 
   static CrankGameTheme fromContext(BuildContext context) {
@@ -209,8 +209,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     // dialCenter in global coordinates (for pan gesture calculation)
     final dialCenter = Offset(dialCenterX, screenHeight - dialCenterY);
 
-    final barBottom = screenWidth * 0.74;
-    final barThickness = 30.0;
+    final barBottom = screenWidth * 0.8;
+    final barThickness = 50.0;
     return Scaffold(
       backgroundColor: backgroundColorA,
       appBar: AppBar(
@@ -291,7 +291,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
 
           // Speed indicator
           Positioned(
-            left: 64,
+            left: barThickness + 40,
+            right: barThickness + 40,
             top: 24,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
