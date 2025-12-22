@@ -2808,65 +2808,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               Builder(builder: (context) {
-                final GlobalKey iconKey = GlobalKey();
-                Offset? tapPosition;
-                return GestureDetector(
-                  onTapDown: (details) {
-                    tapPosition = details.globalPosition;
-                  },
-                  child: ListTile(
-                    title: Text('Crank game', style: theme.textTheme.bodyLarge),
-                    subtitle: Text(
-                      'A silly game about turning a crank at a consistent speed. Can you do the work of the clock?',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                    trailing: trailing(SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: Hero(
-                        tag: 'crank-game-icon',
-                        child: ScalingAspectRatio(
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Icon(
-                                Icons.rotate_right_rounded,
-                                color: theme.colorScheme.primary,
-                                size: 24,
-                              ),
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: Icon(
-                                  Icons.sports_esports,
-                                  color: theme.colorScheme.primary,
-                                  size: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    )),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        CircularRevealRoute(
-                          builder: (context) => CrankGameScreen(
-                              iconKey: iconKey,
-                              flipBackgroundColors:
-                                  !widget.flipBackgroundColors),
-                          buttonCenter: tapPosition ?? Offset.zero,
-                          iconKey: iconKey,
-                        ),
-                      );
-                    },
-                    contentPadding: listItemPadding,
-                  ),
-                );
-              }),
-              Builder(builder: (context) {
                 // Need a Builder to get the correct context for finding the icon's position
                 final GlobalKey iconKey = GlobalKey();
                 final hereIconKey = GlobalKey();
@@ -2933,10 +2874,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
-              SizedBox(height: MediaQuery.of(context).padding.bottom),
+              // ---------------
+              Divider(indent: 22, endIndent: 22, height: 34),
+              Padding(
+                padding:
+                    const EdgeInsets.only(left: 44.0, top: 1.0, bottom: 3.0),
+                child: Text('extra', style: theme.textTheme.titleLarge),
+              ),
+              Builder(builder: (context) {
+                final GlobalKey iconKey = GlobalKey();
+                Offset? tapPosition;
+                return GestureDetector(
+                  onTapDown: (details) {
+                    tapPosition = details.globalPosition;
+                  },
+                  child: ListTile(
+                    title: Text('Crank game', style: theme.textTheme.bodyLarge),
+                    subtitle: Text(
+                      "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time though, it is about the labor of a clock.",
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                    trailing: trailing(SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: Hero(
+                        tag: 'crank-game-icon',
+                        child: ScalingAspectRatio(
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Icon(
+                                Icons.rotate_right_rounded,
+                                color: theme.colorScheme.primary,
+                                size: 24,
+                              ),
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: Icon(
+                                  Icons.sports_esports,
+                                  color: theme.colorScheme.primary,
+                                  size: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        CircularRevealRoute(
+                          builder: (context) => CrankGameScreen(
+                              iconKey: iconKey,
+                              flipBackgroundColors:
+                                  !widget.flipBackgroundColors),
+                          buttonCenter: tapPosition ?? Offset.zero,
+                          iconKey: iconKey,
+                        ),
+                      );
+                    },
+                    contentPadding: listItemPadding,
+                  ),
+                );
+              }),
+
               if (!completedSetup) ...[
                 setupTile,
               ],
+              SizedBox(height: MediaQuery.of(context).padding.bottom),
             ]),
           ),
         ],

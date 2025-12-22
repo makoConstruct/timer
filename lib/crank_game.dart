@@ -209,6 +209,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     // dialCenter in global coordinates (for pan gesture calculation)
     final dialCenter = Offset(dialCenterX, screenHeight - dialCenterY);
 
+    final barBottom = screenWidth * 0.74;
+    final barThickness = 30.0;
     return Scaffold(
       backgroundColor: backgroundColorA,
       appBar: AppBar(
@@ -264,8 +266,9 @@ class _CrankGameScreenState extends State<CrankGameScreen>
           Positioned(
             right: 24,
             top: 24,
-            bottom: screenWidth * 0.72,
+            bottom: barBottom,
             child: _ProgressBar(
+              thickness: barThickness,
               progress: _progress,
               isWithinBounds: _isDragging &&
                   (_currentSpeed - targetSpeed).abs() <= errorMargin,
@@ -278,8 +281,9 @@ class _CrankGameScreenState extends State<CrankGameScreen>
           Positioned(
             left: 24,
             top: 24,
-            bottom: screenWidth * 0.72,
+            bottom: barBottom,
             child: _DifficultySlider(
+              thickness: barThickness,
               value: errorMargin,
               onChanged: (v) => setState(() => errorMargin = v),
             ),
@@ -396,6 +400,16 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                             color: theme.colorScheme.onSurface,
                           ),
                         ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8.0, right: 8.0),
+                          child: Text(
+                            textAlign: TextAlign.center,
+                            "You're capable of doing the work of a clock. In theory, you don't need mako's timer, or any timer app. In theory, you're free. In practice? Well.",
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           'Tap to play again',
@@ -492,11 +506,14 @@ class _ProgressBar extends StatelessWidget {
         final rectangularArea = thickness * rectangularHeight;
         final circularArea = pi * thickness / 2 * thickness / 2;
         final totalArea = rectangularArea + circularArea;
+        final startingp = circularArea / totalArea * 0.33;
+        final augmentedProgress = lerp(startingp, 1, progress);
         final radius = sqrt(
-            (unlerpUnit(0, circularArea / totalArea, progress) * circularArea) /
+            (unlerpUnit(0, circularArea / totalArea, augmentedProgress) *
+                    circularArea) /
                 pi);
         final verticalProgress =
-            unlerpUnit(circularArea / totalArea, 1, progress);
+            unlerpUnit(circularArea / totalArea, 1, augmentedProgress);
         return Container(
             width: thickness,
             decoration: BoxDecoration(
