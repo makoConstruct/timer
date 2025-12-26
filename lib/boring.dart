@@ -273,7 +273,10 @@ class TrackedTimer {
 //   }
 // }
 
-Rect? boxRect(GlobalKey key) {
+Rect? boxRect(GlobalKey? key) {
+  if (key == null) {
+    return null;
+  }
   final box = key.currentContext?.findRenderObject() as RenderBox?;
   if (box == null) {
     return null;
@@ -698,6 +701,7 @@ double moduloProperly(double t, double m) {
 class UpDownAnimationController extends ValueListenable<(double, double)>
     with ChangeNotifier
     implements Animation<(double, double)> {
+  // falltime overrides risetime, so reversing while the forward is still happening always looks fine (special), but there can be glitches when going forward while reverse is in progress.
   DateTime? _riseTime;
   DateTime? _fallTime;
   final Duration riseDuration;
@@ -725,15 +729,24 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     }
   }
 
-  void forward({double? from}) {
-    if (_riseTime == null) {
-      _riseTime = DateTime.now();
-      if (from != null) {
-        _riseTime = DateTime.now().subtract(Duration(
-            milliseconds: (from * riseDuration.inMilliseconds).toInt()));
-      }
+  void towards(bool direction) {
+    if (direction) {
+      forward();
     } else {
-      // tries to start from where it currently is.
+      reverse();
+    }
+  }
+
+  /// does nothing if forward is already running
+  void forward({double? from, Duration? delay}) {
+    Duration dd = delay ?? Duration.zero;
+    if (from != null) {
+      _riseTime = DateTime.now().add(dd).subtract(
+          Duration(milliseconds: (from * riseDuration.inMilliseconds).toInt()));
+    } else if (_riseTime == null) {
+      _riseTime = DateTime.now().add(dd);
+    } else if (_fallTime != null) {
+      // tries to start from where it currently is (this may not work if you're using heterogenous easers on rise and fall)
       double riseProgress =
           durationToSeconds(DateTime.now().difference(_riseTime!));
       double fallProgress = _fallTime != null
@@ -748,8 +761,13 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
                           durationToSeconds(fallDuration) *
                           durationToSeconds(riseDuration)) /
               durationToSeconds(riseDuration));
-      _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
+      if (forwardPosition > 0) {
+        _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
+      } else {
+        _riseTime = DateTime.now().add(dd);
+      }
     }
+    // else already going forward, so just keeps going forward
     _fallTime = null;
     if (!_ticker.isActive) {
       _ticker.start();
@@ -771,6 +789,9 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     _updateStatus();
   }
 
+  /// you may wish to use this to do something different on the first run
+  bool get hasntCycled => _fallTime == null;
+
   void reset() {
     _riseTime = null;
     _fallTime = null;
@@ -785,6 +806,12 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     super.dispose();
   }
 
+  double get scalarValue {
+    final (rise, fall) = value;
+    return rise * (1 - fall);
+  }
+
+  /// (rise, fall)
   @override
   (double, double) get value {
     final now = DateTime.now();
@@ -1290,6 +1317,8 @@ class Pie extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final halfDevicePixel = 0.5 / devicePixelRatio;
     return SizedBox(
       width: size,
       height: size,
@@ -1298,7 +1327,7 @@ class Pie extends StatelessWidget {
         children: [
           // slight (imperceptible)padding to prevent antialiasing artifacts
           Padding(
-            padding: const EdgeInsets.all(0.5),
+            padding: EdgeInsets.all(halfDevicePixel),
             child: Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -2221,6 +2250,7 @@ class InvertToggleButton extends StatelessWidget {
       duration: duration,
       builder: (context, progress, child) {
         return FuzzyCircleClip(
+            fuzzyEdgeWidth: 6,
             progress: Curves.easeOutCubic.transform(progress),
             origin: epicenter ?? RelAlignment.center,
             child: child!);

@@ -335,9 +335,9 @@ class PersistentNotificationTask extends TaskHandler {
 
 Timer? heartbeaterMain;
 
-Future<void> graspForegroundService() async {
+Future<bool> graspForegroundService() async {
   if (!Platform.isAndroid) {
-    return;
+    return false;
   }
 
   FlutterForegroundTask.initCommunicationPort();
@@ -345,24 +345,36 @@ Future<void> graspForegroundService() async {
   // permissions
   // Android 13+, you need to allow notification permission to display foreground service notification.
   // iOS: If you need notification, ask for permission.
+  bool permissionsGranted = true;
   final NotificationPermission notificationPermission =
       await FlutterForegroundTask.checkNotificationPermission();
   if (notificationPermission != NotificationPermission.granted) {
-    await FlutterForegroundTask.requestNotificationPermission();
+    bool g = await FlutterForegroundTask.requestNotificationPermission() ==
+        NotificationPermission.granted;
+    if (!g) {
+      permissionsGranted = false;
+    }
   }
   if (Platform.isAndroid) {
     // Android 12+, there are restrictions on starting a foreground service.
     // To restart the service on device reboot or unexpected problem, you need to allow below permission.
     if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
       // This function requires `android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission.
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      bool g = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      if (!g) {
+        permissionsGranted = false;
+      }
     }
 
+    // I don't think this is ever on Android 13+
     assert(await FlutterForegroundTask.canScheduleExactAlarms);
-    // if (!await FlutterForegroundTask.canScheduleExactAlarms) {
-    //   // [maybe todo] explain to the user why we need this. wait, it doesn't send the user to the settings page it just opens a tooltip, seems clear enough? Or maybe this permission was already granted and this code doesn't really need to be here? I'll comment this out and replace it with just a check.
-    //   await FlutterForegroundTask.openAlarmsAndRemindersSettings();
-    // }
+    if (!await FlutterForegroundTask.canScheduleExactAlarms) {
+      // // [maybe todo] explain to the user why we need this. wait, it doesn't send the user to the settings page it just opens a tooltip, seems clear enough? Or maybe this permission was already granted and this code doesn't really need to be here? I'll comment this out and replace it with just a check.
+      bool g = await FlutterForegroundTask.openAlarmsAndRemindersSettings();
+      if (!g) {
+        permissionsGranted = false;
+      }
+    }
   }
 
   FlutterForegroundTask.init(
@@ -419,4 +431,6 @@ Future<void> graspForegroundService() async {
     print("heartbeat sent");
     FlutterForegroundTask.sendDataToTask({'op': 'heartbeat'});
   });
+
+  return permissionsGranted;
 }

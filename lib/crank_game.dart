@@ -1,7 +1,9 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:makos_timer/boring.dart';
+import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart' show maybeFlippedBackgroundColors;
+import 'package:makos_timer/mobj.dart';
 
 class CrankGameScreen extends StatefulWidget {
   final GlobalKey? iconKey;
@@ -54,18 +56,20 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     with SingleTickerProviderStateMixin {
   // Game parameters
   double targetSpeed = 1.0; // rotations per second
+  late double nextTargetSpeed = _nextTargetSpeed(); // rotations per second
   double windowSeconds = 0.5; // averaging window
   double errorMargin =
       0.1; // allowed deviation from target (in rotations per second)
   double durationToWin = 5.0; // seconds of consistent cranking to win
   double punishmentRate =
-      1.0; // score lost per second when outside error bounds
+      1.3; // score lost per second when outside error bounds
 
   // Game state
   double _crankAngle = -pi / 4;
   double _progress = 0.0; // 0 to 1, represents how close to winning
   bool _isDragging = false;
   bool _hasWon = false;
+  String? _currentWinMessage;
 
   // Speed tracking
   final List<_AngleSample> _angleSamples = [];
@@ -73,10 +77,34 @@ class _CrankGameScreenState extends State<CrankGameScreen>
 
   late AnimationController _tickController;
   DateTime? _lastTickTime;
+  late Mobj<int> _winMessageIndexMobj;
+
+  static List<String> winMessages = [
+    "You're one step closer to attaining the clock nature.",
+    "You possess clock virtue.",
+    "The clocks recognize you.",
+    "I went to the clock zone and they all said they knew you.",
+    "You possess the clock nature.",
+    "You have demonstrated the passions and virtues of the clock.",
+    "You have attained the status of \"Nehomme Sochronoi\".",
+    "You are a clock.",
+    "With these abilities, in theory, you can keep your own time.",
+  ];
+  String _takeNextWinMessage() {
+    int c = _winMessageIndexMobj.peek()!;
+    _winMessageIndexMobj.value = (c + 1) % winMessages.length;
+    return winMessages[c % winMessages.length];
+  }
+
+  double _nextTargetSpeed() {
+    return lerp(0.2, 2.7, Random().nextDouble());
+  }
 
   @override
   void initState() {
     super.initState();
+    _winMessageIndexMobj =
+        Mobj.getAlreadyLoaded(crankGameWinMessageIndexID, const IntType());
     _tickController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
@@ -88,6 +116,14 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   void dispose() {
     _tickController.dispose();
     super.dispose();
+  }
+
+  void _win() {
+    setState(() {
+      _progress = 1.0;
+      _currentWinMessage = _takeNextWinMessage();
+      _hasWon = true;
+    });
   }
 
   void _tick() {
@@ -109,9 +145,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
       if (speedError <= errorMargin) {
         // Within bounds - increase progress
         _progress += dt / durationToWin;
-        if (_progress >= 1.0) {
-          _progress = 1.0;
-          _hasWon = true;
+        if (_progress >= 1.0 && !_hasWon) {
+          _win();
         }
       } else {
         // Outside bounds - decrease progress
@@ -185,7 +220,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
       _progress = 0.0;
       _hasWon = false;
       _currentSpeed = 0.0;
-      targetSpeed = lerp(0.2, 2.7, Random().nextDouble());
+      targetSpeed = nextTargetSpeed;
+      nextTargetSpeed = _nextTargetSpeed();
       _angleSamples.clear();
     });
   }
@@ -318,13 +354,15 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                               : _currentSpeed < targetSpeed * (1 - errorMargin)
                                   ? 'Faster!'
                                   : 'Slower!'
-                          : 'Start cranking!',
+                          : "Please simply rotate the dial at ${targetSpeed.toStringAsFixed(2)}rps for five seconds",
                   style: theme.textTheme.headlineSmall?.copyWith(
-                    color: (_currentSpeed - targetSpeed).abs() <= errorMargin
-                        ? crankGameTheme.withinBoundsColor
-                        : _currentSpeed < targetSpeed - errorMargin
-                            ? crankGameTheme.tooSlowColor
-                            : crankGameTheme.tooFastColor,
+                    color: !_isDragging
+                        ? theme.colorScheme.onSurfaceVariant
+                        : (_currentSpeed - targetSpeed).abs() <= errorMargin
+                            ? crankGameTheme.withinBoundsColor
+                            : _currentSpeed < targetSpeed - errorMargin
+                                ? crankGameTheme.tooSlowColor
+                                : crankGameTheme.tooFastColor,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -386,39 +424,43 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                 child: Container(
                   color: theme.colorScheme.surfaceContainerLowest,
                   child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.celebration,
-                          size: 64,
-                          color: crankGameTheme.wonColor,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'You Won!',
-                          style: theme.textTheme.headlineLarge?.copyWith(
-                            color: theme.colorScheme.onSurface,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 30.0, right: 30.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.access_time_rounded,
+                            size: 64,
+                            color: crankGameTheme.wonColor,
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8.0, right: 8.0),
-                          child: Text(
+                          const SizedBox(height: 16),
+                          Text(
                             textAlign: TextAlign.center,
-                            "You're capable of doing the work of a clock. In theory, you don't need mako's timer, or any timer app. In theory, you're free. In practice? Well.",
-                            style: theme.textTheme.bodyMedium?.copyWith(
+                            'Successfully produced high purity rotation at ${targetSpeed.toStringAsFixed(2)} rotations per second',
+                            style: theme.textTheme.headlineLarge?.copyWith(
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 30.0),
+                            child: Text(
+                              textAlign: TextAlign.center,
+                              _currentWinMessage!,
+                              style: theme.textTheme.headlineLarge?.copyWith(
+                                color: theme.colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 30.0),
+                          Text(
+                            'Tap for next challenge (${nextTargetSpeed.toStringAsFixed(2)}rps)',
+                            style: theme.textTheme.bodyLarge?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap to play again',
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
