@@ -1196,6 +1196,95 @@ double defaultPulserFunction(double v) => v < _bumpMidpoint
     ? sq(v / _bumpMidpoint)
     : 1 - (v - _bumpMidpoint) / (1 - _bumpMidpoint);
 
+/// Animates multiple overlapping pulses triggered by events from a stream.
+/// Each pulse progresses from 0 to 1 over [duration], and is removed once complete.
+class PulserAnimation extends StatefulWidget {
+  final Stream<void> pulses;
+  final Duration duration;
+  final Widget? child;
+  final Widget Function(
+          BuildContext context, Widget? child, List<double> progresses)
+      builder;
+
+  const PulserAnimation({
+    super.key,
+    required this.pulses,
+    required this.duration,
+    this.child,
+    required this.builder,
+  });
+
+  @override
+  State<PulserAnimation> createState() => _PulserAnimationState();
+}
+
+class _PulserAnimationState extends State<PulserAnimation>
+    with SingleTickerProviderStateMixin {
+  late Ticker _ticker;
+  StreamSubscription<void>? _subscription;
+  final List<DateTime> _pulseStartTimes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick);
+    _subscription = widget.pulses.listen(_onPulse);
+  }
+
+  @override
+  void didUpdateWidget(PulserAnimation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.pulses != oldWidget.pulses) {
+      _subscription?.cancel();
+      _subscription = widget.pulses.listen(_onPulse);
+    }
+  }
+
+  void _onPulse(_) {
+    _pulseStartTimes.add(DateTime.now());
+    if (!_ticker.isActive) {
+      _ticker.start();
+    }
+  }
+
+  void _onTick(Duration elapsed) {
+    final now = DateTime.now();
+    final durationMicros = widget.duration.inMicroseconds;
+
+    _pulseStartTimes.removeWhere((startTime) {
+      final elapsed = now.difference(startTime).inMicroseconds;
+      return elapsed >= durationMicros;
+    });
+
+    if (_pulseStartTimes.isEmpty) {
+      _ticker.stop();
+    }
+
+    setState(() {});
+  }
+
+  List<double> _computeProgresses() {
+    final now = DateTime.now();
+    final durationMicros = widget.duration.inMicroseconds;
+    return _pulseStartTimes.map((startTime) {
+      final elapsed = now.difference(startTime).inMicroseconds;
+      return clampUnit(elapsed / durationMicros);
+    }).toList();
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(context, widget.child, _computeProgresses());
+  }
+}
+
 class PiePainter extends CustomPainter {
   final double value;
   final Color color;
@@ -2437,4 +2526,92 @@ Positioned positionedAt(Offset offset, Widget child) {
     top: offset.dy,
     child: child,
   );
+}
+
+class BoolSignalTween extends StatelessWidget {
+  final ReadonlySignal<bool> signal;
+  final Widget Function(BuildContext context, double value, Widget? child)
+      builder;
+  final Widget? child;
+  const BoolSignalTween({
+    super.key,
+    required this.signal,
+    required this.builder,
+    this.child,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Watch((context) => TweenAnimationBuilder(
+          tween: Tween<double>(
+              begin: signal.value ? 0.0 : 1.0, end: signal.value ? 0.0 : 1.0),
+          duration: Duration(milliseconds: 300),
+          builder: builder,
+          child: child,
+        ));
+  }
+}
+
+class PinAnimation extends StatelessWidget {
+  final Widget child;
+  final ReadonlySignal<bool> isPinned;
+  const PinAnimation({
+    super.key,
+    required this.child,
+    required this.isPinned,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return BoolSignalTween(
+      signal: isPinned,
+      builder: (context, progress, child) {
+        // final distance = 50 + squareRad + gap;
+        return Stack(clipBehavior: Clip.none, children: [
+          Positioned.fill(child: LayoutBuilder(
+            builder: (context, constraints) {
+              final r = min(constraints.maxWidth, constraints.maxHeight) / 2;
+              final mt = MakoThemeData.fromContext(context);
+              final movementp = Curves.easeOutCubic
+                  .transform(unlerpUnit(0.4, 1, 1 - progress));
+              final revealp = unlerpUnit(0, 0.3, 1 - progress);
+              final squareRad = 7.0;
+              final gap = 3;
+              final center =
+                  Offset(constraints.maxWidth / 2, constraints.maxHeight / 2);
+              final distance =
+                  (lerp(r + 10, r, movementp) + squareRad + gap) / sqrt(2);
+              return SizedBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: Stack(clipBehavior: Clip.none, children: [
+                  positionedAt(
+                      center + Offset(-distance, -distance),
+                      // I don't understand why the transforms need to be applied in this order
+                      Transform.translate(
+                        offset: Offset(-squareRad, -squareRad),
+                        child: Transform.rotate(
+                          origin: Offset(0, 0),
+                          angle: pi / 4,
+                          child: FuzzyLinearClip(
+                            angle: pi / 2,
+                            progress: revealp,
+                            child: Container(
+                                decoration: BoxDecoration(
+                                  color: mt.foreBackColor,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                width: squareRad * 2,
+                                height: squareRad * 2),
+                          ),
+                        ),
+                      ))
+                ]),
+              );
+            },
+          )),
+          child!
+        ]);
+      },
+      child: child,
+    );
+  }
 }
