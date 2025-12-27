@@ -469,6 +469,8 @@ class TimerState extends State<Timer>
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
   late final AnimationController _selectedUnderlineAnimation;
+  late final Computed<bool> whetherPinned =
+      Computed(() => widget.mobj.value?.pinned ?? false);
   // currently inactive. I was considering using this for doing a deletion where most of the deletion animation happens in-place and then it's shunted out into another layer just for the end.
   late final AnimationController _deletionAnimation;
   final GlobalKey _clockKey = GlobalKey();
@@ -723,45 +725,21 @@ class TimerState extends State<Timer>
               )),
             )));
 
-    // Widget clockDial = AnimatedBuilder(
-    //     key: _clockKey,
-    //     animation: _runningAnimation,
-    //     builder: (context, child) => Container(
-    //           padding:
-    //               EdgeInsets.all((1 - _runningAnimation.value) * timerPaddingr),
-    //           decoration: BoxDecoration(
-    //             shape: BoxShape.circle,
-    //             color: mt.foreBackColor,
-    //           ),
-    //           constraints: BoxConstraints(maxHeight: 49, maxWidth: 49),
-    //           child: child,
-    //         ),
-    //     child: Stack(
-    //       clipBehavior: Clip.none,
-    //       fit: StackFit.expand,
-    //       children: [
-    //         // expandingHindCircle,
-    //         // there's a very strange bug where the pie doesn't repaint when the timer is being dragged. Every other animation still works. I checked, and although build is being called, shouldRepaint isn't. I'm gonna ignore it for now.
-    //         // oh! and I notice the numbers don't update either!
-    //         Pie(
-    //           backgroundColor: backgroundColor(d.hue),
-    //           color: primaryColor(d.hue),
-    //           value: pieCompletion,
-    //           size: pieRadius,
-    //         ),
-    //       ],
-    //     ));
-    Widget clockDial = Container(
-      padding: EdgeInsets.all(timerOutline),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: mt.foreBackColor,
+    Widget clockDial = PinAnimation(
+      isPinned: whetherPinned,
+      child: Container(
+        padding: EdgeInsets.all(timerOutline),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: mt.foreBackColor,
+        ),
+        child: Pie(
+            backgroundColor: backgroundColor(d.hue),
+            color: primaryColor(d.hue),
+            value: pieCompletion,
+            size: 2 * watchSignal(context, timerWidgetRadius)!),
+        // size: 90),
       ),
-      child: Pie(
-          backgroundColor: backgroundColor(d.hue),
-          color: primaryColor(d.hue),
-          value: pieCompletion,
-          size: 2 * watchSignal(context, timerWidgetRadius)!),
     );
 
     Widget result = GestureDetector(
@@ -787,20 +765,20 @@ class TimerState extends State<Timer>
       ),
     );
 
-    result = AnimatedBuilder(
-      animation: _runningAnimation,
-      builder: (context, child) => Container(
-          clipBehavior: Clip.hardEdge,
-          decoration: BoxDecoration(
-            shape: BoxShape.rectangle,
-            // // the running animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
-            // color: _runningAnimation.value == 1
-            //     ? theme.colorScheme.surfaceContainerLowest
-            //     : theme.colorScheme.surfaceContainerLowest.withAlpha(0)
-          ),
-          child: child),
-      child: result,
-    );
+    // result = AnimatedBuilder(
+    //   animation: _runningAnimation,
+    //   builder: (context, child) => Container(
+    //       clipBehavior: Clip.none,
+    //       decoration: BoxDecoration(
+    //         shape: BoxShape.rectangle,
+    //         // // the running animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
+    //         // color: _runningAnimation.value == 1
+    //         //     ? theme.colorScheme.surfaceContainerLowest
+    //         //     : theme.colorScheme.surfaceContainerLowest.withAlpha(0)
+    //       ),
+    //       child: child),
+    //   child: result,
+    // );
 
     // probably just going to use the existing ring (visible when timer isn't playing) for this instead
     // Widget unpinnedIndicator = AnimatedBuilder(
@@ -1460,11 +1438,11 @@ class TimerScreenState extends State<TimerScreen>
   late final Mobj<bool> isRightHandedMobj =
       Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
   late final Signal<Rect> numPadBounds = Signal(Rect.zero);
+
   // note this subscribes to the mobj
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
 
-  GlobalKey controlPadKey = GlobalKey();
   GlobalKey timerTrayKey = GlobalKey();
   GlobalKey pinButtonKey = GlobalKey();
   GlobalKey deleteButtonKey = GlobalKey();
@@ -1501,7 +1479,7 @@ class TimerScreenState extends State<TimerScreen>
       UpDownAnimationController(
           vsync: this,
           riseDuration: Duration(milliseconds: 230),
-          fallDuration: Duration(milliseconds: 230));
+          fallDuration: Duration(milliseconds: 200));
   late final UpDownAnimationController userDragActionHintReveal =
       UpDownAnimationController(
           vsync: this,
@@ -1512,6 +1490,8 @@ class TimerScreenState extends State<TimerScreen>
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
   /// we should probably persist this... but it doesn't matter much.
   late Signal<String> actionMode = Signal('play');
+  late final StreamController<void> modeActivationPulse =
+      StreamController<void>.broadcast();
 
   @override
   void initState() {
@@ -1519,8 +1499,7 @@ class TimerScreenState extends State<TimerScreen>
     // make sure the mode indicator follows the current mode
     createEffect(() {
       void moveTo(GlobalKey target) {
-        Offset t =
-            renderBox(controlPadKey)!.globalToLocal(boxRect(target)!.center);
+        Offset t = boxRect(target)!.center;
         if (modeLivenessAnimation.value == 0) {
           modeMovementAnimation.value = t;
         } else {
@@ -1603,6 +1582,7 @@ class TimerScreenState extends State<TimerScreen>
     actionMode.dispose();
     modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
+    modeActivationPulse.close();
     super.dispose();
   }
 
@@ -1625,6 +1605,7 @@ class TimerScreenState extends State<TimerScreen>
       mode = 'play';
       toggleRunning(timerID, reset: false);
     }
+    modeActivationPulse.add(null);
     _selectTimer(null);
   }
 
@@ -1732,7 +1713,8 @@ class TimerScreenState extends State<TimerScreen>
 
     var pinButton = TimersButton(
         key: pinButtonKey,
-        label: proportionedIcon(Icons.push_pin),
+        label: Transform.rotate(
+            angle: pi / 4, child: proportionedIcon(Icons.push_pin)),
         onPanEnd: () {
           _selectAction('pin');
         });
@@ -1935,11 +1917,21 @@ class TimerScreenState extends State<TimerScreen>
               child: SizedBox(
                 width: modalHighlightSpan * modeLivenessAnimation.value,
                 height: modalHighlightSpan * modeLivenessAnimation.value,
-                child: Container(
-                    decoration: BoxDecoration(
-                        color: mt.foreBackColor,
-                        borderRadius: BorderRadius.circular(
-                            backingCornerRounding * buttonSpan))),
+                child: PulserAnimation(
+                    pulses: modeActivationPulse.stream,
+                    duration: Duration(milliseconds: 600),
+                    builder: (context, child, progresses) {
+                      final p = min(
+                          1.0,
+                          progresses.fold(
+                              0.0, (a, b) => a + defaultPulserFunction(b)));
+                      return Container(
+                          decoration: BoxDecoration(
+                              color: lerpColor(mt.foreBackColor,
+                                  theme.colorScheme.primary, p),
+                              borderRadius: BorderRadius.circular(
+                                  backingCornerRounding * buttonSpan)));
+                    }),
               ),
             ));
       },
@@ -2027,30 +2019,34 @@ class TimerScreenState extends State<TimerScreen>
                     angle: 0,
                     progress: Curves.easeOutCubic
                         .transform(1 - editPopoverAnimation.value.$2),
+                    // this is a stack instead of just a container with a border because the border took up layout space if container, which would throw off the grid alignment
                     child: Stack(
                       children: [
-                        Positioned(
-                          top: backingDeflation,
-                          left: backingDeflation,
-                          right: backingDeflation,
-                          bottom: backingDeflation,
-                          child: Container(
-                            decoration: BoxDecoration(
-                                color: mt.foreBackColor,
-                                borderRadius: BorderRadius.circular(
-                                    editPopoverButtonHeight * 0.5)),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: mt.foreBackColor,
+                            borderRadius: BorderRadius.circular(
+                                editPopoverButtonHeight * 0.5),
+                            border: Border.all(
+                              color: mt.lowestBackColor,
+                              strokeAlign: BorderSide.strokeAlignInside,
+                              width: backingDeflation,
+                            ),
                           ),
                         ),
                         Row(
-                          children: reverseIfNot(isRightHandedMobj.value!, [
-                            iconWidget(Icons.backspace_rounded, () {
-                              _backspace();
-                            }, size: 0.57),
-                            iconWidget(Icons.play_arrow_rounded, () {
-                              pausePlaySelected();
-                            }),
-                          ]),
-                        )
+                          children: reverseIfNot(
+                            isRightHandedMobj.value!,
+                            [
+                              iconWidget(Icons.backspace_rounded, () {
+                                _backspace();
+                              }, size: 0.57),
+                              iconWidget(Icons.play_arrow_rounded, () {
+                                pausePlaySelected();
+                              })
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ));
