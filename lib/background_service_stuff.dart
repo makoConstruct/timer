@@ -335,6 +335,30 @@ class PersistentNotificationTask extends TaskHandler {
 
 Timer? heartbeaterMain;
 
+List<Object>? _pendingTaskMessages;
+
+/// Sends data to the foreground task, buffering messages until the service is running.
+/// Call [flushBufferedTaskMessages] after [startService] completes to deliver buffered messages.
+void bufferedSendToForegroundTask(Object data) {
+  if (_pendingTaskMessages != null) {
+    _pendingTaskMessages!.add(data);
+  } else {
+    FlutterForegroundTask.sendDataToTask(data);
+  }
+}
+
+/// Flushes any buffered messages to the foreground task.
+/// Call this after [startService] has completed.
+void flushBufferedTaskMessages() {
+  final pending = _pendingTaskMessages;
+  _pendingTaskMessages = null;
+  if (pending != null) {
+    for (final msg in pending) {
+      FlutterForegroundTask.sendDataToTask(msg);
+    }
+  }
+}
+
 Future<bool> graspForegroundService() async {
   if (!Platform.isAndroid) {
     return false;
@@ -402,9 +426,10 @@ Future<bool> graspForegroundService() async {
   if (await FlutterForegroundTask.isRunningService) {
     // in the example, they restart the service here, we're not gonna restart
     print("service is already running");
-    FlutterForegroundTask.sendDataToTask({'op': 'hello'});
+    bufferedSendToForegroundTask({'op': 'hello'});
   } else {
     print("starting service");
+    _pendingTaskMessages = [];
     final sr = await FlutterForegroundTask.startService(
       // serviceTypes: [
       //   ForegroundServiceTypes.dataSync,
@@ -421,15 +446,17 @@ Future<bool> graspForegroundService() async {
       callback: foregroundTaskStart,
     );
     if (sr is ServiceRequestFailure) {
+      _pendingTaskMessages = null;
       throw sr;
     }
+    flushBufferedTaskMessages();
   }
 
   // Start an interval timer that sends the heartbeat signal to the foreground task
   heartbeaterMain ??=
       Timer.periodic(const Duration(milliseconds: 1200), (timer) {
     print("heartbeat sent");
-    FlutterForegroundTask.sendDataToTask({'op': 'heartbeat'});
+    bufferedSendToForegroundTask({'op': 'heartbeat'});
   });
 
   return permissionsGranted;

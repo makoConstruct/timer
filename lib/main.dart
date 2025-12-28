@@ -176,10 +176,6 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await enableHighRefreshRate();
   await initializeDatabase();
-  FlutterForegroundTask.addTaskDataCallback(onDataReceived);
-  // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
-  // android will support repeat timers via the foreground service
-  await graspForegroundService();
   SignalsObserver.instance = null;
   runApp(const TimersApp());
 }
@@ -334,15 +330,14 @@ final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
-  late JukeBox jukeBox;
-  late TimerHolm timerHolm;
+  late final JukeBox jukeBox;
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
+    jukeBox = JukeBox.create();
   }
   @override
   void initState() {
     super.initState();
-    jukeBox = JukeBox.create();
     _loadCornerRadius();
 
     // Enable edge-to-edge mode
@@ -351,34 +346,12 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
-
-    final timerListMobj = Mobj<List<MobjID>>.getAlreadyLoaded(
-        timerListID, ListType(const StringType()));
-    timerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.resumed:
-        graspForegroundService();
-        timerHolm.enabled.value = true;
-        print("mako regrasping foreground service");
-        break;
-      case AppLifecycleState.paused:
-        FlutterForegroundTask.sendDataToTask({'op': 'goodbye'});
-        timerHolm.enabled.value = false;
-        print("mako goodbye");
-        break;
-      default:
-        break;
-    }
   }
 
   // This widget is the root of your application.
@@ -400,41 +373,41 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     }
 
     return MultiProvider(
-      providers: [
-        Provider<Thumbspan>(
-            create: (context) => Thumbspan(lpixPerThumbspan(context))),
-        Provider<JukeBox>(create: (_) => jukeBox),
-      ],
-      child: MaterialApp(
-        scaffoldMessengerKey: globalScaffoldMessengerKey,
-        title: 'timer',
-        theme: makeTheme(Brightness.light),
-        darkTheme: makeTheme(Brightness.dark),
-        onGenerateRoute: (settings) {
-          if (settings.name == '/') {
-            return CircularRevealRoute(
-              builder: (context) => TimerScreen(),
-            );
-          }
-          if (settings.name == '/onboard') {
-            return CircularRevealRoute(
-              builder: (context) => OnboardScreen(),
-            );
-          }
-          return null;
-        },
-        onGenerateInitialRoutes: (initialRouteName) {
-          final completedSetup =
-              Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value ??
-                  false;
-          return <Route<dynamic>>[
-            CircularRevealRoute(builder: (context) => TimerScreen()),
-            if (!completedSetup)
-              CircularRevealRoute(builder: (context) => OnboardScreen()),
-          ];
-        },
-      ),
-    );
+        providers: [
+          Provider<Thumbspan>(
+              create: (context) => Thumbspan(lpixPerThumbspan(context))),
+          Provider<JukeBox>(create: (_) => jukeBox),
+        ],
+        child: MaterialApp(
+          scaffoldMessengerKey: globalScaffoldMessengerKey,
+          title: 'timer',
+          theme: makeTheme(Brightness.light),
+          darkTheme: makeTheme(Brightness.dark),
+          onGenerateRoute: (settings) {
+            if (settings.name == '/') {
+              return CircularRevealRoute(
+                builder: (context) => TimerScreen(),
+              );
+            }
+            if (settings.name == '/onboard') {
+              return CircularRevealRoute(
+                builder: (context) => OnboardScreen(),
+              );
+            }
+            return null;
+          },
+          onGenerateInitialRoutes: (initialRouteName) {
+            final completedSetup =
+                Mobj.getAlreadyLoaded(completedSetupID, const BoolType())
+                        .value ??
+                    false;
+            return <Route<dynamic>>[
+              CircularRevealRoute(builder: (context) => TimerScreen()),
+              if (!completedSetup)
+                CircularRevealRoute(builder: (context) => OnboardScreen()),
+            ];
+          },
+        ));
   }
 }
 
@@ -742,135 +715,63 @@ class TimerState extends State<Timer>
       ),
     );
 
-    Widget result = GestureDetector(
-      onTap: () {
-        context
-            .findAncestorStateOfType<TimerScreenState>()
-            ?.takeActionOn(widget.mobj.id);
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: EdgeInsets.all(timerGap / 2),
-        child: Row(
+    // do a bounce animation to respond to slide to start interactions
+    double bounceDistance =
+        10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
+
+    return nesting(
+        nestingLevels: [
+          (child) => AnimatedBuilder(
+              animation: _appearanceAnimation,
+              child: child,
+              builder: (context, child) => FractionalTranslation(
+                    translation: Offset(
+                        0,
+                        0.6 *
+                            (1.0 -
+                                Curves.easeOut
+                                    .transform(_appearanceAnimation.value))),
+                    child: FuzzyLinearClip(
+                      angle: pi / 2,
+                      progress: _appearanceAnimation.value,
+                      child: child!,
+                    ),
+                  )),
+          (child) => AnimatedBuilder(
+              animation: _slideActivateBounceAnimation,
+              builder: (context, child) => Transform.translate(
+                  offset: _slideBounceDirection * bounceDistance, child: child),
+              child: child),
+          (child) => AnimatedTo.spring(
+              globalKey: animatedToKey,
+              enabled: !watchSignal(context, animatedToDisabled)!,
+              // tighter than default. ios sets this to .55
+              description: const Spring.withDamping(durationSeconds: 0.2),
+              child: child),
+          (child) => SizeReporter(
+              key: transferrableKey, previousSize: previousSize, child: child),
+          (child) => DraggableWidget<GlobalKey<TimerState>>(
+              data: widget.key as GlobalKey<TimerState>, child: child),
+          (child) => GestureDetector(
+              onTap: () {
+                context
+                    .findAncestorStateOfType<TimerScreenState>()
+                    ?.takeActionOn(widget.mobj.id);
+              },
+              behavior: HitTestBehavior.opaque,
+              child: child),
+          (child) =>
+              Padding(padding: EdgeInsets.all(timerGap / 2), child: child),
+        ],
+        deepestChild: Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             clockDial,
             SizedBox(width: timerGap * 0.4),
-            Flexible(
-              child: timeText,
-            ),
+            timeText,
           ],
-        ),
-      ),
-    );
-
-    // result = AnimatedBuilder(
-    //   animation: _runningAnimation,
-    //   builder: (context, child) => Container(
-    //       clipBehavior: Clip.none,
-    //       decoration: BoxDecoration(
-    //         shape: BoxShape.rectangle,
-    //         // // the running animation is mostly conveyed by the expanding circle, so only turn on as a contingency in case the circle doesn't fill it
-    //         // color: _runningAnimation.value == 1
-    //         //     ? theme.colorScheme.surfaceContainerLowest
-    //         //     : theme.colorScheme.surfaceContainerLowest.withAlpha(0)
-    //       ),
-    //       child: child),
-    //   child: result,
-    // );
-
-    // probably just going to use the existing ring (visible when timer isn't playing) for this instead
-    // Widget unpinnedIndicator = AnimatedBuilder(
-    //   animation: Listenable.merge([
-    //     _unpinnedIndicatorShowing,
-    //     _unpinnedIndicatorFullyShowing,
-    //   ]),
-    //   builder: (context, child) {
-    //     final circleSize = lerp(
-    //             3,
-    //             7,
-    //             Curves.easeInOut
-    //                 .transform(_unpinnedIndicatorFullyShowing.value)) *
-    //         Curves.easeOut.transform(_unpinnedIndicatorShowing.value);
-
-    //     return Container(
-    //         clipBehavior: Clip.none,
-    //         width: 0,
-    //         height: 0,
-    //         child: Center(
-    //           child: Container(
-    //             width: circleSize,
-    //             height: circleSize,
-    //             decoration: BoxDecoration(
-    //               shape: BoxShape.circle,
-    //               color: backgroundColor(d.hue),
-    //             ),
-    //           ),
-    //         ));
-    //   },
-    // );
-
-    result = Stack(
-      clipBehavior: Clip.none,
-      children: [
-        result,
-        // Positioned(
-        //   left: 1.4,
-        //   bottom: 1.4,
-        //   child: unpinnedIndicator,
-        // ),
-        // selectedUnderline,
-      ],
-    );
-
-    result = AnimatedBuilder(
-        animation: _appearanceAnimation,
-        child: result,
-        builder: (context, child) => FractionalTranslation(
-              translation: Offset(
-                  0,
-                  0.6 *
-                      (1.0 -
-                          Curves.easeOut
-                              .transform(_appearanceAnimation.value))),
-              child: FuzzyLinearClip(
-                angle: pi / 2,
-                progress: _appearanceAnimation.value,
-                child: child!,
-              ),
-            ));
-
-    // do a bounce animation to respond to slide to start interactions
-    double bounceDistance =
-        10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
-    result = AnimatedBuilder(
-        animation: _slideActivateBounceAnimation,
-        builder: (context, child) => Transform.translate(
-            offset: _slideBounceDirection * bounceDistance, child: child),
-        child: result);
-
-    // result = AnimatedBuilder(
-    //   animation: _deletionAnimation,
-    //   builder: (context, child) =>
-    //       Opacity(opacity: 1 - _deletionAnimation.value, child: child),
-    //   child: result,
-    // );
-
-    result = AnimatedTo.spring(
-        globalKey: animatedToKey,
-        enabled: !watchSignal(context, animatedToDisabled)!,
-        // tighter than default. ios sets this to .55
-        description: const Spring.withDamping(durationSeconds: 0.2),
-        child: result);
-
-    result = SizeReporter(
-        key: transferrableKey, previousSize: previousSize, child: result);
-
-    return DraggableWidget<GlobalKey<TimerState>>(
-        data: widget.key as GlobalKey<TimerState>, child: result);
-
-    // return result;
+        ));
   }
 }
 
@@ -1438,7 +1339,8 @@ class TimerScreenState extends State<TimerScreen>
   late final Mobj<bool> isRightHandedMobj =
       Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
   late final Signal<Rect> numPadBounds = Signal(Rect.zero);
-
+  late final JukeBox jukeBox = JukeBox.create();
+  late final TimerHolm timerHolm;
   // note this subscribes to the mobj
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
@@ -1496,6 +1398,16 @@ class TimerScreenState extends State<TimerScreen>
   @override
   void initState() {
     super.initState();
+
+    timerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox);
+
+    FlutterForegroundTask.addTaskDataCallback(onDataReceived);
+    // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
+    // android will support repeat timers via the foreground service
+    // assuming that all permissions are granted by now.
+    // this is async, but we don't have to wait for it since all interaction with it is async and buffered
+    graspForegroundService();
+
     // make sure the mode indicator follows the current mode
     createEffect(() {
       void moveTo(GlobalKey target) {
@@ -1548,7 +1460,7 @@ class TimerScreenState extends State<TimerScreen>
           Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
       if ((dagc.value! & 3) != 3) {
         if (userDragActionHintReveal.hasntCycled) {
-          userDragActionHintReveal.forward(delay: Duration(milliseconds: 2000));
+          userDragActionHintReveal.forward(delay: Duration(milliseconds: 1900));
         } else {
           userDragActionHintReveal.forward();
         }
@@ -1919,12 +1831,12 @@ class TimerScreenState extends State<TimerScreen>
                 height: modalHighlightSpan * modeLivenessAnimation.value,
                 child: PulserAnimation(
                     pulses: modeActivationPulse.stream,
-                    duration: Duration(milliseconds: 600),
+                    duration: Duration(milliseconds: 440),
                     builder: (context, child, progresses) {
                       final p = min(
                           1.0,
-                          progresses.fold(
-                              0.0, (a, b) => a + defaultPulserFunction(b)));
+                          progresses.fold(0.0,
+                              (a, b) => a + 0.55 * defaultPulserFunction(b)));
                       return Container(
                           decoration: BoxDecoration(
                               color: lerpColor(mt.foreBackColor,
@@ -2093,55 +2005,59 @@ this will activate the new timer
       useScrollView: true,
     );
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle(
-          systemNavigationBarContrastEnforced: false,
-          systemNavigationBarDividerColor: mt.lowestBackColor.withAlpha(0),
-          systemNavigationBarColor: mt.lowestBackColor.withAlpha(0),
-          systemNavigationBarIconBrightness: theme.brightness == Brightness.dark
-              ? Brightness.light
-              : Brightness.dark,
-        ),
-        child: Scaffold(
-          backgroundColor: mt.lowestBackColor,
-          body: Focus(
-            autofocus: true, // Automatically request focus when built
-            onKeyEvent: (_, event) {
-              _handleKeyPress(event);
-              return KeyEventResult.handled; // Prevent event from propagating
-            },
-            child: EphemeralAnimationHost(
-                key: ephemeralAnimationLayer,
-                builder: (children, context) => ConstrainedBox(
-                    constraints: BoxConstraints.expand(),
-                    child: Stack(children: children)),
-                // we stack a bunch of stuff here that's not ephemeral because that's allowed
-                children: [
-                  userDragActionHint,
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    top: 0,
-                    child: SingleChildScrollView(
-                        controller: timersScroller,
-                        reverse: true,
-                        child: Column(children: [
-                          // ensure it can always be scrolled down
-                          SizedBox(height: screenSize.height),
-                          ConstrainedBox(
-                              constraints:
-                                  BoxConstraints(minHeight: screenSize.height),
-                              child: timersWidget),
-                          SizedBox(height: controlsh),
-                        ])),
-                  ),
-                  ...controls,
-                  editPopoverControls,
-                  buttonScaleDial,
-                ]),
-          ),
-        ));
+    return nesting(
+        nestingLevels: [
+          (child) => AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                systemNavigationBarContrastEnforced: false,
+                systemNavigationBarDividerColor:
+                    mt.lowestBackColor.withAlpha(0),
+                systemNavigationBarColor: mt.lowestBackColor.withAlpha(0),
+                systemNavigationBarIconBrightness:
+                    theme.brightness == Brightness.dark
+                        ? Brightness.light
+                        : Brightness.dark,
+              ),
+              child: child),
+          (child) => Scaffold(backgroundColor: mt.lowestBackColor, body: child),
+          (child) => Focus(
+              autofocus: true, // Automatically request focus when built
+              onKeyEvent: (_, event) {
+                _handleKeyPress(event);
+                return KeyEventResult.handled; // Prevent event from propagating
+              },
+              child: child)
+        ],
+        deepestChild: EphemeralAnimationHost(
+            key: ephemeralAnimationLayer,
+            builder: (children, context) => ConstrainedBox(
+                constraints: BoxConstraints.expand(),
+                child: Stack(children: children)),
+            // we stack a bunch of stuff here that's not ephemeral because that's allowed
+            children: [
+              userDragActionHint,
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                top: 0,
+                child: SingleChildScrollView(
+                    controller: timersScroller,
+                    reverse: true,
+                    child: Column(children: [
+                      // ensure it can always be scrolled down
+                      SizedBox(height: screenSize.height),
+                      ConstrainedBox(
+                          constraints:
+                              BoxConstraints(minHeight: screenSize.height),
+                          child: timersWidget),
+                      SizedBox(height: controlsh),
+                    ])),
+              ),
+              ...controls,
+              editPopoverControls,
+              buttonScaleDial,
+            ]));
   }
 
   void toggleStopPlay() {
@@ -2501,80 +2417,91 @@ class TimersButtonState extends State<TimersButton>
   Widget build(BuildContext context) {
     ThemeData theme = Theme.of(context);
     final buttonSpan = 0.7 * Thumbspan.of(context);
-    return GestureDetector(
-      // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
-      onPanDown: (details) {
-        if (widget.onPanDown != null) {
-          widget.onPanDown?.call(details.globalPosition);
-          // shortFlash.forward(from: 0);
-        }
-      },
-      onPanUpdate: widget.onPanUpdate != null
-          ? (details) => widget.onPanUpdate?.call(details.globalPosition)
-          : null,
-      onPanCancel:
-          widget.onPanEnd != null ? () => widget.onPanEnd?.call() : null,
-      onPanEnd:
-          widget.onPanEnd != null ? (details) => widget.onPanEnd?.call() : null,
-      child: Container(
+
+    return nesting(
+      nestingLevels: [
+        // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
+        (child) => GestureDetector(
+              onPanDown: (details) {
+                if (widget.onPanDown != null) {
+                  widget.onPanDown?.call(details.globalPosition);
+                  // shortFlash.forward(from: 0);
+                }
+              },
+              onPanUpdate: widget.onPanUpdate != null
+                  ? (details) =>
+                      widget.onPanUpdate?.call(details.globalPosition)
+                  : null,
+              onPanCancel: widget.onPanEnd != null
+                  ? () => widget.onPanEnd?.call()
+                  : null,
+              onPanEnd: widget.onPanEnd != null
+                  ? (details) => widget.onPanEnd?.call()
+                  : null,
+              child: child,
+            ),
         // todo: this is wrong, we shouldn't be setting the size here, unfortunately there's a layout overflow behavior with rows that I don't understand
-        constraints:
-            BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
+        (child) => Container(
+              constraints:
+                  BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
+              child: child,
+            ),
         // most of this is junk, you can just cut it down to the label widget if you ever need to
-        child: InkWell(
-            onTap: widget.onTap,
-            splashColor: widget.accented ? Colors.transparent : null,
-            highlightColor: widget.accented ? Colors.transparent : null,
-            hoverColor: widget.accented ? Colors.transparent : null,
-            focusColor: widget.accented ? Colors.transparent : null,
-            // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
-            child: AnimatedBuilder(
-                animation: Listenable.merge([shortFlash, longFlash]),
-                builder: (context, child) {
-                  double flash = max(
-                      (1 - Curves.easeIn.transform(shortFlash.value)),
-                      (1 - Curves.easeInOutCubic.transform(longFlash.value)));
-                  Color? textColor =
-                      widget.accented ? theme.colorScheme.primary : null;
-                  final backingColor = lerpColor(
-                      widget.accented
-                          ? theme.colorScheme.primary
-                          : widget.solidColor
-                              ? theme.colorScheme.surfaceContainerLowest
-                              : Colors.white.withAlpha(0),
-                      Colors.white,
-                      flash);
-                  final backing = Container(
-                      decoration: BoxDecoration(
-                    color: backingColor,
-                    border: Border.all(
-                      width: standardLineWidth,
-                      color: widget.accented
-                          ? theme.colorScheme.primary
-                          : Colors.transparent,
-                    ),
-                    // borderRadius: BorderRadius.circular(9)
-                  ));
-                  final Widget labelWidget;
-                  if (widget.label is String) {
-                    labelWidget = ScalingAspectRatio(
-                        child: SizedBox(
-                            width: 40,
-                            height: 40,
-                            child: Center(
-                                child: Text(widget.label as String,
-                                    style: controlPadTextStyle
-                                        .merge(TextStyle(color: textColor))))));
-                  } else {
-                    labelWidget = widget.label as Widget;
-                  }
-                  return Center(
-                    child: Stack(
-                        alignment: Alignment.center,
-                        clipBehavior: Clip.none,
-                        children: [backing, labelWidget]),
-                  );
-                })),
+        (child) => InkWell(
+              onTap: widget.onTap,
+              splashColor: widget.accented ? Colors.transparent : null,
+              highlightColor: widget.accented ? Colors.transparent : null,
+              hoverColor: widget.accented ? Colors.transparent : null,
+              focusColor: widget.accented ? Colors.transparent : null,
+              // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
+              child: child,
+            ),
+      ],
+      deepestChild: AnimatedBuilder(
+        animation: Listenable.merge([shortFlash, longFlash]),
+        builder: (context, child) {
+          double flash = max((1 - Curves.easeIn.transform(shortFlash.value)),
+              (1 - Curves.easeInOutCubic.transform(longFlash.value)));
+          Color? textColor = widget.accented ? theme.colorScheme.primary : null;
+          final backingColor = lerpColor(
+              widget.accented
+                  ? theme.colorScheme.primary
+                  : widget.solidColor
+                      ? theme.colorScheme.surfaceContainerLowest
+                      : Colors.white.withAlpha(0),
+              Colors.white,
+              flash);
+          final backing = Container(
+              decoration: BoxDecoration(
+            color: backingColor,
+            border: Border.all(
+              width: standardLineWidth,
+              color: widget.accented
+                  ? theme.colorScheme.primary
+                  : Colors.transparent,
+            ),
+            // borderRadius: BorderRadius.circular(9)
+          ));
+          final Widget labelWidget;
+          if (widget.label is String) {
+            labelWidget = ScalingAspectRatio(
+                child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Center(
+                        child: Text(widget.label as String,
+                            style: controlPadTextStyle
+                                .merge(TextStyle(color: textColor))))));
+          } else {
+            labelWidget = widget.label as Widget;
+          }
+          return Center(
+            child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
+                children: [backing, labelWidget]),
+          );
+        },
       ),
     );
   }
@@ -2966,9 +2893,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // ---------------
               Divider(indent: 22, endIndent: 22, height: 34),
               Padding(
-                padding: const EdgeInsets.only(top: 1.0, bottom: 3.0),
+                padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
                 child: Text('Extra',
-                    style: theme.textTheme.bodyLarge,
+                    style: theme.textTheme.bodyMedium!
+                        .copyWith(color: theme.colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center),
               ),
               Builder(builder: (context) {
@@ -3368,7 +3296,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           ),
           if (!_loading) ...[
             if (_assetSounds.isNotEmpty)
-              section('Mako Timer Sounds', _assetSounds,
+              section("Mako's Timer Sounds", _assetSounds,
                   fadeDelay: Duration(milliseconds: 0)),
             if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
               section('Alarms', _alarmSounds!,
@@ -3495,7 +3423,14 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   void moveOn() {
     autoMoveOn?.cancel();
     autoMoveOn = null;
-    Navigator.of(context).pop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).replace<TimerScreen>(
+        oldRoute: ModalRoute.of(context)!,
+        newRoute: CircularRevealRoute(builder: (context) => TimerScreen()),
+      );
+    }
   }
 
   @override

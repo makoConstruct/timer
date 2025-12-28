@@ -1203,8 +1203,7 @@ class PulserAnimation extends StatefulWidget {
   final Duration duration;
   final Widget? child;
   final Widget Function(
-          BuildContext context, Widget? child, List<double> progresses)
-      builder;
+      BuildContext context, Widget? child, List<double> progresses) builder;
 
   const PulserAnimation({
     super.key,
@@ -2037,20 +2036,18 @@ class FuzzyLinearClip extends StatelessWidget {
     } else if (progress == 1.0) {
       return child;
     } else {
-      return ClipRect(
-        child: ShaderMask(
-          blendMode: BlendMode.dstIn,
-          child: child,
-          shaderCallback: (Rect bounds) {
-            return linearRevealShader(
-              bounds: bounds,
-              fraction: progress,
-              fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
-              angle: angle,
-              sphericalSweepLength: sphericalSweepLength,
-            );
-          },
-        ),
+      return ShaderMask(
+        blendMode: BlendMode.dstIn,
+        child: child,
+        shaderCallback: (Rect bounds) {
+          return linearRevealShader(
+            bounds: bounds,
+            fraction: progress,
+            fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
+            angle: angle,
+            sphericalSweepLength: sphericalSweepLength,
+          );
+        },
       );
     }
   }
@@ -2530,6 +2527,7 @@ Positioned positionedAt(Offset offset, Widget child) {
 
 class BoolSignalTween extends StatelessWidget {
   final ReadonlySignal<bool> signal;
+  final Duration duration;
   final Widget Function(BuildContext context, double value, Widget? child)
       builder;
   final Widget? child;
@@ -2538,13 +2536,14 @@ class BoolSignalTween extends StatelessWidget {
     required this.signal,
     required this.builder,
     this.child,
+    this.duration = const Duration(milliseconds: 300),
   });
   @override
   Widget build(BuildContext context) {
     return Watch((context) => TweenAnimationBuilder(
           tween: Tween<double>(
               begin: signal.value ? 0.0 : 1.0, end: signal.value ? 0.0 : 1.0),
-          duration: Duration(milliseconds: 300),
+          duration: duration,
           builder: builder,
           child: child,
         ));
@@ -2574,11 +2573,20 @@ class PinAnimation extends StatelessWidget {
                   .transform(unlerpUnit(0.4, 1, 1 - progress));
               final revealp = unlerpUnit(0, 0.3, 1 - progress);
               final squareRad = 7.0;
+              // it dawns on me that the pin is going to be kinda hard, since the easiest way to position it places it outside of the layout bounds of the parent, which means the pin will be outside of the linear clip.
+              // final pinThicknessr = 2.0;
+              // final pinLength = 15.0;
+              // final pinLengthTotal = pinThicknessr + pinLength;
               final gap = 3;
+              final stabDistance = 20;
+              // final pinRetraction =
+              //     unlerpUnit((pinLength + gap) / pinLengthTotal, 1, movementp) *
+              //         pinLength;
               final center =
                   Offset(constraints.maxWidth / 2, constraints.maxHeight / 2);
               final distance =
-                  (lerp(r + 10, r, movementp) + squareRad + gap) / sqrt(2);
+                  (lerp(r + stabDistance, r, movementp) + squareRad + gap) /
+                      sqrt(2);
               return SizedBox(
                 width: constraints.maxWidth,
                 height: constraints.maxHeight,
@@ -2590,17 +2598,37 @@ class PinAnimation extends StatelessWidget {
                         offset: Offset(-squareRad, -squareRad),
                         child: Transform.rotate(
                           origin: Offset(0, 0),
-                          angle: pi / 4,
+                          angle: -pi / 4,
                           child: FuzzyLinearClip(
                             angle: pi / 2,
+                            fuzzyEdgeWidth: 3,
                             progress: revealp,
+                            // the box
                             child: Container(
-                                decoration: BoxDecoration(
-                                  color: mt.foreBackColor,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                width: squareRad * 2,
-                                height: squareRad * 2),
+                              alignment: Alignment.bottomCenter,
+                              decoration: BoxDecoration(
+                                color: mt.foreBackColor,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              width: squareRad * 2,
+                              height: squareRad * 2,
+                              // the pin
+                              // child: Transform.translate(
+                              //   offset: Offset(
+                              //       0,
+                              //       pinLength -
+                              //           pinThicknessr -
+                              //           pinRetraction),
+                              //   child: Container(
+                              //       width: pinThicknessr * 2,
+                              //       height: pinLengthTotal,
+                              //       decoration: BoxDecoration(
+                              //         borderRadius: BorderRadius.circular(
+                              //             pinThicknessr),
+                              //         color: mt.foreBackColor,
+                              //       )),
+                              // )
+                            ),
                           ),
                         ),
                       ))
@@ -2614,4 +2642,14 @@ class PinAnimation extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// just prevents you from needing to indent further and further
+T nesting<T>(
+    {required List<T Function(T)> nestingLevels, required T deepestChild}) {
+  T result = deepestChild;
+  for (final builder in nestingLevels.reversed) {
+    result = builder(result);
+  }
+  return result;
 }
