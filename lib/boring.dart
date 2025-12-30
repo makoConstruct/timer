@@ -557,6 +557,12 @@ double moduloProperly(double t, double m) {
   return ((t % m) + m) % m;
 }
 
+double progressOverInterval(Duration interval, DateTime startTime) {
+  return clampUnit(
+      DateTime.now().difference(startTime).inMicroseconds.toDouble() /
+          interval.inMicroseconds.toDouble());
+}
+
 /// tracks two components, a rise time and a fall time. Sometimes you want an animation to look different on the way down. Use the second component (the falling one) of the animation value to smoothly overrule the rising component so that there's no stutter or interruption when the animation changes direction. However, when the animation goes from falling to rising, there will be a discontinuity.
 /// when you call forward(), the rise component will start to move towards 1. When you call reverse(), the fall component will start to move towards 1. The next time you call forward, the rise component will start from roughly min(rise, fall), and the fall component will be 0.
 class UpDownAnimationController extends ValueListenable<(double, double)>
@@ -1449,12 +1455,17 @@ class CircularRevealRoute<T> extends PageRoute<T>
   final Widget Function(BuildContext context) builder;
   final Offset? buttonCenter;
   final GlobalKey? iconOriginKey;
+  final Duration _transitionDuration;
+  final Duration _reverseTransitionDuration;
 
   CircularRevealRoute({
     required this.builder,
     this.buttonCenter,
     this.iconOriginKey,
-  });
+    Duration transitionDuration = const Duration(milliseconds: 400),
+    Duration reverseTransitionDuration = const Duration(milliseconds: 300),
+  })  : _transitionDuration = transitionDuration,
+        _reverseTransitionDuration = reverseTransitionDuration;
 
   @override
   Widget buildContent(BuildContext context) => builder(context);
@@ -1464,10 +1475,10 @@ class CircularRevealRoute<T> extends PageRoute<T>
 
   // Force our own duration, don't let mixin override it
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 400);
+  Duration get transitionDuration => _transitionDuration;
 
   @override
-  Duration get reverseTransitionDuration => Duration(milliseconds: 300);
+  Duration get reverseTransitionDuration => _reverseTransitionDuration;
 
   @override
   bool get maintainState => true;
@@ -2179,6 +2190,7 @@ class RenderScalingAspectRatio extends RenderProxyBox {
 
 /// A button with fuzzy circle ink animation. Ink wells from touch point on press,
 /// fades out on tap confirm. Behaves like a proper button (cancels on drag out, etc).
+/// todo: remove the automatic downfade at the end of the initial well animation, supercede with one that happens at max(animation end, finger release)
 class InkButton extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -2186,14 +2198,16 @@ class InkButton extends StatefulWidget {
   final Duration fadeDuration;
   final double fuzzyEdgeWidth;
   final Color? inkColor;
+  final earlyFadeDuration = const Duration(milliseconds: 170);
   final BorderRadius? borderRadius;
-
+  final Duration fadeDelay;
   const InkButton({
     super.key,
     required this.child,
     this.onTap,
-    this.wellDuration = const Duration(milliseconds: 200),
-    this.fadeDuration = const Duration(milliseconds: 150),
+    this.wellDuration = const Duration(milliseconds: 290),
+    this.fadeDuration = const Duration(milliseconds: 170),
+    this.fadeDelay = const Duration(milliseconds: 90),
     this.fuzzyEdgeWidth = 12.0,
     this.inkColor,
     this.borderRadius,
@@ -2205,17 +2219,17 @@ class InkButton extends StatefulWidget {
 
 class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
   RelAlignment? _touchPoint;
-  late AnimationController _wellController;
+  late AnimationController _wellController = _newWellController();
   // tracks ink spots that are fading out after confirm
   final List<_FadingInk> _fadingInks = [];
+  AnimationController _newWellController() => AnimationController(
+        vsync: this,
+        duration: widget.wellDuration + widget.fadeDelay + widget.fadeDuration,
+      );
 
   @override
   void initState() {
     super.initState();
-    _wellController = AnimationController(
-      vsync: this,
-      duration: widget.wellDuration,
-    );
   }
 
   @override
@@ -2250,41 +2264,22 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
   }
 
   void _confirmInk() {
-    final startProgress = _wellController.value;
-    final remainingFill = 1.0 - startProgress;
-    // Time to complete fill proportional to remaining distance
-    final fillDuration = Duration(
-      milliseconds:
-          (widget.wellDuration.inMilliseconds * remainingFill * 0.5).round(),
-    );
-    const lingerDuration = Duration(milliseconds: 250);
-    final totalDuration = fillDuration + lingerDuration + widget.fadeDuration;
-    final totalMicros = totalDuration.inMicroseconds;
-
-    final controller = AnimationController(
-      vsync: this,
-      duration: totalDuration,
-    );
     final fadingInk = _FadingInk(
       origin: _touchPoint ?? RelAlignment.center,
-      startProgress: startProgress,
-      fillFraction: fillDuration.inMicroseconds / totalMicros,
-      lingerFraction:
-          (fillDuration + lingerDuration).inMicroseconds / totalMicros,
-      controller: controller,
+      controller: _wellController,
+      fadeStart: DateTime.now(),
     );
+    _wellController = _newWellController();
     _fadingInks.add(fadingInk);
-    controller.forward();
-    controller.addStatusListener((status) {
+    fadingInk.controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         setState(() {
           _fadingInks.remove(fadingInk);
         });
-        controller.dispose();
+        fadingInk.controller.dispose();
       }
     });
 
-    _wellController.reset();
     _touchPoint = null;
     setState(() {});
   }
@@ -2297,7 +2292,7 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final inkColor = widget.inkColor ?? Theme.of(context).colorScheme.primary;
 
-    Widget inkLayer(Widget child) {
+    Widget clipIfNeeded(Widget child) {
       if (widget.borderRadius != null) {
         return ClipRRect(
           borderRadius: widget.borderRadius!,
@@ -2307,81 +2302,52 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
       return child;
     }
 
+    final total = (widget.wellDuration + widget.fadeDelay + widget.fadeDuration)
+        .inMicroseconds;
+    final expansionp = widget.wellDuration.inMicroseconds / total;
+    final fadep = widget.fadeDuration.inMicroseconds / total;
+    Widget well(
+        RelAlignment? origin, Animation<double> animation, DateTime fadeStart) {
+      return Positioned.fill(
+          child: clipIfNeeded(AnimatedBuilder(
+        animation: animation,
+        builder: (context, child) => Opacity(
+          opacity: 1 -
+              Curves.easeIn
+                  .transform(unlerpUnit(1 - fadep, 1, animation.value)),
+          child: FuzzyCircleClip(
+            progress: Curves.easeOutCubic
+                .transform(unlerpUnit(0, expansionp, animation.value)),
+            origin: origin ?? _touchPoint ?? RelAlignment.center,
+            fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+            child: ColoredBox(
+                color: lerpColor(
+                    inkColor,
+                    Colors.transparent,
+                    0.5 *
+                        progressOverInterval(
+                            widget.earlyFadeDuration, fadeStart))),
+          ),
+        ),
+      )));
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: widget.onTap != null ? _handleTapDown : null,
       onTapUp: widget.onTap != null ? _handleTapUp : null,
       onTapCancel: widget.onTap != null ? _handleTapCancel : null,
-      child: Stack(
-        fit: StackFit.passthrough,
-        children: [
-          widget.child,
-          // Active well animation
-          Positioned.fill(
-            child: inkLayer(
-              AnimatedBuilder(
-                animation: _wellController,
-                builder: (context, _) {
-                  if (_wellController.value == 0) {
-                    return const SizedBox.shrink();
-                  }
-                  return IgnorePointer(
-                    child: FuzzyCircleClip(
-                      progress: Curves.easeOut.transform(_wellController.value),
-                      origin: _touchPoint ?? RelAlignment.center,
-                      fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
-                      child: ColoredBox(color: inkColor),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-          // Fading inks (confirmed taps)
-          for (final ink in _fadingInks)
-            Positioned.fill(
-              child: inkLayer(
-                AnimatedBuilder(
-                  animation: ink.controller,
-                  builder: (context, _) {
-                    final t = ink.controller.value;
-                    final double wellProgress;
-                    final double opacity;
-                    if (ink.fillFraction > 0 && t < ink.fillFraction) {
-                      // Still filling
-                      final fillT = t / ink.fillFraction;
-                      wellProgress = ink.startProgress +
-                          (1.0 - ink.startProgress) *
-                              Curves.easeOut.transform(fillT);
-                      opacity = 1.0;
-                    } else if (t < ink.lingerFraction) {
-                      // Lingering
-                      wellProgress = 1.0;
-                      opacity = 1.0;
-                    } else {
-                      // Fading out
-                      final fadeT = ink.lingerFraction < 1
-                          ? (t - ink.lingerFraction) / (1 - ink.lingerFraction)
-                          : t;
-                      wellProgress = 1.0;
-                      opacity = 1 - Curves.easeOut.transform(fadeT);
-                    }
-                    return IgnorePointer(
-                      child: Opacity(
-                        opacity: opacity,
-                        child: FuzzyCircleClip(
-                          progress: wellProgress,
-                          origin: ink.origin,
-                          fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
-                          child: ColoredBox(color: inkColor),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-        ],
+      child: IgnorePointer(
+        child: Stack(
+          fit: StackFit.passthrough,
+          children: [
+            widget.child,
+            // origin is passed as null because otherwise it'll be locked in, this isn't the animated part of the widget
+            well(null, _wellController, DateTime.now().add(Duration(hours: 5))),
+            for (final ink in _fadingInks)
+              well(ink.origin, ink.controller, ink.fadeStart),
+          ],
+        ),
       ),
     );
   }
@@ -2389,18 +2355,13 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
 
 class _FadingInk {
   final RelAlignment origin;
-  final double startProgress;
-  final double fillFraction; // portion of animation spent filling (0-1)
-  final double
-      lingerFraction; // portion at which lingering ends (fill + linger)
   final AnimationController controller;
+  final DateTime fadeStart;
 
   _FadingInk({
     required this.origin,
-    required this.startProgress,
-    required this.fillFraction,
-    required this.lingerFraction,
     required this.controller,
+    required this.fadeStart,
   });
 }
 
@@ -2737,9 +2698,8 @@ class PinAnimation extends StatelessWidget {
   }
 }
 
-/// just prevents you from needing to indent further and further
-T nesting<T>(
-    {required List<T Function(T)> nestingLevels, required T deepestChild}) {
+/// just spares you from needing to indent further and further
+T nesting<T>(List<T Function(T)> nestingLevels, T deepestChild) {
   T result = deepestChild;
   for (final builder in nestingLevels.reversed) {
     result = builder(result);

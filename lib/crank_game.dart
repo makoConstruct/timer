@@ -102,6 +102,10 @@ class _CrankGameScreenState extends State<CrankGameScreen>
 
   @override
   void initState() {
+    // Assert that the screen is vertical (portrait orientation)
+    final mq = MediaQuery.of(context);
+    assert(mq.size.height > mq.size.width,
+        "CrankGameScreen layout assumes vertical (portrait) screen orientation, it will scream otherwise. You'll need to add a more sophisticated layout approach (and then remove this assert) if you want it to work for horizontal");
     super.initState();
     _winMessageIndexMobj =
         Mobj.getAlreadyLoaded(crankGameWinMessageIndexID, const IntType());

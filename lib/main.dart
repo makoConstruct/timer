@@ -403,13 +403,26 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
           final completedSetup =
               Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value ??
                   false;
-          return <Route<dynamic>>[
-            CircularRevealRoute(builder: (context) => TimerScreen()),
-            if (!completedSetup)
+          if (completedSetup) {
+            return <Route<dynamic>>[
+              CircularRevealRoute(builder: (context) => TimerScreen()),
+            ];
+          } else {
+            // Start with a blank placeholder, then onboarding on top.
+            // When onboarding completes, only then are we able to initialize TimerScreen, and at that time we replaceRouteBelow with TimerScreen (we can't just push below at that time because for some reason Navigator doesn't support that) then we pop(). The pop animation is the one we want, so pushReplace wouldn't work either.
+            return <Route>[
+              PageRouteBuilder(
+                pageBuilder: (context, __, ___) => ColoredBox(
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerLowest),
+                transitionDuration: Duration.zero,
+              ),
               CircularRevealRoute(
-                  builder: (context) => OnboardScreen(),
+                  builder: (context) => OnboardScreen(isRootal: true),
+                  reverseTransitionDuration: Duration(milliseconds: 700),
                   iconOriginKey: configButtonKey),
-          ];
+            ];
+          }
         },
       ),
     );
@@ -730,10 +743,10 @@ class TimerState extends State<Timer>
         10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
 
     return nesting(
-      nestingLevels: [
-        (child) => AnimatedBuilder(
+      [
+        (next) => AnimatedBuilder(
             animation: _appearanceAnimation,
-            child: child,
+            child: next,
             builder: (context, child) => FractionalTranslation(
                   translation: Offset(
                       0,
@@ -747,39 +760,40 @@ class TimerState extends State<Timer>
                     child: child!,
                   ),
                 )),
-        (child) => AnimatedBuilder(
+        (next) => AnimatedBuilder(
             animation: _slideActivateBounceAnimation,
             builder: (context, child) => Transform.translate(
                 offset: _slideBounceDirection * bounceDistance, child: child),
-            child: child),
-        (child) => AnimatedTo.spring(
+            child: next),
+        (next) => AnimatedTo.spring(
             globalKey: animatedToKey,
             enabled: !watchSignal(context, animatedToDisabled)!,
             // tighter than default. ios sets this to .55
             description: const Spring.withDamping(durationSeconds: 0.2),
-            child: child),
-        (child) => BoolSignalTween(
+            child: next),
+        (next) => BoolSignalTween(
             signal: _shouldFade,
             duration: Duration(milliseconds: 700),
-            child: child,
+            child: next,
             builder: (context, progress, child) => Opacity(
-                opacity: lerp(1, 0.7, unlerpUnit(0.8, 1, progress)),
+                // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
+                opacity: lerp(1, 0.67, unlerpUnit(0.8, 1, progress)),
                 child: child)),
-        (child) => SizeReporter(
-            key: transferrableKey, previousSize: previousSize, child: child),
-        (child) => DraggableWidget<GlobalKey<TimerState>>(
-            data: widget.key as GlobalKey<TimerState>, child: child),
-        (child) => GestureDetector(
+        (next) => SizeReporter(
+            key: transferrableKey, previousSize: previousSize, child: next),
+        (next) => DraggableWidget<GlobalKey<TimerState>>(
+            data: widget.key as GlobalKey<TimerState>, child: next),
+        (next) => GestureDetector(
             onTap: () {
               context
                   .findAncestorStateOfType<TimerScreenState>()
                   ?.takeActionOn(widget.mobj.id);
             },
             behavior: HitTestBehavior.opaque,
-            child: child),
-        (child) => Padding(padding: EdgeInsets.all(timerGap / 2), child: child),
+            child: next),
+        (next) => Padding(padding: EdgeInsets.all(timerGap / 2), child: next),
       ],
-      deepestChild: Row(
+      Row(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1021,12 +1035,12 @@ class _TimerDeletionAnimationState extends State<_TimerDeletionAnimation> {
             //     ));
             // } else {
             return Transform.translate(
-                offset: Offset(0, -30 * Curves.easeOut.transform(progress)),
-                child: FuzzyCircleClip(
-                  progress: 1.0 - progress,
+                offset: Offset(0,
+                    -widget.rect.height * Curves.easeOut.transform(progress)),
+                child: FuzzyLinearClip(
+                  angle: -pi / 2,
+                  progress: 1.0 - Curves.easeOut.transform(progress),
                   fuzzyEdgeWidth: 6,
-                  invertGradient: true,
-                  origin: RelAlignment(originBottom: -90, originLeft: 27),
                   child: child!,
                 ));
             // }
@@ -1477,7 +1491,7 @@ class TimerScreenState extends State<TimerScreen>
           Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
       if ((dagc.value! & 3) != 3) {
         if (userDragActionHintReveal.hasntCycled) {
-          userDragActionHintReveal.forward(delay: Duration(milliseconds: 1900));
+          userDragActionHintReveal.forward(delay: Duration(milliseconds: 6000));
         } else {
           userDragActionHintReveal.forward();
         }
@@ -2002,9 +2016,9 @@ class TimerScreenState extends State<TimerScreen>
                           mt.lowestBackColor,
                           0.4 *
                               (theme.brightness == Brightness.dark ? -1 : 1))),
-                  """when you press a numeral, you can drag up or to the $dir
-this will activate the new timer
-(dragging $dir adds a pair of zeroes to it before activating it)"""));
+                  """when you press a number, you can drag up or to the $dir.
+this will activate the new timer.
+(dragging $dir adds a pair of zeroes to it before activating it.)"""));
         },
       ),
     );
@@ -2019,7 +2033,7 @@ this will activate the new timer
     );
 
     return nesting(
-        nestingLevels: [
+        [
           (child) => AnnotatedRegion<SystemUiOverlayStyle>(
               value: SystemUiOverlayStyle(
                 systemNavigationBarContrastEnforced: false,
@@ -2041,7 +2055,7 @@ this will activate the new timer
               },
               child: child)
         ],
-        deepestChild: EphemeralAnimationHost(
+        EphemeralAnimationHost(
             key: ephemeralAnimationLayer,
             builder: (children, context) => ConstrainedBox(
                 constraints: BoxConstraints.expand(),
@@ -2432,7 +2446,7 @@ class TimersButtonState extends State<TimersButton>
     final buttonSpan = 0.7 * Thumbspan.of(context);
 
     return nesting(
-      nestingLevels: [
+      [
         // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
         (child) => GestureDetector(
               onPanDown: (details) {
@@ -2470,7 +2484,7 @@ class TimersButtonState extends State<TimersButton>
               child: child,
             ),
       ],
-      deepestChild: AnimatedBuilder(
+      AnimatedBuilder(
         animation: Listenable.merge([shortFlash, longFlash]),
         builder: (context, child) {
           double flash = max((1 - Curves.easeIn.transform(shortFlash.value)),
@@ -2696,33 +2710,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
-          // Extra padding at top to allow scrolling content to bottom
-          // SliverPadding(
-          //   padding: EdgeInsets.only(top: _topPadding),
-          // ),
           SliverList(
             delegate: SliverChildListDelegate([
-              // Test InkButton
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: InkButton(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    print('InkButton tapped!');
-                  },
-                  child: Container(
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text('Test InkButton',
-                          style: theme.textTheme.titleMedium),
-                    ),
-                  ),
-                ),
-              ),
+              // // Test InkButton
+              // Padding(
+              //   padding: const EdgeInsets.all(16.0),
+              //   child: InkButton(
+              //     borderRadius: BorderRadius.circular(12),
+              //     onTap: () {
+              //       print('InkButton tapped!');
+              //     },
+              //     child: Container(
+              //       height: 56,
+              //       decoration: BoxDecoration(
+              //         color: theme.colorScheme.surfaceContainerHigh,
+              //         borderRadius: BorderRadius.circular(12),
+              //       ),
+              //       child: Center(
+              //         child: Text('Test InkButton',
+              //             style: theme.textTheme.titleMedium),
+              //       ),
+              //     ),
+              //   ),
+              // ),
               // Right-handed mode setting
               Watch((context) {
                 final isRightHandedMobj =
@@ -3366,7 +3376,9 @@ Future<bool> hasBackgroundPermission() {
 }
 
 class OnboardScreen extends StatefulWidget {
-  const OnboardScreen({super.key});
+  /// whether it's kind of the root screen, which is the case when it's the first run. in this case, it has to do something special before it pops, creating the TimerScreen. If it's not rootal, then a new timer screen would likely be a duplicate and cause problems.
+  final bool isRootal;
+  const OnboardScreen({super.key, this.isRootal = false});
 
   @override
   State<OnboardScreen> createState() => _OnboardScreenState();
@@ -3419,7 +3431,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
         //     duration: Duration(seconds: 3),
         //   ),
         // );
-        // autoMoveOn = async.Timer(Duration(milliseconds: 1000), () => moveOn());
+        // autoMoveOn = async.Timer(Duration(milliseconds: 1000), () => on());
         allChoicesCompleted.value = true;
       }
     });
@@ -3458,14 +3470,21 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   void moveOn() {
     autoMoveOn?.cancel();
     autoMoveOn = null;
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    } else {
-      Navigator.of(context).replace<TimerScreen>(
-        oldRoute: ModalRoute.of(context)!,
-        newRoute: CircularRevealRoute(builder: (context) => TimerScreen()),
-      );
-    }
+    // time should be the same as the interval delay in _scrollTo
+    async.Timer(Duration(milliseconds: (0.4 * 700).round()), () {
+      final navigator = Navigator.of(context);
+      if (widget.isRootal) {
+        final currentRoute = ModalRoute.of(context)!;
+        // we're now ready to create timerscreen, replace the blank placeholder below us with it
+        navigator.replaceRouteBelow(
+          anchorRoute: currentRoute,
+          newRoute: CircularRevealRoute(
+            builder: (context) => TimerScreen(),
+          ),
+        );
+      }
+      navigator.pop();
+    });
   }
 
   @override
@@ -3586,7 +3605,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text('Are you left or right-handed?',
-                                      style: theme.textTheme.titleMedium),
+                                      style: theme.textTheme.bodyMedium!),
                                   SizedBox(height: standardSpacing),
                                   Row(
                                     children: [
@@ -3614,7 +3633,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                           children: [
                             Text(
                                 "Which kind of numpad is more familiar to you?",
-                                style: theme.textTheme.titleMedium!),
+                                style: theme.textTheme.bodyMedium!),
                             spacer,
                             Watch((context) {
                               return AnimatedAlign(
@@ -3630,7 +3649,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                                         children: [
                                           Text(
                                             "phone style",
-                                            style: theme.textTheme.bodyMedium,
+                                            style: theme.textTheme.bodyMedium!,
                                           ),
                                           spacer,
                                           numpadForSetup(
@@ -3643,7 +3662,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                                         children: [
                                           Text(
                                             "calculator style",
-                                            style: theme.textTheme.bodyMedium,
+                                            style: theme.textTheme.bodyMedium!,
                                           ),
                                           spacer,
                                           numpadForSetup(
