@@ -75,6 +75,13 @@ const double timerGap = 11;
 // might make this user-configurable
 final Signal<double> timerWidgetRadius = Signal(19);
 
+const double standardLineWidth = 6;
+
+final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
+final GlobalKey configButtonKey = GlobalKey();
+
 /// Was supposed to be a custom Hero flight shuttle builder with 60ms delay, but I it looks like it does nothing, I can't see how the movement part of the animation would be affected by this, it would only affect an animation over the hero widget
 /// should have been a builder for createRectTween instead
 Widget delayedHeroFlightShuttleBuilder(
@@ -184,8 +191,6 @@ void onDataReceived(Object data) {
   print("data received: $data");
 }
 
-const double standardLineWidth = 6;
-
 class Thumbspan {
   /// measured in logical pixels
   double thumbspan;
@@ -193,13 +198,6 @@ class Thumbspan {
   static double of(BuildContext context, {bool listen = false}) {
     return Provider.of<Thumbspan>(context, listen: listen).thumbspan;
   }
-}
-
-class TimersApp extends StatefulWidget {
-  const TimersApp({super.key});
-
-  @override
-  State<TimersApp> createState() => _TimersAppState();
 }
 
 /// this is in charge of running timer sounds in response to changes to the timer list
@@ -326,8 +324,12 @@ Future<ScreenRadius> _loadCornerRadius() async {
 ScreenRadius getCachedCornerRadius() =>
     _cachedCornerRadius ?? defaultCornerRadius;
 
-final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
-    GlobalKey<ScaffoldMessengerState>();
+class TimersApp extends StatefulWidget {
+  const TimersApp({super.key});
+
+  @override
+  State<TimersApp> createState() => _TimersAppState();
+}
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late final JukeBox jukeBox;
@@ -373,41 +375,44 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     }
 
     return MultiProvider(
-        providers: [
-          Provider<Thumbspan>(
-              create: (context) => Thumbspan(lpixPerThumbspan(context))),
-          Provider<JukeBox>(create: (_) => jukeBox),
-        ],
-        child: MaterialApp(
-          scaffoldMessengerKey: globalScaffoldMessengerKey,
-          title: 'timer',
-          theme: makeTheme(Brightness.light),
-          darkTheme: makeTheme(Brightness.dark),
-          onGenerateRoute: (settings) {
-            if (settings.name == '/') {
-              return CircularRevealRoute(
-                builder: (context) => TimerScreen(),
-              );
-            }
-            if (settings.name == '/onboard') {
-              return CircularRevealRoute(
-                builder: (context) => OnboardScreen(),
-              );
-            }
-            return null;
-          },
-          onGenerateInitialRoutes: (initialRouteName) {
-            final completedSetup =
-                Mobj.getAlreadyLoaded(completedSetupID, const BoolType())
-                        .value ??
-                    false;
-            return <Route<dynamic>>[
-              CircularRevealRoute(builder: (context) => TimerScreen()),
-              if (!completedSetup)
-                CircularRevealRoute(builder: (context) => OnboardScreen()),
-            ];
-          },
-        ));
+      providers: [
+        Provider<Thumbspan>(
+            create: (context) => Thumbspan(lpixPerThumbspan(context))),
+        Provider<JukeBox>(create: (_) => jukeBox),
+      ],
+      child: MaterialApp(
+        scaffoldMessengerKey: globalScaffoldMessengerKey,
+        title: 'timer',
+        theme: makeTheme(Brightness.light),
+        darkTheme: makeTheme(Brightness.dark),
+        onGenerateRoute: (settings) {
+          if (settings.name == '/') {
+            return CircularRevealRoute(
+              builder: (context) => TimerScreen(),
+            );
+          }
+          if (settings.name == '/onboard') {
+            return CircularRevealRoute(
+              builder: (context) => OnboardScreen(),
+              iconOriginKey: configButtonKey,
+            );
+          }
+          return null;
+        },
+        onGenerateInitialRoutes: (initialRouteName) {
+          final completedSetup =
+              Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value ??
+                  false;
+          return <Route<dynamic>>[
+            CircularRevealRoute(builder: (context) => TimerScreen()),
+            if (!completedSetup)
+              CircularRevealRoute(
+                  builder: (context) => OnboardScreen(),
+                  iconOriginKey: configButtonKey),
+          ];
+        },
+      ),
+    );
   }
 }
 
@@ -444,6 +449,11 @@ class TimerState extends State<Timer>
   late final AnimationController _selectedUnderlineAnimation;
   late final Computed<bool> whetherPinned =
       Computed(() => widget.mobj.value?.pinned ?? false);
+  late final Computed<bool> _shouldFade = Computed(() {
+    final d = widget.mobj.value;
+    if (d == null) return false;
+    return !(d.isRunning || d.pinned || d.selected);
+  });
   // currently inactive. I was considering using this for doing a deletion where most of the deletion animation happens in-place and then it's shunted out into another layer just for the end.
   late final AnimationController _deletionAnimation;
   final GlobalKey _clockKey = GlobalKey();
@@ -720,58 +730,65 @@ class TimerState extends State<Timer>
         10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
 
     return nesting(
-        nestingLevels: [
-          (child) => AnimatedBuilder(
-              animation: _appearanceAnimation,
-              child: child,
-              builder: (context, child) => FractionalTranslation(
-                    translation: Offset(
-                        0,
-                        0.6 *
-                            (1.0 -
-                                Curves.easeOut
-                                    .transform(_appearanceAnimation.value))),
-                    child: FuzzyLinearClip(
-                      angle: pi / 2,
-                      progress: _appearanceAnimation.value,
-                      child: child!,
-                    ),
-                  )),
-          (child) => AnimatedBuilder(
-              animation: _slideActivateBounceAnimation,
-              builder: (context, child) => Transform.translate(
-                  offset: _slideBounceDirection * bounceDistance, child: child),
-              child: child),
-          (child) => AnimatedTo.spring(
-              globalKey: animatedToKey,
-              enabled: !watchSignal(context, animatedToDisabled)!,
-              // tighter than default. ios sets this to .55
-              description: const Spring.withDamping(durationSeconds: 0.2),
-              child: child),
-          (child) => SizeReporter(
-              key: transferrableKey, previousSize: previousSize, child: child),
-          (child) => DraggableWidget<GlobalKey<TimerState>>(
-              data: widget.key as GlobalKey<TimerState>, child: child),
-          (child) => GestureDetector(
-              onTap: () {
-                context
-                    .findAncestorStateOfType<TimerScreenState>()
-                    ?.takeActionOn(widget.mobj.id);
-              },
-              behavior: HitTestBehavior.opaque,
-              child: child),
-          (child) =>
-              Padding(padding: EdgeInsets.all(timerGap / 2), child: child),
+      nestingLevels: [
+        (child) => AnimatedBuilder(
+            animation: _appearanceAnimation,
+            child: child,
+            builder: (context, child) => FractionalTranslation(
+                  translation: Offset(
+                      0,
+                      0.6 *
+                          (1.0 -
+                              Curves.easeOut
+                                  .transform(_appearanceAnimation.value))),
+                  child: FuzzyLinearClip(
+                    angle: pi / 2,
+                    progress: _appearanceAnimation.value,
+                    child: child!,
+                  ),
+                )),
+        (child) => AnimatedBuilder(
+            animation: _slideActivateBounceAnimation,
+            builder: (context, child) => Transform.translate(
+                offset: _slideBounceDirection * bounceDistance, child: child),
+            child: child),
+        (child) => AnimatedTo.spring(
+            globalKey: animatedToKey,
+            enabled: !watchSignal(context, animatedToDisabled)!,
+            // tighter than default. ios sets this to .55
+            description: const Spring.withDamping(durationSeconds: 0.2),
+            child: child),
+        (child) => BoolSignalTween(
+            signal: _shouldFade,
+            duration: Duration(milliseconds: 700),
+            child: child,
+            builder: (context, progress, child) => Opacity(
+                opacity: lerp(1, 0.7, unlerpUnit(0.8, 1, progress)),
+                child: child)),
+        (child) => SizeReporter(
+            key: transferrableKey, previousSize: previousSize, child: child),
+        (child) => DraggableWidget<GlobalKey<TimerState>>(
+            data: widget.key as GlobalKey<TimerState>, child: child),
+        (child) => GestureDetector(
+            onTap: () {
+              context
+                  .findAncestorStateOfType<TimerScreenState>()
+                  ?.takeActionOn(widget.mobj.id);
+            },
+            behavior: HitTestBehavior.opaque,
+            child: child),
+        (child) => Padding(padding: EdgeInsets.all(timerGap / 2), child: child),
+      ],
+      deepestChild: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          clockDial,
+          SizedBox(width: timerGap * 0.4),
+          timeText,
         ],
-        deepestChild: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            clockDial,
-            SizedBox(width: timerGap * 0.4),
-            timeText,
-          ],
-        ));
+      ),
+    );
   }
 }
 
@@ -1603,8 +1620,6 @@ class TimerScreenState extends State<TimerScreen>
               child: Center(child: Icon(size: size, icon))));
     }
 
-    final configButtonKey = GlobalKey();
-    final hereConfigButtonKey = GlobalKey();
     // var selectButton = TimersButton(
     //     // label: Icon(Icons.select_all),
     //     // label: Icon(Icons.border_outer_rounded),
@@ -1779,7 +1794,7 @@ class TimerScreenState extends State<TimerScreen>
     }
 
     final configButton = TimersButton(
-        key: hereConfigButtonKey,
+        key: configButtonKey,
         label: SizedBox(
           width: buttonSpan * 0.54,
           height: buttonSpan * 0.54,
@@ -1797,10 +1812,8 @@ class TimerScreenState extends State<TimerScreen>
           Navigator.push(
             context,
             CircularRevealRoute(
-              builder: (context) => SettingsScreen(
-                  iconKey: configButtonKey, flipBackgroundColors: false),
-              buttonCenter: widgetCenter(hereConfigButtonKey),
-              iconKey: configButtonKey,
+              builder: (context) => SettingsScreen(flipBackgroundColors: false),
+              iconOriginKey: configButtonKey,
             ),
           );
         });
@@ -2582,10 +2595,8 @@ double halfScreenHeight(BuildContext context) {
 }
 
 class SettingsScreen extends StatefulWidget {
-  final GlobalKey? iconKey;
   final bool flipBackgroundColors;
-  const SettingsScreen(
-      {super.key, this.iconKey, this.flipBackgroundColors = false});
+  const SettingsScreen({super.key, this.flipBackgroundColors = false});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -2628,8 +2639,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: theme.textTheme.bodySmall!
               .copyWith(color: theme.colorScheme.onSurfaceVariant)),
       onTap: () {
-        Navigator.push(context,
-            CircularRevealRoute(builder: (context) => OnboardScreen()));
+        Navigator.push(
+            context,
+            CircularRevealRoute(
+                builder: (context) => OnboardScreen(),
+                iconOriginKey: configButtonKey));
       },
     );
 
@@ -2688,6 +2702,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ),
           SliverList(
             delegate: SliverChildListDelegate([
+              // Test InkButton
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: InkButton(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    print('InkButton tapped!');
+                  },
+                  child: Container(
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text('Test InkButton',
+                          style: theme.textTheme.titleMedium),
+                    ),
+                  ),
+                ),
+              ),
               // Right-handed mode setting
               Watch((context) {
                 final isRightHandedMobj =
@@ -2797,7 +2832,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             iconKey: iconKey,
                             flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
-                        iconKey: iconKey,
+                        iconOriginKey: iconKey,
                       ),
                     );
                   },
@@ -2849,7 +2884,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             iconKey: iconKey,
                             flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
-                        iconKey: iconKey,
+                        iconOriginKey: iconKey,
                       ),
                     );
                   },
@@ -2883,7 +2918,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             iconKey: iconKey,
                             flipBackgroundColors: !widget.flipBackgroundColors),
                         buttonCenter: widgetCenter(hereIconKey),
-                        iconKey: iconKey,
+                        iconOriginKey: iconKey,
                       ),
                     );
                   },
@@ -2950,7 +2985,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               flipBackgroundColors:
                                   !widget.flipBackgroundColors),
                           buttonCenter: tapPosition ?? Offset.zero,
-                          iconKey: iconKey,
+                          iconOriginKey: iconKey,
                         ),
                       );
                     },
@@ -2959,8 +2994,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
 
-              if (!completedSetup) ...[
-                // if (true) ...[
+              // if (!completedSetup) ...[
+              if (true) ...[
                 setupTile,
               ],
               SizedBox(height: MediaQuery.of(context).padding.bottom),
@@ -3638,10 +3673,12 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                         //   spacer
                         // ],
                         Expanded(
-                          child: GestureDetector(
+                          child: InkButton(
                               onTap: () {
                                 moveOn();
                               },
+                              borderRadius:
+                                  BorderRadius.circular(buttonCornerRadius),
                               child: Container(
                                 height: standardButtonHeight,
                                 decoration: BoxDecoration(

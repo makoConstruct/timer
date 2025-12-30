@@ -134,151 +134,12 @@ class TrackedTimer {
   }
 }
 
-// class TimerTracking {
-//   late JukeBox jukeBox;
-//   Map<MobjID<TimerData>, TrackedTimer> trackedTimers = {};
-//   void onTimerDataChanged(TrackedTimer tracked) {
-//     final timer = tracked.mobj;
-//     final ntp = timer.peek()!;
-//     if (ntp.isRunning) {
-//       tracked.triggerTimer?.cancel();
-//       tracked.triggerTimer = Timer(
-//           digitsToDuration(timer.peek()!.digits) -
-//               DateTime.now().difference(timer.peek()!.startTime), () {
-//         // trigger timer
-//         Mobj.fetch(selectedAudioID, type: AudioInfoType()).then((audio) {
-//           jukeBox.playAudio(audio.value!);
-//         });
-//         timer.value =
-//             timer.value!.withChanges(runningState: TimerData.completed);
-//       });
-//     } else {
-//       tracked.endTrackedTimer();
-//       // [todo]
-//       // updateRunningTimersNotification();
-//     }
-//   }
-
-//   List<Function()> cleanups = [];
-//   void startTracking(Mobj<List<MobjID>> listMobj) {
-//     cleanups.add(listMobj.subscribe((list) {
-//       for (final tid in list ?? []) {
-//         Mobj.fetch(tid, type: TimerDataType())
-//             .then((mobj) => enlivenTimer(mobj, jukeBox));
-//       }
-//     }));
-//   }
-
-//   void stopTrackingAll() {}
-// }
-
-// Old audioplayers implementation (kept for reference)
-// class JukeBox {
-//   static final AssetSource steel15 = AssetSource('sounds/jingles_STEEL15.ogg');
-//   static final AssetSource steel16 = AssetSource('sounds/jingles_STEEL16.ogg');
-//   // minor tombstone, audioplayers can't play ringtone urls. We'll have to use platform audio instead.
-//   // static final UrlSource forbiddenZetaRingtone = UrlSource(
-//   // 'content://media/internal/audio/media/194?title=Zeta&canonical=1');
-//   // static const String jarringSound = 'assets/jarring.mp3';
-//   late AudioPool jarringPlayers;
-//   static Future<JukeBox> create() async {
-//     return AudioPool.create(
-//       source: steel16,
-//       maxPlayers: 4,
-//       audioContext: AudioContext(
-//           android: AudioContextAndroid(
-//               audioFocus: AndroidAudioFocus.gainTransient,
-//               contentType: AndroidContentType.sonification,
-//               usageType: AndroidUsageType.alarm),
-//           iOS: AudioContextIOS(category: AVAudioSessionCategory.playAndRecord)),
-//     ).then((pool) => JukeBox()..jarringPlayers = pool);
-//   }
-//
-//   void playJarringSound() {
-//     jarringPlayers.start();
-//   }
-//
-//   static void jarringSound(BuildContext context) {
-//     Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
-//       jb.jarringPlayers.start();
-//     });
-//   }
-// }
-
-// ringtone manager is totally inadequate because it doesn't give you control over how it interacts with the currently playing sounds, and of course it gives you no control over which asset specifically is played.
-// // with ringtone manager
-// class JukeBox {
-//   // static const String jarringSound = 'assets/jarring.mp3';
-//   late FlutterRingtoneManager m;
-//   JukeBox(this.m) {}
-//   static Future<JukeBox> create() async {
-//     return Future.value(JukeBox(FlutterRingtoneManager()));
-//   }
-
-//   void playJarringSound() {
-//     m.playNotification();
-//   }
-
-//   static void jarringSound(BuildContext context) {
-//     Provider.of<Future<JukeBox>>(context, listen: false).then((jb) {
-//       jb.playJarringSound();
-//     });
-//   }
-// }
-
-// this doesn't even work on arch, trying audioplayers again
-// this is different to the above, we don't create an instance of the jukebox, it's all static. Not sure why it shouldn't be. Some of the code still passes us a context we don't need, and we still initialize and instance that doesn't get used
-// replace with soloud
-// soloud also doesn't work with the most recent flutter nix package
-// class JukeBox {
-//   static final String pianoSound =
-//       'sounds/jarring piano sound 448552__tedagame__g4.ogg';
-//   static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
-//   static final String forcefield = 'sounds/forceField_002_kenney.ogg';
-//   static final Future<sl.AudioSource> briefSound =
-//       soloud.then((s) => s.loadAsset(steel15));
-//   static final Future<sl.SoLoud> soloud = Future.microtask(() {
-//     WidgetsFlutterBinding.ensureInitialized();
-//     final r = sl.SoLoud.instance;
-//     r.init();
-//     return r;
-//   });
-
-//   static Future<JukeBox> create() async {
-//     return Future.value(JukeBox());
-//   }
-
-//   static void jarringSound(BuildContext contex) {
-//     soloud.then((s) {
-//       briefSound.then((so) {
-//         s.play(so);
-//       });
-//     });
-//   }
-// }
-
-// mock
-// class JukeBox {
-//   // static final String pianoSound =
-//   //     'sounds/jarring piano sound 448552__tedagame__g4.ogg';
-//   // static final String steel15 = 'sounds/jingles_STEEL15_kenney.ogg';
-//   // static final String forcefield = 'sounds/forceField_002_kenney.ogg';
-
-//   static Future<JukeBox> create() async {
-//     return Future.value(JukeBox());
-//   }
-
-//   static void jarringSound(BuildContext contex) {
-//     // ideally there'd be a visual indicator when the sound is made
-//   }
-// }
-
 Rect? boxRect(GlobalKey? key) {
   if (key == null) {
     return null;
   }
   final box = key.currentContext?.findRenderObject() as RenderBox?;
-  if (box == null) {
+  if (box == null || !box.hasSize) {
     return null;
   } else {
     return box.localToGlobal(Offset.zero) & box.size;
@@ -1587,12 +1448,12 @@ class CircularRevealRoute<T> extends PageRoute<T>
     with MaterialRouteTransitionMixin<T> {
   final Widget Function(BuildContext context) builder;
   final Offset? buttonCenter;
-  final GlobalKey? iconKey;
+  final GlobalKey? iconOriginKey;
 
   CircularRevealRoute({
     required this.builder,
     this.buttonCenter,
-    this.iconKey,
+    this.iconOriginKey,
   });
 
   @override
@@ -1619,6 +1480,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
       Animation<double> secondaryAnimation, Widget child) {
     // Incorporate screen corner scale-down with secondaryAnimation,
     // and primary animation is still circular reveal.
+    final screenSize = MediaQuery.sizeOf(context);
     return AnimatedBuilder(
       animation: secondaryAnimation,
       builder: (context, child_) {
@@ -1631,6 +1493,10 @@ class CircularRevealRoute<T> extends PageRoute<T>
               1.0 - Curves.easeIn.transform(secondaryAnimation.value) * 0.13;
         }
 
+        final revealOrigin = boxRect(iconOriginKey)?.center ??
+            buttonCenter ??
+            sizeToOffset(screenSize) / 2;
+
         return Transform.scale(
           scale: scale,
           child: ClipRRect(
@@ -1642,7 +1508,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
             ),
             child: _CircularRevealRouteTransition(
               animation: animation,
-              revealOrigin: buttonCenter ?? Offset.zero,
+              revealOrigin: revealOrigin,
               child: child,
             ),
           ),
@@ -2311,6 +2177,233 @@ class RenderScalingAspectRatio extends RenderProxyBox {
   }
 }
 
+/// A button with fuzzy circle ink animation. Ink wells from touch point on press,
+/// fades out on tap confirm. Behaves like a proper button (cancels on drag out, etc).
+class InkButton extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final Duration wellDuration;
+  final Duration fadeDuration;
+  final double fuzzyEdgeWidth;
+  final Color? inkColor;
+  final BorderRadius? borderRadius;
+
+  const InkButton({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.wellDuration = const Duration(milliseconds: 200),
+    this.fadeDuration = const Duration(milliseconds: 150),
+    this.fuzzyEdgeWidth = 12.0,
+    this.inkColor,
+    this.borderRadius,
+  });
+
+  @override
+  State<InkButton> createState() => _InkButtonState();
+}
+
+class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
+  RelAlignment? _touchPoint;
+  late AnimationController _wellController;
+  // tracks ink spots that are fading out after confirm
+  final List<_FadingInk> _fadingInks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _wellController = AnimationController(
+      vsync: this,
+      duration: widget.wellDuration,
+    );
+  }
+
+  @override
+  void didUpdateWidget(InkButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.wellDuration != oldWidget.wellDuration) {
+      _wellController.duration = widget.wellDuration;
+    }
+  }
+
+  @override
+  void dispose() {
+    _wellController.dispose();
+    for (final ink in _fadingInks) {
+      ink.controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _handleTapDown(TapDownDetails details) {
+    _touchPoint = RelAlignment.fromOffset(details.localPosition);
+    _wellController.forward(from: 0);
+  }
+
+  void _handleTapUp(TapUpDetails details) {
+    _confirmInk();
+    widget.onTap?.call();
+  }
+
+  void _handleTapCancel() {
+    _cancelInk();
+  }
+
+  void _confirmInk() {
+    final startProgress = _wellController.value;
+    final remainingFill = 1.0 - startProgress;
+    // Time to complete fill proportional to remaining distance
+    final fillDuration = Duration(
+      milliseconds:
+          (widget.wellDuration.inMilliseconds * remainingFill * 0.5).round(),
+    );
+    const lingerDuration = Duration(milliseconds: 250);
+    final totalDuration = fillDuration + lingerDuration + widget.fadeDuration;
+    final totalMicros = totalDuration.inMicroseconds;
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: totalDuration,
+    );
+    final fadingInk = _FadingInk(
+      origin: _touchPoint ?? RelAlignment.center,
+      startProgress: startProgress,
+      fillFraction: fillDuration.inMicroseconds / totalMicros,
+      lingerFraction:
+          (fillDuration + lingerDuration).inMicroseconds / totalMicros,
+      controller: controller,
+    );
+    _fadingInks.add(fadingInk);
+    controller.forward();
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        setState(() {
+          _fadingInks.remove(fadingInk);
+        });
+        controller.dispose();
+      }
+    });
+
+    _wellController.reset();
+    _touchPoint = null;
+    setState(() {});
+  }
+
+  void _cancelInk() {
+    _wellController.reverse();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inkColor = widget.inkColor ?? Theme.of(context).colorScheme.primary;
+
+    Widget inkLayer(Widget child) {
+      if (widget.borderRadius != null) {
+        return ClipRRect(
+          borderRadius: widget.borderRadius!,
+          child: child,
+        );
+      }
+      return child;
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: widget.onTap != null ? _handleTapDown : null,
+      onTapUp: widget.onTap != null ? _handleTapUp : null,
+      onTapCancel: widget.onTap != null ? _handleTapCancel : null,
+      child: Stack(
+        fit: StackFit.passthrough,
+        children: [
+          widget.child,
+          // Active well animation
+          Positioned.fill(
+            child: inkLayer(
+              AnimatedBuilder(
+                animation: _wellController,
+                builder: (context, _) {
+                  if (_wellController.value == 0) {
+                    return const SizedBox.shrink();
+                  }
+                  return IgnorePointer(
+                    child: FuzzyCircleClip(
+                      progress: Curves.easeOut.transform(_wellController.value),
+                      origin: _touchPoint ?? RelAlignment.center,
+                      fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+                      child: ColoredBox(color: inkColor),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          // Fading inks (confirmed taps)
+          for (final ink in _fadingInks)
+            Positioned.fill(
+              child: inkLayer(
+                AnimatedBuilder(
+                  animation: ink.controller,
+                  builder: (context, _) {
+                    final t = ink.controller.value;
+                    final double wellProgress;
+                    final double opacity;
+                    if (ink.fillFraction > 0 && t < ink.fillFraction) {
+                      // Still filling
+                      final fillT = t / ink.fillFraction;
+                      wellProgress = ink.startProgress +
+                          (1.0 - ink.startProgress) *
+                              Curves.easeOut.transform(fillT);
+                      opacity = 1.0;
+                    } else if (t < ink.lingerFraction) {
+                      // Lingering
+                      wellProgress = 1.0;
+                      opacity = 1.0;
+                    } else {
+                      // Fading out
+                      final fadeT = ink.lingerFraction < 1
+                          ? (t - ink.lingerFraction) / (1 - ink.lingerFraction)
+                          : t;
+                      wellProgress = 1.0;
+                      opacity = 1 - Curves.easeOut.transform(fadeT);
+                    }
+                    return IgnorePointer(
+                      child: Opacity(
+                        opacity: opacity,
+                        child: FuzzyCircleClip(
+                          progress: wellProgress,
+                          origin: ink.origin,
+                          fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+                          child: ColoredBox(color: inkColor),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FadingInk {
+  final RelAlignment origin;
+  final double startProgress;
+  final double fillFraction; // portion of animation spent filling (0-1)
+  final double
+      lingerFraction; // portion at which lingering ends (fill + linger)
+  final AnimationController controller;
+
+  _FadingInk({
+    required this.origin,
+    required this.startProgress,
+    required this.fillFraction,
+    required this.lingerFraction,
+    required this.controller,
+  });
+}
+
 /// animates from the previous state using an inkwell from epicenter
 /// trivial to implement, so included mostly for illustrative purposes, but also because a lot of you are going to want it
 class InvertToggleButton extends StatelessWidget {
@@ -2542,7 +2635,7 @@ class BoolSignalTween extends StatelessWidget {
   Widget build(BuildContext context) {
     return Watch((context) => TweenAnimationBuilder(
           tween: Tween<double>(
-              begin: signal.value ? 0.0 : 1.0, end: signal.value ? 0.0 : 1.0),
+              begin: signal.value ? 1.0 : 0.0, end: signal.value ? 1.0 : 0.0),
           duration: duration,
           builder: builder,
           child: child,
@@ -2569,9 +2662,9 @@ class PinAnimation extends StatelessWidget {
             builder: (context, constraints) {
               final r = min(constraints.maxWidth, constraints.maxHeight) / 2;
               final mt = MakoThemeData.fromContext(context);
-              final movementp = Curves.easeOutCubic
-                  .transform(unlerpUnit(0.4, 1, 1 - progress));
-              final revealp = unlerpUnit(0, 0.3, 1 - progress);
+              final movementp =
+                  Curves.easeOutCubic.transform(unlerpUnit(0.4, 1, progress));
+              final revealp = unlerpUnit(0, 0.3, progress);
               final squareRad = 7.0;
               // it dawns on me that the pin is going to be kinda hard, since the easiest way to position it places it outside of the layout bounds of the parent, which means the pin will be outside of the linear clip.
               // final pinThicknessr = 2.0;
