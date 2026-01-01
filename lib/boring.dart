@@ -1894,14 +1894,17 @@ class FuzzyLinearClip extends StatelessWidget {
   final double angle; // angle in radians
   final double? fuzzyEdgeWidth;
   final bool sphericalSweepLength;
+  final double margin;
   final Widget child;
 
+  /// [margin] currently isn't actually working it seems.
   // ignore: prefer_const_constructors_in_immutables
   FuzzyLinearClip({
     super.key,
     required this.angle,
     required this.progress,
     required this.child,
+    this.margin = 0.0,
     this.fuzzyEdgeWidth = 20.0,
     this.sphericalSweepLength = false,
   });
@@ -1918,7 +1921,7 @@ class FuzzyLinearClip extends StatelessWidget {
         child: child,
         shaderCallback: (Rect bounds) {
           return linearRevealShader(
-            bounds: bounds,
+            bounds: bounds.inflate(margin),
             fraction: progress,
             fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
             angle: angle,
