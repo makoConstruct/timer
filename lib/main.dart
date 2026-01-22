@@ -742,24 +742,24 @@ class TimerState extends State<Timer>
                                     children: [
                                       Text(boring.formatTime(durationDigits),
                                           overflow: TextOverflow.clip),
-                                      SizedBox(
-                                          width: 0,
-                                          child: AnimatedBuilder(
-                                              animation: _runningAnimation,
-                                              builder: (context, child) =>
-                                                  // I wanted a FuzzyLinearClip here but ShaderMask was throwing an error about offset being nan.
-                                                  Opacity(
-                                                    opacity: Curves.easeInCubic
-                                                        .transform(
-                                                            _runningAnimation
-                                                                .value),
-                                                    child: Icon(
-                                                        Icons
-                                                            .play_arrow_rounded,
-                                                        size: 18,
-                                                        color: theme.colorScheme
-                                                            .primary),
-                                                  )))
+                                      // SizedBox(
+                                      //     width: 0,
+                                      //     child: AnimatedBuilder(
+                                      //         animation: _runningAnimation,
+                                      //         builder: (context, child) =>
+                                      //             // I wanted a FuzzyLinearClip here but ShaderMask was throwing an error about offset being nan.
+                                      //             Opacity(
+                                      //               opacity: Curves.easeInCubic
+                                      //                   .transform(
+                                      //                       _runningAnimation
+                                      //                           .value),
+                                      //               child: Icon(
+                                      //                   Icons
+                                      //                       .play_arrow_rounded,
+                                      //                   size: 18,
+                                      //                   color: theme.colorScheme
+                                      //                       .primary),
+                                      //             )))
                                     ],
                                   )),
                               selectionUnderline,
@@ -867,11 +867,11 @@ class TimerState extends State<Timer>
             child: next),
         (next) => BoolSignalTween(
             signal: _shouldFade,
-            duration: Duration(milliseconds: 700),
+            duration: Duration(milliseconds: 450),
             child: next,
             builder: (context, progress, child) => Opacity(
                 // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
-                opacity: lerp(1, 0.67, unlerpUnit(0.8, 1, progress)),
+                opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
                 child: child)),
         (next) => SizeReporter(
             key: transferrableKey, previousSize: previousSize, child: next),

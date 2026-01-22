@@ -14,6 +14,7 @@ import 'package:hsluv/hsluvcolor.dart';
 // import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:makos_timer/database.dart';
+import 'package:makos_timer/margin_shader_mask.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
@@ -1916,18 +1917,19 @@ class FuzzyLinearClip extends StatelessWidget {
     } else if (progress == 1.0) {
       return child;
     } else {
-      return ShaderMask(
+      return MarginShaderMask(
         blendMode: BlendMode.dstIn,
-        child: child,
+        margin: margin,
         shaderCallback: (Rect bounds) {
           return linearRevealShader(
-            bounds: bounds.inflate(margin),
+            bounds: bounds,
             fraction: progress,
             fuzzyEdgeWidth: fuzzyEdgeWidth ?? 20.0,
             angle: angle,
             sphericalSweepLength: sphericalSweepLength,
           );
         },
+        child: child,
       );
     }
   }

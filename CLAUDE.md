@@ -10,7 +10,7 @@ The user doesn't have complete confidence in you, try to substantiate your claim
 
 ## Style
 
-Don't comment excessively.
+Don't leave excessive comments, if the code is self-explanatory, no comment.
 
 ## Project Overview
 
