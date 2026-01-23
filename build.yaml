@@ -1,0 +1,9 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          #to ensure we're getting lexicographic ordering with no loss of precision
+          store_date_time_values_as_text: true
+          # Generate methods with named parameters instead of positional
+          named_parameters: true
