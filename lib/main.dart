@@ -36,6 +36,7 @@ import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
 Future<void> deleteDatabase() async {
   final directory = await getApplicationSupportDirectory();
@@ -867,11 +868,12 @@ class TimerState extends State<Timer>
             child: next),
         (next) => BoolSignalTween(
             signal: _shouldFade,
-            duration: Duration(milliseconds: 450),
+            duration: Duration(milliseconds: 140),
             child: next,
             builder: (context, progress, child) => Opacity(
                 // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
-                opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
+                // opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
+                opacity: lerp(1, 0.4, progress),
                 child: child)),
         (next) => SizeReporter(
             key: transferrableKey, previousSize: previousSize, child: next),
@@ -1505,7 +1507,7 @@ class TimerScreenState extends State<TimerScreen>
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
           vsync: this,
-          riseDuration: Duration(milliseconds: 230),
+          riseDuration: Duration(milliseconds: 400),
           fallDuration: Duration(milliseconds: 200));
   late final UpDownAnimationController userDragActionHintReveal =
       UpDownAnimationController(
@@ -2053,49 +2055,56 @@ class TimerScreenState extends State<TimerScreen>
                     ));
               }
 
-              return FuzzyLinearClip(
-                  angle: pi,
-                  progress: Curves.easeOutCubic
-                      .transform(editPopoverAnimation.value.$1),
-                  margin: backingDeflation * 2 + 2,
-                  child: FuzzyLinearClip(
-                    angle: 0,
-                    progress: 1 -
-                        Curves.easeOutCubic
-                            .transform(editPopoverAnimation.value.$2),
-                    margin: backingDeflation * 2 + 2,
-                    // this is a stack instead of just a container with a border because the border took up layout space if container, which would throw off the grid alignment
-                    child: Stack(
-                      children: [
-                        Container(
-                          decoration: BoxDecoration(
-                            color: mt.foreBackColor,
-                            borderRadius: BorderRadius.circular(
-                                (buttonSpan * backingCornerRounding +
-                                    backingDeflation)),
-                            border: Border.all(
-                              color: mt.lowestBackColor,
-                              strokeAlign: BorderSide.strokeAlignCenter,
-                              width: backingDeflation * 2,
-                            ),
-                          ),
-                        ),
-                        Row(
-                          children: reverseIfNot(
-                            isRightHandedMobj.value!,
-                            [
-                              iconWidget(Icons.backspace_rounded, () {
-                                _backspace();
-                              }, size: 0.4),
-                              iconWidget(Icons.play_arrow_rounded, () {
-                                pausePlaySelected();
-                              }, size: 0.6)
-                            ],
-                          ),
-                        ),
-                      ],
+              // Compute animation progress
+              final progress = Curves.easeInOutCubic.transform(unlerpUnit(
+                  0.4,
+                  1.0,
+                  editPopoverAnimation.value.$1 *
+                      (1 - editPopoverAnimation.value.$2)));
+
+              // Scale: starts smaller, bounces to full size
+              final scale =
+                  lerp(0.8, 1.0, Curves.easeOutBack.transform(progress));
+
+              return Transform.translate(
+                offset: Offset(
+                    0,
+                    buttonSpan *
+                        0.27 *
+                        (1 - Curves.easeOutBack.transform(progress))),
+                child: Transform.scale(
+                  scale: scale,
+                  child: LiquidGlass.withOwnLayer(
+                    shape: LiquidRoundedSuperellipse(
+                      borderRadius: buttonSpan * backingCornerRounding,
+                      side: BorderSide(
+                          width: backingDeflation,
+                          style: BorderStyle.none,
+                          strokeAlign: BorderSide.strokeAlignInside),
                     ),
-                  ));
+                    settings: LiquidGlassSettings(
+                      blur: 2,
+                      thickness: 10,
+                      glassColor: mt.foreBackColor.withValues(alpha: 0.5),
+                      lightIntensity: 0.3,
+                      visibility: progress.clamp(0, 1),
+                    ),
+                    child: Row(
+                      children: reverseIfNot(
+                        isRightHandedMobj.value!,
+                        [
+                          iconWidget(Icons.backspace_rounded, () {
+                            _backspace();
+                          }, size: 0.4),
+                          iconWidget(Icons.play_arrow_rounded, () {
+                            pausePlaySelected();
+                          }, size: 0.6)
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
             },
           ),
         ),
