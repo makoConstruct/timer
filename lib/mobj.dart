@@ -1,8 +1,8 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:makos_timer/database.dart';
+import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
 
 /// these are just parser combinators. They used to be self-describing so that we could put type descriptions in the DB and use those to pre-parse any root objects, but it turned out that's impossible in dart (you can't construct a new generic type at runtime, which, since dart has runtime type information, means you also can't construct values of that type), and would only be elegant with dependent types.
@@ -193,8 +193,8 @@ class MobjRegistry {
     });
   }
 
-  static Mobj<T>? seek<T>(MobjID<T> id) {
-    return _loadedMobjs[id] as Mobj<T>?;
+  static Mobj<T>? seek<T>(MobjID<T> id, TypeHelp<T> type) {
+    return Mobj.seekAlreadyLoaded(id, type);
   }
 
   static void unregister(MobjID id) {
@@ -206,12 +206,9 @@ class MobjRegistry {
 
 /// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.
-/// It was made just for this app, because the author couldn't find anything else that would do, and because the author intends to contribute to the development of a much more serious dynamic persistence system soon, so they need to get interested in making their own.
-/// This is currently quite bad, for a couple of reasons, but mainly because drift's streaming queries update the streams far more often than they need to. Any time a mobj changes on disk, every live mobj's stream will be poked by drift. This will presumably be a performance problem if you have a lot of active mobjs. It wont come through in the behavior of the mobjs (we don't notify on redundant updates) though.
+/// Reactivity is purely in-memory via Signals; changes write through to the DB but the DB doesn't push changes back. Single-isolate only.
 /// Doesn't support transactions right now, though note that both Signal and Drift do support transactions, so it should be possible?
-/// streaming_shared_preferences seems to be the same as this, but using shared_preferences for storage instead of drift.
-/// I think I need this to work across isolates now.
-/// setting it to null causes a deletion. After deletion, undeletion isn't permitted.
+/// Setting it to null causes a deletion. After deletion, undeletion isn't permitted.
 class Mobj<T> extends Signal<T?> {
   final MobjID _id;
 
@@ -222,9 +219,6 @@ class Mobj<T> extends Signal<T?> {
   DateTime _lastTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastSequenceNumber = 0;
   String _valueEncoded = "";
-  StreamSubscription<KV?>? _dbSubscription;
-  // prevents updates from the db from triggering a write back to the db
-  bool _currentlyTakingFromDb = false;
   bool _blockInitialWriteBack = false;
   bool _unloaded = true;
 
@@ -265,6 +259,10 @@ class Mobj<T> extends Signal<T?> {
     // on reflection I'm not sure we can support autodispose, because of the refcounting stuff
     // bool autoDispose = false,
   }) : super(initial, debugLabel: debugLabel, autoDispose: false) {
+    if (T == dynamic) {
+      print(
+          "WARNING: this may create a dynamic mobj, which will fail to cast correctly");
+    }
     MobjRegistry._loadedMobjs[_id] = this;
     _blockInitialWriteBack = !initialWriteBack;
     if (initial != null) {
@@ -280,65 +278,31 @@ class Mobj<T> extends Signal<T?> {
 
     // a Mobj writes back to db whenever it changes
     subscribe((v) {
-      if (_currentlyTakingFromDb) {
-        return;
-      }
       if (_blockInitialWriteBack) {
         _blockInitialWriteBack = false;
         return;
       }
       writeBack();
     });
-
-    // Stream database changes for this id
-    _dbSubscription = (MobjRegistry.db.kVs.select()
-          ..where((t) => t.id.equals(_id)))
-        .watchSingleOrNull()
-        .listen((kv) {
-      if (kv == null) {
-        // Entry was deleted from DB
-        if (internalValue != null) {
-          _currentlyTakingFromDb = true;
-          set(null);
-          _currentlyTakingFromDb = false;
-        }
-      } else {
-        if (kv.timestamp.isAfter(_lastTimestamp) ||
-            (kv.timestamp.isAtSameMomentAs(_lastTimestamp) &&
-                kv.sequenceNumber > _lastSequenceNumber) ||
-            (kv.timestamp.isAtSameMomentAs(_lastTimestamp) &&
-                kv.sequenceNumber == _lastSequenceNumber &&
-                kv.value.compareTo(_valueEncoded) > 0)) {
-          // DB has newer data, update local value
-          _currentlyTakingFromDb = true;
-          _lastTimestamp = kv.timestamp;
-          _lastSequenceNumber = kv.sequenceNumber;
-          set(_type.fromJson(jsonDecode(kv.value)));
-          _currentlyTakingFromDb = false;
-        }
-      }
-    });
   }
 
   /// only returns non-null if the mobj has already been loaded from the db
   /// type is needed in case the object is in the _loadedMobjEncodings stage
   static Mobj<T>? seekAlreadyLoaded<T>(MobjID id, TypeHelp<T> type) {
+    final Mobj? loaded = MobjRegistry._loadedMobjs[id];
+    if (loaded != null) {
+      return loaded as Mobj<T>;
+    }
     final pr = MobjRegistry._preloadedMobjEncodings[id];
     if (pr != null) {
-      final p = Mobj._createAndRegister(id, type,
+      final p = Mobj<T>._createAndRegister(id, type,
           initial: type.fromJson(jsonDecode(pr)),
           debugLabel: id,
           initialWriteBack: false);
       MobjRegistry._preloadedMobjEncodings.remove(id);
       return p;
-    } else {
-      final lm = MobjRegistry._loadingMobjs[id];
-      if (lm != null) {
-        throw StateError(
-            "Mobj.get(id) should only be called if you're sure the mobj has already finished loading. In this case, id=$id, it's still loading");
-      }
-      return MobjRegistry._loadedMobjs[id] as Mobj<T>?;
     }
+    return null;
   }
 
   /// assumes the mobj has already been loaded from the db
@@ -387,51 +351,47 @@ class Mobj<T> extends Signal<T?> {
     Mobj<T>? s = Mobj.seekAlreadyLoaded(id, type);
     if (s != null) {
       return s;
-    } else {
-      // I think this implementation is kinda nonsense, this never could have done what you'd wanted
-      final pf = MobjRegistry._loadingMobjs[id];
-      if (pf != null) {
-        return (await pf) as Mobj<T>;
-      } else {
-        final T iv = initial();
-        final valueEncoding = jsonEncode(type.toJson(iv));
-        final ret = MobjRegistry.db
-            .insertIfNotExistsAndReturn(
-                id: id,
-                value: valueEncoding,
-                timestamp: DateTime.now(),
-                sequenceNumber: 0)
-            .then(
-          (v) {
-            MobjRegistry._loadingMobjs.remove(id);
-            print(v);
-            assert(v.length == 1);
-            final vv = v.first;
-            if (vv.wasInserted == 0) {
-              return Mobj._createAndRegister(
-                id,
-                type,
-                initial: iv,
-                debugLabel: debugLabel,
-                initialWriteBack: true,
-              );
-            } else {
-              return Mobj._createAndRegister(
-                id,
-                type,
-                initial: type.fromJson(jsonDecode(vv.value!)),
-                debugLabel: debugLabel,
-                initialWriteBack: false,
-                timestamp: vv.timestamp!,
-                sequenceNumber: vv.sequenceNumber!,
-              );
-            }
-          },
-        );
-        MobjRegistry._loadingMobjs[id] = ret;
-        return await ret;
-      }
     }
+    final pf = MobjRegistry._loadingMobjs[id];
+    if (pf != null) {
+      return (await pf) as Mobj<T>;
+    }
+    final T iv = initial();
+    final valueEncoding = jsonEncode(type.toJson(iv));
+    final ret = MobjRegistry.db
+        .insertIfNotExistsAndReturn(
+            id: id,
+            value: valueEncoding,
+            timestamp: DateTime.now(),
+            sequenceNumber: 0)
+        .then(
+      (v) {
+        MobjRegistry._loadingMobjs.remove(id);
+        assert(v.length == 1);
+        final vv = v.first;
+        if (vv.wasInserted == 0) {
+          return Mobj._createAndRegister(
+            id,
+            type,
+            initial: iv,
+            debugLabel: debugLabel,
+            initialWriteBack: true,
+          );
+        } else {
+          return Mobj._createAndRegister(
+            id,
+            type,
+            initial: type.fromJson(jsonDecode(vv.value!)),
+            debugLabel: debugLabel,
+            initialWriteBack: false,
+            timestamp: vv.timestamp!,
+            sequenceNumber: vv.sequenceNumber!,
+          );
+        }
+      },
+    );
+    MobjRegistry._loadingMobjs[id] = ret;
+    return ret;
   }
 
   /// Reads the current value from the database without creating or loading a Mobj
@@ -456,15 +416,17 @@ class Mobj<T> extends Signal<T?> {
     required TypeHelp<T> type,
     String? debugLabel,
   }) async {
-    Mobj? s = MobjRegistry.seek(id);
+    Mobj<T>? s = Mobj.seekAlreadyLoaded<T>(id, type);
     if (s != null) {
-      return s as Mobj<T>;
+      return s;
     } else {
-      return (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(id)))
+      final Future<Mobj<T>> r = (MobjRegistry.db.kVs.select()
+            ..where((t) => t.id.equals(id)))
           .getSingleOrNull()
           .then((s) {
         if (s != null) {
-          return Mobj._createAndRegister(
+          MobjRegistry._loadingMobjs.remove(id);
+          return Mobj<T>._createAndRegister(
             id,
             type,
             initial: type.fromJson(jsonDecode(s.value)),
@@ -477,6 +439,8 @@ class Mobj<T> extends Signal<T?> {
               "requested Mobj $id, no such Mobj resides in the database");
         }
       });
+      MobjRegistry._loadingMobjs[id] = r;
+      return r;
     }
   }
 
@@ -501,8 +465,6 @@ class Mobj<T> extends Signal<T?> {
 
   @override
   void dispose() {
-    _dbSubscription?.cancel();
-    _dbSubscription = null;
     super.dispose();
   }
 }

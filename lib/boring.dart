@@ -2711,3 +2711,38 @@ T nesting<T>(List<T Function(T)> nestingLevels, T deepestChild) {
   }
   return result;
 }
+
+/// Places [container] within padding of [shrunkBy], but positions [child]
+/// so that it overflows the container by [shrunkBy] on all sides,
+/// effectively filling the original (pre-shrunk) space.
+class ContainerShrunk extends StatelessWidget {
+  final Widget Function(Widget child) container;
+  final Widget child;
+  final double shrunkBy;
+
+  const ContainerShrunk({
+    super.key,
+    required this.container,
+    required this.child,
+    required this.shrunkBy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Padding(
+          padding: EdgeInsets.all(shrunkBy),
+          child: container(
+            OverflowBox(
+              alignment: Alignment.center,
+              maxWidth: constraints.maxWidth,
+              maxHeight: constraints.maxHeight,
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

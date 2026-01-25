@@ -2074,20 +2074,20 @@ class TimerScreenState extends State<TimerScreen>
                         (1 - Curves.easeOutBack.transform(progress))),
                 child: Transform.scale(
                   scale: scale,
-                  child: LiquidGlass.withOwnLayer(
-                    shape: LiquidRoundedSuperellipse(
-                      borderRadius: buttonSpan * backingCornerRounding,
-                      side: BorderSide(
-                          width: backingDeflation,
-                          style: BorderStyle.none,
-                          strokeAlign: BorderSide.strokeAlignInside),
-                    ),
-                    settings: LiquidGlassSettings(
-                      blur: 2,
-                      thickness: 10,
-                      glassColor: mt.foreBackColor.withValues(alpha: 0.5),
-                      lightIntensity: 0.3,
-                      visibility: progress.clamp(0, 1),
+                  child: ContainerShrunk(
+                    shrunkBy: backingDeflation,
+                    container: (child) => LiquidGlass.withOwnLayer(
+                      shape: LiquidRoundedSuperellipse(
+                        borderRadius: buttonSpan * backingCornerRounding,
+                      ),
+                      settings: LiquidGlassSettings(
+                        blur: 2,
+                        thickness: 10,
+                        glassColor: mt.foreBackColor.withValues(alpha: 0.5),
+                        lightIntensity: 0.3,
+                        visibility: progress.clamp(0, 1),
+                      ),
+                      child: child,
                     ),
                     child: Row(
                       children: reverseIfNot(
