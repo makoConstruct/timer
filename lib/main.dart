@@ -2086,7 +2086,9 @@ class TimerScreenState extends State<TimerScreen>
                         blur: 2,
                         thickness: 10,
                         glassColor: mt.foreBackColor.withValues(alpha: 0.5),
-                        lightIntensity: 0.3,
+                        ambientStrength: 1.0,
+                        lightIntensity:
+                            theme.brightness == Brightness.light ? 0.3 : 0.1,
                         visibility: progress.clamp(0, 1),
                       ),
                       child: child,
@@ -2437,6 +2439,7 @@ class _NumeralButtonState extends State<NumeralButton>
         final tss = context.findAncestorStateOfType<TimerScreenState>()!;
         tss.numeralPressed(widget.digits);
         dragEvents.value = -1;
+        // it's a void listenable, so we can't just set the value (it'll be equivalent to the previous value and wont notify listeners)
         // ignore: invalid_use_of_protected_member
         widget.otherDragActionRingStarted.notifyListeners();
         widget.otherDragActionRingStarted.addListener(_disable);

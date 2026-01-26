@@ -1373,6 +1373,10 @@ double distanceToRectangle(double width, double height, Offset fromTopLeft) {
   return sqrt(dx * dx + dy * dy);
 }
 
+double rectPointDistance(Rect r, Offset p) {
+  return distanceToRectangle(r.width, r.height, p - r.topLeft);
+}
+
 /// A RectTween that wraps another RectTween but delays the start of movement,
 /// staying at `begin` until `delay` fraction of the animation has passed.
 class DelayedRectTween extends Tween<Rect?> {
