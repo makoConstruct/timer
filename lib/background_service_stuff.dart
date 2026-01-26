@@ -133,6 +133,7 @@ class PersistentNotificationTask extends TaskHandler {
   }
 
   void relinquishWork() {
+    // this needs to actually delete the mobjs so that they'll be reloaded when background thread resumes control
     timerListSubscription?.cancel();
     timerListSubscription = null;
     listeningProcessCancel?.call();
@@ -142,6 +143,7 @@ class PersistentNotificationTask extends TaskHandler {
     }
     trackedTimers.clear();
     ranTimerCount.value = 0;
+    MobjRegistry.relinquishAll();
   }
 
   void updatePersistentNotification(
@@ -179,7 +181,6 @@ class PersistentNotificationTask extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    print("onStart");
     appActive = Signal(starter == TaskStarter.developer);
     ranTimerCount = Signal(0);
     refCount = computed(() => ranTimerCount.value + (appActive.value ? 1 : 0));
@@ -190,13 +191,11 @@ class PersistentNotificationTask extends TaskHandler {
     final token = RootIsolateToken.instance!;
     BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     FlutterForegroundTask.sendDataToMain({'op': 'onStart Report'});
-    jukeBox = await JukeBox.create();
-    MobjRegistry.initialize(TheDatabase());
+    jukeBox = JukeBox.create();
+    MobjRegistry.initialize(TheDatabase(), preload: false);
 
-    print("registering effect to update notification message");
     // keeping track of the timers when we need to and forgetting them when we don't
     cleanups.add(effect(() {
-      print("lifecycle logic");
       if (appActive.value) {
         relinquishWork();
         updatePersistentNotification(

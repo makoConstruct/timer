@@ -173,24 +173,28 @@ class MobjRegistry {
   static late TheDatabase db;
 
   // an object should always be removed from its previous caching levels when being moved to the next. _loadedMobjs is the final level atop _loading an _preloaded
-  static final Map<MobjID, Mobj> _loadedMobjs = {};
+  static final Map<MobjID, Mobj> loadedMobjs = {};
   static final Map<MobjID, Future<Mobj>> _loadingMobjs = {};
   static final Map<MobjID, String> _preloadedMobjEncodings = {};
 
   // remember to await the future to make sure the root objects will be ready before other stuff happens
   // none of these ever deload/they're made root objects, they're essentially leaked here once
-  static Future<void> initialize(TheDatabase db) {
+  static Future<void> initialize(TheDatabase db, {bool preload = true}) {
     if (isInitialized) {
       throw StateError("PersistedSignalRegistry already initialized");
     }
     isInitialized = true;
     MobjRegistry.db = db;
     // tombstone: we initially tried to use type information to preload every object fully as a Mobj. This wasn't possible, because it would have required dependent types. So we ended up pre-loading generic types as, EG, List<Object?>, which then broke at runtime
-    return db.kVs.all().get().then((v) {
-      for (final KV kv in v) {
-        _preloadedMobjEncodings[kv.id] = kv.value;
-      }
-    });
+    if (preload) {
+      return db.kVs.all().get().then((v) {
+        for (final KV kv in v) {
+          _preloadedMobjEncodings[kv.id] = kv.value;
+        }
+      });
+    } else {
+      return Future.value();
+    }
   }
 
   static Mobj<T>? seek<T>(MobjID<T> id, TypeHelp<T> type) {
@@ -198,9 +202,24 @@ class MobjRegistry {
   }
 
   static void unregister(MobjID id) {
-    _loadedMobjs.remove(id);
+    loadedMobjs.remove(id);
     _loadingMobjs.remove(id);
     _preloadedMobjEncodings.remove(id);
+  }
+
+  // deletes all Mobjs regardless of refCount. Sometimes necessary because it's really important that the background thread completely forgets all cached values for its mobjs after handing control back to the app thread, and because we haven't really encountered a practical need for refCounts so aren't using them.
+  static void relinquishAll() {
+    for (final mobj in loadedMobjs.values) {
+      mobj.dispose();
+    }
+    loadedMobjs.clear();
+    for (final mobj in _loadingMobjs.values) {
+      mobj.then((m) {
+        m.dispose();
+      });
+    }
+    _loadingMobjs.clear();
+    _preloadedMobjEncodings.clear();
   }
 }
 
@@ -260,10 +279,10 @@ class Mobj<T> extends Signal<T?> {
     // bool autoDispose = false,
   }) : super(initial, debugLabel: debugLabel, autoDispose: false) {
     if (T == dynamic) {
-      print(
-          "WARNING: this may create a dynamic mobj, which will fail to cast correctly");
+      throw StateError(
+          "dynamic mobj type. It's very unlikely that this is what you intended, we're not sure how it could be. In most cases, this is an accident that will prevent you from being able to cast your Mobjs to the actual intended type.");
     }
-    MobjRegistry._loadedMobjs[_id] = this;
+    MobjRegistry.loadedMobjs[_id] = this;
     _blockInitialWriteBack = !initialWriteBack;
     if (initial != null) {
       _unloaded = false;
@@ -289,7 +308,7 @@ class Mobj<T> extends Signal<T?> {
   /// only returns non-null if the mobj has already been loaded from the db
   /// type is needed in case the object is in the _loadedMobjEncodings stage
   static Mobj<T>? seekAlreadyLoaded<T>(MobjID id, TypeHelp<T> type) {
-    final Mobj? loaded = MobjRegistry._loadedMobjs[id];
+    final Mobj? loaded = MobjRegistry.loadedMobjs[id];
     if (loaded != null) {
       return loaded as Mobj<T>;
     }
@@ -418,12 +437,14 @@ class Mobj<T> extends Signal<T?> {
   }) async {
     Mobj<T>? s = Mobj.seekAlreadyLoaded<T>(id, type);
     if (s != null) {
+      print("was non-null");
       return s;
     } else {
       final Future<Mobj<T>> r = (MobjRegistry.db.kVs.select()
             ..where((t) => t.id.equals(id)))
           .getSingleOrNull()
           .then((s) {
+        print("got kv for $id, $s");
         if (s != null) {
           MobjRegistry._loadingMobjs.remove(id);
           return Mobj<T>._createAndRegister(
@@ -461,10 +482,5 @@ class Mobj<T> extends Signal<T?> {
   /// this currently functions as deletion because it removes the original bonus refcount that root objects get for free. This is a slightly janky way to implement this and could eventually be replaced with something that does proper error reporting.
   void deleteRoot() {
     removeRef();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
   }
 }
