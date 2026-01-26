@@ -1225,11 +1225,13 @@ class NumeralDragActionRing extends StatefulWidget {
   final Offset position;
   final Signal<int?> dragEvents;
   final Listenable numeralDragActionRingBus;
+  final Offset visualPosition;
   const NumeralDragActionRing(
       {super.key,
       required this.position,
       required this.dragEvents,
-      required this.numeralDragActionRingBus});
+      required this.numeralDragActionRingBus,
+      required this.visualPosition});
 
   @override
   State<NumeralDragActionRing> createState() => NumeralDragActionRingState();
@@ -1446,8 +1448,8 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
   @override
   Widget build(BuildContext context) {
     return Positioned(
-        left: widget.position.dx,
-        top: widget.position.dy,
+        left: widget.visualPosition.dx,
+        top: widget.visualPosition.dy,
         child: AnimatedBuilder(
           animation:
               Listenable.merge([upDownAnimation, optionActivationAnimation]),
@@ -2441,6 +2443,7 @@ class _NumeralButtonState extends State<NumeralButton>
         final numeralDragActionRing = NumeralDragActionRing(
           key: UniqueKey(),
           position: p,
+          visualPosition: boxRect(widget.timerButtonKey! as GlobalKey)!.center,
           numeralDragActionRingBus: widget.otherDragActionRingStarted,
           dragEvents: dragEvents,
         );
