@@ -1505,6 +1505,7 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<Offset?> buttonScaleDialCenter = Signal(Offset.zero);
   late final Signal<double> buttonScaleDialAngle = Signal(0.0);
   async.Timer? buttonScaleDialLeavingTimer;
+  late final Signal<int> currentlyPressingKey = Signal(0);
   Rect editPopoverControls = Rect.zero;
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
@@ -1600,7 +1601,9 @@ class TimerScreenState extends State<TimerScreen>
 
     // selected timer controls
     createEffect(() {
-      editPopoverAnimation.towards(selectedTimer.value != null);
+      // doesn't pop up while numbers are being pressed, the user wont necessarily want it
+      editPopoverAnimation.towards(
+          selectedTimer.value != null && (currentlyPressingKey.value == 0));
       // [todo]I wanna make it so that there's a rect that tracks the position of the uh text so that if the text starts to overlap the popover controls they move over. Maybe this is better done in or following build.
       // if (selectedTimer.value != null) {
       //   final td = Mobj.seekAlreadyLoaded(selectedTimer.value!, TimerDataType());
@@ -1621,6 +1624,7 @@ class TimerScreenState extends State<TimerScreen>
     numPadBounds.dispose();
     selectedTimer.dispose();
     actionMode.dispose();
+    currentlyPressingKey.dispose();
     modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
     modeActivationPulse.close();
@@ -2572,21 +2576,24 @@ class TimersButtonState extends State<TimersButton>
         // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
         (child) => GestureDetector(
               onPanDown: (details) {
-                if (widget.onPanDown != null) {
-                  widget.onPanDown?.call(details.globalPosition);
-                  // shortFlash.forward(from: 0);
-                }
+                final tss = context.findAncestorStateOfType<TimerScreenState>();
+                tss?.currentlyPressingKey.value += 1;
+                widget.onPanDown?.call(details.globalPosition);
               },
               onPanUpdate: widget.onPanUpdate != null
                   ? (details) =>
                       widget.onPanUpdate?.call(details.globalPosition)
                   : null,
-              onPanCancel: widget.onPanEnd != null
-                  ? () => widget.onPanEnd?.call()
-                  : null,
-              onPanEnd: widget.onPanEnd != null
-                  ? (details) => widget.onPanEnd?.call()
-                  : null,
+              onPanCancel: () {
+                final tss = context.findAncestorStateOfType<TimerScreenState>();
+                tss?.currentlyPressingKey.value -= 1;
+                widget.onPanEnd?.call();
+              },
+              onPanEnd: (details) {
+                final tss = context.findAncestorStateOfType<TimerScreenState>();
+                tss?.currentlyPressingKey.value -= 1;
+                widget.onPanEnd?.call();
+              },
               child: child,
             ),
         // todo: this is wrong, we shouldn't be setting the size here, unfortunately there's a layout overflow behavior with rows that I don't understand
