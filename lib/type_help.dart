@@ -1,4 +1,5 @@
 import 'package:makos_timer/boring.dart';
+import 'package:makos_timer/main.dart';
 import 'package:makos_timer/platform_audio.dart';
 
 import 'mobj.dart';
@@ -36,6 +37,8 @@ class TimerData {
   /// if not pinned, the timer will be deleted next time a new timer is created, unless it's currently playing
   final bool pinned;
 
+  final TimerKind kind;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -54,6 +57,7 @@ class TimerData {
     this.ranTime = Duration.zero,
     this.isGoingOff = false,
     this.pinned = false,
+    this.kind = TimerKind.timer,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -68,6 +72,7 @@ class TimerData {
     Duration? ranTime,
     bool? isGoingOff,
     bool? pinned,
+    TimerKind? kind,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -78,6 +83,7 @@ class TimerData {
       ranTime: ranTime ?? this.ranTime,
       isGoingOff: isGoingOff ?? this.isGoingOff,
       pinned: pinned ?? this.pinned,
+      kind: kind ?? this.kind,
     );
   }
 
@@ -122,6 +128,7 @@ class TimerDataType extends TypeHelp<TimerData> {
             milliseconds:
                 (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
         isGoingOff: const BoolType().fromJson(json['isGoingOff']),
+        kind: TimerKind.values[const IntType().fromJson(json['kind'])],
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -139,6 +146,7 @@ class TimerDataType extends TypeHelp<TimerData> {
       'ranTime': const DoubleType()
           .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
+      'kind': const IntType().toJson(object.kind.index),
     };
   }
 }

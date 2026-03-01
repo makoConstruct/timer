@@ -194,7 +194,7 @@ Future<void> enableHighRefreshRate() async {
 }
 
 void main() async {
-  // await deleteDatabase();
+  await deleteDatabase();
   WidgetsFlutterBinding.ensureInitialized();
   await enableHighRefreshRate();
   await initializeDatabase();
@@ -286,9 +286,9 @@ class TimerHolm {
             if (!d.isRunning) {
               tt.completionTimer?.cancel();
               tt.completionTimer = null;
-            } else {
-              tt.completionTimer?.cancel();
+            } else if (d.kind != TimerKind.stopwatch) {
               final d2 = mobj.value!;
+              tt.completionTimer?.cancel();
               tt.completionTimer = async.Timer(
                   Duration(
                       milliseconds: (d2.duration -
@@ -444,6 +444,11 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   }
 }
 
+enum TimerKind {
+  timer,
+  stopwatch,
+}
+
 /// Timer widget, contrast with Timer row from the database orm
 class Timer extends StatefulWidget {
   final Mobj<TimerData> mobj;
@@ -542,8 +547,8 @@ class TimerState extends State<Timer>
 
   @override
   void initState() {
-    owningList = widget.owningList;
     super.initState();
+    owningList = widget.owningList;
     _appearanceAnimation = AnimationController(
         duration: const Duration(milliseconds: 180), vsync: this);
     if (widget.animateIn) {
@@ -776,66 +781,70 @@ class TimerState extends State<Timer>
           ),
         ));
 
-    final expandingHindCircle = AnimatedBuilder(
-        animation: _runningAnimation,
-        builder: (context, child) => Visibility(
-            visible: _runningAnimation.value != 0,
-            maintainSize: true,
-            maintainState: true,
-            maintainAnimation: true,
-            child: Transform.scale(
-              scale: 1,
-              child: Container(
-                  decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: mt.foreBackColor,
-              )),
-            )));
-
     final playIconRadius = 10;
     Offset playIconPos = Offset(clockRadius, clockRadius) +
         Offset.fromDirection(-pi / 4, clockRadius + 8 + playIconRadius);
 
+    final stopwatchPulse = d.transpired % 1;
+    final stopwatchPulseSize = 2 *
+        clockRadius *
+        lerp(
+            0.2,
+            0.92,
+            // Curves.easeOutCubic.transform(stopwatchPulse) *
+            stopwatchPulse *
+                (1 -
+                    Curves.easeOutCubic
+                        .transform(unlerpUnit(0.84, 1, stopwatchPulse))));
+
     Widget clockDial = nesting(
-      [
-        (next) => PinAnimation(
-            isPinned: whetherPinned,
-            child: Container(
-                padding: EdgeInsets.all(timerOutline),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: mt.foreBackColor,
+        [
+          (next) => PinAnimation(
+              isPinned: whetherPinned,
+              child: Container(
+                  padding: EdgeInsets.all(timerOutline),
+                  decoration: d.kind == TimerKind.stopwatch
+                      ? ShapeDecoration(
+                          shape: StarBorder.polygon(
+                            sides: 8,
+                            pointRounding: 0.5,
+                            rotation: 45 / 2,
+                          ),
+                          color: mt.foreBackColor,
+                        )
+                      : BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: mt.foreBackColor,
+                        ),
+                  child: next)),
+        ],
+        switch (d.kind) {
+          TimerKind.timer => Pie(
+              backgroundColor: backgroundColor(d.hue),
+              color: primaryColor(d.hue),
+              value: pieCompletion,
+              size: 2 * clockRadius),
+          TimerKind.stopwatch => Container(
+              width: 2 * clockRadius,
+              height: 2 * clockRadius,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: backgroundColor(d.hue),
+              ),
+              child: Center(
+                child: Container(
+                  width: stopwatchPulseSize,
+                  height: stopwatchPulseSize,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: primaryColor(d.hue),
+                  ),
                 ),
-                child: next)),
-        // play icon that displays at top right corner
-        // (next) => Stack(clipBehavior: Clip.none, children: [
-        //       next,
-        //       Positioned(
-        //           left: playIconPos.dx,
-        //           top: playIconPos.dy,
-        //           child: FractionalTranslation(
-        //               translation: Offset(-0.5, -0.5),
-        //               child: AnimatedBuilder(
-        //                   animation: _runningAnimation,
-        //                   builder: (context, child) {
-        //                     return Transform.scale(
-        //                         alignment: Alignment.centerLeft,
-        //                         scaleX: Curves.easeOutCubic
-        //                             .transform(_runningAnimation.value),
-        //                         child: child!);
-        //                   },
-        //                   child: Icon(Icons.play_arrow_rounded,
-        //                       size: playIconRadius * 2,
-        //                       color: theme.colorScheme.primary)))),
-        //     ]),
-      ],
-      Pie(
-          backgroundColor: backgroundColor(d.hue),
-          color: primaryColor(d.hue),
-          value: pieCompletion,
-          size: 2 * clockRadius),
-      // size: 90),
-    );
+              ),
+            )
+        }
+        // size: 90),
+        );
 
     // do a bounce animation to respond to slide to start interactions
     double bounceDistance =
@@ -1773,11 +1782,15 @@ class TimerScreenState extends State<TimerScreen>
         });
 
     // stopwatches probably shouldn't be timers, but need to go in the timer list
-    // final createStopwatchButton = TimersButton(
-    //     label: proportionedIcon(Icons.timer_rounded),
-    //     onPanDown: (_) {
-    //       createStopwatch();
-    //     });
+    final createStopwatchButton = TimersButton(
+        label: proportionedIcon(Icons.stop),
+        onPanDown: (_) {
+          addNewStopwatch();
+        },
+        onPanEnd: () {
+          // start the stopwatch (starting on end gives the user more precision)
+          pausePlaySelected();
+        });
 
     // todo: animate the play icon out when playing
     Widget playIcon(Icon otherIcon) {
@@ -2034,6 +2047,9 @@ class TimerScreenState extends State<TimerScreen>
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
           child: pinButton),
+      Positioned.fromRect(
+          rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
+          child: createStopwatchButton),
     ];
 
     final editPopoverControls = Watch((context) {
@@ -2266,7 +2282,7 @@ this will activate the new timer.
     bool selecting = selected ?? false;
 
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
-    final nt = Mobj<TimerData>.clobberCreate(
+    Mobj<TimerData>.clobberCreate(
       ntid,
       type: const TimerDataType(),
       initial: TimerData(
@@ -2286,19 +2302,52 @@ this will activate the new timer.
       _selectTimer(ntid);
     }
 
+    cleanOldTimers(except: ntid);
+
+    timersScroller.animateTo(0,
+        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
+  }
+
+  void addNewStopwatch() {
+    final ntid = UuidV4().generate();
+
+    // we leak this. By not deleting it, it will stay in the db and registry as a root object
+    final nt = Mobj<TimerData>.clobberCreate(
+      ntid,
+      type: const TimerDataType(),
+      initial: TimerData(
+        startTime: DateTime.now(),
+        runningState: TimerData.paused,
+        hue: nextRandomHue(),
+        selected: true,
+        digits: const [],
+        ranTime: Duration.zero,
+        isGoingOff: false,
+        kind: TimerKind.stopwatch,
+      ),
+    );
+    Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value = true;
+
+    timerListMobj.value = peekTimers().toList()..add(ntid);
+    _selectTimer(ntid);
+
+    cleanOldTimers(except: ntid);
+
+    timersScroller.animateTo(0,
+        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
+  }
+
+  void cleanOldTimers({MobjID<TimerData>? except}) {
     // remove (previous) unpinned nonplaying timers
     final curTimers = peekTimers();
     for (final tid in curTimers) {
-      if (tid == ntid) continue;
+      if (tid == except) continue;
       final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
       if (!t.peek()!.pinned && !t.peek()!.isRunning) {
         // delay slightly to make it clear what's happened (might not be necessary if we introduce deletion animations)
         deleteTimer(tid, pushAside: true);
       }
     }
-
-    timersScroller.animateTo(0,
-        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
   }
 
   void _selectTimer(MobjID<TimerData>? timerID) {
