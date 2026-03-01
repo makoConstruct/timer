@@ -194,7 +194,7 @@ Future<void> enableHighRefreshRate() async {
 }
 
 void main() async {
-  await deleteDatabase();
+  // await deleteDatabase();
   WidgetsFlutterBinding.ensureInitialized();
   await enableHighRefreshRate();
   await initializeDatabase();
@@ -687,99 +687,62 @@ class TimerState extends State<Timer>
       },
     );
 
+    Widget timeText(List<int> digits) {
+      // adds a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
+      return Stack(
+        children: [
+          Opacity(
+              opacity: 0,
+              child: Text(boring.formatTime(withDigitsReplacedWith(digits, 0)),
+                  overflow: TextOverflow.clip)),
+          Text(boring.formatTime(digits), overflow: TextOverflow.clip),
+        ],
+      );
+    }
+
+    var animatedTextPartForTimer = Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.centerLeft,
+      children: [
+        AnimatedBuilder(
+          animation: _runningAnimation,
+          builder: (context, child) {
+            final v = Curves.easeInCubic.transform(_runningAnimation.value);
+            return FractionalTranslation(
+                translation: Offset(0, lerp(-mover, mover, v)),
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Transform.scale(
+                          alignment: Alignment.bottomLeft,
+                          scale: lerp(0.6, 1, v),
+                          child: timeText(timeDigits)),
+                      Stack(clipBehavior: Clip.none, children: [
+                        Transform.scale(
+                            alignment: Alignment.topLeft,
+                            scale: lerp(1, 0.6, v),
+                            child: Row(
+                              children: [
+                                Text(boring.formatTime(durationDigits),
+                                    overflow: TextOverflow.clip),
+                              ],
+                            )),
+                        selectionUnderline,
+                      ]),
+                    ]));
+          },
+        ),
+      ],
+    );
+
     final Widget textPart = DefaultTextStyle.merge(
         style: TextStyle(color: theme.colorScheme.onSurface),
-        child: ConstrainedBox(
-          // for some reason we get overflow issues when we try to enlarge so that the play icon will be at top
-          // constraints: BoxConstraints(maxHeight: 2 * clockRadius),
-          constraints: BoxConstraints(),
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.centerLeft,
-            children: [
-              // play icon that displays under the playing numbers
-              // Positioned(
-              //     left: 0,
-              //     top: 0,
-              //     right: 0,
-              //     bottom: 0,
-              //     child: FractionallySizedBox(
-              //         widthFactor: 1.0,
-              //         heightFactor: 0.6,
-              //         alignment: Alignment.topLeft,
-              //         child: AnimatedBuilder(
-              //           animation: _runningAnimation,
-              //           builder: (context, child) => Transform.scale(
-              //             alignment: Alignment.centerLeft,
-              //             scaleY: _runningAnimation.value,
-              //             child: ScalingAspectRatio(
-              //               alignment: Alignment.centerLeft,
-              //               child: fittedPlayIcon(mt.foreBackColor),
-              //             ),
-              //           ),
-              //         ))),
-              AnimatedBuilder(
-                animation: _runningAnimation,
-                builder: (context, child) {
-                  final v =
-                      Curves.easeInCubic.transform(_runningAnimation.value);
-                  return FractionalTranslation(
-                      translation: Offset(0, lerp(-mover, mover, v)),
-                      child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            // adding a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
-                            Stack(children: [
-                              Opacity(
-                                  opacity: 0,
-                                  child: Text(
-                                      boring.formatTime(withDigitsReplacedWith(
-                                          timeDigits, 0)),
-                                      overflow: TextOverflow.clip)),
-                              Transform.scale(
-                                  alignment: Alignment.bottomLeft,
-                                  scale: lerp(0.6, 1, v),
-                                  child: Text(boring.formatTime(timeDigits),
-                                      overflow: TextOverflow.clip))
-                            ]),
-                            Stack(clipBehavior: Clip.none, children: [
-                              Transform.scale(
-                                  alignment: Alignment.topLeft,
-                                  scale: lerp(1, 0.6, v),
-                                  child: Row(
-                                    children: [
-                                      Text(boring.formatTime(durationDigits),
-                                          overflow: TextOverflow.clip),
-                                      // SizedBox(
-                                      //     width: 0,
-                                      //     child: AnimatedBuilder(
-                                      //         animation: _runningAnimation,
-                                      //         builder: (context, child) =>
-                                      //             // I wanted a FuzzyLinearClip here but ShaderMask was throwing an error about offset being nan.
-                                      //             Opacity(
-                                      //               opacity: Curves.easeInCubic
-                                      //                   .transform(
-                                      //                       _runningAnimation
-                                      //                           .value),
-                                      //               child: Icon(
-                                      //                   Icons
-                                      //                       .play_arrow_rounded,
-                                      //                   size: 18,
-                                      //                   color: theme.colorScheme
-                                      //                       .primary),
-                                      //             )))
-                                    ],
-                                  )),
-                              selectionUnderline,
-                            ]),
-                          ]));
-                },
-              ),
-            ],
-          ),
-        ));
+        child: switch (d.kind) {
+          TimerKind.timer => animatedTextPartForTimer,
+          TimerKind.stopwatch => timeText(timeDigits)
+        });
 
     final playIconRadius = 10;
     Offset playIconPos = Offset(clockRadius, clockRadius) +
@@ -797,26 +760,30 @@ class TimerState extends State<Timer>
                     Curves.easeOutCubic
                         .transform(unlerpUnit(0.84, 1, stopwatchPulse))));
 
+    Decoration containerShape(Color color) => d.kind == TimerKind.stopwatch
+        ? ShapeDecoration(
+            shape: StarBorder.polygon(
+              sides: 8,
+              pointRounding: 0.5,
+              rotation: 45 / 2,
+            ),
+            color: color,
+          )
+        : BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+          );
+
     Widget clockDial = nesting(
         [
-          (next) => PinAnimation(
-              isPinned: whetherPinned,
-              child: Container(
-                  padding: EdgeInsets.all(timerOutline),
-                  decoration: d.kind == TimerKind.stopwatch
-                      ? ShapeDecoration(
-                          shape: StarBorder.polygon(
-                            sides: 8,
-                            pointRounding: 0.5,
-                            rotation: 45 / 2,
-                          ),
-                          color: mt.foreBackColor,
-                        )
-                      : BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: mt.foreBackColor,
-                        ),
-                  child: next)),
+          (next) {
+            return PinAnimation(
+                isPinned: whetherPinned,
+                child: Container(
+                    padding: EdgeInsets.all(timerOutline),
+                    decoration: containerShape(mt.foreBackColor),
+                    child: next));
+          },
         ],
         switch (d.kind) {
           TimerKind.timer => Pie(
@@ -827,17 +794,15 @@ class TimerState extends State<Timer>
           TimerKind.stopwatch => Container(
               width: 2 * clockRadius,
               height: 2 * clockRadius,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: backgroundColor(d.hue),
+              decoration: containerShape(
+                backgroundColor(d.hue),
               ),
               child: Center(
                 child: Container(
                   width: stopwatchPulseSize,
                   height: stopwatchPulseSize,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: primaryColor(d.hue),
+                  decoration: containerShape(
+                    primaryColor(d.hue),
                   ),
                 ),
               ),
