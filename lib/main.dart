@@ -222,96 +222,97 @@ class TimerHolm {
   late JukeBox jukeBox;
   final Mobj<List<MobjID<TimerData>>> list;
   Map<MobjID<TimerData>, TimerTrack> tracking = {};
-  late Signal<bool> enabled;
 
-  /// when disabled, it behaves as if there are no timers in the list
-  late final Computed<List<MobjID<TimerData>>> currentList;
-  // late EffectCleanup reaction;
   late EffectCleanup reaction;
   TimerHolm({required this.list, required this.jukeBox}) {
-    enabled = signal(true);
-    currentList = computed(() => enabled.value ? list.value ?? [] : []);
     reaction = effect(() {
       Map<MobjID<TimerData>, TimerTrack> newTracking = {};
-      for (final tid in currentList.value) {
-        if (!tracking.containsKey(tid)) {
-          bool unsubscribedPreFuture = false;
-          final tt = TimerTrack()
-            ..subscription = () {
-              unsubscribedPreFuture = true;
-            };
-          Mobj.fetch(tid, type: const TimerDataType()).then((mobj) {
-            if (unsubscribedPreFuture) {
-              // mobj.reduceRef
-              tt.subscription = null;
-              return;
-            }
-            tt.mobj = mobj;
-            tt.subscription = enlivenTimer(tt, mobj, jukeBox);
-          });
-          newTracking[tid] = tt;
-        } else {
-          newTracking[tid] = tracking[tid]!;
-        }
-      }
-      for (final tt in tracking.entries) {
-        if (!newTracking.containsKey(tt.key)) {
-          tt.value.subscription?.call();
-          tt.value.subscription = null;
-          tt.value.completionTimer?.cancel();
-          tt.value.completionTimer = null;
-          tt.value.mobj = null;
-        }
+
+      for (final tid in list.value!) {
+        considerTracking(tid);
       }
       tracking = newTracking;
     });
+  }
+
+  void considerTracking(MobjID tid) {
+    if (!tracking.containsKey(tid)) {
+      bool unsubscribedPreFuture = false;
+      final tt = TimerTrack()
+        ..subscription = () {
+          unsubscribedPreFuture = true;
+        };
+      Mobj.fetch(tid, type: const TimerDataType()).then((mobj) {
+        if (unsubscribedPreFuture) {
+          // mobj.reduceRef
+          tt.subscription = null;
+          return;
+        }
+        tt.mobj = mobj;
+        tt.subscription = enlivenTimer(tt, mobj, jukeBox);
+      });
+      tracking[tid] = tt;
+    } else {
+      tracking[tid] = tracking[tid]!;
+    }
+  }
+
+  void stopTracking(MobjID id) {
+    final tt = tracking[id];
+    if (tt == null) {
+      return;
+    }
+    tt.completionTimer?.cancel();
+    tt.completionTimer = null;
+    tt.subscription?.call();
+    tt.subscription = null;
+    tt.mobj = null;
+    tracking.remove(id);
   }
 
   /// how each timer is subscribed to and responded to
   void Function() enlivenTimer(
       TimerTrack tt, Mobj<TimerData> mobj, JukeBox jukeBox) {
     // once null always null
-    if (mobj.peek() != null) {
-      TimerData? prev;
-      return effect(() {
-        final TimerData? d = mobj.value;
-        if (d == null) {
-          // mobj.reduceRef();
-          // this is never actually called, the list change triggers this listener to be unhooked
-          tt.completionTimer?.cancel();
-          tt.completionTimer = null;
-        } else {
-          bool? prevRunning = prev?.isRunning;
-          if (prevRunning != d.isRunning) {
-            if (!d.isRunning) {
-              tt.completionTimer?.cancel();
-              tt.completionTimer = null;
-            } else if (d.kind != TimerKind.stopwatch) {
-              final d2 = mobj.value!;
-              tt.completionTimer?.cancel();
-              tt.completionTimer = async.Timer(
-                  Duration(
-                      milliseconds: (d2.duration -
-                              DateTime.now().difference(d2.startTime))
-                          .inMilliseconds
-                          .ceil()), () {
-                tt.completionTimer = null;
-                jukeBox.playAudio(Mobj.getAlreadyLoaded(
-                        selectedAudioID, const AudioInfoType())
-                    .value!);
-                mobj.value = mobj.value!.withChanges(
-                  runningState: TimerData.completed,
-                  // isGoingOff: true,
-                );
-              });
-            }
-          }
-        }
-        prev = d;
-      });
-    } else {
+    if (mobj.peek() == null) {
       return () {};
     }
+    TimerData? prev;
+    return effect(() {
+      final TimerData? d = mobj.value;
+      if (d == null) {
+        // mobj.reduceRef();
+        stopTracking(mobj.id);
+        prev?.children.forEach(stopTracking);
+      } else {
+        // I'm unsure as to whether the children even need to be registered here. Child timers are kind of not autonomous?
+        if (prev?.isRunning != d.isRunning) {
+          if (!d.isRunning) {
+            tt.completionTimer?.cancel();
+            tt.completionTimer = null;
+          } else if (d.kind != TimerKind.stopwatch) {
+            final d2 = mobj.value!;
+            tt.completionTimer?.cancel();
+            tt.completionTimer = async.Timer(
+                Duration(
+                    milliseconds:
+                        (d2.duration - DateTime.now().difference(d2.startTime))
+                            .inMilliseconds
+                            .ceil()), () {
+              tt.completionTimer = null;
+              jukeBox.playAudio(
+                  Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
+                      .value!);
+              mobj.value = mobj.value!.withChanges(
+                runningState: TimerData.completed,
+                // isGoingOff: true,
+              );
+            });
+          }
+        }
+      }
+      prev = d;
+    });
   }
 }
 
@@ -447,6 +448,9 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
 enum TimerKind {
   timer,
   stopwatch,
+  // loop,
+  // series,
+  // parallel,
 }
 
 /// Timer widget, contrast with Timer row from the database orm

@@ -39,6 +39,9 @@ class TimerData {
 
   final TimerKind kind;
 
+  /// list of child timer IDs
+  final List<String> children;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -58,6 +61,7 @@ class TimerData {
     this.isGoingOff = false,
     this.pinned = false,
     this.kind = TimerKind.timer,
+    this.children = const [],
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -73,6 +77,7 @@ class TimerData {
     bool? isGoingOff,
     bool? pinned,
     TimerKind? kind,
+    List<String>? children,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -84,6 +89,7 @@ class TimerData {
       isGoingOff: isGoingOff ?? this.isGoingOff,
       pinned: pinned ?? this.pinned,
       kind: kind ?? this.kind,
+      children: children ?? this.children,
     );
   }
 
@@ -129,6 +135,7 @@ class TimerDataType extends TypeHelp<TimerData> {
                 (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
         isGoingOff: const BoolType().fromJson(json['isGoingOff']),
         kind: TimerKind.values[const IntType().fromJson(json['kind'])],
+        children: ListType(const StringType()).fromJson(json['children'] ?? []),
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -147,6 +154,7 @@ class TimerDataType extends TypeHelp<TimerData> {
           .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
       'kind': const IntType().toJson(object.kind.index),
+      'children': ListType(const StringType()).toJson(object.children),
     };
   }
 }
@@ -161,6 +169,7 @@ TimerData cloneTimerDataWithChanges(
   Duration? ranTime,
   bool? isGoingOff,
   bool? pinned,
+  List<String>? children,
 }) {
   return TimerData(
     startTime: startTime ?? old.startTime,
@@ -171,6 +180,7 @@ TimerData cloneTimerDataWithChanges(
     ranTime: ranTime ?? old.ranTime,
     isGoingOff: isGoingOff ?? old.isGoingOff,
     pinned: pinned ?? old.pinned,
+    children: children ?? old.children,
   );
 }
 

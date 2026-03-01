@@ -2051,6 +2051,23 @@ class _CircularRevealRouteTransitionState
   }
 }
 
+/// calls removed first
+void diffListsets<T>(List<T> earlier, List<T> newer,
+    {void Function(T item)? added, void Function(T item)? removed}) {
+  final earlierSet = earlier.toSet();
+  final newerSet = newer.toSet();
+  for (final et in earlier) {
+    if (!newerSet.contains(et)) {
+      removed?.call(et);
+    }
+  }
+  for (final nt in newer) {
+    if (!earlierSet.contains(nt)) {
+      added?.call(nt);
+    }
+  }
+}
+
 /// A widget that maintains aspect ratio using visual scaling instead of layout constraints.
 /// Unlike AspectRatio which constrains the child during layout, this widget:
 /// 1. Lays out the child to determine its natural size
