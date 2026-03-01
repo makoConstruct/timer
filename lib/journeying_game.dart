@@ -132,3 +132,15 @@ class GenerationThingType<GC extends GenerationContext> {
     required this.generate,
   }) : hashCode = name.hashCode;
 }
+
+// we don't have to ensure nonrepetition but if we do the below thoughts are relevant..
+
+//pondering nonrepeating randomization. If we want to guarantee each tile is distinct from the last, but also random, but we have a limited number of tile variants (say, 9), how can this be done.
+// one way is for each tile to have a set of things it can be, and for it to look at its neighbors, and pick from the exclusion of the union of its two lower neighbors' sets.
+// as a safety, though this would create a not entirely random pattern, this pattern would rarely show through; we could have the sets always include x % n_variants, and y % n_variants, and exclude x - 1 and y + 1 % n_variants.
+// I think you might be wanting to use a LCG, which is something that appears random but isn't, has periodic patterns.
+// where lcg(x,y) is guaranteed to differ from lcg(x+1,y) and lcg(x,y+1). It lacks full randomness, but usually wont be visible. The larger n_variants, the less visible its influence becomes.
+// I'm pretty sure you can make a lcg 2d by having y = x/span, where span is prime or something, in such a way that ensures that lcg(span-1, y) != lcg(0, y), and the same for the top and bottom edges as well?... maybe not. In which case oops.
+// so to conclude, base_set(x,y) = random_set(hash(x,y), floor(n_variants*0.45)) + lcg(x,y) - lcg(x+1,y) - lcg(x,y+1)
+// we then choose our final tile variant as choose(base_set(x,y) - base_set(x-1,y) - base_set(x,y-1))
+// able to guarantee that this will at least contain lcg(x,y).

@@ -544,6 +544,16 @@ double clampUnit(double t) {
   }
 }
 
+double clampSignedUnit(double t) {
+  if (t < -1) {
+    return -1;
+  } else if (t > 1) {
+    return 1;
+  } else {
+    return t;
+  }
+}
+
 double clampDouble(double t, double min, double max) {
   if (t < min) {
     return min;

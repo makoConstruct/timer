@@ -47,8 +47,23 @@ class CrankGameTheme {
     tooSlowColor: const Color(0xFF5bcdf5),
   );
 
+  static CrankGameTheme lightMono = CrankGameTheme(
+    tooSlowColor: const Color.fromARGB(255, 251, 251, 251),
+    withinBoundsColor: const Color(0xff17e351),
+    wonColor: darkenColor(Colors.amber, 0.1),
+    tooFastColor: const Color.fromARGB(255, 251, 251, 251),
+  );
+  static CrankGameTheme darkMono = CrankGameTheme(
+    tooFastColor: const Color.fromARGB(255, 227, 227, 227),
+    withinBoundsColor: const Color(0xff13bb3a),
+    wonColor: Colors.amber,
+    tooSlowColor: const Color.fromARGB(255, 227, 227, 227),
+  );
+
   static CrankGameTheme fromContext(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark ? dark : light;
+    return Theme.of(context).brightness == Brightness.dark
+        ? darkMono
+        : lightMono;
   }
 }
 
@@ -56,10 +71,10 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     with SingleTickerProviderStateMixin {
   // Game parameters
   double targetSpeed = 1.0; // rotations per second
-  late double nextTargetSpeed = _nextTargetSpeed(); // rotations per second
+  late double nextTargetSpeed; // rotations per second
   double windowSeconds = 0.5; // averaging window
   double errorMargin =
-      0.1; // allowed deviation from target (in rotations per second)
+      0.10; // allowed deviation from target (as percentage, 0.01 to 0.20)
   double durationToWin = 5.0; // seconds of consistent cranking to win
   double punishmentRate =
       1.3; // score lost per second when outside error bounds
@@ -102,11 +117,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
 
   @override
   void initState() {
-    // Assert that the screen is vertical (portrait orientation)
-    final mq = MediaQuery.of(context);
-    assert(mq.size.height > mq.size.width,
-        "CrankGameScreen layout assumes vertical (portrait) screen orientation, it will scream otherwise. You'll need to add a more sophisticated layout approach (and then remove this assert) if you want it to work for horizontal");
     super.initState();
+    nextTargetSpeed = _nextTargetSpeed();
     _winMessageIndexMobj =
         Mobj.getAlreadyLoaded(crankGameWinMessageIndexID, const IntType());
     _tickController = AnimationController(
@@ -146,7 +158,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     // Update progress based on whether we're within error bounds
     if (_isDragging) {
       final speedError = (_currentSpeed - targetSpeed).abs();
-      if (speedError <= errorMargin) {
+      final actualErrorMargin = errorMargin * targetSpeed;
+      if (speedError <= actualErrorMargin) {
         // Within bounds - increase progress
         _progress += dt / durationToWin;
         if (_progress >= 1.0 && !_hasWon) {
@@ -240,6 +253,10 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     final screenWidth = mq.size.width;
     final screenHeight = mq.size.height;
 
+    // Assert that the screen is vertical (portrait orientation)
+    assert(screenHeight > screenWidth,
+        "CrankGameScreen layout assumes vertical (portrait) screen orientation, it will scream otherwise. You'll need to add a more sophisticated layout approach (and then remove this assert) if you want it to work for horizontal");
+
     final outerDiameter = screenWidth * 0.8;
     final innerDiameter = screenWidth * 0.1;
     final dialCenterX = screenWidth * 0.5;
@@ -307,13 +324,54 @@ class _CrankGameScreenState extends State<CrankGameScreen>
             right: 24,
             top: 24,
             bottom: barBottom,
-            child: _ProgressBar(
-              thickness: barThickness,
-              progress: _progress,
-              isWithinBounds: _isDragging &&
-                  (_currentSpeed - targetSpeed).abs() <= errorMargin,
-              isTooSlow: _currentSpeed < targetSpeed - errorMargin,
-              hasWon: _hasWon,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _SpeedArrow(
+                currentSpeed: _currentSpeed,
+                targetSpeed: targetSpeed,
+                errorMargin: errorMargin * targetSpeed,
+                crankGameTheme: crankGameTheme,
+                size: 30,
+              ),
+              SizedBox(height: 14),
+              Flexible(
+                flex: 1,
+                child: _ProgressBar(
+                  thickness: barThickness,
+                  progress: _progress,
+                  isWithinBounds: _isDragging &&
+                      (_currentSpeed - targetSpeed).abs() <=
+                          (errorMargin * targetSpeed),
+                  isTooSlow:
+                      _currentSpeed < targetSpeed - (errorMargin * targetSpeed),
+                  hasWon: _hasWon,
+                ),
+              )
+            ]),
+          ),
+
+          // Crank dial
+          Positioned(
+            left: dialCenterX - outerDiameter / 2,
+            bottom: dialCenterY - outerDiameter / 2,
+            child: GestureDetector(
+              onPanStart: _onPanStart,
+              onPanUpdate: (details) =>
+                  _onPanUpdate(details, dialCenter, outerDiameter / 2),
+              onPanEnd: _onPanEnd,
+              child: SizedBox(
+                width: outerDiameter,
+                height: outerDiameter,
+                child: CustomPaint(
+                  painter: _CrankDialPainter(
+                    angle: _crankAngle,
+                    outerDiameter: outerDiameter,
+                    innerDiameter: innerDiameter,
+                    backgroundColor: theme.colorScheme.surfaceContainerLow,
+                    surfaceColor: theme.colorScheme.surfaceContainerHighest,
+                    isDragging: _isDragging,
+                  ),
+                ),
+              ),
             ),
           ),
 
@@ -348,26 +406,12 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                   ),
                 ),
                 const SizedBox(height: 8),
+                // Speed indicator arrow
                 Text(
                   _hasWon
                       ? 'You won!'
-                      : _isDragging
-                          ? (_currentSpeed - targetSpeed).abs() / targetSpeed <=
-                                  errorMargin
-                              ? 'Good!'
-                              : _currentSpeed < targetSpeed * (1 - errorMargin)
-                                  ? 'Faster!'
-                                  : 'Slower!'
-                          : "Please simply rotate the dial at ${targetSpeed.toStringAsFixed(2)}rps for five seconds",
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: !_isDragging
-                        ? theme.colorScheme.onSurfaceVariant
-                        : (_currentSpeed - targetSpeed).abs() <= errorMargin
-                            ? crankGameTheme.withinBoundsColor
-                            : _currentSpeed < targetSpeed - errorMargin
-                                ? crankGameTheme.tooSlowColor
-                                : crankGameTheme.tooFastColor,
-                  ),
+                      : "Please simply rotate the dial at ${targetSpeed.toStringAsFixed(2)}rps for five seconds",
+                  style: theme.textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
                 RotatedBox(
@@ -383,7 +427,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                         ),
                       ),
                       Text(
-                        '${errorMargin.toStringAsFixed(2)}s',
+                        '${(errorMargin * 100).toStringAsFixed(1)}%',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -395,31 +439,6 @@ class _CrankGameScreenState extends State<CrankGameScreen>
             ),
           ),
 
-          // Crank dial
-          Positioned(
-            left: dialCenterX - outerDiameter / 2,
-            bottom: dialCenterY - outerDiameter / 2,
-            child: GestureDetector(
-              onPanStart: _onPanStart,
-              onPanUpdate: (details) =>
-                  _onPanUpdate(details, dialCenter, outerDiameter / 2),
-              onPanEnd: _onPanEnd,
-              child: SizedBox(
-                width: outerDiameter,
-                height: outerDiameter,
-                child: CustomPaint(
-                  painter: _CrankDialPainter(
-                    angle: _crankAngle,
-                    outerDiameter: outerDiameter,
-                    innerDiameter: innerDiameter,
-                    backgroundColor: theme.colorScheme.surfaceContainerLow,
-                    surfaceColor: theme.colorScheme.surfaceContainerHighest,
-                    isDragging: _isDragging,
-                  ),
-                ),
-              ),
-            ),
-          ),
           // Win overlay
           if (_hasWon)
             Positioned.fill(
@@ -598,12 +617,132 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
+class _SpeedArrow extends StatelessWidget {
+  final double currentSpeed;
+  final double targetSpeed;
+  final double errorMargin;
+  final CrankGameTheme crankGameTheme;
+  final double size;
+
+  const _SpeedArrow({
+    required this.currentSpeed,
+    required this.targetSpeed,
+    required this.errorMargin,
+    required this.crankGameTheme,
+    this.size = 60,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final speedDifference = currentSpeed - targetSpeed;
+    final difficultyMargin = errorMargin * 3;
+
+    // Calculate t value for lerp: -1 (too slow) to 1 (too fast)
+    final t = clampSignedUnit(speedDifference / difficultyMargin);
+
+    // Determine color based on speed
+    Color arrowColor;
+    if (speedDifference.abs() <= errorMargin) {
+      arrowColor = crankGameTheme.withinBoundsColor;
+    } else if (speedDifference < 0) {
+      arrowColor = crankGameTheme.tooSlowColor;
+    } else {
+      arrowColor = crankGameTheme.tooFastColor;
+    }
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _ArrowPainter(
+          t: t, // -1 (up) to 1 (down)
+          color: arrowColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _ArrowPainter extends CustomPainter {
+  final double t; // -1 (pointing up) to 1 (pointing down)
+  final Color color;
+
+  _ArrowPainter({
+    required this.t,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final width = size.width;
+    final thickness = width * 0.3;
+
+    // Calculate arrow head shape based on t value
+    // When t = -1 (too slow): arrow points up (sharp top)
+    // When t = 1 (too fast): arrow points down (sharp bottom)
+    // When t = 0 (perfect): balanced arrow
+
+    // calculate the offset by which to displace the points up and down so that the lines being formed are always `thickness` wide.
+    final double heightCrossSection;
+    {
+      final a = lerp(0, pi / 4, t.abs());
+      final na = thickness * cos(a);
+      final no = thickness * sin(a);
+      final fo = no / cos(a) * sin(a);
+      heightCrossSection = na + fo;
+    }
+
+    final path = Path();
+
+    final leftness = -width / 2;
+    final rightness = width / 2;
+    final centerness = -width / 2 / 2 * t;
+    final outness = -centerness;
+    final topness = -heightCrossSection / 2;
+    final bottomness = heightCrossSection / 2;
+
+    moveTo(Offset offset) {
+      final p = center + offset;
+      path.moveTo(p.dx, p.dy);
+    }
+
+    lineTo(Offset offset) {
+      final p = center + offset;
+      path.lineTo(p.dx, p.dy);
+    }
+
+    final tip = Offset(0, centerness + topness);
+    moveTo(tip);
+    lineTo(Offset(leftness, outness + topness));
+    lineTo(Offset(leftness, outness + bottomness));
+    lineTo(Offset(0, centerness + bottomness));
+    lineTo(Offset(rightness, outness + bottomness));
+    lineTo(Offset(rightness, outness + topness));
+    lineTo(tip);
+
+    // Close path back to top point
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_ArrowPainter oldDelegate) {
+    return t != oldDelegate.t || color != oldDelegate.color;
+  }
+}
+
 class _DifficultySlider extends StatelessWidget {
   final double value;
   final ValueChanged<double> onChanged;
   final double thickness;
-  static const double minError = 0.05;
-  static const double maxError = 0.24;
+  static const double minError = 0.01; // 1%
+  static const double maxError = 0.20; // 20%
 
   const _DifficultySlider({
     required this.value,

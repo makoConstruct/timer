@@ -1768,6 +1768,13 @@ class TimerScreenState extends State<TimerScreen>
           addNewTimer(selected: true);
         });
 
+    // stopwatches probably shouldn't be timers, but need to go in the timer list
+    // final createStopwatchButton = TimersButton(
+    //     label: proportionedIcon(Icons.timer_rounded),
+    //     onPanDown: (_) {
+    //       createStopwatch();
+    //     });
+
     // todo: animate the play icon out when playing
     Widget playIcon(Icon otherIcon) {
       // todo: measure the width of the icons to make this precise
