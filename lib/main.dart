@@ -147,6 +147,10 @@ Future<void> initializeDatabase() async {
         type: const AudioInfoType(),
         initial: () => PlatformAudio.assetSounds[0],
         debugLabel: "selected audio"),
+    Mobj.getOrCreate(hasSelectedAudioID,
+        type: const BoolType(),
+        initial: () => false,
+        debugLabel: "has selected audio"),
     Mobj.getOrCreate(timeFirstUsedApp,
         type: const StringType(),
         initial: () => '',
@@ -2126,6 +2130,12 @@ class TimerScreenState extends State<TimerScreen>
       );
     });
 
+    final hintColor = darkenColor(mt.lowestBackColor,
+        0.4 * (theme.brightness == Brightness.dark ? -1 : 1));
+    final hintTextStyle = theme.textTheme.bodySmall!.copyWith(color: hintColor);
+
+    // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
+
     final dahMargin = thumbSpan * 0.2;
     final userDragActionHint = Positioned(
       left: dahMargin,
@@ -2142,11 +2152,7 @@ class TimerScreenState extends State<TimerScreen>
               opacity: Curves.easeInOutCubic
                   .transform(userDragActionHintReveal.scalarValue),
               child: Text(
-                  style: theme.textTheme.bodySmall!.copyWith(
-                      color: darkenColor(
-                          mt.lowestBackColor,
-                          0.4 *
-                              (theme.brightness == Brightness.dark ? -1 : 1))),
+                  style: hintTextStyle,
                   """when you press a number, you can drag up or to the $dir.
 this will activate the new timer.
 (dragging $dir adds a pair of zeroes to it before activating it.)"""));
@@ -3308,12 +3314,24 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
   final List<AudioInfo> _assetSounds = PlatformAudio.assetSounds;
+  late Function() listeningAudioEffectChange;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     _loadSounds();
+    listeningAudioEffectChange =
+        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
+            .subscribe((event) {
+      Mobj.getAlreadyLoaded(hasSelectedAudioID, const BoolType()).value = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    listeningAudioEffectChange();
+    super.dispose();
   }
 
   Future<void> _loadSounds() async {
