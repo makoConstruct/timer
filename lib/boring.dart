@@ -2244,7 +2244,7 @@ class InkButton extends StatefulWidget {
     this.onTap,
     this.wellDuration = const Duration(milliseconds: 290),
     this.fadeDuration = const Duration(milliseconds: 170),
-    this.fadeDelay = const Duration(milliseconds: 90),
+    this.fadeDelay = const Duration(milliseconds: 50),
     this.fuzzyEdgeWidth = 12.0,
     this.backgroundColor,
     this.inkColor,
@@ -2275,11 +2275,12 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
         },
         bloomController: AnimationController(
           vsync: this,
-          duration: const Duration(milliseconds: 470),
+          duration:
+              widget.wellDuration + widget.fadeDelay + widget.fadeDuration,
         )..forward(),
         fadeController: AnimationController(
           vsync: this,
-          duration: const Duration(milliseconds: 280),
+          duration: widget.fadeDuration,
         ),
       ));
     });
@@ -2368,10 +2369,18 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    widget.fadeController.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
+    void considerFinishing() {
+      if (widget.fadeController.status == AnimationStatus.completed &&
+          widget.bloomController.status == AnimationStatus.completed) {
         widget.onFinished();
       }
+    }
+
+    widget.fadeController.addStatusListener((_) {
+      considerFinishing();
+    });
+    widget.bloomController.addStatusListener((_) {
+      considerFinishing();
     });
   }
 
