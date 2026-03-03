@@ -2228,6 +2228,7 @@ class RenderScalingAspectRatio extends RenderProxyBox {
 /// fades out on tap confirm. Behaves like a proper button (cancels on drag out, etc).
 /// todo: remove the automatic downfade at the end of the initial well animation, supercede with one that happens at max(animation end, finger release)
 class InkButton extends StatefulWidget {
+  final Color? backgroundColor;
   final Widget child;
   final VoidCallback? onTap;
   final Duration wellDuration;
@@ -2245,6 +2246,7 @@ class InkButton extends StatefulWidget {
     this.fadeDuration = const Duration(milliseconds: 170),
     this.fadeDelay = const Duration(milliseconds: 90),
     this.fuzzyEdgeWidth = 12.0,
+    this.backgroundColor,
     this.inkColor,
     this.borderRadius,
   });
@@ -2254,80 +2256,46 @@ class InkButton extends StatefulWidget {
 }
 
 class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
-  RelAlignment? _touchPoint;
-  late AnimationController _wellController = _newWellController();
-  // tracks ink spots that are fading out after confirm
-  final List<_FadingInk> _fadingInks = [];
-  AnimationController _newWellController() => AnimationController(
-        vsync: this,
-        duration: widget.wellDuration + widget.fadeDelay + widget.fadeDuration,
-      );
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
-  void didUpdateWidget(InkButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.wellDuration != oldWidget.wellDuration) {
-      _wellController.duration = widget.wellDuration;
-    }
-  }
-
-  @override
-  void dispose() {
-    _wellController.dispose();
-    for (final ink in _fadingInks) {
-      ink.controller.dispose();
-    }
-    super.dispose();
-  }
+  final List<InkWelling> _wells = [];
 
   void _handleTapDown(TapDownDetails details) {
-    _touchPoint = RelAlignment.fromOffset(details.localPosition);
-    _wellController.forward(from: 0);
+    final touchPoint = RelAlignment.fromOffset(details.localPosition);
+    final key = UniqueKey();
+    setState(() {
+      _wells.add(InkWelling(
+        key: key,
+        origin: touchPoint,
+        color: widget.inkColor ?? Theme.of(context).colorScheme.primary,
+        fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+        borderRadius: widget.borderRadius,
+        onFinished: () {
+          setState(() {
+            _wells.removeWhere((e) => e.key == key);
+          });
+        },
+        bloomController: AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 470),
+        )..forward(),
+        fadeController: AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 280),
+        ),
+      ));
+    });
   }
 
   void _handleTapUp(TapUpDetails details) {
-    _confirmInk();
+    _wells.lastOrNull?.confirm();
     widget.onTap?.call();
   }
 
   void _handleTapCancel() {
-    _cancelInk();
-  }
-
-  void _confirmInk() {
-    final fadingInk = _FadingInk(
-      origin: _touchPoint ?? RelAlignment.center,
-      controller: _wellController,
-      fadeStart: DateTime.now(),
-    );
-    _wellController = _newWellController();
-    _fadingInks.add(fadingInk);
-    fadingInk.controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        setState(() {
-          _fadingInks.remove(fadingInk);
-        });
-        fadingInk.controller.dispose();
-      }
-    });
-
-    _touchPoint = null;
-    setState(() {});
-  }
-
-  void _cancelInk() {
-    _wellController.reverse();
+    _wells.lastOrNull?.cancel();
   }
 
   @override
   Widget build(BuildContext context) {
-    final inkColor = widget.inkColor ?? Theme.of(context).colorScheme.primary;
-
     Widget clipIfNeeded(Widget child) {
       if (widget.borderRadius != null) {
         return ClipRRect(
@@ -2338,67 +2306,106 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
       return child;
     }
 
-    final total = (widget.wellDuration + widget.fadeDelay + widget.fadeDuration)
-        .inMicroseconds;
-    final expansionp = widget.wellDuration.inMicroseconds / total;
-    final fadep = widget.fadeDuration.inMicroseconds / total;
-    Widget well(
-        RelAlignment? origin, Animation<double> animation, DateTime fadeStart) {
-      return Positioned.fill(
-          child: clipIfNeeded(AnimatedBuilder(
-        animation: animation,
-        builder: (context, child) => Opacity(
-          opacity: 1 -
-              Curves.easeIn
-                  .transform(unlerpUnit(1 - fadep, 1, animation.value)),
-          child: FuzzyCircleClip(
-            progress: Curves.easeOutCubic
-                .transform(unlerpUnit(0, expansionp, animation.value)),
-            origin: origin ?? _touchPoint ?? RelAlignment.center,
-            fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
-            child: ColoredBox(
-                color: lerpColor(
-                    inkColor,
-                    Colors.transparent,
-                    0.5 *
-                        progressOverInterval(
-                            widget.earlyFadeDuration, fadeStart))),
-          ),
-        ),
-      )));
-    }
-
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: widget.onTap != null ? _handleTapDown : null,
       onTapUp: widget.onTap != null ? _handleTapUp : null,
       onTapCancel: widget.onTap != null ? _handleTapCancel : null,
       child: IgnorePointer(
-        child: Stack(
-          fit: StackFit.passthrough,
-          children: [
-            widget.child,
-            // origin is passed as null because otherwise it'll be locked in, this isn't the animated part of the widget
-            well(null, _wellController, DateTime.now().add(Duration(hours: 5))),
-            for (final ink in _fadingInks)
-              well(ink.origin, ink.controller, ink.fadeStart),
-          ],
+        child: clipIfNeeded(
+          ColoredBox(
+              color: widget.backgroundColor ??
+                  Theme.of(context).colorScheme.surfaceContainerLowest,
+              child: Stack(
+                fit: StackFit.passthrough,
+                children: [
+                  for (final ink in _wells) ink,
+                  widget.child,
+                ],
+              )),
         ),
       ),
     );
   }
 }
 
-class _FadingInk {
+class InkWelling extends StatefulWidget {
   final RelAlignment origin;
-  final AnimationController controller;
-  final DateTime fadeStart;
+  final Color color;
+  final double fuzzyEdgeWidth;
+  final AnimationController bloomController;
+  final AnimationController fadeController;
+  final BorderRadius? borderRadius;
+  final VoidCallback onFinished;
 
-  _FadingInk({
+  const InkWelling({
+    super.key,
     required this.origin,
-    required this.controller,
-    required this.fadeStart,
+    required this.color,
+    this.fuzzyEdgeWidth = 12.0,
+    this.borderRadius,
+    required this.onFinished,
+    required this.bloomController,
+    required this.fadeController,
   });
+
+  /// Reverse the bloom iff the bloom is still visible (early cancel).
+  void cancel() {
+    if (bloomController.value < 0.5) {
+      bloomController.reverse();
+    }
+    fadeController.forward();
+  }
+
+  /// Fade opacity to zero (mouse release or late cancel).
+  void confirm() => fadeController.forward();
+
+  @override
+  State<InkWelling> createState() => InkWellingState();
+}
+
+class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
+  @override
+  void initState() {
+    super.initState();
+    widget.fadeController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        widget.onFinished();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.bloomController.dispose();
+    widget.fadeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget result = AnimatedBuilder(
+      animation:
+          Listenable.merge([widget.bloomController, widget.fadeController]),
+      builder: (context, child) {
+        return Opacity(
+          opacity: (1.0 -
+              (lerp(0.8, 1, widget.fadeController.value) *
+                  Curves.easeIn.transform(
+                      unlerpUnit(0.6, 1, widget.bloomController.value)))),
+          child: FuzzyCircleClip(
+            progress: Curves.easeOutCubic
+                .transform(unlerpUnit(0, 0.5, widget.bloomController.value)),
+            origin: widget.origin,
+            fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+            child: child!,
+          ),
+        );
+      },
+      child: ColoredBox(color: widget.color),
+    );
+    return Positioned.fill(child: result);
+  }
 }
 
 /// animates from the previous state using an inkwell from epicenter

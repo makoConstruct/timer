@@ -83,6 +83,9 @@ final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
 
 final GlobalKey configButtonKey = GlobalKey();
 
+const backingCornerRounding = 0.37;
+const backingDeflationProportion = 0.07;
+
 /// I meticulously fitted the actual core of the play icon to this box. You can scale it to get a play icon that has the dimensions you want.
 Widget fittedPlayIcon(color) => SizedBox(
       height: 10,
@@ -445,6 +448,71 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   }
 }
 
+class TimerMenu extends StatelessWidget {
+  final MobjID<TimerData> timerID;
+  final Rect centerOn;
+  final List<Widget> items;
+  final Animation<double> animation;
+  static const double buttonHeight = 40;
+  const TimerMenu(
+      {super.key,
+      required this.timerID,
+      required this.centerOn,
+      required this.items,
+      required this.animation});
+
+  @override
+  Widget build(BuildContext context) {
+    const double margin = 12;
+    const double padding = 7;
+    final theme = Theme.of(context);
+    final mt = MakoThemeData.fromTheme(theme);
+    // final itemHeight = items.length * TimerMenu.buttonHeight;
+    final top = centerOn.bottom;
+    // final double top = max(centerOn.top - itemHeight, 0);
+    final left = margin;
+    final right = margin;
+    final buttonSpan =
+        Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!;
+    final cornerRounding = backingCornerRounding * buttonSpan;
+    return Stack(
+      children: [
+        Positioned(
+          left: left,
+          top: top,
+          right: right,
+          child: FuzzyCircleReveal(
+            animation:
+                CurvedAnimation(parent: animation, curve: Curves.easeOut),
+            origin:
+                RelAlignment.fromOffset(centerOn.center - Offset(left, top)),
+            child: Container(
+              decoration: BoxDecoration(
+                color: mt.foreBackColor,
+                borderRadius: BorderRadius.circular(cornerRounding),
+              ),
+              padding: EdgeInsets.all(padding),
+              child: Column(children: items.toList()
+                  // this was supposed to include the timer in the menu (in the same position it has in the timer tray), but we don't have enough menu items to place them both above and below the timer (I guess they should just go below), so we shouldn't include the timer like this yet
+                  // +
+                  //     [
+                  //       ConstrainedBox(
+                  //           constraints: BoxConstraints(
+                  //               minHeight: centerOn.height,
+                  //               maxHeight: centerOn.height,
+                  //               maxWidth: double.infinity,
+                  //               minWidth: 30),
+                  //           child: Container())
+                  //     ],
+                  ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 enum TimerKind {
   timer,
   stopwatch,
@@ -458,12 +526,14 @@ class Timer extends StatefulWidget {
   final Mobj<TimerData> mobj;
   final bool animateIn;
   final MobjID? owningList;
+  final void Function()? onTap;
   const Timer({
-    required GlobalKey<TimerState> key,
+    super.key,
     required this.mobj,
     this.animateIn = true,
     required this.owningList,
-  }) : super(key: key);
+    this.onTap,
+  });
 
   @override
   State<Timer> createState() => TimerState();
@@ -859,14 +929,16 @@ class TimerState extends State<Timer>
                 child: child)),
         (next) => SizeReporter(
             key: transferrableKey, previousSize: previousSize, child: next),
-        (next) => DraggableWidget<GlobalKey<TimerState>>(
-            data: widget.key as GlobalKey<TimerState>, child: next),
+        if (widget.key is GlobalKey<TimerState>)
+          (next) => DraggableWidget<GlobalKey<TimerState>>(
+              data: widget.key as GlobalKey<TimerState>, child: next),
         (next) => GestureDetector(
-            onTap: () {
-              context
-                  .findAncestorStateOfType<TimerScreenState>()
-                  ?.takeActionOn(widget.mobj.id);
-            },
+            onTap: widget.onTap ??
+                () {
+                  context
+                      .findAncestorStateOfType<TimerScreenState>()
+                      ?.takeActionOn(widget.mobj.id);
+                },
             behavior: HitTestBehavior.opaque,
             child: next),
         (next) => Padding(padding: EdgeInsets.all(timerGap / 2), child: next),
@@ -1026,12 +1098,20 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
           if (cs.owningList == widget.mobj.id) {
             assert(currentIndex != -1,
                 "item wasn't found inside of its owningList");
-            final (operative, at) =
-                insertion.cleverInsertionIndexFor(currentIndex, p.length);
-            if (operative) {
-              widget.mobj.value = p.toList()
-                ..insert(at, cs.widget.mobj.id)
-                ..removeAt(currentIndex > at ? currentIndex + 1 : currentIndex);
+            if (insertion.index == currentIndex) {
+              // it's not a drag action, so open the right click menu
+              context
+                  .findAncestorStateOfType<TimerScreenState>()
+                  ?.openTimerMenu(context, timerId);
+            } else {
+              final (operative, at) =
+                  insertion.cleverInsertionIndexFor(currentIndex, p.length);
+              if (operative) {
+                widget.mobj.value = p.toList()
+                  ..insert(at, cs.widget.mobj.id)
+                  ..removeAt(
+                      currentIndex > at ? currentIndex + 1 : currentIndex);
+              }
             }
           } else {
             doInsertion(insertion.midwayInsertionIndex());
@@ -1557,7 +1637,8 @@ class TimerScreenState extends State<TimerScreen>
       for (MobjID t in timerListMobj.value!) {
         next[t] = prevTimerWidgets[t] ??
             Timer(
-                key: GlobalKey(),
+                // if you remove the generic parameter here, drag and menu open stops working :)
+                key: GlobalKey<TimerState>(),
                 mobj: Mobj.getAlreadyLoaded(t, TimerDataType()),
                 animateIn: true,
                 owningList: timerListMobj.id);
@@ -1613,19 +1694,57 @@ class TimerScreenState extends State<TimerScreen>
     super.dispose();
   }
 
+  void openTimerMenu(BuildContext context, MobjID timerID) {
+    final wk = timerWidgets[timerID]!.key as GlobalKey<TimerState>?;
+    if (wk == null) {
+      return;
+    }
+    Rect p = boxRect(wk)!;
+    Widget menuItem(BuildContext context, ThemeData theme, IconData icon,
+            String label, Function() action) =>
+        Row(
+          children: [
+            SizedBox(
+                width: TimerMenu.buttonHeight,
+                height: TimerMenu.buttonHeight,
+                child: Center(child: Icon(icon))),
+            Flexible(
+                child: Text(label,
+                    style: theme.textTheme.bodyMedium,
+                    overflow: TextOverflow.visible)),
+          ],
+        );
+    final theme = Theme.of(context);
+    final mt = MakoThemeData.fromTheme(theme);
+    showGeneralDialog(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: 'Timer menu',
+        barrierColor: mt.lowestBackColor.withAlpha(60),
+        transitionDuration: Duration(milliseconds: 210),
+        transitionBuilder: (context, animation, secondaryAnimation, child) =>
+            child,
+        pageBuilder: (context, animation, secondaryAnimation) {
+          ThemeData theme = Theme.of(context);
+          return TimerMenu(
+              timerID: timerID,
+              centerOn: p,
+              animation: animation,
+              items: [
+                menuItem(context, theme, Icons.delete, 'Delete', () {
+                  deleteTimer(timerID);
+                }),
+                menuItem(context, theme, Icons.pin, 'Pin', () {
+                  togglePin(timerID);
+                }),
+              ]);
+        });
+  }
+
   void takeActionOn(MobjID<TimerData> timerID) {
     String mode = actionMode.peek();
     if (mode == 'pin') {
-      Mobj.fetch(timerID, type: TimerDataType()).then((mt) {
-        bool pp = mt.peek()!.pinned;
-        // this feature is benign but behaviorally maximalist to the point of being ugly and confusing
-        // if (pp && !mt.peek()!.isRunning) {
-        //   deleteTimer(timerID);
-        // } else {
-        //   mt.value = mt.peek()!.withChanges(pinned: !pp);
-        // }
-        mt.value = mt.peek()!.withChanges(pinned: !pp);
-      });
+      togglePin(timerID);
     } else if (mode == 'delete') {
       deleteTimer(timerID);
     } else {
@@ -1663,6 +1782,19 @@ class TimerScreenState extends State<TimerScreen>
         flashAnimation.forward(from: 0);
       }
     }
+  }
+
+  void togglePin(MobjID<TimerData> timerID) {
+    Mobj.fetch(timerID, type: TimerDataType()).then((mt) {
+      bool pp = mt.peek()!.pinned;
+      // this feature is benign but behaviorally maximalist to the point of being ugly and confusing
+      // if (pp && !mt.peek()!.isRunning) {
+      //   deleteTimer(timerID);
+      // } else {
+      //   mt.value = mt.peek()!.withChanges(pinned: !pp);
+      // }
+      mt.value = mt.peek()!.withChanges(pinned: !pp);
+    });
   }
 
   // Add new method to handle key events
@@ -1927,8 +2059,7 @@ class TimerScreenState extends State<TimerScreen>
           );
         });
 
-    final backingCornerRounding = 0.37;
-    final double backingDeflation = 0.07 * buttonSpan;
+    final double backingDeflation = backingDeflationProportion * buttonSpan;
     Widget numeralBacking = Positioned.fromRect(
         rect: controlGridBound(Offset(-3, 0), Size(3, 4))
             .deflate(backingDeflation),
@@ -3868,16 +3999,12 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                               onTap: () {
                                 moveOn();
                               },
+                              backgroundColor:
+                                  theme.colorScheme.surfaceContainerLowest,
                               borderRadius:
                                   BorderRadius.circular(buttonCornerRadius),
                               child: Container(
                                 height: standardButtonHeight,
-                                decoration: BoxDecoration(
-                                  color:
-                                      theme.colorScheme.surfaceContainerLowest,
-                                  borderRadius:
-                                      BorderRadius.circular(buttonCornerRadius),
-                                ),
                                 child: Center(
                                     child: Row(
                                         mainAxisAlignment:
