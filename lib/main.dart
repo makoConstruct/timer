@@ -229,12 +229,9 @@ class TimerHolm {
   late EffectCleanup reaction;
   TimerHolm({required this.list, required this.jukeBox}) {
     reaction = effect(() {
-      Map<MobjID<TimerData>, TimerTrack> newTracking = {};
-
       for (final tid in list.value!) {
         considerTracking(tid);
       }
-      tracking = newTracking;
     });
   }
 
@@ -255,8 +252,6 @@ class TimerHolm {
         tt.subscription = enlivenTimer(tt, mobj, jukeBox);
       });
       tracking[tid] = tt;
-    } else {
-      tracking[tid] = tracking[tid]!;
     }
   }
 
@@ -294,19 +289,19 @@ class TimerHolm {
             tt.completionTimer?.cancel();
             tt.completionTimer = null;
           } else if (d.kind != TimerKind.stopwatch) {
-            final d2 = mobj.value!;
             tt.completionTimer?.cancel();
             tt.completionTimer = async.Timer(
                 Duration(
                     milliseconds:
-                        (d2.duration - DateTime.now().difference(d2.startTime))
+                        (d.duration - DateTime.now().difference(d.startTime))
                             .inMilliseconds
                             .ceil()), () {
+              final d = mobj.value!;
               tt.completionTimer = null;
               jukeBox.playAudio(
                   Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
                       .value!);
-              mobj.value = mobj.value!.withChanges(
+              mobj.value = d.withChanges(
                 runningState: TimerData.completed,
                 // isGoingOff: true,
               );
@@ -464,7 +459,6 @@ class TimerMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const double margin = 12;
-    const double padding = 7;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
     // final itemHeight = items.length * TimerMenu.buttonHeight;
@@ -475,42 +469,72 @@ class TimerMenu extends StatelessWidget {
     final buttonSpan =
         Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!;
     final cornerRounding = backingCornerRounding * buttonSpan;
-    return Stack(
-      children: [
-        Positioned(
-          left: left,
-          top: top,
-          right: right,
-          child: FuzzyCircleReveal(
-            animation:
-                CurvedAnimation(parent: animation, curve: Curves.easeOut),
-            origin:
-                RelAlignment.fromOffset(centerOn.center - Offset(left, top)),
-            child: Container(
-              decoration: BoxDecoration(
-                color: mt.foreBackColor,
-                borderRadius: BorderRadius.circular(cornerRounding),
+    final arrowX = centerOn.left + buttonSpan / 2;
+    final arrowRadMax = buttonSpan * 0.2;
+    final arrowHeight = arrowRadMax;
+
+    return AnimatedBuilder(
+      animation: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      builder: (context, child) {
+        return Stack(children: [
+          Positioned(
+            left: arrowX - left,
+            top: centerOn.bottom - arrowHeight,
+            child: CustomPaint(
+                size: Size(arrowRadMax * 2, arrowRadMax),
+                painter: _SpeechArrowPainter(
+                    color: mt.foreBackColor,
+                    progress: Curves.easeOutCubic
+                        .transform(unlerpUnit(0.3, 1, animation.value)))),
+          ),
+          Positioned(
+            left: left,
+            top: top,
+            right: right,
+            child: FuzzyCircleClip(
+              progress: animation.value,
+              origin:
+                  RelAlignment.fromOffset(centerOn.center - Offset(left, top)),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: mt.foreBackColor,
+                  borderRadius: BorderRadius.circular(cornerRounding),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(children: items.toList()),
               ),
-              padding: EdgeInsets.all(padding),
-              child: Column(children: items.toList()
-                  // this was supposed to include the timer in the menu (in the same position it has in the timer tray), but we don't have enough menu items to place them both above and below the timer (I guess they should just go below), so we shouldn't include the timer like this yet
-                  // +
-                  //     [
-                  //       ConstrainedBox(
-                  //           constraints: BoxConstraints(
-                  //               minHeight: centerOn.height,
-                  //               maxHeight: centerOn.height,
-                  //               maxWidth: double.infinity,
-                  //               minWidth: 30),
-                  //           child: Container())
-                  //     ],
-                  ),
             ),
           ),
-        ),
-      ],
+        ]);
+      },
     );
   }
+}
+
+class _SpeechArrowPainter extends CustomPainter {
+  final Color color;
+  final double progress;
+  _SpeechArrowPainter({required this.color, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.save();
+    canvas.translate(size.width / 2, size.height);
+    canvas.scale(progress);
+    canvas.translate(-size.width / 2, -size.height);
+    canvas.drawPath(path, paint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_SpeechArrowPainter oldDelegate) =>
+      color != oldDelegate.color;
 }
 
 enum TimerKind {
@@ -1700,20 +1724,40 @@ class TimerScreenState extends State<TimerScreen>
       return;
     }
     Rect p = boxRect(wk)!;
-    Widget menuItem(BuildContext context, ThemeData theme, IconData icon,
-            String label, Function() action) =>
-        Row(
-          children: [
-            SizedBox(
-                width: TimerMenu.buttonHeight,
-                height: TimerMenu.buttonHeight,
-                child: Center(child: Icon(icon))),
-            Flexible(
-                child: Text(label,
-                    style: theme.textTheme.bodyMedium,
-                    overflow: TextOverflow.visible)),
-          ],
-        );
+    Widget menuItem(BuildContext context, bool isRightHanded, ThemeData theme,
+        IconData icon, String label, Function() action,
+        {bool isFirst = false, bool isLast = false}) {
+      const double padding = 8;
+      return InkButton(
+          backgroundColor: MakoThemeData.fromTheme(theme).foreBackColor,
+          inkColor: theme.colorScheme.primary.withAlpha(60),
+          onTap: () {
+            action();
+            Navigator.of(context).pop();
+          },
+          child: Padding(
+              padding: EdgeInsets.only(
+                  top: isFirst ? padding : 0,
+                  bottom: isLast ? padding : 0,
+                  left: padding,
+                  right: padding),
+              child: Row(
+                mainAxisAlignment: isRightHanded
+                    ? MainAxisAlignment.start
+                    : MainAxisAlignment.end,
+                children: reverseIfNot(isRightHanded, [
+                  SizedBox(
+                      width: TimerMenu.buttonHeight,
+                      height: TimerMenu.buttonHeight,
+                      child: Center(child: Icon(icon))),
+                  Flexible(
+                      child: Text(label,
+                          style: theme.textTheme.bodyMedium,
+                          overflow: TextOverflow.visible)),
+                ]),
+              )));
+    }
+
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
     showGeneralDialog(
@@ -1725,19 +1769,28 @@ class TimerScreenState extends State<TimerScreen>
         transitionBuilder: (context, animation, secondaryAnimation, child) =>
             child,
         pageBuilder: (context, animation, secondaryAnimation) {
-          ThemeData theme = Theme.of(context);
-          return TimerMenu(
-              timerID: timerID,
-              centerOn: p,
-              animation: animation,
-              items: [
-                menuItem(context, theme, Icons.delete, 'Delete', () {
-                  deleteTimer(timerID);
-                }),
-                menuItem(context, theme, Icons.pin, 'Pin', () {
-                  togglePin(timerID);
-                }),
-              ]);
+          return Watch(
+            (context) {
+              ThemeData theme = Theme.of(context);
+              bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
+              return TimerMenu(
+                  timerID: timerID,
+                  centerOn: p,
+                  animation: animation,
+                  items: [
+                    menuItem(
+                        context, isRightHanded, theme, Icons.delete, 'Delete',
+                        () {
+                      deleteTimer(timerID);
+                    }, isFirst: true),
+                    menuItem(
+                        context, isRightHanded, theme, Icons.push_pin, 'Pin',
+                        () {
+                      togglePin(timerID);
+                    }, isLast: true),
+                  ]);
+            },
+          );
         });
   }
 
@@ -3999,11 +4052,9 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                               onTap: () {
                                 moveOn();
                               },
-                              backgroundColor:
-                                  theme.colorScheme.surfaceContainerLowest,
                               borderRadius:
                                   BorderRadius.circular(buttonCornerRadius),
-                              child: Container(
+                              child: SizedBox(
                                 height: standardButtonHeight,
                                 child: Center(
                                     child: Row(
