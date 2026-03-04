@@ -3751,11 +3751,23 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   final GlobalKey handednessKey = GlobalKey();
   final GlobalKey skipKey = GlobalKey();
   final GlobalKey padKey = GlobalKey();
-  late List<GlobalKey> allKeys = [handednessKey, padKey, skipKey];
+  late List<GlobalKey> allKeys = [
+    handednessKey,
+    padKey,
+    if (Platform.isAndroid) notifKey,
+    skipKey
+  ];
   late Signal<bool?> numpadOrientation = Signal(null);
-  late List<Signal<dynamic>> allChoices = [setIsRightHanded, numpadOrientation];
+  late List<Signal<dynamic>> allChoices = [
+    setIsRightHanded,
+    numpadOrientation,
+    if (Platform.isAndroid) notifGranted
+  ];
   late Signal<bool> allChoicesCompleted = Signal(false);
   async.Timer? autoMoveOn;
+  late Signal<bool?> notifGranted = Signal(null);
+  bool _notifWasAlreadyGranted = false;
+  final GlobalKey notifKey = GlobalKey();
 
   @override
   void initState() {
@@ -3792,6 +3804,24 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
       }
     });
     _scrollController = ScrollController();
+    if (Platform.isAndroid) {
+      _checkNotificationPermission();
+    }
+  }
+
+  Future<void> _checkNotificationPermission() async {
+    final status = await FlutterForegroundTask.checkNotificationPermission();
+    final granted = status == NotificationPermission.granted;
+    _notifWasAlreadyGranted = granted;
+    notifGranted.value = granted ? true : null;
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    final result = await FlutterForegroundTask.requestNotificationPermission();
+    notifGranted.value = result == NotificationPermission.granted ? true : null;
+    if (result == NotificationPermission.granted) {
+      inputCompleted(notifKey);
+    }
   }
 
   @override
@@ -3800,6 +3830,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     setIsRightHanded.dispose();
     numpadOrientation.dispose();
     allChoicesCompleted.dispose();
+    notifGranted.dispose();
     super.dispose();
   }
 
@@ -3814,12 +3845,15 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
 
   void inputCompleted(GlobalKey key) {
     // If all choices are non-null, navigate away
-    final idx = allKeys.indexOf(key);
-    if (idx != -1 && idx < allKeys.length - 1) {
-      final nextKey = allKeys[idx + 1];
-      // if (nextKey != skipKey) {
-      _scrollTo(nextKey);
-      // }
+    int idx = allKeys.indexOf(key);
+    if (idx != -1) {
+      while (idx < allKeys.length - 1) {
+        idx += 1;
+        if (allChoices.elementAtOrNull(idx)?.value == null) {
+          break;
+        }
+      }
+      _scrollTo(allKeys[idx]);
     }
   }
 
@@ -3982,54 +4016,94 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                   padding: EdgeInsets.all(
                     standardSpacing,
                   ),
-                  child: GestureDetector(
-                      onTap: () => inputCompleted(padKey),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                                "Which kind of numpad is more familiar to you?",
-                                style: theme.textTheme.bodyMedium!),
-                            spacer,
-                            Watch((context) {
-                              return AnimatedAlign(
-                                duration: Duration(milliseconds: 340),
-                                curve: Curves.easeInOutCubic,
-                                alignment: isRightHanded.value == true
-                                    ? Alignment.centerRight
-                                    : Alignment.centerLeft,
-                                child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Column(
-                                        children: [
-                                          Text(
-                                            "phone style",
-                                            style: theme.textTheme.bodyMedium!,
-                                          ),
-                                          spacer,
-                                          numpadForSetup(
-                                            false,
-                                          ),
-                                        ],
-                                      ),
-                                      spacer,
-                                      Column(
-                                        children: [
-                                          Text(
-                                            "calculator style",
-                                            style: theme.textTheme.bodyMedium!,
-                                          ),
-                                          spacer,
-                                          numpadForSetup(
-                                            true,
-                                          ),
-                                        ],
-                                      ),
-                                    ]),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text("Which kind of numpad is more familiar to you?",
+                            style: theme.textTheme.bodyMedium!),
+                        spacer,
+                        Watch((context) {
+                          return AnimatedAlign(
+                            duration: Duration(milliseconds: 340),
+                            curve: Curves.easeInOutCubic,
+                            alignment: isRightHanded.value == true
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              Column(
+                                children: [
+                                  Text(
+                                    "phone style",
+                                    style: theme.textTheme.bodyMedium!,
+                                  ),
+                                  spacer,
+                                  numpadForSetup(
+                                    false,
+                                  ),
+                                ],
+                              ),
+                              spacer,
+                              Column(
+                                children: [
+                                  Text(
+                                    "calculator style",
+                                    style: theme.textTheme.bodyMedium!,
+                                  ),
+                                  spacer,
+                                  numpadForSetup(
+                                    true,
+                                  ),
+                                ],
+                              ),
+                            ]),
+                          );
+                        })
+                      ]))),
+          if (Platform.isAndroid)
+            SliverToBoxAdapter(
+                key: notifKey,
+                child: Padding(
+                    padding: EdgeInsets.all(standardSpacing),
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: reverseIfNot(isRightHanded.value ?? true, [
+                          Flexible(
+                              child: Text('Enable notifications permission',
+                                  style: theme.textTheme.bodyMedium!)),
+                          spacer,
+                          Flexible(
+                            child: Watch((context) {
+                              final granted = notifGranted.value;
+                              final isOn = granted == true;
+                              final label = granted == null
+                                  ? '...'
+                                  : granted
+                                      ? (_notifWasAlreadyGranted
+                                          ? 'already granted'
+                                          : 'granted')
+                                      : 'request';
+                              return InkButton(
+                                backgroundColor:
+                                    backgroundColorFor(theme, isOn),
+                                onTap: granted == true
+                                    ? null
+                                    : _requestNotificationPermission,
+                                borderRadius:
+                                    BorderRadius.circular(buttonCornerRadius),
+                                child: SizedBox(
+                                  height: standardButtonHeight,
+                                  child: Center(
+                                      child: Text(label,
+                                          style: theme.textTheme.titleMedium!
+                                              .copyWith(
+                                                  color: foregroundColorFor(
+                                                      theme, isOn)))),
+                                ),
                               );
-                            })
-                          ])))),
+                            }),
+                          ),
+                        ])))),
           // Skip button - full screen
           SliverToBoxAdapter(
               key: skipKey,

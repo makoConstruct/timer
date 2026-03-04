@@ -48,16 +48,16 @@ class CrankGameTheme {
   );
 
   static CrankGameTheme lightMono = CrankGameTheme(
-    tooSlowColor: const Color.fromARGB(255, 251, 251, 251),
+    tooSlowColor: const Color.fromARGB(255, 189, 189, 189),
     withinBoundsColor: const Color(0xff17e351),
     wonColor: darkenColor(Colors.amber, 0.1),
-    tooFastColor: const Color.fromARGB(255, 251, 251, 251),
+    tooFastColor: const Color.fromARGB(255, 189, 189, 189),
   );
   static CrankGameTheme darkMono = CrankGameTheme(
-    tooFastColor: const Color.fromARGB(255, 227, 227, 227),
+    tooFastColor: const Color.fromARGB(255, 180, 180, 180),
     withinBoundsColor: const Color(0xff13bb3a),
     wonColor: Colors.amber,
-    tooSlowColor: const Color.fromARGB(255, 227, 227, 227),
+    tooSlowColor: const Color.fromARGB(255, 180, 180, 180),
   );
 
   static CrankGameTheme fromContext(BuildContext context) {
@@ -635,7 +635,7 @@ class _SpeedArrow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final speedDifference = currentSpeed - targetSpeed;
-    final difficultyMargin = errorMargin * 3;
+    final difficultyMargin = errorMargin * 4;
 
     // Calculate t value for lerp: -1 (too slow) to 1 (too fast)
     final t = clampSignedUnit(speedDifference / difficultyMargin);
