@@ -2399,7 +2399,7 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
       builder: (context, child) {
         return Opacity(
           opacity: (1.0 -
-              (lerp(0.8, 1, widget.fadeController.value) *
+              (lerp(0.6, 1, widget.fadeController.value) *
                   Curves.easeIn.transform(
                       unlerpUnit(0.6, 1, widget.bloomController.value)))),
           child: FuzzyCircleClip(

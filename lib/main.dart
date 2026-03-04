@@ -474,7 +474,7 @@ class TimerMenu extends StatelessWidget {
     final arrowHeight = arrowRadMax;
 
     return AnimatedBuilder(
-      animation: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      animation: animation,
       builder: (context, child) {
         return Stack(children: [
           Positioned(
