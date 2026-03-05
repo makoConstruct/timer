@@ -10,7 +10,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
-
 // import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:makos_timer/database.dart';
@@ -20,6 +19,8 @@ import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:vibration/vibration.dart';
+import 'package:vibration/vibration_presets.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
 import 'platform_audio.dart';
@@ -2792,4 +2793,25 @@ class ContainerShrunk extends StatelessWidget {
       },
     );
   }
+}
+
+void vibrationSampleBoard() async {
+  Future<void> pause() => Future.delayed(const Duration(milliseconds: 2000));
+  await Vibration.vibrate(
+      pattern: [100, 100, 100, 100], intensities: [128, 64, 32, 16]);
+  await pause();
+  await Vibration.vibrate(
+      pattern: [60, 60, 60, 60], intensities: [128, 64, 32, 16]);
+
+  for (final preset in presets.keys) {
+    await pause();
+    await Vibration.vibrate(preset: preset);
+  }
+}
+
+void vibrateAlertOnce() async {
+  // await Vibration.vibrate(preset: VibrationPreset.pulseWave);
+  await Vibration.vibrate(
+      pattern: [0, 120, 80, 50, 80, 120, 80, 120],
+      intensities: [0, 200, 0, 255, 0, 200, 0, 200]);
 }

@@ -37,6 +37,8 @@ import 'package:signals/signals_flutter.dart';
 import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:vibration/vibration.dart';
+import 'package:vibration/vibration_presets.dart';
 
 Future<void> deleteDatabase() async {
   final directory = await getApplicationSupportDirectory();
@@ -298,6 +300,8 @@ class TimerHolm {
                             .ceil()), () {
               final d = mobj.value!;
               tt.completionTimer = null;
+              // vibrate the device when the timer completes
+              vibrateAlertOnce();
               jukeBox.playAudio(
                   Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
                       .value!);
@@ -1295,8 +1299,8 @@ final List<double> radialActivatorPositions = [
   -pi,
 ];
 void pausePlaySelected(TimerScreenState tss) {
+  HapticFeedback.heavyImpact();
   tss.pausePlaySelected();
-  HapticFeedback.lightImpact();
 }
 
 final List<Function(TimerScreenState)> radialActivatorFunctions = [
@@ -1903,16 +1907,13 @@ class TimerScreenState extends State<TimerScreen>
               child: Center(child: Icon(size: size, icon))));
     }
 
-    // var selectButton = TimersButton(
-    //     // label: Icon(Icons.select_all),
-    //     // label: Icon(Icons.border_outer_rounded),
-    //     label: Icon(Icons.center_focus_strong),
-    //     onPanDown: (_) {
-    //       numeralPressed([1]);
-    //       numeralPressed([2]);
-    //       numeralPressed([3]);
-    //       numeralPressed([4]);
-    //     });
+    var selectButton = TimersButton(
+        // label: Icon(Icons.select_all),
+        // label: Icon(Icons.border_outer_rounded),
+        label: Icon(Icons.center_focus_strong),
+        onPanDown: (_) {
+          vibrationSampleBoard();
+        });
 
     var backspaceButton = TimersButton(
         key: deleteButtonKey,
@@ -2203,6 +2204,9 @@ class TimerScreenState extends State<TimerScreen>
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
           child: createStopwatchButton),
+      Positioned.fromRect(
+          rect: controlGridBound(innerPaletteAnchor + Offset(0, 3), Size(1, 1)),
+          child: selectButton),
     ];
 
     final editPopoverControls = Watch((context) {

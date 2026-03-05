@@ -120,6 +120,7 @@ class PersistentNotificationTask extends TaskHandler {
         // trigger timer
         FlutterForegroundTask.sendDataToMain(
             {'op': 'timerTriggered', 'timerId': timer.id});
+        HapticFeedback.heavyImpact();
         Mobj.fetch(selectedAudioID, type: AudioInfoType()).then((audio) {
           jukeBox.playAudio(audio.value!);
         });

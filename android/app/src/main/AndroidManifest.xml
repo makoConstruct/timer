@@ -2,6 +2,7 @@
     xmlns:tools="http://schemas.android.com/tools">
     <!-- <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" /> -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <!-- this one is needed for the special use foreground service type. We can't use mediaPlayback because that's forbidden from launching on boot (we have to launch on boot for timers that failed to complete before the device was rebooted), we also don't use media player controls or anything. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
