@@ -318,6 +318,18 @@ class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
     return false;
   }
 
+  bool removeByKey(Key key) {
+    final matchingChildIndex =
+        ephemeralChildren.indexWhere((c) => c.key == key);
+    if (matchingChildIndex != -1) {
+      setState(() {
+        ephemeralChildren.removeAt(matchingChildIndex);
+      });
+      return true;
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2809,14 +2821,63 @@ void vibrationSampleBoard() async {
   }
 }
 
+// we call it once at app start so that it doesn't check/delay every time
+Future<bool> platformHasVibrator = Vibration.hasVibrator();
+
+/// I'm fairly sure the returned future is meaningless, vibrationSampleBoard seemed to indicate that it resolves as soon as the vibration starts rather than when it ends
 void vibrateAlertOnce() async {
   // await Vibration.vibrate(preset: VibrationPreset.pulseWave);
-  await Vibration.vibrate(
-      pattern: [0, 120, 80, 50, 80, 120, 80, 120],
-      intensities: [0, 200, 0, 255, 0, 200, 0, 200]);
+  if (await platformHasVibrator) {
+    await Vibration.vibrate(
+        pattern: [0, 120, 80, 50, 80, 120, 80, 120],
+        intensities: [0, 200, 0, 255, 0, 200, 0, 200]);
+  }
 }
 
+class HintToast extends StatelessWidget {
+  final Widget child;
+  final Animation<double> animation;
+  final bool startOpen;
 
-// class HintToast extends StatelessWidget {
-  
-// }
+  const HintToast({
+    super.key,
+    required this.child,
+    required this.animation,
+    this.startOpen = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final v = animation.value;
+        final isReversing = animation.status == AnimationStatus.reverse;
+        final animateHeight = !startOpen || isReversing;
+
+        final double heightFraction;
+        final double opacity;
+
+        if (animateHeight) {
+          heightFraction = unlerpUnit(0, 0.5, v);
+          opacity = Curves.easeInOut.transform(unlerpUnit(0.5, 1, v));
+        } else {
+          heightFraction = 1.0;
+          opacity = Curves.easeInOut.transform(unlerpUnit(0, 0.5, v));
+        }
+
+        return ClipRect(
+          child: Align(
+            heightFactor: heightFraction,
+            alignment: Alignment.bottomCenter,
+            child: Opacity(
+              opacity: opacity,
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}

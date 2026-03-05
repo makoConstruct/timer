@@ -1602,9 +1602,10 @@ class TimerScreenState extends State<TimerScreen>
   late final UpDownAnimationController userDragActionHintReveal =
       UpDownAnimationController(
           vsync: this,
-          riseDuration: Duration(milliseconds: 700),
-          fallDuration: Duration(milliseconds: 1000));
+          riseDuration: Duration(milliseconds: 200),
+          fallDuration: Duration(milliseconds: 200));
   late final ScrollController timersScroller = ScrollController();
+  late final Signal<bool> isFirstPressForSelectedTimer = Signal(true);
 
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
   /// we should probably persist this... but it doesn't matter much.
@@ -1690,13 +1691,13 @@ class TimerScreenState extends State<TimerScreen>
     // selected timer controls
     createEffect(() {
       // doesn't pop up while numbers are being pressed, the user wont necessarily want it
-      editPopoverAnimation.towards(
-          selectedTimer.value != null && (currentlyPressingKey.value == 0));
-      // [todo]I wanna make it so that there's a rect that tracks the position of the uh text so that if the text starts to overlap the popover controls they move over. Maybe this is better done in or following build.
-      // if (selectedTimer.value != null) {
-      //   final td = Mobj.seekAlreadyLoaded(selectedTimer.value!, TimerDataType());
-
-      // }
+      editPopoverAnimation.towards(selectedTimer.value != null &&
+          Mobj.getAlreadyLoaded(selectedTimer.value!, TimerDataType())
+                  .peek()!
+                  .kind !=
+              TimerKind.stopwatch &&
+          (!isFirstPressForSelectedTimer.value ||
+              currentlyPressingKey.value == 0));
     });
   }
 
@@ -1712,6 +1713,7 @@ class TimerScreenState extends State<TimerScreen>
     numPadBounds.dispose();
     selectedTimer.dispose();
     actionMode.dispose();
+    isFirstPressForSelectedTimer.dispose();
     currentlyPressingKey.dispose();
     modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
@@ -1818,11 +1820,13 @@ class TimerScreenState extends State<TimerScreen>
 
   void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
     if (selectedTimer.peek() == null) {
+      isFirstPressForSelectedTimer.value = true;
       addNewTimer(
         selected: true,
         digits: stripZeroes(number),
       );
     } else {
+      isFirstPressForSelectedTimer.value = false;
       final mt = Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
       List<int> ct = List.from(mt.peek()!.digits);
       for (int n in number) {
@@ -2298,15 +2302,25 @@ class TimerScreenState extends State<TimerScreen>
         builder: (context, child) {
           final theme = Theme.of(context);
           final dir = isRightHanded ? "left" : "right";
-
           return Opacity(
               opacity: Curves.easeInOutCubic
                   .transform(userDragActionHintReveal.scalarValue),
-              child: Text(
-                  style: hintTextStyle,
-                  """when you press a number, you can drag up or to the $dir.
+              child: RichText(
+                text: TextSpan(
+                  children: [
+                    WidgetSpan(
+                        child: Icon(Icons.info_rounded,
+                            size: 16, color: hintColor)),
+                    WidgetSpan(child: SizedBox(width: 4)),
+                    TextSpan(
+                        style: hintTextStyle,
+                        text:
+                            """when you press a number, you can drag up or to the $dir.
 this will activate the new timer.
-(dragging $dir adds a pair of zeroes to it before activating it.)"""));
+(dragging $dir adds a pair of zeroes to it before activating it.)"""),
+                  ],
+                ),
+              ));
         },
       ),
     );
