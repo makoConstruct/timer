@@ -492,16 +492,14 @@ class TimerMenu extends StatelessWidget {
             left: left,
             top: top,
             right: right,
-            child: FuzzyCircleClip(
-              progress: animation.value,
-              origin:
-                  RelAlignment.fromOffset(centerOn.center - Offset(left, top)),
+            child: ClipRRect(
+              clipper: _MenuRevealClipper(
+                progress: animation.value,
+                origin: centerOn.center - Offset(left, top),
+                cornerRounding: cornerRounding,
+              ),
               child: Container(
-                decoration: BoxDecoration(
-                  color: mt.foreBackColor,
-                  borderRadius: BorderRadius.circular(cornerRounding),
-                ),
-                clipBehavior: Clip.antiAlias,
+                color: mt.foreBackColor,
                 child: Column(children: items.toList()),
               ),
             ),
@@ -520,22 +518,82 @@ class _SpeechArrowPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = color;
-    final path = Path()
-      ..moveTo(size.width / 2, 0)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-    canvas.save();
-    canvas.translate(size.width / 2, size.height);
-    canvas.scale(progress);
-    canvas.translate(-size.width / 2, -size.height);
+    final path = Path();
+    final w = size.width;
+    final h = size.height;
+    final stemw = w * 0.2;
+    final basew = (w - stemw) / 2;
+    final minHeight = basew + stemw / 2;
+    final double additionalHeight = max(h - minHeight, 0);
+    path.moveTo(0, h);
+    path.relativeArcToPoint(Offset(basew, -basew),
+        radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
+    path.relativeLineTo(0, additionalHeight);
+    path.relativeArcToPoint(Offset(stemw, 0),
+        radius: Radius.circular(stemw / 2), rotation: pi, clockwise: true);
+    path.relativeLineTo(0, -additionalHeight);
+    path.relativeArcToPoint(Offset(basew, basew),
+        radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
+    path.close();
     canvas.drawPath(path, paint);
-    canvas.restore();
+    // final path = Path()
+    //   ..moveTo(size.width / 2, 0)
+    //   ..lineTo(size.width, size.height)
+    //   ..lineTo(0, size.height)
+    //   ..close();
+    // canvas.save();
+    // canvas.translate(size.width / 2, size.height);
+    // canvas.scale(progress);
+    // canvas.translate(-size.width / 2, -size.height);
+    // canvas.drawPath(path, paint);
+    // canvas.restore();
   }
 
   @override
   bool shouldRepaint(_SpeechArrowPainter oldDelegate) =>
       color != oldDelegate.color;
+}
+
+class _MenuRevealClipper extends CustomClipper<RRect> {
+  final double progress;
+  final Offset origin;
+  final double cornerRounding;
+
+  _MenuRevealClipper({
+    required this.progress,
+    required this.origin,
+    required this.cornerRounding,
+  });
+
+  @override
+  RRect getClip(Size size) {
+    final ir = lerp(0, min(size.height, size.width),
+        unlerpUnit(0.2, 0.7, Curves.easeOutCubic.transform(progress)));
+    // takes the shotest path to one of the axes of the target rectangle
+    final distanceFromCenter = origin - sizeToOffset(size / 2);
+    final intermediateOriginTarget =
+        distanceFromCenter.dx > distanceFromCenter.dy
+            ? Offset(origin.dx, size.height / 2)
+            : Offset(size.width / 2, origin.dy);
+    final seed = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+          center: lerpOffset(
+              origin, intermediateOriginTarget, unlerpUnit(0, 0.6, progress)),
+          width: ir,
+          height: ir),
+      Radius.circular(cornerRounding),
+    );
+    final target = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(cornerRounding),
+    );
+    return RRect.lerp(seed, target,
+        Curves.easeOutCubic.transform(unlerpUnit(0.3, 1, progress)))!;
+  }
+
+  @override
+  bool shouldReclip(_MenuRevealClipper old) =>
+      old.progress != progress || old.origin != origin;
 }
 
 enum TimerKind {
@@ -1690,7 +1748,7 @@ class TimerScreenState extends State<TimerScreen>
 
     // selected timer controls
     createEffect(() {
-      // doesn't pop up while numbers are being pressed, the user wont necessarily want it
+      // doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
       editPopoverAnimation.towards(selectedTimer.value != null &&
           Mobj.getAlreadyLoaded(selectedTimer.value!, TimerDataType())
                   .peek()!
