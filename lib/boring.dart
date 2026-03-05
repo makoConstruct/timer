@@ -2815,3 +2815,8 @@ void vibrateAlertOnce() async {
       pattern: [0, 120, 80, 50, 80, 120, 80, 120],
       intensities: [0, 200, 0, 255, 0, 200, 0, 200]);
 }
+
+
+// class HintToast extends StatelessWidget {
+  
+// }

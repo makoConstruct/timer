@@ -36,9 +36,6 @@ import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
-import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
-import 'package:vibration/vibration.dart';
-import 'package:vibration/vibration_presets.dart';
 
 Future<void> deleteDatabase() async {
   final directory = await getApplicationSupportDirectory();
@@ -1907,13 +1904,13 @@ class TimerScreenState extends State<TimerScreen>
               child: Center(child: Icon(size: size, icon))));
     }
 
-    var selectButton = TimersButton(
-        // label: Icon(Icons.select_all),
-        // label: Icon(Icons.border_outer_rounded),
-        label: Icon(Icons.center_focus_strong),
-        onPanDown: (_) {
-          vibrationSampleBoard();
-        });
+    // var selectButton = TimersButton(
+    //     // label: Icon(Icons.select_all),
+    //     // label: Icon(Icons.border_outer_rounded),
+    //     label: Icon(Icons.center_focus_strong),
+    //     onPanDown: (_) {
+    //       vibrationSampleBoard();
+    //     });
 
     var backspaceButton = TimersButton(
         key: deleteButtonKey,
@@ -2204,104 +2201,85 @@ class TimerScreenState extends State<TimerScreen>
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
           child: createStopwatchButton),
-      Positioned.fromRect(
-          rect: controlGridBound(innerPaletteAnchor + Offset(0, 3), Size(1, 1)),
-          child: selectButton),
+      // Positioned.fromRect(
+      //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 3), Size(1, 1)),
+      //     child: selectButton),
     ];
 
-    final editPopoverControls = Watch((context) {
-      final editPopoverButtonWidth = buttonSpan;
-      // final editPopoverButtonHeight = buttonSpan * 0.74;
-      final editPopoverButtonHeight = buttonSpan;
-      final epw = 2 * editPopoverButtonWidth;
-      final tbound =
-          controlGridBound(numeralPartAnchor + Offset(0, -1), Size(2, 1));
-      // adjust top downwards
-      final verticalAdjustment = editPopoverButtonHeight - buttonSpan;
-      final bound = Rect.fromLTRB(tbound.left, tbound.top - verticalAdjustment,
-          tbound.right, tbound.bottom);
-      return Positioned.fromRect(
-        rect: bound,
-        child: IgnorePointer(
-          ignoring: selectedTimer.value == null,
-          child: AnimatedBuilder(
-            animation: editPopoverAnimation,
-            builder: (context, child) {
-              Color iconColor = theme.colorScheme.primary;
-              Color iconBackColor = mt.lowestBackColor;
-              Widget iconWidget(IconData icon, Function() onTap,
-                  {double size = 1.0}) {
-                return GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: onTap,
-                    child: SizedBox(
-                      width: editPopoverButtonWidth,
-                      height: editPopoverButtonHeight,
-                      child: Icon(
-                        icon,
-                        color: iconColor,
-                        size: editPopoverButtonHeight * size,
-                      ),
-                    ));
-              }
-
-              // Compute animation progress
-              final progress = Curves.easeInOutCubic.transform(unlerpUnit(
-                  0.4,
-                  1.0,
-                  editPopoverAnimation.value.$1 *
-                      (1 - editPopoverAnimation.value.$2)));
-
-              // Scale: starts smaller, bounces to full size
-              final scale =
-                  lerp(0.8, 1.0, Curves.easeOutBack.transform(progress));
-
-              return Transform.translate(
-                offset: Offset(
-                    0,
-                    buttonSpan *
-                        0.27 *
-                        (1 - Curves.easeOutBack.transform(progress))),
-                child: Transform.scale(
-                  scale: scale,
-                  child: ContainerShrunk(
-                    shrunkBy: backingDeflation,
-                    container: (child) => LiquidGlass.withOwnLayer(
-                      shape: LiquidRoundedSuperellipse(
-                        borderRadius: buttonSpan * backingCornerRounding,
-                      ),
-                      settings: LiquidGlassSettings(
-                        blur: 2,
-                        thickness: 10,
-                        glassColor: mt.foreBackColor.withValues(alpha: 0.5),
-                        ambientStrength: 1.0,
-                        lightIntensity:
-                            theme.brightness == Brightness.light ? 0.3 : 0.1,
-                        visibility: progress.clamp(0, 1),
-                      ),
-                      child: child,
-                    ),
-                    child: Row(
-                      children: reverseIfNot(
-                        isRightHandedMobj.value!,
-                        [
-                          iconWidget(Icons.backspace_rounded, () {
-                            _backspace();
-                          }, size: 0.4),
-                          iconWidget(Icons.play_arrow_rounded, () {
-                            pausePlaySelected();
-                          }, size: 0.6)
-                        ],
-                      ),
+    Widget editPopoverIcon(
+        Offset gridPos, IconData icon, Function() onTap, double size) {
+      return AnimatedBuilder(
+        animation: editPopoverAnimation,
+        builder: (context, child) {
+          final opacity =
+              unlerpUnit(0.5, 1.0, editPopoverAnimation.scalarValue);
+          return Positioned.fromRect(
+            rect: controlGridBound(gridPos, Size(1, 1)),
+            child: IgnorePointer(
+              ignoring: selectedTimer.value == null,
+              child: Opacity(
+                opacity: opacity,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTap,
+                  child: SizedBox.expand(
+                    child: Icon(
+                      icon,
+                      color: theme.colorScheme.primary,
+                      size: buttonSpan * size,
                     ),
                   ),
                 ),
-              );
-            },
-          ),
-        ),
+              ),
+            ),
+          );
+        },
       );
-    });
+    }
+
+    // edit popover
+    final editPopoverOrigin = Offset(-4, 1);
+    final editPopoverBacking = AnimatedBuilder(
+      animation: editPopoverAnimation,
+      builder: (context, child) {
+        final fromRect = controlGridBound(editPopoverOrigin, Size(1, 1))
+            .deflate(backingDeflation)
+            .shift(Offset(buttonSpan * 0.4, 0));
+        final toRect = controlGridBound(editPopoverOrigin, Size(1, 2))
+            .deflate(backingDeflation);
+        final backingRectProgress =
+            unlerpUnit(0, 0.7, editPopoverAnimation.scalarValue);
+        // deflated to nothing by targetRad at first
+        final targetRad = buttonSpan - backingDeflation * 2;
+        final backingRect = Rect.lerp(
+                fromRect,
+                toRect,
+                Curves.easeInOutCubic
+                    .transform(unlerpUnit(0.3, 1, backingRectProgress)))!
+            .deflate((1 - Curves.easeOut.transform(backingRectProgress)) *
+                targetRad);
+        return Positioned.fromRect(
+          rect: backingRect,
+          child: Container(
+            constraints: BoxConstraints.expand(),
+            decoration: BoxDecoration(
+              color: mt.foreBackColor,
+              borderRadius:
+                  BorderRadius.circular(backingCornerRounding * buttonSpan),
+            ),
+          ),
+        );
+      },
+    );
+
+    final editPopoverBackspaceButton =
+        editPopoverIcon(editPopoverOrigin, Icons.backspace_rounded, () {
+      _backspace();
+    }, 0.4);
+    final editPopoverPlayButton = editPopoverIcon(
+        editPopoverOrigin + Offset(0, 1), Icons.play_arrow_rounded, () {
+      pausePlaySelected();
+    }, 0.6);
 
     final hintColor = darkenColor(mt.lowestBackColor,
         0.4 * (theme.brightness == Brightness.dark ? -1 : 1));
@@ -2392,7 +2370,9 @@ this will activate the new timer.
                     ])),
               ),
               ...controls,
-              editPopoverControls,
+              editPopoverBacking,
+              editPopoverBackspaceButton,
+              editPopoverPlayButton,
               buttonScaleDial,
             ]));
   }
