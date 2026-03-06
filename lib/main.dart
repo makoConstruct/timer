@@ -552,31 +552,42 @@ class _MenuRevealClipper extends CustomClipper<Path> {
         RRect.lerp(intermediateRect, targetRect,
             Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress)))!,
         unlerpUnit(0, 0.5, progress))!;
-    return Path.combine(
-        PathOperation.union, Path()..addRRect(lerpr), _buildArrow());
-  }
 
-  Path _buildArrow() {
-    final ah = arrowHeight *
-        Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress));
-    final w = ah * 2;
-    final h = ah;
-    final stemw = w * 0.2;
-    final basew = (w - stemw) / 2;
-    final minHeight = basew + stemw / 2;
-    final double additionalHeight = max(h - minHeight, 0);
-    final path = Path();
-    path.moveTo(arrowX - w / 2, h);
-    path.relativeArcToPoint(Offset(basew, -basew),
-        radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
-    path.relativeLineTo(0, additionalHeight);
-    path.relativeArcToPoint(Offset(stemw, 0),
-        radius: Radius.circular(stemw / 2), rotation: pi, clockwise: true);
-    path.relativeLineTo(0, -additionalHeight);
-    path.relativeArcToPoint(Offset(basew, basew),
-        radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
-    path.close();
-    return path;
+    final yp = Curves.easeOutCubic.transform(unlerpUnit(0, 0.7, progress));
+    final xp = Curves.easeInOutCubic.transform(unlerpUnit(0.0, 1, progress));
+    final rh = lerp(0, targetRect.height, yp);
+    final rt = lerp(0, arrowHeight, yp);
+    final initialWidth = arrowHeight;
+    // final rw = lerp(initialWidth, targetRect.width, xp);
+    final lerpRRect = RRect.fromRectAndRadius(
+      Rect.fromLTRB(lerp(arrowX - initialWidth / 2, 0, xp), rt,
+          lerp(arrowX + initialWidth / 2, targetRect.width, xp), rt + rh),
+      Radius.circular(cornerRounding),
+    );
+
+    Path arrowPath = Path();
+    {
+      final ah = arrowHeight * yp;
+      final w = ah * 2;
+      final h = ah;
+      final stemw = w * 0.2;
+      final basew = (w - stemw) / 2;
+      final minHeight = basew + stemw / 2;
+      final double additionalHeight = max(h - minHeight, 0);
+      arrowPath.moveTo(arrowX - w / 2, h);
+      arrowPath.relativeArcToPoint(Offset(basew, -basew),
+          radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
+      arrowPath.relativeLineTo(0, additionalHeight);
+      arrowPath.relativeArcToPoint(Offset(stemw, 0),
+          radius: Radius.circular(stemw / 2), rotation: pi, clockwise: true);
+      arrowPath.relativeLineTo(0, -additionalHeight);
+      arrowPath.relativeArcToPoint(Offset(basew, basew),
+          radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
+      arrowPath.close();
+    }
+
+    return Path.combine(
+        PathOperation.union, Path()..addRRect(lerpRRect), arrowPath);
   }
 
   @override
@@ -1782,7 +1793,7 @@ class TimerScreenState extends State<TimerScreen>
     Widget menuItem(BuildContext context, bool isRightHanded, ThemeData theme,
         IconData icon, String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
-      const double padding = 8;
+      const double padding = 4;
       return InkButton(
           backgroundColor: MakoThemeData.fromTheme(theme).foreBackColor,
           inkColor: theme.colorScheme.primary.withAlpha(60),
@@ -1820,7 +1831,7 @@ class TimerScreenState extends State<TimerScreen>
         barrierDismissible: true,
         barrierLabel: 'Timer menu',
         barrierColor: mt.lowestBackColor.withAlpha(60),
-        transitionDuration: Duration(milliseconds: 210),
+        transitionDuration: Duration(milliseconds: 250),
         transitionBuilder: (context, animation, secondaryAnimation, child) =>
             child,
         pageBuilder: (context, animation, secondaryAnimation) {
@@ -4189,22 +4200,32 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                               onTap: () {
                                 moveOn();
                               },
+                              inkColor: theme.colorScheme.primary,
                               borderRadius:
                                   BorderRadius.circular(buttonCornerRadius),
-                              child: SizedBox(
-                                height: standardButtonHeight,
-                                child: Center(
-                                    child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                      Watch((context) => Text(
-                                          allChoicesCompleted.value
-                                              ? 'done, continue'
-                                              : 'skip',
-                                          style: theme.textTheme.titleMedium!)),
-                                    ])),
-                              )),
+                              builder: (context, isOn) => SizedBox(
+                                    height: standardButtonHeight,
+                                    child: Center(
+                                        child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                          Text(
+                                              allChoicesCompleted.value
+                                                  ? 'done, continue'
+                                                  : 'skip',
+                                              style:
+                                                  theme.textTheme.titleMedium!
+                                                      .copyWith(
+                                                          color: isOn
+                                                              ? theme
+                                                                  .colorScheme
+                                                                  .onPrimary
+                                                              : theme
+                                                                  .colorScheme
+                                                                  .onSurface)),
+                                        ])),
+                                  )),
                         ),
                       ],
                     ),

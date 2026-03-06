@@ -2247,7 +2247,8 @@ class RenderScalingAspectRatio extends RenderProxyBox {
 /// todo: remove the automatic downfade at the end of the initial well animation, supercede with one that happens at max(animation end, finger release)
 class InkButton extends StatefulWidget {
   final Color? backgroundColor;
-  final Widget child;
+  final Widget? child;
+  final Widget Function(BuildContext context, bool isOn)? builder;
   final VoidCallback? onTap;
   final Duration wellDuration;
   final Duration fadeDuration;
@@ -2256,9 +2257,8 @@ class InkButton extends StatefulWidget {
   final earlyFadeDuration = const Duration(milliseconds: 170);
   final BorderRadius? borderRadius;
   final Duration fadeDelay;
-  const InkButton({
+  InkButton({
     super.key,
-    required this.child,
     this.onTap,
     this.wellDuration = const Duration(milliseconds: 290),
     this.fadeDuration = const Duration(milliseconds: 170),
@@ -2267,7 +2267,17 @@ class InkButton extends StatefulWidget {
     this.backgroundColor,
     this.inkColor,
     this.borderRadius,
-  });
+    this.child,
+    this.builder,
+  }) {
+    if (builder != null && child != null) {
+      throw ArgumentError.value(
+          child, 'child', 'Cannot provide both builder and child');
+    } else if (builder == null && child == null) {
+      throw ArgumentError.value(
+          child, 'child', 'Must provide either builder or child');
+    }
+  }
 
   @override
   State<InkButton> createState() => _InkButtonState();
@@ -2283,7 +2293,8 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
       _wells.add(InkWelling(
         key: key,
         origin: touchPoint,
-        color: widget.inkColor ?? Theme.of(context).colorScheme.primary,
+        color: widget.inkColor ??
+            Theme.of(context).colorScheme.primary.withAlpha(60),
         fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
         borderRadius: widget.borderRadius,
         onFinished: () {
@@ -2300,6 +2311,10 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
           vsync: this,
           duration: widget.fadeDuration,
         ),
+        child: ColoredBox(
+            color: widget.inkColor ??
+                Theme.of(context).colorScheme.primary.withAlpha(60),
+            child: widget.builder?.call(context, true)),
       ));
     });
   }
@@ -2338,8 +2353,10 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
               child: Stack(
                 fit: StackFit.passthrough,
                 children: [
+                  // if there's a builder, then child should be obscured by the inks, as it will also be rendered inverted within them. (maybe it should be obscured anyway, maybe this should just be a distinct setting)
+                  if (widget.builder != null) widget.builder!(context, false),
                   for (final ink in _wells) ink,
-                  widget.child,
+                  if (widget.builder == null) widget.child!,
                 ],
               )),
         ),
@@ -2354,6 +2371,7 @@ class InkWelling extends StatefulWidget {
   final double fuzzyEdgeWidth;
   final AnimationController bloomController;
   final AnimationController fadeController;
+  final Widget? child;
   final BorderRadius? borderRadius;
   final VoidCallback onFinished;
 
@@ -2366,6 +2384,7 @@ class InkWelling extends StatefulWidget {
     required this.onFinished,
     required this.bloomController,
     required this.fadeController,
+    this.child,
   });
 
   /// Reverse the bloom iff the bloom is still visible (early cancel).
@@ -2429,7 +2448,7 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
           ),
         );
       },
-      child: ColoredBox(color: widget.color),
+      child: ColoredBox(color: widget.color, child: widget.child),
     );
     return Positioned.fill(child: result);
   }
