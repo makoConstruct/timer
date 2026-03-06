@@ -483,7 +483,8 @@ class TimerMenu extends StatelessWidget {
             child: ClipPath(
               clipper: _MenuRevealClipper(
                 progress: animation.value,
-                origin: centerOn.center - Offset(left, top),
+                // happens to make the origin be the center of the clockface
+                origin: topLeftManhattanCenter(centerOn) - Offset(left, top),
                 cornerRounding: cornerRounding,
                 arrowX: arrowX - left,
                 arrowHeight: arrowHeight,
@@ -517,37 +518,47 @@ class _MenuRevealClipper extends CustomClipper<Path> {
 
   @override
   Path getClip(Size size) {
+    // morphs from intermediateRect to targetRect
+    // it's complicated because it was arrived at by iterating towards something that felt right
     Size targetRectSize = Size(size.width, size.height - arrowHeight);
-    final intermediateTargetRadius = lerp(
-        0,
-        min(targetRectSize.height, targetRectSize.width),
-        unlerpUnit(0.2, 0.7, Curves.easeOutCubic.transform(progress)));
+    final intermediateProgress =
+        Curves.easeOutCubic.transform(unlerpUnit(0.3, 0.7, progress));
+    final intermediateTargetSpan = lerp(0,
+        min(targetRectSize.height, targetRectSize.width), intermediateProgress);
+    final earlyProgress =
+        Curves.easeOutCubic.transform(unlerpUnit(0, 0.5, progress));
     final distanceFromCenter = origin - sizeToOffset(targetRectSize / 2);
     final intermediateOriginTarget =
-        distanceFromCenter.dx > distanceFromCenter.dy
+        // Offset(0, arrowHeight) +
+        (distanceFromCenter.dx > distanceFromCenter.dy
             ? Offset(origin.dx, targetRectSize.height / 2)
-            : Offset(targetRectSize.width / 2, origin.dy);
-    final seed = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-          center: lerpOffset(
-              origin, intermediateOriginTarget, unlerpUnit(0, 0.6, progress)),
-          width: intermediateTargetRadius,
-          height: intermediateTargetRadius),
+            : Offset(targetRectSize.width / 2, origin.dy));
+    final earlyRect = RRect.fromRectAndRadius(
+        Rect.fromCircle(
+            center: lerpOffset(origin, intermediateOriginTarget, earlyProgress),
+            radius: lerp(0, intermediateTargetSpan / 2, earlyProgress)),
+        Radius.circular(cornerRounding));
+    final intermediateRect = RRect.fromRectAndRadius(
+      Rect.fromCircle(
+          center: intermediateOriginTarget, radius: intermediateTargetSpan / 2),
       Radius.circular(cornerRounding),
     );
     final targetRect = RRect.fromRectAndRadius(
       Offset(0, arrowHeight) & targetRectSize,
       Radius.circular(cornerRounding),
     );
-    final lerpr = RRect.lerp(seed, targetRect,
-        Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress)))!;
+    final lerpr = RRect.lerp(
+        earlyRect,
+        RRect.lerp(intermediateRect, targetRect,
+            Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress)))!,
+        unlerpUnit(0, 0.5, progress))!;
     return Path.combine(
         PathOperation.union, Path()..addRRect(lerpr), _buildArrow());
   }
 
   Path _buildArrow() {
     final ah = arrowHeight *
-        Curves.easeOutCubic.transform(unlerpUnit(0.6, 1, progress));
+        Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress));
     final w = ah * 2;
     final h = ah;
     final stemw = w * 0.2;

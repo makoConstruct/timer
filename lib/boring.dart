@@ -504,6 +504,11 @@ double shortestAngleDistance(double from, double to) {
   return diff <= pi ? diff : -(tau - diff);
 }
 
+Offset topLeftManhattanCenter(Rect r) {
+  return Offset(
+      r.left + min(r.width, r.height) / 2, r.top + min(r.width, r.height) / 2);
+}
+
 // (double, double) bothAngleDifferences(double from, double to) {
 //   double a = to - from;
 //   double b = from - to;
