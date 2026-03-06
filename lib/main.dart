@@ -450,53 +450,43 @@ class TimerMenu extends StatelessWidget {
   final List<Widget> items;
   final Animation<double> animation;
   static const double buttonHeight = 40;
+  final double arrowHeight;
   const TimerMenu(
       {super.key,
       required this.timerID,
       required this.centerOn,
       required this.items,
-      required this.animation});
+      required this.animation,
+      required this.arrowHeight});
 
   @override
   Widget build(BuildContext context) {
     const double margin = 12;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
-    // final itemHeight = items.length * TimerMenu.buttonHeight;
-    final top = centerOn.bottom;
-    // final double top = max(centerOn.top - itemHeight, 0);
     final left = margin;
     final right = margin;
     final buttonSpan =
         Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!;
     final cornerRounding = backingCornerRounding * buttonSpan;
     final arrowX = centerOn.left + buttonSpan / 2;
-    final arrowRadMax = buttonSpan * 0.2;
-    final arrowHeight = arrowRadMax;
+    final top = centerOn.bottom - arrowHeight;
 
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
         return Stack(children: [
           Positioned(
-            left: arrowX - left,
-            top: centerOn.bottom - arrowHeight,
-            child: CustomPaint(
-                size: Size(arrowRadMax * 2, arrowRadMax),
-                painter: _SpeechArrowPainter(
-                    color: mt.foreBackColor,
-                    progress: Curves.easeOutCubic
-                        .transform(unlerpUnit(0.3, 1, animation.value)))),
-          ),
-          Positioned(
             left: left,
             top: top,
             right: right,
-            child: ClipRRect(
+            child: ClipPath(
               clipper: _MenuRevealClipper(
                 progress: animation.value,
                 origin: centerOn.center - Offset(left, top),
                 cornerRounding: cornerRounding,
+                arrowX: arrowX - left,
+                arrowHeight: arrowHeight,
               ),
               child: Container(
                 color: mt.foreBackColor,
@@ -510,22 +500,62 @@ class TimerMenu extends StatelessWidget {
   }
 }
 
-class _SpeechArrowPainter extends CustomPainter {
-  final Color color;
+class _MenuRevealClipper extends CustomClipper<Path> {
   final double progress;
-  _SpeechArrowPainter({required this.color, required this.progress});
+  final Offset origin;
+  final double cornerRounding;
+  final double arrowX;
+  final double arrowHeight;
+
+  _MenuRevealClipper({
+    required this.progress,
+    required this.origin,
+    required this.cornerRounding,
+    required this.arrowX,
+    required this.arrowHeight,
+  });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final path = Path();
-    final w = size.width;
-    final h = size.height;
+  Path getClip(Size size) {
+    Size targetRectSize = Size(size.width, size.height - arrowHeight);
+    final intermediateTargetRadius = lerp(
+        0,
+        min(targetRectSize.height, targetRectSize.width),
+        unlerpUnit(0.2, 0.7, Curves.easeOutCubic.transform(progress)));
+    final distanceFromCenter = origin - sizeToOffset(targetRectSize / 2);
+    final intermediateOriginTarget =
+        distanceFromCenter.dx > distanceFromCenter.dy
+            ? Offset(origin.dx, targetRectSize.height / 2)
+            : Offset(targetRectSize.width / 2, origin.dy);
+    final seed = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+          center: lerpOffset(
+              origin, intermediateOriginTarget, unlerpUnit(0, 0.6, progress)),
+          width: intermediateTargetRadius,
+          height: intermediateTargetRadius),
+      Radius.circular(cornerRounding),
+    );
+    final targetRect = RRect.fromRectAndRadius(
+      Offset(0, arrowHeight) & targetRectSize,
+      Radius.circular(cornerRounding),
+    );
+    final lerpr = RRect.lerp(seed, targetRect,
+        Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress)))!;
+    return Path.combine(
+        PathOperation.union, Path()..addRRect(lerpr), _buildArrow());
+  }
+
+  Path _buildArrow() {
+    final ah = arrowHeight *
+        Curves.easeOutCubic.transform(unlerpUnit(0.6, 1, progress));
+    final w = ah * 2;
+    final h = ah;
     final stemw = w * 0.2;
     final basew = (w - stemw) / 2;
     final minHeight = basew + stemw / 2;
     final double additionalHeight = max(h - minHeight, 0);
-    path.moveTo(0, h);
+    final path = Path();
+    path.moveTo(arrowX - w / 2, h);
     path.relativeArcToPoint(Offset(basew, -basew),
         radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
     path.relativeLineTo(0, additionalHeight);
@@ -535,60 +565,7 @@ class _SpeechArrowPainter extends CustomPainter {
     path.relativeArcToPoint(Offset(basew, basew),
         radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
     path.close();
-    canvas.drawPath(path, paint);
-    // final path = Path()
-    //   ..moveTo(size.width / 2, 0)
-    //   ..lineTo(size.width, size.height)
-    //   ..lineTo(0, size.height)
-    //   ..close();
-    // canvas.save();
-    // canvas.translate(size.width / 2, size.height);
-    // canvas.scale(progress);
-    // canvas.translate(-size.width / 2, -size.height);
-    // canvas.drawPath(path, paint);
-    // canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_SpeechArrowPainter oldDelegate) =>
-      color != oldDelegate.color;
-}
-
-class _MenuRevealClipper extends CustomClipper<RRect> {
-  final double progress;
-  final Offset origin;
-  final double cornerRounding;
-
-  _MenuRevealClipper({
-    required this.progress,
-    required this.origin,
-    required this.cornerRounding,
-  });
-
-  @override
-  RRect getClip(Size size) {
-    final ir = lerp(0, min(size.height, size.width),
-        unlerpUnit(0.2, 0.7, Curves.easeOutCubic.transform(progress)));
-    // takes the shotest path to one of the axes of the target rectangle
-    final distanceFromCenter = origin - sizeToOffset(size / 2);
-    final intermediateOriginTarget =
-        distanceFromCenter.dx > distanceFromCenter.dy
-            ? Offset(origin.dx, size.height / 2)
-            : Offset(size.width / 2, origin.dy);
-    final seed = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-          center: lerpOffset(
-              origin, intermediateOriginTarget, unlerpUnit(0, 0.6, progress)),
-          width: ir,
-          height: ir),
-      Radius.circular(cornerRounding),
-    );
-    final target = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      Radius.circular(cornerRounding),
-    );
-    return RRect.lerp(seed, target,
-        Curves.easeOutCubic.transform(unlerpUnit(0.3, 1, progress)))!;
+    return path;
   }
 
   @override
@@ -1785,6 +1762,7 @@ class TimerScreenState extends State<TimerScreen>
       return;
     }
     Rect p = boxRect(wk)!;
+    final arrowHeight = TimerMenu.buttonHeight * 0.36;
     Widget menuItem(BuildContext context, bool isRightHanded, ThemeData theme,
         IconData icon, String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
@@ -1798,7 +1776,7 @@ class TimerScreenState extends State<TimerScreen>
           },
           child: Padding(
               padding: EdgeInsets.only(
-                  top: isFirst ? padding : 0,
+                  top: isFirst ? (padding + arrowHeight) : 0,
                   bottom: isLast ? padding : 0,
                   left: padding,
                   right: padding),
@@ -1836,6 +1814,7 @@ class TimerScreenState extends State<TimerScreen>
               bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
               return TimerMenu(
                   timerID: timerID,
+                  arrowHeight: arrowHeight,
                   centerOn: p,
                   animation: animation,
                   items: [
