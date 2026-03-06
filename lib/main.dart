@@ -894,16 +894,16 @@ class TimerState extends State<Timer>
         Offset.fromDirection(-pi / 4, clockRadius + 8 + playIconRadius);
 
     final stopwatchPulse = d.transpired % 1;
+    final stopwatchPulseProgress = stopwatchPulse *
+        (1 -
+            Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
     final stopwatchPulseSize = 2 *
         lerp(
             clockRadius * 0.34,
             // I don't know why it wants to be 0.6, the full timerOutline width seems far too thick.
             clockRadius - timerOutline * 0.6,
             // Curves.easeOutCubic.transform(stopwatchPulse) *
-            stopwatchPulse *
-                (1 -
-                    Curves.easeOutCubic
-                        .transform(unlerpUnit(0.84, 1, stopwatchPulse))));
+            stopwatchPulseProgress);
 
     Decoration containerShape(Color color) => d.kind == TimerKind.stopwatch
         ? ShapeDecoration(
@@ -946,8 +946,13 @@ class TimerState extends State<Timer>
                 child: Container(
                   width: stopwatchPulseSize,
                   height: stopwatchPulseSize,
-                  decoration: containerShape(
-                    primaryColor(d.hue),
+                  decoration: ShapeDecoration(
+                    shape: StarBorder.polygon(
+                      sides: 8,
+                      pointRounding: lerp(0.5, 1, 1 - stopwatchPulseProgress),
+                      rotation: 45 / 2,
+                    ),
+                    color: primaryColor(d.hue),
                   ),
                 ),
               ),
@@ -2251,11 +2256,11 @@ class TimerScreenState extends State<TimerScreen>
       // Positioned.fromRect(
       //     rect: positionAt(outerPaletteAnchor, Size(1, 1)),
       //     child: backspaceButton),
+      // Positioned.fromRect(
+      //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
+      //     child: pinButton),
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
-          child: pinButton),
-      Positioned.fromRect(
-          rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
           child: createStopwatchButton),
       // Positioned.fromRect(
       //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 3), Size(1, 1)),
