@@ -895,10 +895,10 @@ class TimerState extends State<Timer>
 
     final stopwatchPulse = d.transpired % 1;
     final stopwatchPulseSize = 2 *
-        clockRadius *
         lerp(
-            0.2,
-            0.92,
+            clockRadius * 0.34,
+            // I don't know why it wants to be 0.6, the full timerOutline width seems far too thick.
+            clockRadius - timerOutline * 0.6,
             // Curves.easeOutCubic.transform(stopwatchPulse) *
             stopwatchPulse *
                 (1 -
@@ -1834,6 +1834,10 @@ class TimerScreenState extends State<TimerScreen>
                         () {
                       deleteTimer(timerID);
                     }, isFirst: true),
+                    menuItem(context, isRightHanded, theme, Icons.edit, 'Reset',
+                        () {
+                      resetTimer(timerID);
+                    }),
                     menuItem(
                         context, isRightHanded, theme, Icons.push_pin, 'Pin',
                         () {
@@ -2628,6 +2632,14 @@ this will activate the new timer.
     removeTimer(ki);
     Mobj.getAlreadyLoaded(ki, TimerDataType()).value = null;
     // [todo] reduceRef
+  }
+
+  void resetTimer(MobjID ki) {
+    final mobj = Mobj.getAlreadyLoaded(ki, TimerDataType());
+    mobj.value = mobj.peek()!.withChanges(
+        ranTime: Duration.zero,
+        runningState: TimerData.paused,
+        startTime: DateTime.now());
   }
 
   void removeTimer(MobjID ki) {
