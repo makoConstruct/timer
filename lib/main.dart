@@ -468,7 +468,7 @@ class TimerMenu extends StatelessWidget {
     final right = margin;
     final buttonSpan =
         Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!;
-    final cornerRounding = backingCornerRounding * buttonSpan;
+    final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
     final arrowX = centerOn.left + buttonSpan / 2;
     final top = centerOn.bottom - arrowHeight;
 
@@ -1793,7 +1793,7 @@ class TimerScreenState extends State<TimerScreen>
     Widget menuItem(BuildContext context, bool isRightHanded, ThemeData theme,
         Widget icon, String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
-      const double padding = 4;
+      const double padding = 8;
       return InkButton(
           backgroundColor: MakoThemeData.fromTheme(theme).foreBackColor,
           inkColor: theme.colorScheme.primary.withAlpha(60),
