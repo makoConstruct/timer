@@ -1541,7 +1541,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
           lerp(
               radius - actionRadiusMax,
               radius,
-              Curves.easeOut.transform(unlerpUnit(0.6, 1,
+              Curves.easeInOut.transform(unlerpUnit(0.6, 1,
                   (overrideRisep ?? risep) * (1 - fallpIfNotSelected)))));
     }
 
@@ -1791,7 +1791,7 @@ class TimerScreenState extends State<TimerScreen>
     Rect p = boxRect(wk)!;
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
     Widget menuItem(BuildContext context, bool isRightHanded, ThemeData theme,
-        IconData icon, String label, Function() action,
+        Widget icon, String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
       const double padding = 4;
       return InkButton(
@@ -1815,7 +1815,7 @@ class TimerScreenState extends State<TimerScreen>
                   SizedBox(
                       width: TimerMenu.buttonHeight,
                       height: TimerMenu.buttonHeight,
-                      child: Center(child: Icon(icon))),
+                      child: Center(child: icon)),
                   Flexible(
                       child: Text(label,
                           style: theme.textTheme.bodyMedium,
@@ -1845,18 +1845,22 @@ class TimerScreenState extends State<TimerScreen>
                   centerOn: p,
                   animation: animation,
                   items: [
-                    menuItem(
-                        context, isRightHanded, theme, Icons.delete, 'Delete',
-                        () {
+                    menuItem(context, isRightHanded, theme, Icon(Icons.delete),
+                        'Delete', () {
                       deleteTimer(timerID);
                     }, isFirst: true),
-                    menuItem(context, isRightHanded, theme, Icons.edit, 'Reset',
-                        () {
+                    menuItem(
+                        context,
+                        isRightHanded,
+                        theme,
+                        Transform.rotate(
+                            angle: -pi / 2,
+                            child: Icon(Icons.rotate_90_degrees_cw_rounded)),
+                        'Reset', () {
                       resetTimer(timerID);
                     }),
-                    menuItem(
-                        context, isRightHanded, theme, Icons.push_pin, 'Pin',
-                        () {
+                    menuItem(context, isRightHanded, theme,
+                        Icon(Icons.push_pin), 'Pin', () {
                       togglePin(timerID);
                     }, isLast: true),
                   ]);
