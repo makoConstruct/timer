@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
+import 'package:makos_timer/main.dart' show mainNotificationPortName;
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
@@ -40,23 +41,7 @@ Future<void> printExceptionsAsync(Future<void> Function() fn,
 
 late final PersistentNotificationTask foregroundTaskHandler;
 
-const _foregroundServicePortName = 'foreground_service';
-
-@pragma('vm:entry-point')
-Future<void> foregroundServiceNotificationActionReceived(
-    ReceivedAction action) async {
-  print("foregroundServiceNotificationActionReceived: $action");
-  IsolateNameServer.lookupPortByName(_foregroundServicePortName)
-      ?.send('dismissAlarms');
-}
-
-@pragma('vm:entry-point')
-Future<void> foregroundServiceNotificationDismissedReceived(
-    ReceivedAction action) async {
-  print("foregroundServiceNotificationDismissedReceived: $action");
-  IsolateNameServer.lookupPortByName(_foregroundServicePortName)
-      ?.send('dismissAlarms');
-}
+const foregroundServicePortName = 'foreground_service';
 
 // entrypoint for the persistent notification isolate
 @pragma('vm:entry-point')
@@ -80,6 +65,27 @@ void foregroundTaskStart() {
   foregroundTaskHandler = PersistentNotificationTask();
   FlutterForegroundTask.setTaskHandler(
       ErrorCatchingTaskHandler(foregroundTaskHandler));
+}
+
+void _sendDismissAlarms() {
+  IsolateNameServer.lookupPortByName(mainNotificationPortName)
+      ?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(foregroundServicePortName)
+      ?.send('dismissAlarms');
+}
+
+@pragma('vm:entry-point')
+Future<void> foregroundServiceNotificationActionReceived(
+    ReceivedAction action) async {
+  print("foregroundServiceNotificationActionReceived: $action");
+  _sendDismissAlarms();
+}
+
+@pragma('vm:entry-point')
+Future<void> foregroundServiceNotificationDismissedReceived(
+    ReceivedAction action) async {
+  print("foregroundServiceNotificationDismissedReceived: $action");
+  _sendDismissAlarms();
 }
 
 // Wrapper that catches and logs all errors from the inner handler, since they don't otherwise seem to reach the logcat
@@ -114,6 +120,8 @@ class ErrorCatchingTaskHandler extends TaskHandler {
       "onNotificationButtonPressed");
 }
 
+const completionChannelKey = 'timer_completion';
+
 class PersistentNotificationTask extends TaskHandler {
   late JukeBox jukeBox;
   Timer? _heartbeatTimeout;
@@ -129,7 +137,6 @@ class PersistentNotificationTask extends TaskHandler {
   Timer? noTimersCheck;
   // kept for debouncing notification updates
   DateTime? lastNotificationUpdate;
-  static const completionChannelKey = 'timer_completion';
   late ReceivePort _dismissPort;
   int _notificationIdCounter = 256;
 
@@ -275,12 +282,13 @@ class PersistentNotificationTask extends TaskHandler {
     print("onStart c");
     MobjRegistry.initialize(TheDatabase(), preload: false);
     _dismissPort = ReceivePort();
+    IsolateNameServer.removePortNameMapping(foregroundServicePortName);
     IsolateNameServer.registerPortWithName(
-        _dismissPort.sendPort, _foregroundServicePortName);
+        _dismissPort.sendPort, foregroundServicePortName);
     _dismissPort.listen((message) {
       if (message == 'dismissAlarms') dismissAllAlarms();
     });
-    print("initializing notification channel");
+    // print("initializing notification channel");
     await AwesomeNotifications().initialize(null, [
       NotificationChannel(
         channelKey: completionChannelKey,
@@ -289,7 +297,6 @@ class PersistentNotificationTask extends TaskHandler {
         importance: NotificationImportance.High,
       ),
     ]);
-    print("setting notification listeners");
     await AwesomeNotifications().setListeners(
       onActionReceivedMethod: foregroundServiceNotificationActionReceived,
       onDismissActionReceivedMethod:
@@ -381,7 +388,7 @@ class PersistentNotificationTask extends TaskHandler {
     appActive.dispose();
     ranTimerCount.dispose();
     refCount.dispose();
-    IsolateNameServer.removePortNameMapping(_foregroundServicePortName);
+    IsolateNameServer.removePortNameMapping(foregroundServicePortName);
     _dismissPort.close();
     FlutterForegroundTask.sendDataToMain({'op': 'goodbye'});
   }
@@ -430,9 +437,6 @@ class PersistentNotificationTask extends TaskHandler {
       case 'goodbye':
         appActive.value = false;
         _heartbeatTimeout?.cancel();
-        break;
-      case 'acknowledgeAlarms':
-        dismissAllAlarms();
         break;
     }
   }

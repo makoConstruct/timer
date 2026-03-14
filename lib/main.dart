@@ -1,9 +1,11 @@
 // this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code, for anyone who enjoys reading code.
 
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:async';
 import 'dart:async' as async;
+import 'dart:ui';
 
 import 'package:animated_containers/retargetable_easers.dart'
     hide defaultPulserFunction;
@@ -201,29 +203,62 @@ Future<void> enableHighRefreshRate() async {
   // bool success = await _refreshRateControl.stopHighRefreshRate();
 }
 
+const mainNotificationPortName = 'main_notification';
+ReceivePort? notificationResponseReceivePort;
+
 void main() async {
   // await deleteDatabase();
   WidgetsFlutterBinding.ensureInitialized();
-  await enableHighRefreshRate();
-  await initializeDatabase();
-  await AwesomeNotifications().setListeners(
-    onActionReceivedMethod: onNotificationActionReceived,
-    onDismissActionReceivedMethod: onNotificationDismissedReceived,
-  );
   SignalsObserver.instance = null;
+  await Future.wait([
+    enableHighRefreshRate(),
+    initializeDatabase(),
+    Future(() async {
+      notificationResponseReceivePort = ReceivePort();
+      // tombstone: registerPortWithName doesn't work if there's already a port with that name, so when main died and then was reborn, this registration would fail. So you have to removePortWithMapping first.
+      IsolateNameServer.removePortNameMapping(mainNotificationPortName);
+      IsolateNameServer.registerPortWithName(
+          notificationResponseReceivePort!.sendPort, mainNotificationPortName);
+      notificationResponseReceivePort!.listen((message) {
+        if (message == 'dismissAlarms') {
+          print("main message to dismissAlarms");
+          globalTimerHolm?.dismissAlarms();
+        }
+      });
+      await AwesomeNotifications().initialize(null, [
+        NotificationChannel(
+          channelKey: 'main_notification',
+          channelName: 'Timer Completion',
+          channelDescription: 'Notifications when timers complete',
+          importance: NotificationImportance.High,
+        ),
+      ]);
+      await AwesomeNotifications().setListeners(
+        onActionReceivedMethod: onNotificationActionReceived,
+        onDismissActionReceivedMethod: onNotificationDismissedReceived,
+      );
+    })
+  ]);
   runApp(const TimersApp());
+}
+
+void _sendDismissAlarms() {
+  IsolateNameServer.lookupPortByName(mainNotificationPortName)
+      ?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(foregroundServicePortName)
+      ?.send('dismissAlarms');
 }
 
 @pragma('vm:entry-point')
 Future<void> onNotificationActionReceived(ReceivedAction action) async {
   print("onNotificationActionReceived: $action");
-  globalTimerHolm?.dismissAlarms();
+  _sendDismissAlarms();
 }
 
 @pragma('vm:entry-point')
 Future<void> onNotificationDismissedReceived(ReceivedAction action) async {
   print("onNotificationDismissedReceived: $action");
-  globalTimerHolm?.dismissAlarms();
+  _sendDismissAlarms();
 }
 
 void onDataReceived(Object data) {
@@ -270,6 +305,7 @@ class TimerHolm {
 
   void dismissAlarms() {
     jukeBox.stopAudio();
+    print("main dismissAlarms");
     AwesomeNotifications().cancelAll();
     for (final tt in tracking.values) {
       print("dismissing alarm ${tt.mobj?.id}");
@@ -287,15 +323,16 @@ class TimerHolm {
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
         id: _notificationIdCounter++,
-        channelKey: 'timer_completion',
+        channelKey: completionChannelKey,
         title: 'Timer Complete',
         body: 'Tap to dismiss alarm',
         actionType: ActionType.DismissAction,
         locked: true,
         autoDismissible: true,
+        // category: NotificationCategory.Alarm,
+        // wakeUpScreen: true,
       ),
       actionButtons: [
-        // shouldn't need this
         // NotificationActionButton(
         //   key: 'dismiss',
         //   label: 'Dismiss',
@@ -339,6 +376,35 @@ class TimerHolm {
     tracking.remove(id);
   }
 
+  void _timerGoesOff(TimerTrack tt, Mobj<TimerData> mobj) {
+    final d = mobj.value!;
+    tt.completionTimer = null;
+    vibrateAlertOnce();
+    final audio =
+        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType()).value!;
+    final persistentAlarmMode =
+        Mobj.getAlreadyLoaded(persistentAlarmModeID, const BoolType()).value ??
+            false;
+    // if ((d.persistentAlarm ?? persistentAlarmMode)) {
+    if (isBackgrounded.peek() && (d.persistentAlarm ?? persistentAlarmMode)) {
+      // then it needs to send a notification and scream repeatedly until acknowledged
+      jukeBox.playAudioLooping(audio);
+      mobj.value = d.withChanges(
+        runningState: TimerData.completed,
+        isGoingOff: true,
+      );
+      tt.vibrationRepeatTimer?.cancel();
+      tt.vibrationRepeatTimer = async.Timer.periodic(
+          const Duration(seconds: 8), (_) => vibrateAlertOnce());
+      _showCompletionNotification();
+    } else {
+      jukeBox.playAudio(audio);
+      mobj.value = d.withChanges(
+        runningState: TimerData.completed,
+      );
+    }
+  }
+
   /// how each timer is subscribed to and responded to
   void Function() enlivenTimer(
       TimerTrack tt, Mobj<TimerData> mobj, JukeBox jukeBox) {
@@ -367,32 +433,7 @@ class TimerHolm {
                         (d.duration - DateTime.now().difference(d.startTime))
                             .inMilliseconds
                             .ceil()), () {
-              final d = mobj.value!;
-              tt.completionTimer = null;
-              vibrateAlertOnce();
-              final audio =
-                  Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
-                      .value!;
-              final persistentAlarmMode =
-                  Mobj.getAlreadyLoaded(persistentAlarmModeID, const BoolType())
-                          .value ??
-                      false;
-              if (isBackgrounded.peek() && persistentAlarmMode) {
-                jukeBox.playAudioLooping(audio);
-                mobj.value = d.withChanges(
-                  runningState: TimerData.completed,
-                  isGoingOff: true,
-                );
-                tt.vibrationRepeatTimer?.cancel();
-                tt.vibrationRepeatTimer = async.Timer.periodic(
-                    const Duration(seconds: 8), (_) => vibrateAlertOnce());
-                _showCompletionNotification();
-              } else {
-                jukeBox.playAudio(audio);
-                mobj.value = d.withChanges(
-                  runningState: TimerData.completed,
-                );
-              }
+              _timerGoesOff(tt, mobj);
             });
           }
         }
@@ -1121,7 +1162,7 @@ class TimerState extends State<Timer>
             child: next),
         (next) => BoolSignalTween(
             signal: _shouldFade,
-            duration: Duration(milliseconds: 140),
+            duration: Duration(milliseconds: 90),
             child: next,
             builder: (context, progress, child) => Opacity(
                 // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause

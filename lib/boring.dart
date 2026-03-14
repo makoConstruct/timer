@@ -2723,7 +2723,7 @@ class MakoThemeData {
                 darkenColor(theme.colorScheme.surfaceContainerHighest, 0.05),
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
-            inkColor: theme.colorScheme.primary.withAlpha(110),
+            inkColor: theme.colorScheme.primary.withAlpha(30),
           );
   }
 }

@@ -37,6 +37,8 @@ class TimerData {
   /// if not pinned, the timer will be deleted next time a new timer is created, unless it's currently playing
   final bool pinned;
 
+  final bool? persistentAlarm;
+
   final TimerKind kind;
 
   /// list of child timer IDs
@@ -60,6 +62,7 @@ class TimerData {
     this.ranTime = Duration.zero,
     this.isGoingOff = false,
     this.pinned = false,
+    this.persistentAlarm,
     this.kind = TimerKind.timer,
     this.children = const [],
   }) {
@@ -76,6 +79,8 @@ class TimerData {
     Duration? ranTime,
     bool? isGoingOff,
     bool? pinned,
+    bool? persistentAlarm,
+    bool persistentAlarmNull = false,
     TimerKind? kind,
     List<String>? children,
   }) {
@@ -88,6 +93,9 @@ class TimerData {
       ranTime: ranTime ?? this.ranTime,
       isGoingOff: isGoingOff ?? this.isGoingOff,
       pinned: pinned ?? this.pinned,
+      persistentAlarm: persistentAlarmNull
+          ? null
+          : (persistentAlarm ?? this.persistentAlarm),
       kind: kind ?? this.kind,
       children: children ?? this.children,
     );
@@ -130,6 +138,8 @@ class TimerDataType extends TypeHelp<TimerData> {
         selected: const BoolType().fromJson(json['selected']),
         digits: ListType(const IntType()).fromJson(json['digits']),
         pinned: const BoolType().fromJson(json['pinned']),
+        persistentAlarm:
+            Nullable(const BoolType()).fromJson(json['persistentAlarm']),
         ranTime: Duration(
             milliseconds:
                 (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
@@ -150,6 +160,8 @@ class TimerDataType extends TypeHelp<TimerData> {
       'selected': const BoolType().toJson(object.selected),
       'digits': ListType(const IntType()).toJson(object.digits),
       'pinned': const BoolType().toJson(object.pinned),
+      'persistentAlarm':
+          Nullable(const BoolType()).toJson(object.persistentAlarm),
       'ranTime': const DoubleType()
           .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
@@ -169,6 +181,8 @@ TimerData cloneTimerDataWithChanges(
   Duration? ranTime,
   bool? isGoingOff,
   bool? pinned,
+  bool? persistentAlarm,
+  bool persistentAlarmNull = false,
   List<String>? children,
 }) {
   return TimerData(
@@ -180,6 +194,8 @@ TimerData cloneTimerDataWithChanges(
     ranTime: ranTime ?? old.ranTime,
     isGoingOff: isGoingOff ?? old.isGoingOff,
     pinned: pinned ?? old.pinned,
+    persistentAlarm:
+        persistentAlarmNull ? null : (persistentAlarm ?? old.persistentAlarm),
     children: children ?? old.children,
   );
 }
