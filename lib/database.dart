@@ -32,8 +32,10 @@ const MobjID usedDragActionRecordID = '1cf75159-85e7-46eb-aa21-5b06a164b01b';
 /// whether the user has chosen a preferred audio sound effect (we display a reminder)
 const MobjID hasSelectedAudioID = '1cd38324-8199-4c92-88f1-a6becbe9ec55';
 
+/// when enabled, completed timers loop audio until user acknowledges (when app is backgrounded)
+const MobjID persistentAlarmModeID = 'fb66e93f-84d1-4809-a997-293218a83ddc';
+
 // some spares
-// fb66e93f-84d1-4809-a997-293218a83ddc
 // cursor made this one lol
 // 91012689-136a-4b23-9629-5a71657709a4
 

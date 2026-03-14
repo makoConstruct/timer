@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:ui';
 // this doesn't work from background isolates?
 // import 'dart:developer' as developer;
 
+import 'package:awesome_notifications/awesome_notifications.dart'
+    hide NotificationPermission;
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:makos_timer/boring.dart';
@@ -35,6 +38,26 @@ Future<void> printExceptionsAsync(Future<void> Function() fn,
   }
 }
 
+late final PersistentNotificationTask foregroundTaskHandler;
+
+const _foregroundServicePortName = 'foreground_service';
+
+@pragma('vm:entry-point')
+Future<void> foregroundServiceNotificationActionReceived(
+    ReceivedAction action) async {
+  print("foregroundServiceNotificationActionReceived: $action");
+  IsolateNameServer.lookupPortByName(_foregroundServicePortName)
+      ?.send('dismissAlarms');
+}
+
+@pragma('vm:entry-point')
+Future<void> foregroundServiceNotificationDismissedReceived(
+    ReceivedAction action) async {
+  print("foregroundServiceNotificationDismissedReceived: $action");
+  IsolateNameServer.lookupPortByName(_foregroundServicePortName)
+      ?.send('dismissAlarms');
+}
+
 // entrypoint for the persistent notification isolate
 @pragma('vm:entry-point')
 void foregroundTaskStart() {
@@ -54,8 +77,9 @@ void foregroundTaskStart() {
     }
   });
 
+  foregroundTaskHandler = PersistentNotificationTask();
   FlutterForegroundTask.setTaskHandler(
-      ErrorCatchingTaskHandler(PersistentNotificationTask()));
+      ErrorCatchingTaskHandler(foregroundTaskHandler));
 }
 
 // Wrapper that catches and logs all errors from the inner handler, since they don't otherwise seem to reach the logcat
@@ -99,37 +123,90 @@ class PersistentNotificationTask extends TaskHandler {
   // tracks the number of timers that were running when the app was last closed.
   late Signal<int> ranTimerCount;
   late Computed<int> refCount;
-  final List<TrackedTimer> trackedTimers = [];
+  Map<MobjID<TimerData>, TrackedTimer> trackedTimers = {};
   StreamSubscription? timerListSubscription;
   Function()? listeningProcessCancel;
   Timer? noTimersCheck;
   // kept for debouncing notification updates
   DateTime? lastNotificationUpdate;
+  static const completionChannelKey = 'timer_completion';
+  late ReceivePort _dismissPort;
+  int _notificationIdCounter = 256;
 
-  void onTimerDataChanged(TrackedTimer tracked) {
+  void onTimerDataChanged(TimerData prev, TrackedTimer tracked) {
     backthreadLog("onTimerDataChanged ${tracked.mobj.id}",
         name: "ForegroundService");
     final timer = tracked.mobj;
     final ntp = timer.peek()!;
+    // bug: this fires every time it changes, not just every time it changes from non-running to running
     if (ntp.isRunning) {
       tracked.triggerTimer?.cancel();
       tracked.triggerTimer = Timer(
           digitsToDuration(timer.peek()!.digits) -
-              DateTime.now().difference(timer.peek()!.startTime), () {
+              DateTime.now().difference(timer.peek()!.startTime), () async {
         backthreadLog("timer triggered ${timer.id}", name: "ForegroundService");
-        // trigger timer
         FlutterForegroundTask.sendDataToMain(
             {'op': 'timerTriggered', 'timerId': timer.id});
-        HapticFeedback.heavyImpact();
-        Mobj.fetch(selectedAudioID, type: AudioInfoType()).then((audio) {
-          jukeBox.playAudio(audio.value!);
-        });
-        timer.value =
-            timer.value!.withChanges(runningState: TimerData.completed);
+        vibrateAlertOnce();
+
+        final persistentAlarmMode =
+            await Mobj.fetch(persistentAlarmModeID, type: const BoolType());
+        final audio = await Mobj.fetch(selectedAudioID, type: AudioInfoType());
+
+        if (persistentAlarmMode.peek() == true) {
+          jukeBox.playAudioLooping(audio.peek()!);
+          timer.value = timer
+              .peek()!
+              .withChanges(runningState: TimerData.completed, isGoingOff: true);
+          showCompletionNotification(timer.id);
+        } else {
+          jukeBox.playAudio(audio.peek()!);
+          timer.value =
+              timer.peek()!.withChanges(runningState: TimerData.completed);
+        }
       });
     } else {
-      tracked.endTrackedTimer();
+      if (!ntp.isGoingOff) {
+        tracked.endTrackedTimer();
+      }
       updateRunningTimersNotification();
+    }
+  }
+
+  Future<void> showCompletionNotification(String timerId) async {
+    print("showCompletionNotification");
+    printExceptionsAsync(() => AwesomeNotifications().createNotification(
+          content: NotificationContent(
+            id: _notificationIdCounter++,
+            channelKey: completionChannelKey,
+            title: 'Timer Complete',
+            body: 'Tap to dismiss alarm',
+            locked: true,
+            autoDismissible: true,
+            actionType: ActionType.DismissAction,
+            payload: {'timerId': timerId},
+          ),
+          actionButtons: [
+            // NotificationActionButton(
+            //   key: 'dismiss',
+            //   label: 'Dismiss',
+            //   actionType: ActionType.SilentBackgroundAction,
+            //   autoDismissible: true,
+            // ),
+          ],
+        ));
+  }
+
+  Future<void> dismissAllAlarms() async {
+    backthreadLog("dismissAllAlarms", name: "ForegroundService");
+    jukeBox.stopAudio();
+    await AwesomeNotifications().cancelAll();
+    for (final tracked in trackedTimers.values) {
+      backthreadLog("dismissing alarm ${tracked.mobj.id}");
+      final timerData = tracked.mobj.peek();
+      if (timerData != null && timerData.isGoingOff) {
+        tracked.mobj.value = timerData.withChanges(isGoingOff: false);
+      }
     }
   }
 
@@ -139,7 +216,7 @@ class PersistentNotificationTask extends TaskHandler {
     timerListSubscription = null;
     listeningProcessCancel?.call();
     listeningProcessCancel = null;
-    for (final tracked in trackedTimers) {
+    for (final tracked in trackedTimers.values) {
       tracked.endTrackedTimer();
     }
     trackedTimers.clear();
@@ -171,7 +248,7 @@ class PersistentNotificationTask extends TaskHandler {
     String title =
         trackedTimers.length == 1 ? "timer running" : "timers running";
     String body = "";
-    for (final tracked in trackedTimers) {
+    for (final tracked in trackedTimers.values) {
       final mv = tracked.mobj.value;
       body += mv?.isRunning ?? false
           ? "${formatTime(durationToDigits(tracked.secondsRemaining().toDouble()))}\n"
@@ -182,6 +259,7 @@ class PersistentNotificationTask extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    print("onStart a");
     appActive = Signal(starter == TaskStarter.developer);
     ranTimerCount = Signal(0);
     refCount = computed(() => ranTimerCount.value + (appActive.value ? 1 : 0));
@@ -190,10 +268,33 @@ class PersistentNotificationTask extends TaskHandler {
     // [todo] test to see if platform audio works when the isolate is started on reboot. If not, I think we're kinda screwed.
     // [todo] try removing this
     final token = RootIsolateToken.instance!;
+    print("onStart b");
     BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     FlutterForegroundTask.sendDataToMain({'op': 'onStart Report'});
     jukeBox = JukeBox.create();
+    print("onStart c");
     MobjRegistry.initialize(TheDatabase(), preload: false);
+    _dismissPort = ReceivePort();
+    IsolateNameServer.registerPortWithName(
+        _dismissPort.sendPort, _foregroundServicePortName);
+    _dismissPort.listen((message) {
+      if (message == 'dismissAlarms') dismissAllAlarms();
+    });
+    print("initializing notification channel");
+    await AwesomeNotifications().initialize(null, [
+      NotificationChannel(
+        channelKey: completionChannelKey,
+        channelName: 'Timer Completion',
+        channelDescription: 'Notifications when timers complete',
+        importance: NotificationImportance.High,
+      ),
+    ]);
+    print("setting notification listeners");
+    await AwesomeNotifications().setListeners(
+      onActionReceivedMethod: foregroundServiceNotificationActionReceived,
+      onDismissActionReceivedMethod:
+          foregroundServiceNotificationDismissedReceived,
+    );
 
     // keeping track of the timers when we need to and forgetting them when we don't
     cleanups.add(effect(() {
@@ -224,16 +325,21 @@ class PersistentNotificationTask extends TaskHandler {
                   .map((id) => Mobj.fetch(id, type: TimerDataType()))
                   .toList())
               .then((timers) {
+            final List<TrackedTimer> newTrackedTimers = [];
             for (final timer in timers) {
-              if (cancelled) {
+              if (appActive.value && cancelled) {
                 timer.dispose();
-                return;
+                continue;
               }
-              if (timer.peek()!.isRunning) {
+              var td = timer.peek()!;
+              if (!trackedTimers.containsKey(timer.id) &&
+                  (td.isRunning || td.isGoingOff)) {
                 ranTimerCount.value++;
                 final tracked = TrackedTimer(timer);
+                TimerData prev = td;
                 tracked.mobjUnsubscribe = timer.subscribe((_) {
-                  onTimerDataChanged(tracked);
+                  onTimerDataChanged(prev, tracked);
+                  prev = timer.peek()!;
                 });
                 tracked.secondCountdownIndicatorTimer = PeriodicTimerFromEpoch(
                     period: Duration(seconds: 1),
@@ -241,14 +347,20 @@ class PersistentNotificationTask extends TaskHandler {
                     callback: (timer) {
                       updateRunningTimersNotification();
                     });
-                trackedTimers.add(tracked);
+                newTrackedTimers.add(tracked);
               }
             }
-            if (appActive.value) {
-              // never mind, app has resumed control
-              return;
+            final oldTrackedTimers = trackedTimers;
+            final newTrackedTimersMap = <MobjID<TimerData>, TrackedTimer>{};
+            for (final tracked in newTrackedTimers) {
+              oldTrackedTimers.remove(tracked.mobj.id);
+              newTrackedTimersMap[tracked.mobj.id] = tracked;
             }
-            if (trackedTimers.isEmpty) {
+            for (final r in oldTrackedTimers.values) {
+              r.endTrackedTimer();
+            }
+            trackedTimers = newTrackedTimersMap;
+            if (newTrackedTimers.isEmpty) {
               FlutterForegroundTask.stopService();
             }
           });
@@ -269,6 +381,8 @@ class PersistentNotificationTask extends TaskHandler {
     appActive.dispose();
     ranTimerCount.dispose();
     refCount.dispose();
+    IsolateNameServer.removePortNameMapping(_foregroundServicePortName);
+    _dismissPort.close();
     FlutterForegroundTask.sendDataToMain({'op': 'goodbye'});
   }
 
@@ -284,13 +398,6 @@ class PersistentNotificationTask extends TaskHandler {
   @override
   void onNotificationPressed() {
     backthreadLog("mako onNotificationPressed", name: "ForegroundService");
-    for (final tracked in trackedTimers) {
-      if (tracked.mobj.value!.isRunning) {
-        tracked.mobj.value = tracked.mobj.value!.withChanges(
-            runningState: TimerData.paused, ranTime: Duration.zero);
-      }
-    }
-    relinquishWork();
   }
 
   @override
@@ -309,26 +416,29 @@ class PersistentNotificationTask extends TaskHandler {
       case 'hello':
         appActive.value = true;
         resetHeartbeatTimeout();
+        dismissAllAlarms();
         break;
       // there is no way to be reliably notified when a process is killed, so we do a heartbeat timer as well as the goodbye thing just in case that's killed
       case 'heartbeat':
         // for some reason the heartbeat continues to fire even after the app is closed. The heartbeat shouldn't trigger in that case.
+        // wait, what are you talking about, that's not possible? [todo] investigate
         backthreadLog("heartbeat received", name: "ForegroundService");
         if (appActive.peek()) {
-          appActive.value = true;
           resetHeartbeatTimeout();
-          break;
         }
+        break;
       case 'goodbye':
         appActive.value = false;
         _heartbeatTimeout?.cancel();
+        break;
+      case 'acknowledgeAlarms':
+        dismissAllAlarms();
         break;
     }
   }
 
   @override
   void onNotificationButtonPressed(String id) {
-    // [todo]: pause/play the current timer
     backthreadLog("notification button pressed $id", name: "ForegroundService");
   }
 }
@@ -336,19 +446,19 @@ class PersistentNotificationTask extends TaskHandler {
 Timer? heartbeaterMain;
 
 List<Object>? _pendingTaskMessages;
+bool _serviceRunning = false;
 
 /// Sends data to the foreground task, buffering messages until the service is running.
-/// Call [flushBufferedTaskMessages] after [startService] completes to deliver buffered messages.
 void bufferedSendToForegroundTask(Object data) {
-  if (_pendingTaskMessages != null) {
-    _pendingTaskMessages!.add(data);
-  } else {
+  if (_serviceRunning) {
     FlutterForegroundTask.sendDataToTask(data);
+  } else {
+    _pendingTaskMessages ??= [];
+    _pendingTaskMessages!.add(data);
   }
 }
 
 /// Flushes any buffered messages to the foreground task.
-/// Call this after [startService] has completed.
 void flushBufferedTaskMessages() {
   final pending = _pendingTaskMessages;
   _pendingTaskMessages = null;
@@ -426,6 +536,8 @@ Future<bool> graspForegroundService() async {
   if (await FlutterForegroundTask.isRunningService) {
     // in the example, they restart the service here, we're not gonna restart
     print("service is already running");
+    _serviceRunning = true;
+    flushBufferedTaskMessages();
     bufferedSendToForegroundTask({'op': 'hello'});
   } else {
     print("starting service");
@@ -449,6 +561,7 @@ Future<bool> graspForegroundService() async {
       _pendingTaskMessages = null;
       throw sr;
     }
+    _serviceRunning = true;
     flushBufferedTaskMessages();
   }
 

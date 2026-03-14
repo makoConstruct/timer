@@ -84,6 +84,36 @@ class JukeBox {
     }
   }
 
+  Future<void> stopAudio() async {
+    if (platformIsDesktop()) {
+      await _audioPlayer!.stop();
+      await _audioPlayer!.setReleaseMode(ReleaseMode.release);
+    } else {
+      await PlatformAudio.stopAudio();
+    }
+  }
+
+  Future<void> playAudioLooping(AudioInfo a) async {
+    if (platformIsDesktop()) {
+      if (a.url == null) {
+        return;
+      }
+      Source source;
+      if (a.url!.startsWith('asset://')) {
+        final assetPath = a.url!.replaceFirst('asset://assets/', '');
+        source = AssetSource(assetPath);
+      } else if (a.url!.startsWith('file://')) {
+        source = DeviceFileSource(a.url!.replaceFirst('file://', ''));
+      } else {
+        source = DeviceFileSource(a.url!);
+      }
+      await _audioPlayer!.setReleaseMode(ReleaseMode.loop);
+      await _audioPlayer!.play(source);
+    } else {
+      await PlatformAudio.playAudioLooping(a);
+    }
+  }
+
   Future<void> playJarringSound() async {
     if (platformIsDesktop()) {
       // Use default asset sound on Linux
@@ -134,6 +164,19 @@ class TrackedTimer {
     secondCountdownIndicatorTimer?.cancel();
     secondCountdownIndicatorTimer = null;
   }
+}
+
+Rect rectFromAlign({
+  required Alignment align,
+  required Offset anchor,
+  required double width,
+  required double height,
+}) {
+  return Rect.fromCenter(
+    center: anchor - Offset(width * align.x / 2, height * align.y / 2),
+    width: width,
+    height: height,
+  );
 }
 
 Rect? boxRect(GlobalKey? key) {
@@ -535,7 +578,14 @@ Color lerpColor(Color a, Color b, double t) {
 
 Color darkenColor(Color c, double amount) {
   final hsl = HSLuvColor.fromColor(c);
-  return hsl.addLightness(-amount * 100).toColor();
+  return hsl.addLightness(-amount * hsl.lightness).toColor();
+}
+
+Color lightenColor(Color c, double amount) {
+  final hsl = HSLuvColor.fromColor(c);
+  return hsl
+      .addLightness(hsl.lightness + amount * (100 - hsl.lightness))
+      .toColor();
 }
 
 Color grey(double v) {
@@ -2634,12 +2684,20 @@ Color backgroundColorFor(ThemeData theme, bool isOn) {
 
 class MakoThemeData {
   Color lowestBackColor;
+
+  /// indent colors are for subtle details like dividers, they don't have to contrast very well, only enough to *acknowledge*.
+  Color lowestIndentColor;
   Color midBackColor;
   Color foreBackColor;
+  Color foreIndentColor;
+  Color inkColor;
   MakoThemeData({
     required this.lowestBackColor,
+    required this.lowestIndentColor,
     required this.midBackColor,
     required this.foreBackColor,
+    required this.foreIndentColor,
+    required this.inkColor,
   });
   static MakoThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
@@ -2651,11 +2709,21 @@ class MakoThemeData {
             lowestBackColor: theme.colorScheme.surfaceContainerLowest,
             midBackColor: theme.colorScheme.surfaceContainerLow,
             foreBackColor: theme.colorScheme.surfaceContainerHighest,
+            lowestIndentColor:
+                lightenColor(theme.colorScheme.surfaceContainerLowest, 0.05),
+            foreIndentColor:
+                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.07),
+            inkColor: theme.colorScheme.primary.withAlpha(30),
           )
         : MakoThemeData(
             lowestBackColor: theme.colorScheme.surfaceContainerHighest,
             midBackColor: theme.colorScheme.surfaceContainerHigh,
             foreBackColor: theme.colorScheme.surfaceContainerLowest,
+            lowestIndentColor:
+                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.05),
+            foreIndentColor:
+                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
+            inkColor: theme.colorScheme.primary.withAlpha(110),
           );
   }
 }
@@ -2902,6 +2970,32 @@ class HintToast extends StatelessWidget {
         );
       },
       child: child,
+    );
+  }
+}
+
+class SeparatorGradient extends StatelessWidget {
+  final Color? color;
+  final double height;
+  const SeparatorGradient({super.key, this.color, this.height = 14});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = MakoThemeData.fromContext(context);
+    final col = color ?? theme.foreIndentColor;
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            col.withAlpha(0),
+            col,
+            col.withAlpha(0),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -10,13 +10,15 @@ import 'package:animated_containers/retargetable_easers.dart'
 import 'package:animated_to/animated_to.dart';
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:awesome_notifications/awesome_notifications.dart'
+    hide NotificationPermission;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:improved_wrap/improved_wrap.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
+import 'package:flutter/scheduler.dart' hide Priority;
 import 'package:flutter/services.dart';
 import 'package:hsluv/extensions.dart';
 import 'package:hsluv/hsluvcolor.dart';
@@ -153,6 +155,10 @@ Future<void> initializeDatabase() async {
         type: const BoolType(),
         initial: () => false,
         debugLabel: "has selected audio"),
+    Mobj.getOrCreate(persistentAlarmModeID,
+        type: const BoolType(),
+        initial: () => false,
+        debugLabel: "persistent alarm mode"),
     Mobj.getOrCreate(timeFirstUsedApp,
         type: const StringType(),
         initial: () => '',
@@ -200,13 +206,31 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await enableHighRefreshRate();
   await initializeDatabase();
+  await AwesomeNotifications().setListeners(
+    onActionReceivedMethod: onNotificationActionReceived,
+    onDismissActionReceivedMethod: onNotificationDismissedReceived,
+  );
   SignalsObserver.instance = null;
   runApp(const TimersApp());
+}
+
+@pragma('vm:entry-point')
+Future<void> onNotificationActionReceived(ReceivedAction action) async {
+  print("onNotificationActionReceived: $action");
+  globalTimerHolm?.dismissAlarms();
+}
+
+@pragma('vm:entry-point')
+Future<void> onNotificationDismissedReceived(ReceivedAction action) async {
+  print("onNotificationDismissedReceived: $action");
+  globalTimerHolm?.dismissAlarms();
 }
 
 void onDataReceived(Object data) {
   print("data received: $data");
 }
+
+final Signal<bool> isBackgrounded = Signal(false);
 
 class Thumbspan {
   /// measured in logical pixels
@@ -217,6 +241,8 @@ class Thumbspan {
   }
 }
 
+TimerHolm? globalTimerHolm;
+
 /// this is in charge of running timer sounds in response to changes to the timer list
 /// eventually it will be responsible for doing repeat timer logic
 /// ideally the background thread would also use it
@@ -224,14 +250,60 @@ class TimerHolm {
   late JukeBox jukeBox;
   final Mobj<List<MobjID<TimerData>>> list;
   Map<MobjID<TimerData>, TimerTrack> tracking = {};
+  // initialized to a high number to make sure that notifications from the main thread wont id collide with notifications from the background thread
+  int _notificationIdCounter = 200000;
 
   late EffectCleanup reaction;
+  late EffectCleanup _backgroundedReaction;
   TimerHolm({required this.list, required this.jukeBox}) {
     reaction = effect(() {
       for (final tid in list.value!) {
         considerTracking(tid);
       }
     });
+    _backgroundedReaction = effect(() {
+      if (!isBackgrounded.value) {
+        dismissAlarms();
+      }
+    });
+  }
+
+  void dismissAlarms() {
+    jukeBox.stopAudio();
+    AwesomeNotifications().cancelAll();
+    for (final tt in tracking.values) {
+      print("dismissing alarm ${tt.mobj?.id}");
+      final d = tt.mobj?.peek();
+      if (d != null && d.isGoingOff) {
+        tt.mobj!.value = d.withChanges(isGoingOff: false);
+        tt.vibrationRepeatTimer?.cancel();
+        tt.vibrationRepeatTimer = null;
+      }
+    }
+  }
+
+  Future<void> _showCompletionNotification() async {
+    print("_showCompletionNotification");
+    await AwesomeNotifications().createNotification(
+      content: NotificationContent(
+        id: _notificationIdCounter++,
+        channelKey: 'timer_completion',
+        title: 'Timer Complete',
+        body: 'Tap to dismiss alarm',
+        actionType: ActionType.DismissAction,
+        locked: true,
+        autoDismissible: true,
+      ),
+      actionButtons: [
+        // shouldn't need this
+        // NotificationActionButton(
+        //   key: 'dismiss',
+        //   label: 'Dismiss',
+        //   actionType: ActionType.DismissAction,
+        //   autoDismissible: true,
+        // ),
+      ],
+    );
   }
 
   void considerTracking(MobjID tid) {
@@ -287,7 +359,7 @@ class TimerHolm {
           if (!d.isRunning) {
             tt.completionTimer?.cancel();
             tt.completionTimer = null;
-          } else if (d.kind != TimerKind.stopwatch) {
+          } else if (d.kind == TimerKind.timer) {
             tt.completionTimer?.cancel();
             tt.completionTimer = async.Timer(
                 Duration(
@@ -297,18 +369,41 @@ class TimerHolm {
                             .ceil()), () {
               final d = mobj.value!;
               tt.completionTimer = null;
-              // vibrate the device when the timer completes
               vibrateAlertOnce();
-              jukeBox.playAudio(
+              final audio =
                   Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
-                      .value!);
-              mobj.value = d.withChanges(
-                runningState: TimerData.completed,
-                // isGoingOff: true,
-              );
+                      .value!;
+              final persistentAlarmMode =
+                  Mobj.getAlreadyLoaded(persistentAlarmModeID, const BoolType())
+                          .value ??
+                      false;
+              if (isBackgrounded.peek() && persistentAlarmMode) {
+                jukeBox.playAudioLooping(audio);
+                mobj.value = d.withChanges(
+                  runningState: TimerData.completed,
+                  isGoingOff: true,
+                );
+                tt.vibrationRepeatTimer?.cancel();
+                tt.vibrationRepeatTimer = async.Timer.periodic(
+                    const Duration(seconds: 8), (_) => vibrateAlertOnce());
+                _showCompletionNotification();
+              } else {
+                jukeBox.playAudio(audio);
+                mobj.value = d.withChanges(
+                  runningState: TimerData.completed,
+                );
+              }
             });
           }
         }
+
+        // I think this is entirely managed by dismissAlarms()
+        // if(prev?.isGoingOff ?? false != d.isGoingOff) {
+        //   if(!d.isGoingOff){
+        //     tt.vibrationRepeatTimer?.cancel();
+        //     tt.vibrationRepeatTimer = null;
+        //   }
+        // }
       }
       prev = d;
     });
@@ -318,6 +413,7 @@ class TimerHolm {
 class TimerTrack {
   Function()? subscription;
   async.Timer? completionTimer;
+  async.Timer? vibrationRepeatTimer;
   Mobj<TimerData>? mobj;
 }
 
@@ -363,6 +459,16 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      isBackgrounded.value = true;
+    } else if (state == AppLifecycleState.resumed) {
+      isBackgrounded.value = false;
+    }
   }
 
   @override
@@ -434,7 +540,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
               ),
               CircularRevealRoute(
                   builder: (context) => OnboardScreen(isRootal: true),
-                  reverseTransitionDuration: Duration(milliseconds: 700),
+                  reverseTransitionDuration: Duration(milliseconds: 350),
                   iconOriginKey: configButtonKey),
             ];
           }
@@ -469,7 +575,6 @@ class TimerMenu extends StatelessWidget {
     final buttonSpan =
         Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!;
     final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
-    final arrowX = centerOn.left + buttonSpan / 2;
     final top = centerOn.bottom - arrowHeight;
 
     return AnimatedBuilder(
@@ -482,11 +587,10 @@ class TimerMenu extends StatelessWidget {
             right: right,
             child: ClipPath(
               clipper: _MenuRevealClipper(
-                progress: animation.value,
+                progress: Curves.easeOut.transform(animation.value),
                 // happens to make the origin be the center of the clockface
                 origin: topLeftManhattanCenter(centerOn) - Offset(left, top),
                 cornerRounding: cornerRounding,
-                arrowX: arrowX - left,
                 arrowHeight: arrowHeight,
               ),
               child: Container(
@@ -505,14 +609,12 @@ class _MenuRevealClipper extends CustomClipper<Path> {
   final double progress;
   final Offset origin;
   final double cornerRounding;
-  final double arrowX;
   final double arrowHeight;
 
   _MenuRevealClipper({
     required this.progress,
     required this.origin,
     required this.cornerRounding,
-    required this.arrowX,
     required this.arrowHeight,
   });
 
@@ -521,60 +623,72 @@ class _MenuRevealClipper extends CustomClipper<Path> {
     // morphs from intermediateRect to targetRect
     // it's complicated because it was arrived at by iterating towards something that felt right
     Size targetRectSize = Size(size.width, size.height - arrowHeight);
-    final intermediateProgress =
-        Curves.easeOutCubic.transform(unlerpUnit(0.3, 0.7, progress));
-    final intermediateTargetSpan = lerp(0,
-        min(targetRectSize.height, targetRectSize.width), intermediateProgress);
-    final earlyProgress =
-        Curves.easeOutCubic.transform(unlerpUnit(0, 0.5, progress));
+    final intermediateProgress = unlerpUnit(0.3, 0.7, progress);
+    // should start already being wide enough to be flush with the arrow bottom
+    final targetRect = RRect.fromRectAndRadius(
+      Offset(0, arrowHeight) & targetRectSize,
+      Radius.circular(cornerRounding),
+    );
+    final intermediateTargetSpan =
+        min(targetRectSize.height, targetRectSize.width);
+    final earlyProgress = unlerpUnit(0, 0.5, progress);
     final distanceFromCenter = origin - sizeToOffset(targetRectSize / 2);
+    final Offset earlyOrigin = Offset(origin.dx, targetRect.top);
     final intermediateOriginTarget =
         // Offset(0, arrowHeight) +
         (distanceFromCenter.dx > distanceFromCenter.dy
-            ? Offset(origin.dx, targetRectSize.height / 2)
-            : Offset(targetRectSize.width / 2, origin.dy));
+            ? Offset(
+                origin.dx.clamp(intermediateTargetSpan / 2,
+                    targetRectSize.width - intermediateTargetSpan / 2),
+                targetRect.center.dy)
+            : Offset(
+                targetRect.center.dx,
+                origin.dy.clamp(intermediateTargetSpan / 2,
+                    targetRectSize.height - intermediateTargetSpan / 2)));
+    final arrowProgress =
+        Curves.easeOutCubic.transform(unlerpUnit(0, 0.7, progress));
+    var earlyCornerRounding = cornerRounding * earlyProgress;
+    final earlySpan = arrowHeight * arrowProgress * 2 + 2 * earlyCornerRounding;
     final earlyRect = RRect.fromRectAndRadius(
-        Rect.fromCircle(
-            center: lerpOffset(origin, intermediateOriginTarget, earlyProgress),
-            radius: lerp(0, intermediateTargetSpan / 2, earlyProgress)),
-        Radius.circular(cornerRounding));
+        rectFromAlign(
+            align: Alignment.topCenter,
+            anchor: earlyOrigin,
+            width: earlySpan,
+            height: lerp(0, earlySpan, earlyProgress)),
+        Radius.circular(earlyCornerRounding));
+    // intermediate rect target is square
     final intermediateRect = RRect.fromRectAndRadius(
       Rect.fromCircle(
           center: intermediateOriginTarget, radius: intermediateTargetSpan / 2),
       Radius.circular(cornerRounding),
     );
-    final targetRect = RRect.fromRectAndRadius(
-      Offset(0, arrowHeight) & targetRectSize,
-      Radius.circular(cornerRounding),
-    );
     final lerpr = RRect.lerp(
         earlyRect,
-        RRect.lerp(intermediateRect, targetRect,
-            Curves.easeOutCubic.transform(unlerpUnit(0.5, 1, progress)))!,
-        unlerpUnit(0, 0.5, progress))!;
+        RRect.lerp(
+            intermediateRect, targetRect, unlerpUnit(0.37, 1, progress))!,
+        unlerpUnit(0.2, 0.65, progress))!;
 
-    final yp = Curves.easeOutCubic.transform(unlerpUnit(0, 0.7, progress));
-    final xp = Curves.easeInOutCubic.transform(unlerpUnit(0.0, 1, progress));
-    final rh = lerp(0, targetRect.height, yp);
-    final rt = lerp(0, arrowHeight, yp);
-    final initialWidth = arrowHeight;
-    // final rw = lerp(initialWidth, targetRect.width, xp);
-    final lerpRRect = RRect.fromRectAndRadius(
-      Rect.fromLTRB(lerp(arrowX - initialWidth / 2, 0, xp), rt,
-          lerp(arrowX + initialWidth / 2, targetRect.width, xp), rt + rh),
-      Radius.circular(cornerRounding),
-    );
+    // final xp = Curves.easeInOutCubic.transform(unlerpUnit(0.0, 1, progress));
+    // final rh = lerp(0, targetRect.height, arrowProgress);
+    // final rt = lerp(0, arrowHeight, arrowProgress);
+    // final initialWidth = arrowHeight;
+    // // final rw = lerp(initialWidth, targetRect.width, xp);
+    // final lerpRRect = RRect.fromRectAndRadius(
+    //   Rect.fromLTRB(lerp(origin.dx - initialWidth / 2, 0, xp), rt,
+    //       lerp(origin.dx + initialWidth / 2, targetRect.width, xp), rt + rh),
+    //   Radius.circular(cornerRounding),
+    // );
 
     Path arrowPath = Path();
     {
-      final ah = arrowHeight * yp;
-      final w = ah * 2;
+      final ah = arrowHeight * arrowProgress;
+      final w = arrowHeight * 2 * arrowProgress;
       final h = ah;
       final stemw = w * 0.2;
       final basew = (w - stemw) / 2;
       final minHeight = basew + stemw / 2;
       final double additionalHeight = max(h - minHeight, 0);
-      arrowPath.moveTo(arrowX - w / 2, h);
+      arrowPath.moveTo(origin.dx - w / 2, arrowHeight);
       arrowPath.relativeArcToPoint(Offset(basew, -basew),
           radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
       arrowPath.relativeLineTo(0, additionalHeight);
@@ -587,7 +701,7 @@ class _MenuRevealClipper extends CustomClipper<Path> {
     }
 
     return Path.combine(
-        PathOperation.union, Path()..addRRect(lerpRRect), arrowPath);
+        PathOperation.union, Path()..addRRect(lerpr), arrowPath);
   }
 
   @override
@@ -908,13 +1022,11 @@ class TimerState extends State<Timer>
     final stopwatchPulseProgress = stopwatchPulse *
         (1 -
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
-    final stopwatchPulseSize = 2 *
-        lerp(
-            clockRadius * 0.34,
-            // I don't know why it wants to be 0.6, the full timerOutline width seems far too thick.
-            clockRadius - timerOutline * 0.6,
-            // Curves.easeOutCubic.transform(stopwatchPulse) *
-            stopwatchPulseProgress);
+    final stopwatchPulseSize = lerp(
+        clockRadius * 2 - timerOutline * 2,
+        clockRadius * 2 * 0.28,
+        // Curves.easeOutCubic.transform(stopwatchPulse) *
+        stopwatchPulseProgress);
 
     Decoration containerShape(Color color) => d.kind == TimerKind.stopwatch
         ? ShapeDecoration(
@@ -960,7 +1072,9 @@ class TimerState extends State<Timer>
                   decoration: ShapeDecoration(
                     shape: StarBorder.polygon(
                       sides: 8,
-                      pointRounding: lerp(0.5, 1, 1 - stopwatchPulseProgress),
+                      // it should linger in the full roundness for a moment
+                      pointRounding: lerp(
+                          0.5, 1, unlerpUnit(0.0, 0.8, stopwatchPulseProgress)),
                       rotation: 45 / 2,
                     ),
                     color: primaryColor(d.hue),
@@ -1679,7 +1793,8 @@ class TimerScreenState extends State<TimerScreen>
   void initState() {
     super.initState();
 
-    timerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox);
+    timerHolm =
+        globalTimerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox);
 
     FlutterForegroundTask.addTaskDataCallback(onDataReceived);
     // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
@@ -1780,6 +1895,8 @@ class TimerScreenState extends State<TimerScreen>
     modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
     modeActivationPulse.close();
+    timerHolm.reaction();
+    timerHolm._backgroundedReaction();
     super.dispose();
   }
 
@@ -1790,13 +1907,15 @@ class TimerScreenState extends State<TimerScreen>
     }
     Rect p = boxRect(wk)!;
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
-    Widget menuItem(BuildContext context, bool isRightHanded, ThemeData theme,
-        Widget icon, String label, Function() action,
+    final theme = Theme.of(context);
+    final mt = MakoThemeData.fromTheme(theme);
+    Widget menuItem(BuildContext context, bool isRightHanded, Widget icon,
+        String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
       const double padding = 8;
       return InkButton(
-          backgroundColor: MakoThemeData.fromTheme(theme).foreBackColor,
-          inkColor: theme.colorScheme.primary.withAlpha(60),
+          backgroundColor: mt.foreBackColor,
+          inkColor: mt.inkColor,
           onTap: () {
             action();
             Navigator.of(context).pop();
@@ -1808,6 +1927,7 @@ class TimerScreenState extends State<TimerScreen>
                   left: padding,
                   right: padding),
               child: Row(
+                mainAxisSize: MainAxisSize.max,
                 mainAxisAlignment: isRightHanded
                     ? MainAxisAlignment.start
                     : MainAxisAlignment.end,
@@ -1816,16 +1936,16 @@ class TimerScreenState extends State<TimerScreen>
                       width: TimerMenu.buttonHeight,
                       height: TimerMenu.buttonHeight,
                       child: Center(child: icon)),
-                  Flexible(
-                      child: Text(label,
-                          style: theme.textTheme.bodyMedium,
-                          overflow: TextOverflow.visible)),
+                  Expanded(
+                      child: Text(
+                    label,
+                    style: theme.textTheme.bodyMedium,
+                  )),
+                  SizedBox(width: TimerMenu.buttonHeight * 0.2),
                 ]),
               )));
     }
 
-    final theme = Theme.of(context);
-    final mt = MakoThemeData.fromTheme(theme);
     showGeneralDialog(
         context: context,
         barrierDismissible: true,
@@ -1845,22 +1965,24 @@ class TimerScreenState extends State<TimerScreen>
                   centerOn: p,
                   animation: animation,
                   items: [
-                    menuItem(context, isRightHanded, theme, Icon(Icons.delete),
-                        'Delete', () {
+                    menuItem(
+                        context, isRightHanded, Icon(Icons.delete), 'Delete',
+                        () {
                       deleteTimer(timerID);
                     }, isFirst: true),
+                    SeparatorGradient(),
                     menuItem(
                         context,
                         isRightHanded,
-                        theme,
                         Transform.rotate(
                             angle: -pi / 2,
                             child: Icon(Icons.rotate_90_degrees_cw_rounded)),
                         'Reset', () {
                       resetTimer(timerID);
                     }),
-                    menuItem(context, isRightHanded, theme,
-                        Icon(Icons.push_pin), 'Pin', () {
+                    menuItem(
+                        context, isRightHanded, Icon(Icons.push_pin), 'Pin',
+                        () {
                       togglePin(timerID);
                     }, isLast: true),
                   ]);
@@ -1980,13 +2102,36 @@ class TimerScreenState extends State<TimerScreen>
               child: Center(child: Icon(size: size, icon))));
     }
 
-    // var selectButton = TimersButton(
-    //     // label: Icon(Icons.select_all),
-    //     // label: Icon(Icons.border_outer_rounded),
-    //     label: Icon(Icons.center_focus_strong),
-    //     onPanDown: (_) {
-    //       vibrationSampleBoard();
-    //     });
+    var selectButton = TimersButton(
+        // label: Icon(Icons.select_all),
+        // label: Icon(Icons.border_outer_rounded),
+        label: Icon(Icons.center_focus_strong),
+        onPanDown: (_) {
+          // vibrationSampleBoard();
+          AwesomeNotifications().createNotification(
+            content: NotificationContent(
+              id: timerHolm._notificationIdCounter++,
+              channelKey: 'timer_completion',
+              title: 'spare notification',
+              body: 'whatever',
+              locked: true,
+              autoDismissible: false,
+            ),
+            actionButtons: [
+              NotificationActionButton(
+                key: 'wooblywoobly',
+                label: 'wooblywoobly',
+                actionType: ActionType.SilentAction,
+                autoDismissible: true,
+              ),
+            ],
+          ).then((value) {
+            print("notification shown: $value");
+          }, onError: (error, stackTrace) {
+            print("error showing notification: $error");
+            print("stack trace: $stackTrace");
+          });
+        });
 
     var backspaceButton = TimersButton(
         key: deleteButtonKey,
@@ -2278,7 +2423,7 @@ class TimerScreenState extends State<TimerScreen>
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
           child: createStopwatchButton),
       // Positioned.fromRect(
-      //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 3), Size(1, 1)),
+      //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
       //     child: selectButton),
     ];
 
@@ -2754,7 +2899,7 @@ class _NumeralButtonState extends State<NumeralButton>
       onPanUpdate: (Offset p) {
         Offset dp = p - _startDrag;
         if (!dragActionRingDisabled &&
-            dp.distance > Thumbspan.of(context) * 0.18 &&
+            dp.distance > Thumbspan.of(context) * 0.34 &&
             !hasTriggered) {
           hasTriggered = true;
           final tss = context.findAncestorStateOfType<TimerScreenState>();
@@ -3271,6 +3416,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
+              // Persistent alarm mode setting
+              Watch((context) {
+                final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
+                    persistentAlarmModeID, const BoolType());
+                final persistentAlarmMode =
+                    persistentAlarmModeMobj.value ?? false;
+                return SwitchListTile(
+                  title: Text('Persistent alarm',
+                      style: theme.textTheme.bodyLarge),
+                  subtitle: Text(
+                    persistentAlarmMode
+                        ? 'Alarm loops until you open the app'
+                        : 'Alarm plays once',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  value: persistentAlarmMode,
+                  onChanged: (value) {
+                    persistentAlarmModeMobj.value = value;
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
               Watch((context) {
                 final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
                     buttonScaleDialOnID, const BoolType());
@@ -3358,7 +3526,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               // ---------------
-              Divider(indent: 22, endIndent: 22, height: 34),
+              // Divider(indent: 22, endIndent: 22, height: 34),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: SeparatorGradient(
+                    color: MakoThemeData.fromContext(context).foreIndentColor),
+              ),
               Padding(
                 padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
                 child: Text('Extra',
@@ -3829,16 +4002,20 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   final GlobalKey handednessKey = GlobalKey();
   final GlobalKey skipKey = GlobalKey();
   final GlobalKey padKey = GlobalKey();
+  final GlobalKey ringModeKey = GlobalKey();
   late List<GlobalKey> allKeys = [
     handednessKey,
     padKey,
+    ringModeKey,
     if (Platform.isAndroid) notifKey,
     skipKey
   ];
   late Signal<bool?> numpadOrientation = Signal(null);
+  late Signal<bool?> ringMode = Signal(null);
   late List<Signal<dynamic>> allChoices = [
     setIsRightHanded,
     numpadOrientation,
+    ringMode,
     if (Platform.isAndroid) notifGranted
   ];
   late Signal<bool> allChoicesCompleted = Signal(false);
@@ -3861,6 +4038,12 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
       if (numpadOrientation.value != null) {
         Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType())
             .value = numpadOrientation.value!;
+      }
+    });
+    createEffect(() {
+      if (ringMode.value != null) {
+        Mobj.getAlreadyLoaded(persistentAlarmModeID, const BoolType()).value =
+            ringMode.value!;
       }
     });
     //when all choices are non-null, navigate away
@@ -3907,6 +4090,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     _scrollController.dispose();
     setIsRightHanded.dispose();
     numpadOrientation.dispose();
+    ringMode.dispose();
     allChoicesCompleted.dispose();
     notifGranted.dispose();
     super.dispose();
@@ -3962,6 +4146,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     final backgroundColor = theme.colorScheme.surfaceContainerLow;
     final isRightHanded =
         Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+    const buttonAnimationDuration = Duration(milliseconds: 270);
 
     Widget handButton({
       required bool isRight,
@@ -3969,7 +4154,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
       return Expanded(
         child: RadioItem<bool?>(
           selection: setIsRightHanded,
-          duration: Duration(milliseconds: 370),
+          duration: buttonAnimationDuration,
           me: isRight,
           onTap: () => inputCompleted(handednessKey),
           builder: (context, isOn) {
@@ -4015,7 +4200,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     Widget numpadForSetup(bool isAscending) {
       return RadioItem<bool?>(
         selection: numpadOrientation,
-        duration: Duration(milliseconds: 370),
+        duration: buttonAnimationDuration,
         onTap: () => inputCompleted(padKey),
         me: isAscending,
         builder: (context, isOn) {
@@ -4138,6 +4323,70 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                           );
                         })
                       ]))),
+          SliverToBoxAdapter(
+              key: ringModeKey,
+              child: Padding(
+                  padding: EdgeInsets.all(standardSpacing),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                            """Are you forgetful or absentminded? If so, or for any reason, you may want to set this to "require acknowledgement", to make it so that alarms keep ringing until you acknowledge them. Otherwise, if you generally pay close attention to your phone, it's much more convenient to have it set to "ring once".""",
+                            style: theme.textTheme.bodyMedium!),
+                        SizedBox(height: standardSpacing),
+                        Row(children: [
+                          Expanded(
+                            child: RadioItem<bool?>(
+                              selection: ringMode,
+                              duration: buttonAnimationDuration,
+                              me: true,
+                              onTap: () => inputCompleted(ringModeKey),
+                              builder: (context, isOn) => Container(
+                                height: standardButtonHeight,
+                                decoration: BoxDecoration(
+                                  color: backgroundColorFor(theme, isOn),
+                                  borderRadius:
+                                      BorderRadius.circular(buttonCornerRadius),
+                                ),
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Text('require acknowledgement',
+                                        style: theme.textTheme.titleMedium!
+                                            .copyWith(
+                                                color: foregroundColorFor(
+                                                    theme, isOn))),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          spacer,
+                          Expanded(
+                            child: RadioItem<bool?>(
+                              selection: ringMode,
+                              duration: buttonAnimationDuration,
+                              me: false,
+                              onTap: () => inputCompleted(ringModeKey),
+                              builder: (context, isOn) => Container(
+                                height: standardButtonHeight,
+                                decoration: BoxDecoration(
+                                  color: backgroundColorFor(theme, isOn),
+                                  borderRadius:
+                                      BorderRadius.circular(buttonCornerRadius),
+                                ),
+                                child: Center(
+                                  child: Text('Ring once',
+                                      style: theme.textTheme.titleMedium!
+                                          .copyWith(
+                                              color: foregroundColorFor(
+                                                  theme, isOn))),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ]))),
           if (Platform.isAndroid)
             SliverToBoxAdapter(
                 key: notifKey,
@@ -4155,7 +4404,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                               final granted = notifGranted.value;
                               final isOn = granted == true;
                               final label = granted == null
-                                  ? '...'
+                                  ? 'request'
                                   : granted
                                       ? (_notifWasAlreadyGranted
                                           ? 'already granted'
@@ -4186,54 +4435,52 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
           SliverToBoxAdapter(
               key: skipKey,
               child: Padding(
-                  padding: EdgeInsets.only(
-                      left: standardSpacing,
-                      right: standardSpacing,
-                      bottom: standardSpacing),
-                  child: Watch(
-                    (context) => Row(
-                      mainAxisSize: MainAxisSize.max,
-                      children: [
-                        // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
-                        // if (allChoicesCompleted.value) ...[
-                        //   Text('done'),
-                        //   spacer
-                        // ],
-                        Expanded(
-                          child: InkButton(
-                              onTap: () {
-                                moveOn();
-                              },
-                              inkColor: theme.colorScheme.primary,
-                              borderRadius:
-                                  BorderRadius.circular(buttonCornerRadius),
-                              builder: (context, isOn) => SizedBox(
-                                    height: standardButtonHeight,
-                                    child: Center(
-                                        child: Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                          Text(
-                                              allChoicesCompleted.value
-                                                  ? 'done, continue'
-                                                  : 'skip',
-                                              style:
-                                                  theme.textTheme.titleMedium!
-                                                      .copyWith(
-                                                          color: isOn
-                                                              ? theme
-                                                                  .colorScheme
-                                                                  .onPrimary
-                                                              : theme
-                                                                  .colorScheme
-                                                                  .onSurface)),
-                                        ])),
-                                  )),
-                        ),
-                      ],
+                padding: EdgeInsets.only(
+                    left: standardSpacing,
+                    right: standardSpacing,
+                    bottom: standardSpacing),
+                child: Row(
+                  mainAxisSize: MainAxisSize.max,
+                  children: [
+                    // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
+                    // if (allChoicesCompleted.value) ...[
+                    //   Text('done'),
+                    //   spacer
+                    // ],
+                    Expanded(
+                      child: InkButton(
+                          onTap: () {
+                            moveOn();
+                          },
+                          inkColor: theme.colorScheme.primary,
+                          borderRadius:
+                              BorderRadius.circular(buttonCornerRadius),
+                          builder: (context, isOn) => SizedBox(
+                                height: standardButtonHeight,
+                                child: Center(
+                                    child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                      Watch(
+                                        (context) => Text(
+                                            allChoicesCompleted.value
+                                                ? 'done, continue'
+                                                : 'skip',
+                                            style: theme.textTheme.titleMedium!
+                                                .copyWith(
+                                                    color: isOn
+                                                        ? theme.colorScheme
+                                                            .onPrimary
+                                                        : theme.colorScheme
+                                                            .onSurface)),
+                                      ),
+                                    ])),
+                              )),
                     ),
-                  ))),
+                  ],
+                ),
+              )),
         ],
       ),
     );

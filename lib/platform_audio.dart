@@ -83,6 +83,14 @@ class PlatformAudio {
     }
   }
 
+  static Future<void> playAudioLooping(AudioInfo a) async {
+    try {
+      await _channel.invokeMethod('playAudioLooping', {'uri': a.url});
+    } on PlatformException catch (e) {
+      throw Exception('Failed to play audio looping: ${e.message}');
+    }
+  }
+
   static Future<void> pauseAudio() async {
     try {
       await _channel.invokeMethod('pauseAudio');

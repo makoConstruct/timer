@@ -71,7 +71,11 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
             }
             "playAudio" -> {
                 val uri = call.argument<String>("uri")
-                playAudio(uri, result)
+                playAudio(uri, result, looping = false)
+            }
+            "playAudioLooping" -> {
+                val uri = call.argument<String>("uri")
+                playAudio(uri, result, looping = true)
             }
             "pauseAudio" -> {
                 pauseAudio()
@@ -155,7 +159,7 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
         return audioList
     }
 
-    private fun playAudio(uriString: String?, result: Result) {
+    private fun playAudio(uriString: String?, result: Result, looping: Boolean = false) {
         try {
             stopAudio()  // Clean up previous player
 
@@ -215,8 +219,12 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
                         setAudioStreamType(AudioManager.STREAM_ALARM)
                     }
 
-                    setOnCompletionListener {
-                        abandonAudioFocus()
+                    isLooping = looping
+
+                    if (!looping) {
+                        setOnCompletionListener {
+                            abandonAudioFocus()
+                        }
                     }
 
                     prepare()
