@@ -146,7 +146,7 @@ class PersistentNotificationTask extends TaskHandler {
     final timer = tracked.mobj;
     final ntp = timer.peek()!;
     // bug: this fires every time it changes, not just every time it changes from non-running to running
-    if (ntp.isRunning) {
+    if (ntp.isRunning && ntp.kind == TimerKind.timer) {
       tracked.triggerTimer?.cancel();
       tracked.triggerTimer = Timer(
           digitsToDuration(timer.peek()!.digits) -
@@ -188,18 +188,20 @@ class PersistentNotificationTask extends TaskHandler {
             channelKey: completionChannelKey,
             title: 'Timer Complete',
             body: 'Tap to dismiss alarm',
+            bigPicture: 'resource://drawable/res_large_notification_icon',
+            notificationLayout: NotificationLayout.BigPicture,
             locked: true,
             autoDismissible: true,
             actionType: ActionType.DismissAction,
             payload: {'timerId': timerId},
           ),
           actionButtons: [
-            // NotificationActionButton(
-            //   key: 'dismiss',
-            //   label: 'Dismiss',
-            //   actionType: ActionType.SilentBackgroundAction,
-            //   autoDismissible: true,
-            // ),
+            NotificationActionButton(
+              key: 'dismiss',
+              label: 'dismiss',
+              actionType: ActionType.DismissAction,
+              autoDismissible: true,
+            ),
           ],
         ));
   }
@@ -289,7 +291,8 @@ class PersistentNotificationTask extends TaskHandler {
       if (message == 'dismissAlarms') dismissAllAlarms();
     });
     // print("initializing notification channel");
-    await AwesomeNotifications().initialize(null, [
+    await AwesomeNotifications()
+        .initialize('resource://drawable/res_notification_icon', [
       NotificationChannel(
         channelKey: completionChannelKey,
         channelName: 'Timer Completion',

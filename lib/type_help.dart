@@ -6,6 +6,14 @@ import 'mobj.dart';
 
 // this file is pretty much entirely edited through language models, it's just database boilerplate. In a better programming langauge this stuff would be handled by reflection or codegen. In dart, it's more practical to just make the robot do it.
 
+enum TimerKind {
+  timer,
+  stopwatch,
+  // loop,
+  // series,
+  // parallel,
+}
+
 class TimerData {
   /// the last time the timer was started
   late final DateTime startTime;

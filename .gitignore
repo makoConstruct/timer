@@ -75,3 +75,5 @@ flake.lock
 build.gradle
 vis.svg
 android/app/src/main/play_store_512.png
+
+*.apk

@@ -225,7 +225,8 @@ void main() async {
           globalTimerHolm?.dismissAlarms();
         }
       });
-      await AwesomeNotifications().initialize(null, [
+      await AwesomeNotifications()
+          .initialize('resource://drawable/res_notification_icon', [
         NotificationChannel(
           channelKey: 'main_notification',
           channelName: 'Timer Completion',
@@ -318,27 +319,30 @@ class TimerHolm {
     }
   }
 
-  Future<void> _showCompletionNotification() async {
-    print("_showCompletionNotification");
+  Future<void> _sendCompletionNotification() async {
+    print("_sendCompletionNotification");
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
         id: _notificationIdCounter++,
         channelKey: completionChannelKey,
-        title: 'Timer Complete',
-        body: 'Tap to dismiss alarm',
+        title: 'timer complete',
+        body: 'tap to dismiss',
+        bigPicture: 'resource://drawable/res_large_notification_icon',
+        notificationLayout: NotificationLayout.BigPicture,
         actionType: ActionType.DismissAction,
         locked: true,
         autoDismissible: true,
-        // category: NotificationCategory.Alarm,
+        category: NotificationCategory.Alarm,
+        // my phone screen already wakes up for alarms, so maybe we shouldn't override os default, if that's what this does, and if that's not what it does maybe it does nothing. And yes I went trhough the convoluted 5 clicks required to find out whether this is default true and it isn't.
         // wakeUpScreen: true,
       ),
       actionButtons: [
-        // NotificationActionButton(
-        //   key: 'dismiss',
-        //   label: 'Dismiss',
-        //   actionType: ActionType.DismissAction,
-        //   autoDismissible: true,
-        // ),
+        NotificationActionButton(
+          key: 'dismiss',
+          label: 'dismiss',
+          actionType: ActionType.DismissAction,
+          autoDismissible: true,
+        ),
       ],
     );
   }
@@ -396,7 +400,7 @@ class TimerHolm {
       tt.vibrationRepeatTimer?.cancel();
       tt.vibrationRepeatTimer = async.Timer.periodic(
           const Duration(seconds: 8), (_) => vibrateAlertOnce());
-      _showCompletionNotification();
+      _sendCompletionNotification();
     } else {
       jukeBox.playAudio(audio);
       mobj.value = d.withChanges(
@@ -750,14 +754,6 @@ class _MenuRevealClipper extends CustomClipper<Path> {
       old.progress != progress || old.origin != origin;
 }
 
-enum TimerKind {
-  timer,
-  stopwatch,
-  // loop,
-  // series,
-  // parallel,
-}
-
 /// Timer widget, contrast with Timer row from the database orm
 class Timer extends StatefulWidget {
   final Mobj<TimerData> mobj;
@@ -998,15 +994,22 @@ class TimerState extends State<Timer>
       },
     );
 
-    Widget timeText(List<int> digits) {
+    Widget timeText(List<int> digits, {int? centiseconds}) {
       // adds a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
+      String fmt(List<int> ds, int? cs) {
+        final base = boring.formatTime(ds);
+        return cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}';
+      }
+
       return Stack(
         children: [
           Opacity(
               opacity: 0,
-              child: Text(boring.formatTime(withDigitsReplacedWith(digits, 0)),
+              child: Text(
+                  fmt(withDigitsReplacedWith(digits, 0),
+                      centiseconds != null ? 0 : null),
                   overflow: TextOverflow.clip)),
-          Text(boring.formatTime(digits), overflow: TextOverflow.clip),
+          Text(fmt(digits, centiseconds), overflow: TextOverflow.clip),
         ],
       );
     }
@@ -1052,7 +1055,8 @@ class TimerState extends State<Timer>
         style: TextStyle(color: theme.colorScheme.onSurface),
         child: switch (d.kind) {
           TimerKind.timer => animatedTextPartForTimer,
-          TimerKind.stopwatch => timeText(timeDigits)
+          TimerKind.stopwatch => timeText(timeDigits,
+              centiseconds: ((d.transpired % 1) * 100).toInt())
         });
 
     final playIconRadius = 10;
@@ -2155,6 +2159,8 @@ class TimerScreenState extends State<TimerScreen>
               channelKey: 'timer_completion',
               title: 'spare notification',
               body: 'whatever',
+              bigPicture: 'resource://drawable/res_large_notification_icon',
+              notificationLayout: NotificationLayout.BigPicture,
               locked: true,
               autoDismissible: false,
             ),
@@ -2234,11 +2240,11 @@ class TimerScreenState extends State<TimerScreen>
     final buttonScaleDial = Watch(
       (context) {
         if (buttonScaleDialCenter.value == null) {
-          Offset p = Offset(screenSize.width * 0.23, screenSize.height / 2);
-          if (!isRightHanded) {
-            p = Offset(screenSize.width - p.dx, p.dy);
-          }
-          buttonScaleDialCenter.value = p;
+          // Offset p = Offset(screenSize.width * 0.23, screenSize.height / 2);
+          // if (!isRightHanded) {
+          //   p = Offset(screenSize.width - p.dx, p.dy);
+          // }
+          buttonScaleDialCenter.value = sizeToOffset(screenSize / 2);
         }
         return positionedAt(
           buttonScaleDialCenter.value!,
