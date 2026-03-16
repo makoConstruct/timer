@@ -1,12 +1,12 @@
 # mako's timer
 
-A timer app that's roughly 20 times more ergonomic than any other timer app. Our optimizations:
+A timer app that's roughly (considering all of the factors below) *11 times more ergonomic* than any other timer app. Our optimizations:
 
 - In most timer apps, it takes about 6 keypresses to make a new timer and start it. In this timer app, it takes just 1 or 2.
 
-- Every part of the app is easily usable one-handed. (*No other timer app is like this. Despite it being acknowledged by all sides of the industry around 2016 that it's good practice to keep most interactive components of an app in "the thumb zone". Afaik literally no app other than this one has fully implemented that.*)
+- It's designed to fit the hand: every part of the app is easily usable one-handed, even in larger phones. (*Despite the fact that around a decade ago all sides of the industry acknowledged that it's good practice to keep most interactive components of an app in the "thumb zone". Afaik literally no app other than this one has fully followed through on that.*)
 
-- When a timer goes off, most timer apps require the user to pull their phone up and unlock it and interact with the app and physically acknowledge the alarm before it will shut up. Sometimes you want this, because it makes absolutely sure that you heard the alarm, and we do have that as an option, but if you don't need that, it's a really annoying behavior, so by default, you don't have to do that here.
+- When a timer goes off, most timer apps essentially, repeatedly ask "but did you hear me" over and over again until the user pulls their phone up and unlocks it and interact with the app to acknowledge the alarm. Sometimes you want this, but when you don't need it, it's an inconvenience, so we make it optional, you can have your alarms just make a sound once and then stop. (*As far as we can tell, no other timer app has this.*)
 
 - Timers are visually compact and color-coded, so users can easily find and reuse timers. (*No other timer app has this as far as we're aware.*)
 

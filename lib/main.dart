@@ -632,7 +632,7 @@ class TimerMenu extends StatelessWidget {
             right: right,
             child: ClipPath(
               clipper: _MenuRevealClipper(
-                progress: Curves.easeOut.transform(animation.value),
+                progress: Curves.easeOutCubic.transform(animation.value),
                 // happens to make the origin be the center of the clockface
                 origin: topLeftManhattanCenter(centerOn) - Offset(left, top),
                 cornerRounding: cornerRounding,
@@ -668,7 +668,6 @@ class _MenuRevealClipper extends CustomClipper<Path> {
     // morphs from intermediateRect to targetRect
     // it's complicated because it was arrived at by iterating towards something that felt right
     Size targetRectSize = Size(size.width, size.height - arrowHeight);
-    final intermediateProgress = unlerpUnit(0.3, 0.7, progress);
     // should start already being wide enough to be flush with the arrow bottom
     final targetRect = RRect.fromRectAndRadius(
       Offset(0, arrowHeight) & targetRectSize,
@@ -3995,16 +3994,16 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           ),
           if (!_loading) ...[
             if (_assetSounds.isNotEmpty)
-              section("Mako's Timer Sounds", _assetSounds,
+              section("Our Sounds", _assetSounds,
                   fadeDelay: Duration(milliseconds: 0)),
-            if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-              section('Alarms', _alarmSounds!,
-                  fadeDelay: Duration(milliseconds: 100)),
             if (_notificationSounds != null && _notificationSounds!.isNotEmpty)
-              section('Notifications', _notificationSounds!,
+              section('Phone Notification Sounds', _notificationSounds!,
                   fadeDelay: Duration(milliseconds: 200)),
+            if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+              section('Phone Alarm Sounds (long duration)', _alarmSounds!,
+                  fadeDelay: Duration(milliseconds: 100)),
             if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
-              section('Ringtones', _ringtoneSounds!,
+              section('Your Ringtones', _ringtoneSounds!,
                   fadeDelay: Duration(milliseconds: 300)),
             SliverToBoxAdapter(
               child:
@@ -4378,61 +4377,76 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                            """Are you forgetful or absentminded? If so, or for any reason, you may want to set this to "require acknowledgement", to make it so that alarms keep ringing until you acknowledge them. Otherwise, if you generally pay close attention to your phone, it's much more convenient to have it set to "ring once".""",
+                            """Are you forgetful or absentminded? You may want to set this to "require acknowledgement", to make it so that alarms keep ringing until you interact with them to confirm that you heard them.
+Otherwise, if you generally pay close attention to your phone, it's much more convenient to have it set to "ring once".""",
                             style: theme.textTheme.bodyMedium!),
                         SizedBox(height: standardSpacing),
-                        Row(children: [
-                          Expanded(
-                            child: RadioItem<bool?>(
-                              selection: ringMode,
-                              duration: buttonAnimationDuration,
-                              me: true,
-                              onTap: () => inputCompleted(ringModeKey),
-                              builder: (context, isOn) => Container(
-                                height: standardButtonHeight,
-                                decoration: BoxDecoration(
-                                  color: backgroundColorFor(theme, isOn),
-                                  borderRadius:
-                                      BorderRadius.circular(buttonCornerRadius),
-                                ),
-                                child: Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Text('require acknowledgement',
-                                        style: theme.textTheme.titleMedium!
-                                            .copyWith(
-                                                color: foregroundColorFor(
-                                                    theme, isOn))),
-                                  ),
-                                ),
-                              ),
+                        Row(
+                          children: [
+                            Flexible(flex: 20, child: Container()),
+                            Flexible(
+                              flex: 50,
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    RadioItem<bool?>(
+                                      selection: ringMode,
+                                      duration: buttonAnimationDuration,
+                                      me: true,
+                                      onTap: () => inputCompleted(ringModeKey),
+                                      builder: (context, isOn) => Container(
+                                        height: standardButtonHeight,
+                                        decoration: BoxDecoration(
+                                          color:
+                                              backgroundColorFor(theme, isOn),
+                                          borderRadius: BorderRadius.circular(
+                                              buttonCornerRadius),
+                                        ),
+                                        child: Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 20.0),
+                                            child: Text(
+                                                'require acknowledgement',
+                                                style: theme
+                                                    .textTheme.titleMedium!
+                                                    .copyWith(
+                                                        color:
+                                                            foregroundColorFor(
+                                                                theme, isOn))),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    spacer,
+                                    RadioItem<bool?>(
+                                      selection: ringMode,
+                                      duration: buttonAnimationDuration,
+                                      me: false,
+                                      onTap: () => inputCompleted(ringModeKey),
+                                      builder: (context, isOn) => Container(
+                                        height: standardButtonHeight,
+                                        decoration: BoxDecoration(
+                                          color:
+                                              backgroundColorFor(theme, isOn),
+                                          borderRadius: BorderRadius.circular(
+                                              buttonCornerRadius),
+                                        ),
+                                        child: Center(
+                                          child: Text('Ring once',
+                                              style: theme
+                                                  .textTheme.titleMedium!
+                                                  .copyWith(
+                                                      color: foregroundColorFor(
+                                                          theme, isOn))),
+                                        ),
+                                      ),
+                                    ),
+                                  ]),
                             ),
-                          ),
-                          spacer,
-                          Expanded(
-                            child: RadioItem<bool?>(
-                              selection: ringMode,
-                              duration: buttonAnimationDuration,
-                              me: false,
-                              onTap: () => inputCompleted(ringModeKey),
-                              builder: (context, isOn) => Container(
-                                height: standardButtonHeight,
-                                decoration: BoxDecoration(
-                                  color: backgroundColorFor(theme, isOn),
-                                  borderRadius:
-                                      BorderRadius.circular(buttonCornerRadius),
-                                ),
-                                child: Center(
-                                  child: Text('Ring once',
-                                      style: theme.textTheme.titleMedium!
-                                          .copyWith(
-                                              color: foregroundColorFor(
-                                                  theme, isOn))),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ]),
+                          ],
+                        ),
                       ]))),
           if (Platform.isAndroid)
             SliverToBoxAdapter(
@@ -4513,7 +4527,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                                         (context) => Text(
                                             allChoicesCompleted.value
                                                 ? 'done, continue'
-                                                : 'skip',
+                                                : 'skip setup',
                                             style: theme.textTheme.titleMedium!
                                                 .copyWith(
                                                     color: isOn
@@ -4528,6 +4542,8 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                   ],
                 ),
               )),
+          SliverToBoxAdapter(
+              child: SizedBox(height: MediaQuery.of(context).padding.bottom)),
         ],
       ),
     );
