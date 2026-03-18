@@ -2539,21 +2539,7 @@ class TimerScreenState extends State<TimerScreen>
       pausePlaySelected();
     }, 0.6);
 
-    final hintColor = mt.hintTextColor;
-    final hintTextStyle = theme.textTheme.bodySmall!.copyWith(color: hintColor);
-
     // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
-
-    Widget infoText(String content) => RichText(
-          text: TextSpan(
-            children: [
-              WidgetSpan(
-                  child: Icon(Icons.info_rounded, size: 16, color: hintColor)),
-              WidgetSpan(child: SizedBox(width: 4)),
-              TextSpan(style: hintTextStyle, text: content),
-            ],
-          ),
-        );
 
     final hintMargin = thumbSpan * 0.2;
     final hintTray = Positioned(
@@ -2562,18 +2548,19 @@ class TimerScreenState extends State<TimerScreen>
       // width: screenSize.width * 0.71 - hintMargin,
       right: hintMargin,
       child: Column(
+        spacing: 8,
         children: [
           Builder(builder: (context) {
             final dir = isRightHanded ? "left" : "right";
             return HintToast(
                 showCondition: userDragActionHintCondition,
-                child: infoText(
-                    """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)"""));
+                message:
+                    """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)""");
           }),
           HintToast(
             showCondition: hasUsedMenuTwice,
-            child: infoText(
-                "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)"),
+            message:
+                "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
           )
         ],
       ),

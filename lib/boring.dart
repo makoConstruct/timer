@@ -2922,14 +2922,16 @@ void vibrateAlertOnce() async {
 }
 
 class HintToast extends StatefulWidget {
-  final Widget child;
+  final Widget? child;
+  final String? message;
   final Computed<bool> showCondition;
   final bool startOpen;
 
   const HintToast({
     super.key,
-    required this.child,
+    this.child,
     required this.showCondition,
+    this.message,
     this.startOpen = false,
   });
 
@@ -2955,6 +2957,22 @@ class _HintToastState extends State<HintToast>
         animation.reverse();
       }
     });
+  }
+
+  Widget infoText(BuildContext context, String content) {
+    final hintColor = MakoThemeData.fromContext(context).hintTextColor;
+    final hintTextStyle =
+        Theme.of(context).textTheme.bodySmall!.copyWith(color: hintColor);
+    return RichText(
+      text: TextSpan(
+        children: [
+          WidgetSpan(
+              child: Icon(Icons.info_rounded, size: 16, color: hintColor)),
+          WidgetSpan(child: SizedBox(width: 4)),
+          TextSpan(style: hintTextStyle, text: content),
+        ],
+      ),
+    );
   }
 
   @override
@@ -2988,7 +3006,7 @@ class _HintToastState extends State<HintToast>
           ),
         );
       },
-      child: widget.child,
+      child: widget.child ?? infoText(context, widget.message!),
     );
   }
 }
