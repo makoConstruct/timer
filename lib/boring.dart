@@ -320,41 +320,25 @@ void moveAnimationTowardsState(AnimationController animation, bool forward) {
 }
 
 // automatically removes children when the associated animation is dismissed
-class EphemeralAnimationHost extends StatefulWidget {
-  final List<Widget> children;
+class SelfRemovalHost extends StatefulWidget {
+  final List<Widget> initialChildren;
   final Widget Function(List<Widget>, BuildContext) builder;
-  const EphemeralAnimationHost(
-      {super.key, this.children = const [], required this.builder});
+  const SelfRemovalHost(
+      {super.key, this.initialChildren = const [], required this.builder});
   @override
-  State<EphemeralAnimationHost> createState() => EphemeralAnimationHostState();
+  State<SelfRemovalHost> createState() => SelfRemovalHostState();
 }
 
-class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
-  List<Widget> ephemeralChildren = [];
-
-  /// adds a child to this that's removed when the animation completes
-  void add(Widget child, Animation animation) {
+class SelfRemovalHostState extends State<SelfRemovalHost> {
+  List<Widget> children = [];
+  void add(Widget child) {
     setState(() {
-      ephemeralChildren.add(child);
-    });
-    animation.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        setState(() {
-          ephemeralChildren.remove(child);
-        });
-      }
-    });
-  }
-
-  /// use this when the animation completion isn't really the trigger of removal. In this case, you might wonder what EphemeralAnimationHost is even providing, but imo what it provides is a State type that helps you find the right removal host when you do the removal.
-  void addWithoutAutomaticRemoval(Widget child) {
-    setState(() {
-      ephemeralChildren.add(child);
+      children.add(child);
     });
   }
 
   bool remove(Widget child) {
-    if (ephemeralChildren.remove(child)) {
+    if (children.remove(child)) {
       setState(() {});
       return true;
     }
@@ -362,11 +346,10 @@ class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
   }
 
   bool removeByKey(Key key) {
-    final matchingChildIndex =
-        ephemeralChildren.indexWhere((c) => c.key == key);
+    final matchingChildIndex = children.indexWhere((c) => c.key == key);
     if (matchingChildIndex != -1) {
       setState(() {
-        ephemeralChildren.removeAt(matchingChildIndex);
+        children.removeAt(matchingChildIndex);
       });
       return true;
     }
@@ -380,13 +363,21 @@ class EphemeralAnimationHostState extends State<EphemeralAnimationHost> {
 
   @override
   Widget build(BuildContext context) {
-    return widget.builder(widget.children + ephemeralChildren, context);
+    return widget.builder(widget.initialChildren + children, context);
   }
 }
 
-void addToEphemeralAnimatioHost(
-    GlobalKey key, Widget child, Animation animation) {
-  (key.currentState! as EphemeralAnimationHostState).add(child, animation);
+// takes ownership of animation/dispose it on statusForRemoval
+void addEphemeralAnimation(GlobalKey<SelfRemovalHostState> hostKey,
+    Widget child, AnimationController animation,
+    {AnimationStatus statusForRemoval = AnimationStatus.completed}) {
+  hostKey.currentState!.add(child);
+  animation.addStatusListener((status) {
+    if (status == statusForRemoval) {
+      hostKey.currentState?.remove(child);
+      animation.dispose();
+    }
+  });
 }
 
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
@@ -2691,6 +2682,7 @@ class MakoThemeData {
   Color foreBackColor;
   Color foreIndentColor;
   Color inkColor;
+  Color hintTextColor;
   MakoThemeData({
     required this.lowestBackColor,
     required this.lowestIndentColor,
@@ -2698,6 +2690,7 @@ class MakoThemeData {
     required this.foreBackColor,
     required this.foreIndentColor,
     required this.inkColor,
+    required this.hintTextColor,
   });
   static MakoThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
@@ -2714,6 +2707,7 @@ class MakoThemeData {
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerHighest, 0.07),
             inkColor: theme.colorScheme.primary.withAlpha(30),
+            hintTextColor: darkenColor(theme.colorScheme.onSurface, 0.4),
           )
         : MakoThemeData(
             lowestBackColor: theme.colorScheme.surfaceContainerHighest,
@@ -2724,6 +2718,7 @@ class MakoThemeData {
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
             inkColor: theme.colorScheme.primary.withAlpha(30),
+            hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
           );
   }
 }
@@ -2926,17 +2921,41 @@ void vibrateAlertOnce() async {
   }
 }
 
-class HintToast extends StatelessWidget {
+class HintToast extends StatefulWidget {
   final Widget child;
-  final Animation<double> animation;
+  final Computed<bool> showCondition;
   final bool startOpen;
 
   const HintToast({
     super.key,
     required this.child,
-    required this.animation,
+    required this.showCondition,
     this.startOpen = false,
   });
+
+  @override
+  State<HintToast> createState() => _HintToastState();
+}
+
+class _HintToastState extends State<HintToast>
+    with TickerProviderStateMixin, SignalsMixin<HintToast> {
+  late AnimationController animation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    animation =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 280));
+
+    createEffect(() {
+      if (widget.showCondition.value) {
+        animation.forward();
+      } else {
+        animation.reverse();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2945,17 +2964,17 @@ class HintToast extends StatelessWidget {
       builder: (context, child) {
         final v = animation.value;
         final isReversing = animation.status == AnimationStatus.reverse;
-        final animateHeight = !startOpen || isReversing;
+        final animateHeight = !widget.startOpen || isReversing;
 
         final double heightFraction;
         final double opacity;
 
         if (animateHeight) {
           heightFraction = unlerpUnit(0, 0.5, v);
-          opacity = Curves.easeInOut.transform(unlerpUnit(0.5, 1, v));
+          opacity = Curves.easeInOutCubic.transform(unlerpUnit(0.5, 1, v));
         } else {
           heightFraction = 1.0;
-          opacity = Curves.easeInOut.transform(unlerpUnit(0, 0.5, v));
+          opacity = Curves.easeInOutCubic.transform(unlerpUnit(0, 0.5, v));
         }
 
         return ClipRect(
@@ -2969,7 +2988,7 @@ class HintToast extends StatelessWidget {
           ),
         );
       },
-      child: child,
+      child: widget.child,
     );
   }
 }

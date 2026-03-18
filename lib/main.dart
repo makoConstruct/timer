@@ -191,6 +191,8 @@ Future<void> initializeDatabase() async {
         type: const IntType(),
         initial: () => 0,
         debugLabel: "used drag action count"),
+    Mobj.getOrCreate(usedMenuCountID,
+        type: const IntType(), initial: () => 0, debugLabel: "used menu count"),
     fversion,
   ]);
 }
@@ -1420,7 +1422,7 @@ class _TimerDeletionAnimationState extends State<_TimerDeletionAnimation> {
           onEnd: () {
             // Remove this widget from the ephemeral animation host when animation completes
             context
-                .findAncestorStateOfType<EphemeralAnimationHostState>()
+                .findAncestorStateOfType<SelfRemovalHostState>()
                 ?.remove(widget);
           },
           builder: (context, progress, child) {
@@ -1575,9 +1577,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
         return;
       }
       if (status == AnimationStatus.completed) {
-        context
-            .findAncestorStateOfType<EphemeralAnimationHostState>()
-            ?.remove(widget);
+        context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(widget);
       }
     });
     upDownAnimation.addStatusListener((status) {
@@ -1587,9 +1587,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
         if (!mounted) {
           return;
         }
-        context
-            .findAncestorStateOfType<EphemeralAnimationHostState>()
-            ?.remove(widget);
+        context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(widget);
       }
     });
     dragEventsSubscription = widget.dragEvents.subscribe((v) {
@@ -1784,7 +1782,7 @@ class TimerScreenState extends State<TimerScreen>
   GlobalKey timerTrayKey = GlobalKey();
   GlobalKey pinButtonKey = GlobalKey();
   GlobalKey deleteButtonKey = GlobalKey();
-  GlobalKey<EphemeralAnimationHostState> ephemeralAnimationLayer = GlobalKey();
+  GlobalKey<SelfRemovalHostState> ephemeralAnimationLayer = GlobalKey();
   final Mobj<List<MobjID<TimerData>>> timerListMobj =
       Mobj.getAlreadyLoaded(timerListID, timerListType);
   // final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
@@ -1805,6 +1803,14 @@ class TimerScreenState extends State<TimerScreen>
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   // emits whenever a drag action ring is created, so that older ones can disable themselves
   late final ChangeNotifier onNewNumeralDragActionRing = ChangeNotifier();
+  late final Computed<bool> userDragActionHintCondition = Computed(() {
+    final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
+    return (dagc.value! & 3) != 3;
+  });
+  late final Computed<bool> hasUsedMenuTwice = Computed(() {
+    final dagc = Mobj.getAlreadyLoaded(usedMenuCountID, const IntType());
+    return dagc.value! < 2;
+  });
   late final AnimationController buttonScaleDialAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   late final AnimationController buttonScaleFlashAnimation =
@@ -1818,11 +1824,6 @@ class TimerScreenState extends State<TimerScreen>
       UpDownAnimationController(
           vsync: this,
           riseDuration: Duration(milliseconds: 400),
-          fallDuration: Duration(milliseconds: 200));
-  late final UpDownAnimationController userDragActionHintReveal =
-      UpDownAnimationController(
-          vsync: this,
-          riseDuration: Duration(milliseconds: 200),
           fallDuration: Duration(milliseconds: 200));
   late final ScrollController timersScroller = ScrollController();
   late final Signal<bool> isFirstPressForSelectedTimer = Signal(true);
@@ -1894,21 +1895,6 @@ class TimerScreenState extends State<TimerScreen>
       return next;
     });
 
-    // showing the drag action hint
-    createEffect(() {
-      final dagc =
-          Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
-      if ((dagc.value! & 3) != 3) {
-        if (userDragActionHintReveal.hasntCycled) {
-          userDragActionHintReveal.forward(delay: Duration(milliseconds: 6000));
-        } else {
-          userDragActionHintReveal.forward();
-        }
-      } else {
-        userDragActionHintReveal.reverse();
-      }
-    });
-
     // selected timer controls
     createEffect(() {
       // doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
@@ -1948,6 +1934,11 @@ class TimerScreenState extends State<TimerScreen>
     final wk = timerWidgets[timerID]!.key as GlobalKey<TimerState>?;
     if (wk == null) {
       return;
+    }
+    final menuCountMobj =
+        Mobj.getAlreadyLoaded(usedMenuCountID, const IntType());
+    if ((menuCountMobj.peek() ?? 0) < 2) {
+      menuCountMobj.value = (menuCountMobj.peek() ?? 0) + 1;
     }
     Rect p = boxRect(wk)!;
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
@@ -2548,43 +2539,43 @@ class TimerScreenState extends State<TimerScreen>
       pausePlaySelected();
     }, 0.6);
 
-    final hintColor = darkenColor(mt.lowestBackColor,
-        0.4 * (theme.brightness == Brightness.dark ? -1 : 1));
+    final hintColor = mt.hintTextColor;
     final hintTextStyle = theme.textTheme.bodySmall!.copyWith(color: hintColor);
 
     // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
 
-    final dahMargin = thumbSpan * 0.2;
-    final userDragActionHint = Positioned(
-      left: dahMargin,
-      top: MediaQuery.of(context).padding.top + dahMargin,
-      // width: screenSize.width * 0.71 - dahMargin,
-      right: dahMargin,
-      child: AnimatedBuilder(
-        animation: userDragActionHintReveal,
-        builder: (context, child) {
-          final theme = Theme.of(context);
-          final dir = isRightHanded ? "left" : "right";
-          return Opacity(
-              opacity: Curves.easeInOutCubic
-                  .transform(userDragActionHintReveal.scalarValue),
-              child: RichText(
-                text: TextSpan(
-                  children: [
-                    WidgetSpan(
-                        child: Icon(Icons.info_rounded,
-                            size: 16, color: hintColor)),
-                    WidgetSpan(child: SizedBox(width: 4)),
-                    TextSpan(
-                        style: hintTextStyle,
-                        text:
-                            """when you press a number, you can drag up or to the $dir.
-this will activate the new timer.
-(dragging $dir adds a pair of zeroes to it before activating it.)"""),
-                  ],
-                ),
-              ));
-        },
+    Widget infoText(String content) => RichText(
+          text: TextSpan(
+            children: [
+              WidgetSpan(
+                  child: Icon(Icons.info_rounded, size: 16, color: hintColor)),
+              WidgetSpan(child: SizedBox(width: 4)),
+              TextSpan(style: hintTextStyle, text: content),
+            ],
+          ),
+        );
+
+    final hintMargin = thumbSpan * 0.2;
+    final hintTray = Positioned(
+      left: hintMargin,
+      top: MediaQuery.of(context).padding.top + hintMargin,
+      // width: screenSize.width * 0.71 - hintMargin,
+      right: hintMargin,
+      child: Column(
+        children: [
+          Builder(builder: (context) {
+            final dir = isRightHanded ? "left" : "right";
+            return HintToast(
+                showCondition: userDragActionHintCondition,
+                child: infoText(
+                    """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)"""));
+          }),
+          HintToast(
+            showCondition: hasUsedMenuTwice,
+            child: infoText(
+                "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)"),
+          )
+        ],
       ),
     );
 
@@ -2620,38 +2611,40 @@ this will activate the new timer.
               },
               child: child)
         ],
-        EphemeralAnimationHost(
-            key: ephemeralAnimationLayer,
-            builder: (children, context) => ConstrainedBox(
-                constraints: BoxConstraints.expand(),
-                child: Stack(children: children)),
-            // we stack a bunch of stuff here that's not ephemeral because that's allowed
-            children: [
-              userDragActionHint,
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                top: 0,
-                child: SingleChildScrollView(
-                    controller: timersScroller,
-                    reverse: true,
-                    child: Column(children: [
-                      // ensure it can always be scrolled down
-                      SizedBox(height: screenSize.height),
-                      ConstrainedBox(
-                          constraints:
-                              BoxConstraints(minHeight: screenSize.height),
-                          child: timersWidget),
-                      SizedBox(height: controlsh),
-                    ])),
-              ),
-              ...controls,
-              editPopoverBacking,
-              editPopoverBackspaceButton,
-              editPopoverPlayButton,
-              buttonScaleDial,
-            ]));
+        SelfRemovalHost(
+          key: ephemeralAnimationLayer,
+          builder: (children, context) => ConstrainedBox(
+              constraints: BoxConstraints.expand(),
+              child: Stack(
+                  children: [
+                        hintTray,
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          top: 0,
+                          child: SingleChildScrollView(
+                              controller: timersScroller,
+                              reverse: true,
+                              child: Column(children: [
+                                // ensure it can always be scrolled down
+                                SizedBox(height: screenSize.height),
+                                ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                        minHeight: screenSize.height),
+                                    child: timersWidget),
+                                SizedBox(height: controlsh),
+                              ])),
+                        ),
+                        ...controls,
+                        editPopoverBacking,
+                        editPopoverBackspaceButton,
+                        editPopoverPlayButton,
+                        buttonScaleDial,
+                      ] +
+                      children)),
+          // we stack a bunch of stuff here that's not ephemeral because that's allowed
+        ));
   }
 
   void toggleStopPlay() {
@@ -2835,8 +2828,7 @@ this will activate the new timer.
           duration: const Duration(milliseconds: 270),
         );
 
-        ephemeralAnimationLayer.currentState!
-            .addWithoutAutomaticRemoval(deletionAnimationWidget);
+        ephemeralAnimationLayer.currentState!.add(deletionAnimationWidget);
       }
     }
 
@@ -2939,8 +2931,8 @@ class _NumeralButtonState extends State<NumeralButton>
           dragEvents: dragEvents,
         );
         context
-            .findAncestorStateOfType<EphemeralAnimationHostState>()
-            ?.addWithoutAutomaticRemoval(numeralDragActionRing);
+            .findAncestorStateOfType<SelfRemovalHostState>()
+            ?.add(numeralDragActionRing);
       },
       onPanUpdate: (Offset p) {
         Offset dp = p - _startDrag;
