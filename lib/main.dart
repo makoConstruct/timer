@@ -2125,7 +2125,8 @@ class TimerScreenState extends State<TimerScreen>
     final thumbSpan = Thumbspan.of(context);
 
     final buttonSpan = watchSignal(context, buttonSpanMobj)!;
-    final bottomGutter = thumbSpan * 0.3;
+    final bottomGutter =
+        max(thumbSpan * 0.3, MediaQuery.of(context).padding.bottom);
     final controlsh = bottomGutter + 4 * buttonSpan;
     bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
 
@@ -4122,12 +4123,13 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   }
 
   void _scrollTo(GlobalKey key) {
-    Scrollable.ensureVisible(
-      key.currentContext!,
-      duration: const Duration(milliseconds: 700),
-      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-      curve: Interval(0.4, 1.0, curve: Curves.easeInOutCubic),
-    );
+    // Scrollable.ensureVisible(
+    //   key.currentContext!,
+    //   duration: const Duration(milliseconds: 700),
+    //   alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    //   curve: Interval(0.4, 1.0, curve: Curves.easeInOutCubic),
+    // );
+    boring.scrollToWithPadding(key.currentContext!, _scrollController);
   }
 
   void inputCompleted(GlobalKey key) {
@@ -4382,11 +4384,12 @@ Otherwise, if you generally pay close attention to your phone, it's much more co
                                           borderRadius: BorderRadius.circular(
                                               buttonCornerRadius),
                                         ),
-                                        child: Center(
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 20.0),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 22.0),
+                                          child: Center(
                                             child: Text(
+                                                textAlign: TextAlign.center,
                                                 'require acknowledgement',
                                                 style: theme
                                                     .textTheme.titleMedium!
@@ -4413,7 +4416,7 @@ Otherwise, if you generally pay close attention to your phone, it's much more co
                                               buttonCornerRadius),
                                         ),
                                         child: Center(
-                                          child: Text('Ring once',
+                                          child: Text('ring once',
                                               style: theme
                                                   .textTheme.titleMedium!
                                                   .copyWith(
@@ -4505,7 +4508,7 @@ Otherwise, if you generally pay close attention to your phone, it's much more co
                                       Watch(
                                         (context) => Text(
                                             allChoicesCompleted.value
-                                                ? 'done, continue'
+                                                ? 'setup complete, click to continue'
                                                 : 'skip setup',
                                             style: theme.textTheme.titleMedium!
                                                 .copyWith(

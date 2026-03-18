@@ -32,6 +32,39 @@ const double backingIndicatorGap = 8.0;
 bool platformIsDesktop() =>
     Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
+void scrollToWithPadding(
+  BuildContext context,
+  ScrollController scrollController, {
+  Duration duration = const Duration(milliseconds: 700),
+  Curve curve = const Interval(0.4, 1.0, curve: Curves.easeInOutCubic),
+}) {
+  final object = context.findRenderObject()!;
+  final viewport = RenderAbstractViewport.maybeOf(object);
+  final position = scrollController.position;
+
+  if (viewport == null) {
+    Scrollable.ensureVisible(
+      context,
+      duration: duration,
+      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      curve: curve,
+    );
+    return;
+  }
+
+  final revealed = viewport.getOffsetToReveal(
+    object,
+    1.0,
+    rect: null,
+    axis: Axis.vertical,
+  );
+  final padding = MediaQuery.of(context).padding.bottom;
+  final baseTarget = revealed.offset;
+  final target = (baseTarget >= position.pixels ? baseTarget + padding : baseTarget)
+      .clamp(position.minScrollExtent, position.maxScrollExtent);
+  position.animateTo(target, duration: duration, curve: curve);
+}
+
 // Using platform audio for content:// URI support (for using system ringtones)
 // On Linux, uses audioplayers instead since platform_audio doesn't work there, though audioplayers doesn't work perfectly, we're not actually doing a linux target, linux is just for testing
 class JukeBox {
