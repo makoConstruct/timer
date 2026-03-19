@@ -3212,9 +3212,9 @@ class _NumpadTypeIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cellSpan = width / 3;
+    final fontSize = 14.0;
     final fontScale = cellSpan / 10;
     final color = this.color ?? theme.colorScheme.onSurface;
-
     return SizedBox(
       width: width,
       height: width,
@@ -3223,7 +3223,7 @@ class _NumpadTypeIndicator extends StatelessWidget {
         children: List.generate(9, (index) {
           final widg = Text((index + 1).toString(),
               style: TextStyle(
-                  fontSize: 14.0,
+                  fontSize: fontSize,
                   color: color,
                   fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
                   fontFamily: 'Dongle'));
@@ -3236,7 +3236,7 @@ class _NumpadTypeIndicator extends StatelessWidget {
             duration: Duration(milliseconds: 300),
             curve: Curves.easeInOut,
             left: cellSpan / 2 + x * cellSpan,
-            top: cellSpan / 2 + py * cellSpan,
+            top: cellSpan / 2 + py * cellSpan + fontSize * 0.25,
             child: FractionalTranslation(
                 translation: Offset(-0.5, -0.5),
                 child: Transform.scale(scale: fontScale, child: widg)),
