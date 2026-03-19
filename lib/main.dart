@@ -805,6 +805,9 @@ class TimerState extends State<Timer>
   final transferrableKey = GlobalKey();
   bool hasDisabled = false;
   TimerData? previousValue;
+  bool _titleEditMode = false;
+  final FocusNode _titleFocusNode = FocusNode();
+  late final TextEditingController _titleController = TextEditingController();
 
   /// kept so that drag handlers will know to remove it from the lsit
   late MobjID? owningList;
@@ -926,6 +929,8 @@ class TimerState extends State<Timer>
     _deletionAnimation.dispose();
     animatedToDisabled.dispose();
     previousSize.dispose();
+    _titleFocusNode.dispose();
+    _titleController.dispose();
 
     super.dispose();
   }
@@ -943,6 +948,31 @@ class TimerState extends State<Timer>
     setState(() {
       currentTime = nd;
       // we don't set the timer off/change its state, enlivenTimer bindings do that
+    });
+  }
+
+  void enterTitleEditMode() {
+    final current = p.title ?? '';
+    widget.mobj.value = p.withChanges(title: current);
+    _titleController.text = current;
+    _titleController.selection =
+        TextSelection.collapsed(offset: current.length);
+    void onFocusChange() {
+      if (!_titleFocusNode.hasFocus) {
+        _titleFocusNode.removeListener(onFocusChange);
+        final text = _titleController.text;
+        setState(() => _titleEditMode = false);
+        widget.mobj.value = p.withChanges(
+          title: text.isEmpty ? null : text,
+          titleNull: text.isEmpty,
+        );
+      }
+    }
+
+    _titleFocusNode.addListener(onFocusChange);
+    setState(() => _titleEditMode = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _titleFocusNode.requestFocus();
     });
   }
 
@@ -1028,7 +1058,7 @@ class TimerState extends State<Timer>
                 child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       Transform.scale(
                           alignment: Alignment.bottomLeft,
@@ -1052,13 +1082,47 @@ class TimerState extends State<Timer>
       ],
     );
 
+    Widget titledTextPart() {
+      final Widget titleWidget = _titleEditMode
+          ? IntrinsicWidth(
+              child: TextField(
+                focusNode: _titleFocusNode,
+                controller: _titleController,
+                style: DefaultTextStyle.of(context).style,
+                decoration: InputDecoration.collapsed(hintText: 'description'),
+                onChanged: (text) {
+                  widget.mobj.value = p.withChanges(title: text);
+                },
+              ),
+            )
+          : Text(d.title!, overflow: TextOverflow.clip);
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          titleWidget,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              timeText(timeDigits),
+              Text(' / ', overflow: TextOverflow.clip),
+              Text(boring.formatTime(durationDigits),
+                  overflow: TextOverflow.clip),
+            ],
+          ),
+        ],
+      );
+    }
+
     final Widget textPart = DefaultTextStyle.merge(
         style: TextStyle(color: theme.colorScheme.onSurface),
-        child: switch (d.kind) {
-          TimerKind.timer => animatedTextPartForTimer,
-          TimerKind.stopwatch => timeText(timeDigits,
-              centiseconds: ((d.transpired % 1) * 100).toInt())
-        });
+        child: (d.title != null || _titleEditMode)
+            ? titledTextPart()
+            : switch (d.kind) {
+                TimerKind.timer => animatedTextPartForTimer,
+                TimerKind.stopwatch => timeText(timeDigits,
+                    centiseconds: ((d.transpired % 1) * 100).toInt())
+              });
 
     final playIconRadius = 10;
     Offset playIconPos = Offset(clockRadius, clockRadius) +
@@ -2019,6 +2083,12 @@ class TimerScreenState extends State<TimerScreen>
                         context, isRightHanded, Icon(Icons.push_pin), 'Pin',
                         () {
                       togglePin(timerID);
+                    }),
+                    menuItem(context, isRightHanded, Icon(Icons.label_outline),
+                        'Title', () {
+                      final wk =
+                          timerWidgets[timerID]?.key as GlobalKey<TimerState>?;
+                      wk?.currentState?.enterTitleEditMode();
                     }, isLast: true),
                   ]);
             },
@@ -2592,10 +2662,13 @@ class TimerScreenState extends State<TimerScreen>
               child: child),
           (child) => Scaffold(backgroundColor: mt.lowestBackColor, body: child),
           (child) => Focus(
-              autofocus: true, // Automatically request focus when built
-              onKeyEvent: (_, event) {
+              autofocus: true,
+              onKeyEvent: (node, event) {
+                if (FocusManager.instance.primaryFocus != node) {
+                  return KeyEventResult.ignored;
+                }
                 _handleKeyPress(event);
-                return KeyEventResult.handled; // Prevent event from propagating
+                return KeyEventResult.handled;
               },
               child: child)
         ],

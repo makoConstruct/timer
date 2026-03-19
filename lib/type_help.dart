@@ -52,6 +52,8 @@ class TimerData {
   /// list of child timer IDs
   final List<String> children;
 
+  final String? title;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -73,6 +75,7 @@ class TimerData {
     this.persistentAlarm,
     this.kind = TimerKind.timer,
     this.children = const [],
+    this.title,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -91,6 +94,8 @@ class TimerData {
     bool persistentAlarmNull = false,
     TimerKind? kind,
     List<String>? children,
+    String? title,
+    bool titleNull = false,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -106,6 +111,7 @@ class TimerData {
           : (persistentAlarm ?? this.persistentAlarm),
       kind: kind ?? this.kind,
       children: children ?? this.children,
+      title: titleNull ? null : (title ?? this.title),
     );
   }
 
@@ -154,6 +160,7 @@ class TimerDataType extends TypeHelp<TimerData> {
         isGoingOff: const BoolType().fromJson(json['isGoingOff']),
         kind: TimerKind.values[const IntType().fromJson(json['kind'])],
         children: ListType(const StringType()).fromJson(json['children'] ?? []),
+        title: Nullable(const StringType()).fromJson(json['title']),
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -175,6 +182,7 @@ class TimerDataType extends TypeHelp<TimerData> {
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
       'kind': const IntType().toJson(object.kind.index),
       'children': ListType(const StringType()).toJson(object.children),
+      'title': Nullable(const StringType()).toJson(object.title),
     };
   }
 }
@@ -192,6 +200,8 @@ TimerData cloneTimerDataWithChanges(
   bool? persistentAlarm,
   bool persistentAlarmNull = false,
   List<String>? children,
+  String? title,
+  bool titleNull = false,
 }) {
   return TimerData(
     startTime: startTime ?? old.startTime,
@@ -205,6 +215,7 @@ TimerData cloneTimerDataWithChanges(
     persistentAlarm:
         persistentAlarmNull ? null : (persistentAlarm ?? old.persistentAlarm),
     children: children ?? old.children,
+    title: titleNull ? null : (title ?? old.title),
   );
 }
 
