@@ -4122,6 +4122,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     padKey,
     ringModeKey,
     if (Platform.isAndroid) notifKey,
+    if (Platform.isAndroid) batteryOptimKey,
     skipKey
   ];
   late Signal<bool?> numpadOrientation = Signal(null);
@@ -4130,13 +4131,17 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     setIsRightHanded,
     numpadOrientation,
     ringMode,
-    if (Platform.isAndroid) notifGranted
+    if (Platform.isAndroid) notifGranted,
+    if (Platform.isAndroid) batteryOptimGranted
   ];
   late Signal<bool> allChoicesCompleted = Signal(false);
   async.Timer? autoMoveOn;
   late Signal<bool?> notifGranted = Signal(null);
   bool _notifWasAlreadyGranted = false;
   final GlobalKey notifKey = GlobalKey();
+  late Signal<bool?> batteryOptimGranted = Signal(null);
+  bool _batteryOptimWasAlreadyGranted = false;
+  final GlobalKey batteryOptimKey = GlobalKey();
 
   @override
   void initState() {
@@ -4181,6 +4186,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     _scrollController = ScrollController();
     if (Platform.isAndroid) {
       _checkNotificationPermission();
+      _checkBatteryOptimization();
     }
   }
 
@@ -4199,6 +4205,21 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     }
   }
 
+  Future<void> _checkBatteryOptimization() async {
+    final granted = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    _batteryOptimWasAlreadyGranted = granted;
+    batteryOptimGranted.value = granted ? true : null;
+  }
+
+  Future<void> _requestBatteryOptimization() async {
+    final granted =
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    batteryOptimGranted.value = granted ? true : null;
+    if (granted) {
+      inputCompleted(batteryOptimKey);
+    }
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
@@ -4207,6 +4228,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     ringMode.dispose();
     allChoicesCompleted.dispose();
     notifGranted.dispose();
+    batteryOptimGranted.dispose();
     super.dispose();
   }
 
@@ -4547,6 +4569,51 @@ Otherwise, if you generally pay close attention to your phone, it's much more co
                                 onTap: granted == true
                                     ? null
                                     : _requestNotificationPermission,
+                                borderRadius:
+                                    BorderRadius.circular(buttonCornerRadius),
+                                child: SizedBox(
+                                  height: standardButtonHeight,
+                                  child: Center(
+                                      child: Text(label,
+                                          style: theme.textTheme.titleMedium!
+                                              .copyWith(
+                                                  color: foregroundColorFor(
+                                                      theme, isOn)))),
+                                ),
+                              );
+                            }),
+                          ),
+                        ])))),
+          if (Platform.isAndroid)
+            SliverToBoxAdapter(
+                key: batteryOptimKey,
+                child: Padding(
+                    padding: EdgeInsets.all(standardSpacing),
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: reverseIfNot(isRightHanded.value ?? true, [
+                          Flexible(
+                              child: Text(
+                                  'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
+                                  style: theme.textTheme.bodyMedium!)),
+                          spacer,
+                          Flexible(
+                            child: Watch((context) {
+                              final granted = batteryOptimGranted.value;
+                              final isOn = granted == true;
+                              final label = granted == null
+                                  ? 'request'
+                                  : granted
+                                      ? (_batteryOptimWasAlreadyGranted
+                                          ? 'already granted'
+                                          : 'granted')
+                                      : 'request';
+                              return InkButton(
+                                backgroundColor:
+                                    backgroundColorFor(theme, isOn),
+                                onTap: granted == true
+                                    ? null
+                                    : _requestBatteryOptimization,
                                 borderRadius:
                                     BorderRadius.circular(buttonCornerRadius),
                                 child: SizedBox(

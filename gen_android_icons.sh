@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 command -v rsvg-convert >/dev/null 2>&1 || { echo "Error: rsvg-convert not found. Install librsvg (e.g. pacman -S librsvg)."; exit 1; }
+command -v magick      >/dev/null 2>&1 || { echo "Error: magick not found. Install imagemagick."; exit 1; }
 
 for f in "app icon.svg" "app icon without border.svg" "app icon monochrome.svg" "app icon background.svg"; do
   [[ -f "$f" ]] || { echo "Error: source file missing: $f"; exit 1; }
@@ -21,16 +22,26 @@ svg_to_png() {
   echo "  -> $dst ($size x $size)"
 }
 
+# Adaptive icon layers must fill 108dp total but keep artwork within the 72dp
+# safe zone (center 2/3). Scale SVG to 2/3 of target, then pad to full size.
+svg_to_adaptive_png() {
+  local src="$1" size="$2" dst="$3"
+  local safe=$(( size * 2 / 3 ))
+  rsvg-convert -w "$safe" -h "$safe" "$src" \
+    | magick - -gravity center -background transparent -extent "${size}x${size}" "$dst"
+  echo "  -> $dst ($size x $size, safe zone $safe x $safe)"
+}
+
 for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
   dir="$RES/mipmap-$density"
   ls_size=${LAUNCHER_SIZE[$density]}
   ad_size=${ADAPTIVE_SIZE[$density]}
 
   echo "$density:"
-  svg_to_png "app icon.svg"              "$ls_size" "$dir/ic_launcher.png"
-  svg_to_png "app icon background.svg"   "$ad_size" "$dir/ic_launcher_background.png"
-  svg_to_png "app icon without border.svg" "$ad_size" "$dir/ic_launcher_foreground.png"
-  svg_to_png "app icon monochrome.svg"   "$ad_size" "$dir/ic_launcher_monochrome.png"
+  svg_to_png          "app icon.svg"               "$ls_size" "$dir/ic_launcher.png"
+  svg_to_adaptive_png "app icon background.svg"    "$ad_size" "$dir/ic_launcher_background.png"
+  svg_to_adaptive_png "app icon without border.svg" "$ad_size" "$dir/ic_launcher_foreground.png"
+  svg_to_adaptive_png "app icon monochrome.svg"    "$ad_size" "$dir/ic_launcher_monochrome.png"
 done
 
 echo "Done."
