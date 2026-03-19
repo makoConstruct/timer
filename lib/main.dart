@@ -1030,22 +1030,33 @@ class TimerState extends State<Timer>
       },
     );
 
-    Widget timeText(List<int> digits, {int? centiseconds}) {
+    Widget timeText(List<int> digits,
+        {int? centiseconds, bool withTimeLevel = false}) {
       // adds a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
-      String fmt(List<int> ds, int? cs) {
-        final base = boring.formatTime(ds);
-        return cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}';
+      Widget fmt(List<int> ds, int? cs, {bool maybeWithTimeLevel = false}) {
+        if (maybeWithTimeLevel && withTimeLevel) {
+          return boring.formatTimeWithTimeLevel(
+            ds,
+            padLevel: padLevelFor(ds.length),
+            centiseconds: cs,
+          );
+        } else {
+          final base = boring.formatTime(ds);
+          return Text(
+              overflow: TextOverflow.clip,
+              cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}');
+        }
       }
 
       return Stack(
         children: [
           Opacity(
               opacity: 0,
-              child: Text(
-                  fmt(withDigitsReplacedWith(digits, 0),
-                      centiseconds != null ? 0 : null),
-                  overflow: TextOverflow.clip)),
-          Text(fmt(digits, centiseconds), overflow: TextOverflow.clip),
+              child: fmt(
+                withDigitsReplacedWith(digits, 0),
+                centiseconds != null ? 0 : null,
+              )),
+          fmt(digits, centiseconds, maybeWithTimeLevel: true),
         ],
       );
     }
@@ -1073,12 +1084,8 @@ class TimerState extends State<Timer>
                         Transform.scale(
                             alignment: Alignment.topLeft,
                             scale: lerp(1, 0.6, v),
-                            child: Row(
-                              children: [
-                                Text(boring.formatTime(durationDigits),
-                                    overflow: TextOverflow.clip),
-                              ],
-                            )),
+                            child:
+                                timeText(durationDigits, withTimeLevel: true)),
                         selectionUnderline,
                       ]),
                     ]));
@@ -1106,15 +1113,20 @@ class TimerState extends State<Timer>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           titleWidget,
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              timeText(timeDigits),
-              Text(' / ', overflow: TextOverflow.clip),
-              Text(boring.formatTime(durationDigits),
-                  overflow: TextOverflow.clip),
-            ],
-          ),
+          switch (d.kind) {
+            TimerKind.timer => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  timeText(timeDigits),
+                  Text(' / ', overflow: TextOverflow.clip),
+                  Text(boring.formatTime(durationDigits),
+                      overflow: TextOverflow.clip),
+                ],
+              ),
+            TimerKind.stopwatch => timeText(timeDigits,
+                centiseconds: ((d.transpired % 1) * 100).toInt(),
+                withTimeLevel: true)
+          }
         ],
       );
     }
@@ -1126,7 +1138,8 @@ class TimerState extends State<Timer>
             : switch (d.kind) {
                 TimerKind.timer => animatedTextPartForTimer,
                 TimerKind.stopwatch => timeText(timeDigits,
-                    centiseconds: ((d.transpired % 1) * 100).toInt())
+                    centiseconds: ((d.transpired % 1) * 100).toInt(),
+                    withTimeLevel: true)
               });
 
     final playIconRadius = 10;

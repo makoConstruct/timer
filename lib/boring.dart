@@ -60,8 +60,9 @@ void scrollToWithPadding(
   );
   final padding = MediaQuery.of(context).padding.bottom;
   final baseTarget = revealed.offset;
-  final target = (baseTarget >= position.pixels ? baseTarget + padding : baseTarget)
-      .clamp(position.minScrollExtent, position.maxScrollExtent);
+  final target =
+      (baseTarget >= position.pixels ? baseTarget + padding : baseTarget)
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
   position.animateTo(target, duration: duration, curve: curve);
 }
 
@@ -889,6 +890,7 @@ class _UpDownToDoubleAdapter extends Animation<double>
 const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
 const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9];
 const List<int> datetimeMaxima = [60, 60, 24, 365];
+const List<String> datetimeMaximaInitial = ["s", "m", "h", "d", "y"];
 
 const appName = "mako timer";
 
@@ -896,38 +898,88 @@ const appName = "mako timer";
 const foregroundNotificationText = "";
 
 int padLevelFor(int digitLength) {
-  return datetimeSectionOffsets.indexWhere((s) => s >= digitLength);
+  return datetimeSectionOffsets.lastIndexWhere((s) => s < digitLength);
 }
 
-/// if d is greater than the number of given padLevel, eg, if it's 25 hours and place is 3 (which means show seconds, minutes and hours), it will still automatically show 1 day, 1 hour, and zero minutes and seconds. padLevel is for making sure enough places are shown in numbers that are too low.
+/// if digits.length is greater than the number of given padLevel, eg, if it's 25 hours and place is 3 (which means show seconds, minutes and hours), it will still automatically show 1 day, 1 hour, and zero minutes and seconds. padLevel is for making sure enough places are shown in numbers that are too low.
 String formatTime(List<int> digits, {int padLevel = 0}) {
   String ret = "";
-  // the index of the next digit to be printe
-  int underLevel = max(
+  formatTimeFull(digits,
+      padLevel: padLevel,
+      onDigit: (d) => ret += d.toString(),
+      onSeparator: () => ret += ':');
+  return ret;
+}
+
+/// displays the time with a "d" or "y" or "m" or "h" under the first section to make the meaning of the number easily felt. Doesn't show an "s", I think the seconds level is always clear enough..
+RichText formatTimeWithTimeLevel(List<int> digits,
+    {int padLevel = 0, int? centiseconds}) {
+  List<String> parts = [""];
+  int highestLevel = formatTimeFull(digits,
+      padLevel: padLevel,
+      onDigit: (d) => parts.last += d.toString(),
+      onSeparator: () => parts.add(""));
+  List<InlineSpan> spans = [];
+  for (int i = 0; i < parts.length; i++) {
+    spans.add(TextSpan(text: parts[i]));
+    if (highestLevel > 0 && i == 0) {
+      spans.add(WidgetSpan(
+          // I don't know why this required a stack positioned, I tried Container(clipBehavior: Clip.none, alignment: Alignment.topRight), for some reason it was always 0 size.. and also seemingly positioned in the wrong place
+          child: SizedBox(
+        width: 0,
+        height: 0,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Positioned(
+              top: -4,
+              right: 0,
+              child: Text(datetimeMaximaInitial[highestLevel],
+                  style: TextStyle(fontSize: 9)))
+        ]),
+      )));
+    }
+    if (i < parts.length - 1) {
+      spans.add(TextSpan(text: ":"));
+    }
+  }
+  if (centiseconds != null) {
+    spans.add(TextSpan(text: ".${centiseconds.toString().padLeft(2, '0')}"));
+  }
+
+  return RichText(
+      overflow: TextOverflow.visible, text: TextSpan(children: spans));
+}
+
+/// see the above formatTime to understand what this is used for
+int formatTimeFull(List<int> digits,
+    {int padLevel = 0,
+    required Function(int) onDigit,
+    required Function() onSeparator}) {
+  // the index of the current time level (where time levels indicate seconds, minutes, hours, days, years)
+  int initialUnderLevel = max(
       0,
       max(padLevel - 1,
           datetimeSectionOffsets.lastIndexWhere((s) => s < digits.length)));
   int di = max(
-          underLevel + 1 < datetimeSectionOffsets.length
-              ? datetimeSectionOffsets[underLevel + 1]
+          initialUnderLevel + 1 < datetimeSectionOffsets.length
+              ? datetimeSectionOffsets[initialUnderLevel + 1]
               : digits.length,
           digits.length) -
       1;
 
-  underLevel = max(padLevel, underLevel);
+  int underLevel = max(padLevel, initialUnderLevel);
   while (di >= 0) {
     if (di < datetimeSectionOffsets[underLevel]) {
       --underLevel;
-      ret += ":";
+      onSeparator();
     }
     if (di < digits.length) {
-      ret += digits[digits.length - di - 1].toString();
+      onDigit(digits[digits.length - di - 1]);
     } else {
-      ret += "0";
+      onDigit(0);
     }
     --di;
   }
-  return ret;
+  return initialUnderLevel;
 }
 
 ///returns the index of the angleRadius segment that angle intersects, otherwise, returns -1

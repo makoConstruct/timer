@@ -70,7 +70,7 @@ credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects. -->
 
 ## License
 
-It's BSL-1.1(Apache-2.0, non-compete), a fair use license, which means you can use the code for anything as long as it isn't a directly competing project (a timer app). Even that restriction goes away after 4 years, at which point it converts to Apache 2. 
+It's BSL-1.1(Apache-2.0, non-compete), a fair use license, which means you can use the code for anything as long as it isn't a directly competing project (a timer app). Even that restriction goes away after 4 years, at which point it converts to Apache 2. "Mako's Timer" and its logo are trademarks of the licensor.
 
 ## building
 
