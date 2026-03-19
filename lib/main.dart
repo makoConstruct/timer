@@ -321,14 +321,14 @@ class TimerHolm {
     }
   }
 
-  Future<void> _sendCompletionNotification() async {
+  Future<void> _sendCompletionNotification(TimerTrack tt) async {
     print("_sendCompletionNotification");
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
         id: _notificationIdCounter++,
         channelKey: completionChannelKey,
         title: 'timer complete',
-        body: 'tap to dismiss',
+        body: tt.mobj?.peek()?.title ?? 'tap to dismiss',
         bigPicture: 'resource://drawable/res_large_notification_icon',
         notificationLayout: NotificationLayout.BigPicture,
         actionType: ActionType.DismissAction,
@@ -402,7 +402,7 @@ class TimerHolm {
       tt.vibrationRepeatTimer?.cancel();
       tt.vibrationRepeatTimer = async.Timer.periodic(
           const Duration(seconds: 8), (_) => vibrateAlertOnce());
-      _sendCompletionNotification();
+      _sendCompletionNotification(tt);
     } else {
       jukeBox.playAudio(audio);
       mobj.value = d.withChanges(
@@ -2660,7 +2660,7 @@ class TimerScreenState extends State<TimerScreen>
                         : Brightness.dark,
               ),
               child: child),
-          (child) => Scaffold(backgroundColor: mt.lowestBackColor, body: child),
+          (child) => Scaffold(backgroundColor: mt.lowestBackColor, resizeToAvoidBottomInset: false, body: child),
           (child) => Focus(
               autofocus: true,
               onKeyEvent: (node, event) {
@@ -3329,6 +3329,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return Scaffold(
       backgroundColor: backgroundColorA,
+      resizeToAvoidBottomInset: false,
       body: CustomScrollView(
         controller: _scrollController,
         slivers: [

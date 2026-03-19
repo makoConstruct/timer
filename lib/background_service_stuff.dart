@@ -165,7 +165,7 @@ class PersistentNotificationTask extends TaskHandler {
           timer.value = timer
               .peek()!
               .withChanges(runningState: TimerData.completed, isGoingOff: true);
-          showCompletionNotification(timer.id);
+          showCompletionNotification(timer);
         } else {
           jukeBox.playAudio(audio.peek()!);
           timer.value =
@@ -180,20 +180,20 @@ class PersistentNotificationTask extends TaskHandler {
     }
   }
 
-  Future<void> showCompletionNotification(String timerId) async {
+  Future<void> showCompletionNotification(Mobj<TimerData> tracked) async {
     print("showCompletionNotification");
     printExceptionsAsync(() => AwesomeNotifications().createNotification(
           content: NotificationContent(
             id: _notificationIdCounter++,
             channelKey: completionChannelKey,
-            title: 'Timer Complete',
-            body: 'Tap to dismiss alarm',
+            title: 'timer complete',
+            body: tracked.peek()?.title ?? 'tap to dismiss',
             bigPicture: 'resource://drawable/res_large_notification_icon',
             notificationLayout: NotificationLayout.BigPicture,
             locked: true,
             autoDismissible: true,
             actionType: ActionType.DismissAction,
-            payload: {'timerId': timerId},
+            payload: {'timerId': tracked.id},
           ),
           actionButtons: [
             NotificationActionButton(
