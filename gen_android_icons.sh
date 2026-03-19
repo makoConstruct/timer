@@ -22,14 +22,15 @@ svg_to_png() {
   echo "  -> $dst ($size x $size)"
 }
 
-# Adaptive icon layers must fill 108dp total but keep artwork within the 72dp
-# safe zone (center 2/3). Scale SVG to 2/3 of target, then pad to full size.
+# Adaptive icon layers must fill 108dp total. Scale SVG to 19/42 of target
+# (19/28 of the 72dp safe zone), then pad to full size.
 svg_to_adaptive_png() {
   local src="$1" size="$2" dst="$3"
-  local safe=$(( size * 2 / 3 ))
+  local safe=$(( size * 19 / 42 ))
+  # local safe=$(( size * 2 / 3 ))
   rsvg-convert -w "$safe" -h "$safe" "$src" \
     | magick - -gravity center -background transparent -extent "${size}x${size}" "$dst"
-  echo "  -> $dst ($size x $size, safe zone $safe x $safe)"
+  echo "  -> $dst (${size}x${size}, artwork ${safe}x${safe})"
 }
 
 for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
@@ -39,9 +40,9 @@ for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
 
   echo "$density:"
   svg_to_png          "app icon.svg"               "$ls_size" "$dir/ic_launcher.png"
-  svg_to_adaptive_png "app icon background.svg"    "$ad_size" "$dir/ic_launcher_background.png"
+  svg_to_png "app icon background.svg"    "$ad_size" "$dir/ic_launcher_background.png"
   svg_to_adaptive_png "app icon without border.svg" "$ad_size" "$dir/ic_launcher_foreground.png"
-  svg_to_adaptive_png "app icon monochrome.svg"    "$ad_size" "$dir/ic_launcher_monochrome.png"
+  svg_to_png "app icon monochrome.svg"    "$ad_size" "$dir/ic_launcher_monochrome.png"
 done
 
 echo "Done."
