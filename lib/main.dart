@@ -3223,10 +3223,10 @@ class _NumpadTypeIndicator extends StatelessWidget {
         children: List.generate(9, (index) {
           final widg = Text((index + 1).toString(),
               style: TextStyle(
-                  fontSize: index == 0 ? 11.0 : 9.0,
+                  fontSize: 14.0,
                   color: color,
                   fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
-                  fontFamily: 'monospace'));
+                  fontFamily: 'Dongle'));
           // : Icon(Icons.circle, size: 3.0, color: theme.colorScheme.primary);
           final x = index % 3;
           int y = index ~/ 3;
