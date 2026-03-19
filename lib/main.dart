@@ -771,6 +771,11 @@ class Timer extends StatefulWidget {
 
   @override
   State<Timer> createState() => TimerState();
+
+  static usualHeight() {
+    final clockRadius = timerWidgetRadius.peek();
+    return 2 * clockRadius + timerGap * 2;
+  }
 }
 
 class TimerState extends State<Timer>
@@ -2198,6 +2203,8 @@ class TimerScreenState extends State<TimerScreen>
     final bottomGutter =
         max(thumbSpan * 0.3, MediaQuery.of(context).padding.bottom);
     final controlsh = bottomGutter + 4 * buttonSpan;
+    // Calculate the vertical space generally taken by Timer widgets (tallest, including padding).
+    final timerHeight = Timer.usualHeight();
     bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
 
     Widget proportionedIcon(IconData icon, {double size = 22}) {
@@ -2660,7 +2667,10 @@ class TimerScreenState extends State<TimerScreen>
                         : Brightness.dark,
               ),
               child: child),
-          (child) => Scaffold(backgroundColor: mt.lowestBackColor, resizeToAvoidBottomInset: false, body: child),
+          (child) => Scaffold(
+              backgroundColor: mt.lowestBackColor,
+              resizeToAvoidBottomInset: false,
+              body: child),
           (child) => Focus(
               autofocus: true,
               onKeyEvent: (node, event) {
@@ -2688,12 +2698,16 @@ class TimerScreenState extends State<TimerScreen>
                               controller: timersScroller,
                               reverse: true,
                               child: Column(children: [
-                                // ensure it can always be scrolled down
-                                SizedBox(height: screenSize.height),
-                                ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                        minHeight: screenSize.height),
-                                    child: timersWidget),
+                                // ensure it can be scrolled down to center the top row of timers
+                                SizedBox(
+                                    height: screenSize.height -
+                                        controlsh -
+                                        timerHeight),
+                                // ConstrainedBox(
+                                //     constraints: BoxConstraints(
+                                //         minHeight: screenSize.height),
+                                //     child: timersWidget),
+                                timersWidget,
                                 SizedBox(height: controlsh),
                               ])),
                         ),
