@@ -3329,25 +3329,45 @@ class NumeralButton extends StatefulWidget {
   State<NumeralButton> createState() => _NumeralButtonState();
 }
 
-class _NumeralButtonState extends State<NumeralButton>
-    with TickerProviderStateMixin, SignalsMixin {
-  /// -1 means mousedown, number means item has been selected, null means dismissed
-  late Signal<int?> dragEvents = Signal(null, debugLabel: 'dragEvents');
-  // UpDownAnimationController? get numeralDragIndicator =>
-  //     numeralDragActionRing?.currentState?.widget.upDownAnimation;
-  // AnimationController? get numeralDragIndicatorSelect =>
-  //     numeralDragActionRing?.currentState?.widget.optionActivationAnimation;
-  // GlobalKey<NumeralDragActionRingState>? numeralDragActionRing;
-  Offset _startDrag = Offset.zero;
-  bool hasTriggered = false;
-  bool dragActionRingDisabled = false;
-  void _disable() {
-    dragActionRingDisabled = true;
+class _NumeralButtonState extends State<NumeralButton> {
+  late final DragActionRingController dragActionRingController;
+
+  @override
+  void initState() {
+    super.initState();
+    dragActionRingController = DragActionRingController(
+      suppressingNotifier: widget.otherDragActionRingStarted,
+      radialActivatorFunctions: List.generate(
+        radialActivatorFunctions.length,
+        (i) => () {
+          final tss = context.findAncestorStateOfType<TimerScreenState>();
+          if (tss == null) {
+            return;
+          }
+          radialActivatorFunctions[i](tss);
+          final isRightHanded = tss.isRightHandedMobj.peek()!;
+          final rectifiedActivatorPositions = isRightHanded
+              ? radialActivatorPositions
+              : radialActivatorPositions.map(flipAngleHorizontally).toList();
+          final lti = tss.timerListMobj.peek()!.lastOrNull;
+          if (lti != null) {
+            final ts =
+                (tss.timerWidgets.peek()[lti]?.key as GlobalKey<TimerState>?)
+                    ?.currentState;
+            ts?._slideActivateBounceAnimation.forward(from: 0);
+            ts?._slideBounceDirection = Offset.fromDirection(
+                rectifiedActivatorPositions[i], 1);
+          }
+        },
+      ),
+      radialActivatorPositions: radialActivatorPositions,
+      radialActivatorIcons: const [],
+    );
   }
 
   @override
   void dispose() {
-    dragEvents.dispose();
+    dragActionRingController.dispose();
     super.dispose();
   }
 
@@ -3357,75 +3377,22 @@ class _NumeralButtonState extends State<NumeralButton>
       key: widget.timerButtonKey,
       label: widget.digits.join(),
       onPanDown: (Offset p) {
-        hasTriggered = false;
-        dragActionRingDisabled = false;
-        _startDrag = p;
         final tss = context.findAncestorStateOfType<TimerScreenState>()!;
         tss.numeralPressed(widget.digits);
-        dragEvents.value = -1;
-        // it's a void listenable, so we can't just set the value (it'll be equivalent to the previous value and wont notify listeners)
         // ignore: invalid_use_of_protected_member
         widget.otherDragActionRingStarted.notifyListeners();
-        widget.otherDragActionRingStarted.addListener(_disable);
-        final numeralDragActionRing = DragActionRing(
-          key: UniqueKey(),
-          position: p,
-          visualPosition: boxRect(widget.timerButtonKey! as GlobalKey)!.center,
-          numeralDragActionRingBus: widget.otherDragActionRingStarted,
-          dragEvents: dragEvents,
-        );
-        context
-            .findAncestorStateOfType<SelfRemovalHostState>()
-            ?.add(numeralDragActionRing);
+        widget.otherDragActionRingStarted
+            .addListener(dragActionRingController.disable);
+        dragActionRingController.onPanDown(
+            context,
+            p,
+            boxRect(widget.timerButtonKey! as GlobalKey)!.center);
       },
       onPanUpdate: (Offset p) {
-        Offset dp = p - _startDrag;
-        if (!dragActionRingDisabled &&
-            dp.distance > Thumbspan.of(context) * 0.34 &&
-            !hasTriggered) {
-          hasTriggered = true;
-          final tss = context.findAncestorStateOfType<TimerScreenState>();
-          if (tss == null) {
-            return;
-          }
-          bool isRightHanded = tss.isRightHandedMobj.peek()!;
-          final rectifiedActivatorPositions = isRightHanded
-              ? radialActivatorPositions
-              : radialActivatorPositions.map(flipAngleHorizontally).toList();
-          // int dragResult = radialDragResult(
-          //     rectifiedActivatorPositions, offsetAngle(dp),
-          //     hitSpan: pi / 2);
-          int dragResult = radialDragResult(
-              rectifiedActivatorPositions, offsetAngle(dp),
-              // no limit, will activate on the nearest option regardless of its distance. If you want to be more sophisticated, you can maintain an accumulator vector and not activate until the vector aligns somewhat closely with one of the options
-              hitSpan: pi);
-          if (dragResult == -1) {
-            dragEvents.value = null;
-          } else {
-            // activate
-            radialActivatorFunctions[dragResult](tss);
-            dragEvents.value = dragResult;
-            dragEvents.value = null;
-            // consider removing the hint
-            final dagc =
-                Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
-            dagc.value = dagc.peek()! | (dragResult == 0 ? 1 : 2);
-            // bounce animation
-            final lti = tss.timerListMobj.peek()!.lastOrNull;
-            if (lti != null) {
-              final ts =
-                  (tss.timerWidgets.peek()[lti]?.key as GlobalKey<TimerState>?)
-                      ?.currentState;
-              ts?._slideActivateBounceAnimation.forward(from: 0);
-              ts?._slideBounceDirection = Offset.fromDirection(
-                  rectifiedActivatorPositions[dragResult], 1);
-            }
-          }
-        }
+        dragActionRingController.onPanUpdate(context, p);
       },
       onPanEnd: () {
-        dragEvents.value = null;
-        widget.otherDragActionRingStarted.removeListener(_disable);
+        dragActionRingController.onPanEnd(context);
       },
     );
   }
