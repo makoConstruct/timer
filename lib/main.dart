@@ -411,6 +411,52 @@ class TimerHolm {
         completedRecently: true,
       );
     }
+    actuateParentCompositeTimers(mobj);
+  }
+
+  void actuateParentCompositeTimers(Mobj<TimerData> childMobj) {
+    final child = childMobj.peek();
+    if (child?.parentId == null) return;
+
+    final parentMobj =
+        Mobj.getAlreadyLoaded(child!.parentId!, const TimerDataType());
+    final parent = parentMobj.peek();
+    if (parent == null) return;
+
+    switch (parent.kind) {
+      case TimerKind.series:
+        final childIdx = parent.children.indexOf(childMobj.id);
+        if (childIdx < parent.children.length - 1) {
+          final nextId = parent.children[childIdx + 1];
+          final nextMobj = Mobj.getAlreadyLoaded(nextId, const TimerDataType());
+          nextMobj.value = nextMobj.peek()!.toggleRunning(reset: true);
+        } else {
+          parentMobj.value = parent.withChanges(
+            runningState: TimerData.completed,
+            completedRecently: true,
+          );
+        }
+      case TimerKind.loop:
+        final childIdx = parent.children.indexOf(childMobj.id);
+        final nextIdx = (childIdx + 1) % parent.children.length;
+        final nextId = parent.children[nextIdx];
+        final nextMobj = Mobj.getAlreadyLoaded(nextId, const TimerDataType());
+        nextMobj.value = nextMobj.peek()!.toggleRunning(reset: true);
+      case TimerKind.parallel:
+        final allCompleted = parent.children.every((id) =>
+            Mobj.getAlreadyLoaded(id, const TimerDataType())
+                .peek()
+                ?.isCompleted ??
+            false);
+        if (allCompleted) {
+          parentMobj.value = parent.withChanges(
+            runningState: TimerData.completed,
+            completedRecently: true,
+          );
+        }
+      default:
+        break;
+    }
   }
 
   /// how each timer is subscribed to and responded to
@@ -757,55 +803,31 @@ class _MenuRevealClipper extends CustomClipper<Path> {
       old.progress != progress || old.origin != origin;
 }
 
-/// Timer widget, contrast with Timer row from the database orm
-class Timer extends StatefulWidget {
+abstract class TimerBase extends StatefulWidget {
   final Mobj<TimerData> mobj;
   final bool animateIn;
   final MobjID? owningList;
   final void Function()? onTap;
-  const Timer({
+  const TimerBase({
     super.key,
     required this.mobj,
     this.animateIn = true,
     required this.owningList,
     this.onTap,
   });
-
-  @override
-  State<Timer> createState() => TimerState();
-
-  static usualHeight() {
-    final clockRadius = timerWidgetRadius.peek();
-    return 2 * clockRadius + timerGap * 2;
-  }
 }
 
-class TimerState extends State<Timer>
+abstract class TimerBaseState<T extends TimerBase> extends State<T>
     with SignalsMixin, TickerProviderStateMixin {
-  // peek mobj data
   TimerData get p => widget.mobj.peek()!;
 
-  late Ticker _ticker;
-  // in seconds
-  double currentTime = 0;
   late final AnimationController _appearanceAnimation;
-  late final AnimationController _runningAnimation;
-  Offset _slideBounceDirection = Offset(0, -1);
-  late final AnimationController _slideActivateBounceAnimation;
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
-  late final AnimationController _selectedUnderlineAnimation;
-  late final AnimationController _completedRecentlyAnimation;
-  late final Computed<bool> whetherPinned =
-      Computed(() => widget.mobj.value?.pinned ?? false);
-  late final Computed<bool> _shouldFade = Computed(() {
-    final d = widget.mobj.value;
-    if (d == null) return false;
-    return !(d.isRunning || d.pinned || d.selected);
-  });
   // currently inactive. I was considering using this for doing a deletion where most of the deletion animation happens in-place and then it's shunted out into another layer just for the end.
   late final AnimationController _deletionAnimation;
-  final GlobalKey _clockKey = GlobalKey();
+  late final Computed<bool> whetherPinned;
+  late final Computed<bool> _shouldFade;
   final GlobalKey animatedToKey = GlobalKey();
   // used to prevent the deletion animation from being interfered with by animated to, which unfortunately only pays attention to paint position, so slows down even non-layout position transforms.
   late final Signal<bool> animatedToDisabled = Signal(false);
@@ -817,8 +839,194 @@ class TimerState extends State<Timer>
   final FocusNode _titleFocusNode = FocusNode();
   late final TextEditingController _titleController = TextEditingController();
 
-  /// kept so that drag handlers will know to remove it from the lsit
+  /// kept so that drag handlers will know to remove it from the list
   late MobjID? owningList;
+
+  static Color backgroundColor(double hue) =>
+      hpluvToRGBColor([hue * 360, 100, 90]);
+  static Color primaryColor(double hue) =>
+      hpluvToRGBColor([hue * 360, 100, 30]);
+
+  /// called after base animations are initialized, before the reactive effect is created
+  void onInitState() {}
+
+  /// called by the reactive effect whenever timer data changes
+  void onTimerDataChanged(TimerData d, TimerData? prev) {}
+
+  @override
+  void initState() {
+    super.initState();
+    owningList = widget.owningList;
+    whetherPinned = Computed(() => widget.mobj.value?.pinned ?? false);
+    _shouldFade = Computed(() {
+      final d = widget.mobj.value;
+      if (d == null) return false;
+      return !(d.isRunning || d.pinned || d.selected);
+    });
+    _appearanceAnimation = AnimationController(
+        duration: const Duration(milliseconds: 180), vsync: this);
+    if (widget.animateIn) {
+      _appearanceAnimation.forward();
+    } else {
+      _appearanceAnimation.value = 1;
+    }
+    _unpinnedIndicatorShowing = AnimationController(
+        duration: const Duration(milliseconds: 150), vsync: this);
+    _unpinnedIndicatorFullyShowing = AnimationController(
+        duration: const Duration(milliseconds: 150), vsync: this);
+    _deletionAnimation = AnimationController(
+        duration: const Duration(milliseconds: 240), vsync: this);
+    onInitState();
+    createEffect(() {
+      final TimerData? d = widget.mobj.value;
+      final prev = previousValue;
+      if (d == null) {
+        _deletionAnimation.forward();
+        disable();
+        return;
+      }
+      moveAnimationTowardsState(_unpinnedIndicatorShowing, !d.pinned);
+      moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
+      onTimerDataChanged(d, prev);
+      previousValue = d;
+    });
+  }
+
+  @override
+  void dispose() {
+    disable();
+    _appearanceAnimation.dispose();
+    _unpinnedIndicatorShowing.dispose();
+    _unpinnedIndicatorFullyShowing.dispose();
+    _deletionAnimation.dispose();
+    animatedToDisabled.dispose();
+    previousSize.dispose();
+    _titleFocusNode.dispose();
+    _titleController.dispose();
+    whetherPinned.dispose();
+    _shouldFade.dispose();
+    super.dispose();
+  }
+
+  void disable() {
+    if (hasDisabled) return;
+    hasDisabled = true;
+  }
+
+  void enterTitleEditMode() {
+    final current = p.title ?? '';
+    widget.mobj.value = p.withChanges(title: current);
+    _titleController.text = current;
+    _titleController.selection =
+        TextSelection.collapsed(offset: current.length);
+    void onFocusChange() {
+      if (!_titleFocusNode.hasFocus) {
+        _titleFocusNode.removeListener(onFocusChange);
+        final text = _titleController.text;
+        setState(() => _titleEditMode = false);
+        widget.mobj.value = p.withChanges(
+          title: text.isEmpty ? null : text,
+          titleNull: text.isEmpty,
+        );
+      }
+    }
+
+    _titleFocusNode.addListener(onFocusChange);
+    setState(() => _titleEditMode = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _titleFocusNode.requestFocus();
+    });
+  }
+
+  Widget buildShell(BuildContext context, Widget content) {
+    return nesting(
+      [
+        (next) => AnimatedBuilder(
+            animation: _appearanceAnimation,
+            child: next,
+            builder: (context, child) => FractionalTranslation(
+                  translation: Offset(
+                      0,
+                      0.6 *
+                          (1.0 -
+                              Curves.easeOut
+                                  .transform(_appearanceAnimation.value))),
+                  child: FuzzyLinearClip(
+                    angle: pi / 2,
+                    progress: _appearanceAnimation.value,
+                    child: child!,
+                  ),
+                )),
+        (next) => AnimatedTo.spring(
+            globalKey: animatedToKey,
+            enabled: !watchSignal(context, animatedToDisabled)!,
+            // tighter than default. ios sets this to .55
+            description: const Spring.withDamping(durationSeconds: 0.2),
+            child: next),
+        (next) => BoolSignalTween(
+            signal: _shouldFade,
+            duration: Duration(milliseconds: 90),
+            child: next,
+            builder: (context, progress, child) => Opacity(
+                // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
+                // opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
+                opacity: lerp(1, 0.4, progress),
+                child: child)),
+        (next) => SizeReporter(
+            key: transferrableKey, previousSize: previousSize, child: next),
+        if (widget.key is GlobalKey<TimerBaseState>)
+          (next) => DraggableWidget<GlobalKey<TimerBaseState>>(
+              data: widget.key as GlobalKey<TimerBaseState>, child: next),
+        (next) => GestureDetector(
+            onTap: widget.onTap ??
+                () {
+                  context
+                      .findAncestorStateOfType<TimerScreenState>()
+                      ?.takeActionOn(widget.mobj.id);
+                },
+            behavior: HitTestBehavior.opaque,
+            child: next),
+        (next) => Padding(padding: EdgeInsets.all(timerGap / 2), child: next),
+      ],
+      content,
+    );
+  }
+}
+
+/// Timer widget, contrast with Timer row from the database orm
+class Timer extends TimerBase {
+  const Timer({
+    super.key,
+    required super.mobj,
+    super.animateIn = true,
+    required super.owningList,
+    super.onTap,
+  });
+
+  @override
+  State<Timer> createState() => TimerState();
+
+  static usualHeight() {
+    final clockRadius = timerWidgetRadius.peek();
+    return 2 * clockRadius + timerGap * 2;
+  }
+}
+
+class TimerState extends TimerBaseState<Timer> {
+  @override
+  TimerData get p => widget.mobj.peek()!;
+
+  late Ticker _ticker;
+  // in seconds
+  double currentTime = 0;
+  late final AnimationController _runningAnimation;
+  Offset _slideBounceDirection = Offset(0, -1);
+  late final AnimationController _slideActivateBounceAnimation;
+  late final AnimationController _selectedUnderlineAnimation;
+  late final AnimationController _completedRecentlyAnimation;
+  final GlobalKey _clockKey = GlobalKey();
+  StateError wrongTimerVariantError(TimerKind kind) =>
+      StateError("timer kind $kind shouldn't appear in a non-composite timer");
 
   // maybe I should just use an animated_to like approach. I'm pretty sure the current approach (AnimatedContainers) wont work because when we transfer between two containers a remove will play that will mount the same globalkey twice. Terrible.
   // /// set at the end of a drag animation with the position of the drag item relative to the parent
@@ -848,11 +1056,6 @@ class TimerState extends State<Timer>
     widget.mobj.value = p.withChanges(digits: value);
   }
 
-  static Color backgroundColor(double hue) =>
-      hpluvToRGBColor([hue * 360, 100, 90]);
-  static Color primaryColor(double hue) =>
-      hpluvToRGBColor([hue * 360, 100, 30]);
-
   // the timerID should never change, we don't respond to widget updates
   // @override
   // void didUpdateWidget(Timer oldWidget) {
@@ -865,105 +1068,33 @@ class TimerState extends State<Timer>
   // }
 
   @override
-  void initState() {
-    super.initState();
-    owningList = widget.owningList;
-    _appearanceAnimation = AnimationController(
-        duration: const Duration(milliseconds: 180), vsync: this);
-    if (widget.animateIn) {
-      _appearanceAnimation.forward();
-    } else {
-      _appearanceAnimation.value = 1;
-    }
-
+  void onInitState() {
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
-    _slideBounceDirection = Offset(0, -1);
     _slideActivateBounceAnimation = AnimationController(
         duration: const Duration(milliseconds: 180), vsync: this);
-    _unpinnedIndicatorShowing = AnimationController(
-        duration: const Duration(milliseconds: 150), vsync: this);
-    _unpinnedIndicatorFullyShowing = AnimationController(
-        duration: const Duration(milliseconds: 150), vsync: this);
     _selectedUnderlineAnimation = AnimationController(
         duration: const Duration(milliseconds: 250), vsync: this);
     _completedRecentlyAnimation = AnimationController(
         duration: const Duration(milliseconds: 570), vsync: this);
-    _deletionAnimation = AnimationController(
-        duration: const Duration(milliseconds: 240), vsync: this);
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
-    });
-    createEffect(() {
-      TimerData? d = widget.mobj.value;
-      bool isSelected = d?.selected ?? false;
-      if (previousValue?.selected != isSelected) {
-        if (isSelected) {
-          _selectedUnderlineAnimation.forward();
-        } else {
-          _selectedUnderlineAnimation.reverse();
-        }
-      }
-      if (d == null) {
-        _deletionAnimation.forward();
-        disable();
-        return;
-      }
-      if ((previousValue?.isRunning ?? false) != d.isRunning) {
-        if (d.isRunning) {
-          _completedRecentlyAnimation.value = 0;
-          _runningAnimation.forward();
-          _ticker.start();
-        } else {
-          _runningAnimation.reverse();
-          _ticker.stop();
-        }
-      }
-      if (previousValue?.completedRecently != d.completedRecently &&
-          d.completedRecently) {
-        // acknowledge and begin display
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final d2 = widget.mobj.peek();
-          if (d2 != null && d2.completedRecently) {
-            widget.mobj.value = d2.withChanges(completedRecently: false);
-          }
-        });
-        _completedRecentlyAnimation.forward(from: 0);
-      }
-      // if we're just initializing for the first time and it didn't complete recently/has been acknowledged, don't run the acknowledgement animation
-      if (previousValue == null && !d.completedRecently) {
-        _completedRecentlyAnimation.value = 1;
-      }
-      moveAnimationTowardsState(_unpinnedIndicatorShowing, !d.pinned);
-      moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
-
-      // Trigger underline animation when selected changes
-      moveAnimationTowardsState(_selectedUnderlineAnimation, d.selected);
-
-      previousValue = d;
     });
   }
 
   @override
   dispose() {
-    disable();
-    _appearanceAnimation.dispose();
     _runningAnimation.dispose();
-    _unpinnedIndicatorShowing.dispose();
-    _unpinnedIndicatorFullyShowing.dispose();
+    _slideActivateBounceAnimation.dispose();
     _selectedUnderlineAnimation.dispose();
-    _deletionAnimation.dispose();
-    animatedToDisabled.dispose();
-    previousSize.dispose();
-    _titleFocusNode.dispose();
-    _titleController.dispose();
-
+    _completedRecentlyAnimation.dispose();
     super.dispose();
   }
 
+  @override
   void disable() {
     if (hasDisabled) return;
-    hasDisabled = true;
+    super.disable();
     _ticker.dispose();
   }
 
@@ -977,29 +1108,33 @@ class TimerState extends State<Timer>
     });
   }
 
-  void enterTitleEditMode() {
-    final current = p.title ?? '';
-    widget.mobj.value = p.withChanges(title: current);
-    _titleController.text = current;
-    _titleController.selection =
-        TextSelection.collapsed(offset: current.length);
-    void onFocusChange() {
-      if (!_titleFocusNode.hasFocus) {
-        _titleFocusNode.removeListener(onFocusChange);
-        final text = _titleController.text;
-        setState(() => _titleEditMode = false);
-        widget.mobj.value = p.withChanges(
-          title: text.isEmpty ? null : text,
-          titleNull: text.isEmpty,
-        );
+  @override
+  void onTimerDataChanged(TimerData d, TimerData? prev) {
+    if ((prev?.isRunning ?? false) != d.isRunning) {
+      if (d.isRunning) {
+        _completedRecentlyAnimation.value = 0;
+        _runningAnimation.forward();
+        _ticker.start();
+      } else {
+        _runningAnimation.reverse();
+        _ticker.stop();
       }
     }
-
-    _titleFocusNode.addListener(onFocusChange);
-    setState(() => _titleEditMode = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _titleFocusNode.requestFocus();
-    });
+    if (prev?.completedRecently != d.completedRecently && d.completedRecently) {
+      // acknowledge and begin display
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final d2 = widget.mobj.peek();
+        if (d2 != null && d2.completedRecently) {
+          widget.mobj.value = d2.withChanges(completedRecently: false);
+        }
+      });
+      _completedRecentlyAnimation.forward(from: 0);
+    }
+    // if we're just initializing for the first time and it didn't complete recently/has been acknowledged, don't run the acknowledgement animation
+    if (prev == null && !d.completedRecently) {
+      _completedRecentlyAnimation.value = 1;
+    }
+    moveAnimationTowardsState(_selectedUnderlineAnimation, d.selected);
   }
 
   @override
@@ -1146,7 +1281,8 @@ class TimerState extends State<Timer>
               ),
             TimerKind.stopwatch => timeText(timeDigits,
                 centiseconds: ((d.transpired % 1) * 100).toInt(),
-                withTimeLevel: true)
+                withTimeLevel: true),
+            _ => throw wrongTimerVariantError(d.kind),
           }
         ],
       );
@@ -1160,7 +1296,8 @@ class TimerState extends State<Timer>
                 TimerKind.timer => animatedTextPartForTimer,
                 TimerKind.stopwatch => timeText(timeDigits,
                     centiseconds: ((d.transpired % 1) * 100).toInt(),
-                    withTimeLevel: true)
+                    withTimeLevel: true),
+                _ => throw wrongTimerVariantError(d.kind),
               });
 
     final playIconRadius = 10;
@@ -1216,8 +1353,8 @@ class TimerState extends State<Timer>
                               1,
                               Curves.easeInCubic.transform(
                                   _completedRecentlyAnimation.value))),
-                  backgroundColor: backgroundColor(d.hue),
-                  color: primaryColor(d.hue),
+                  backgroundColor: TimerBaseState.backgroundColor(d.hue),
+                  color: TimerBaseState.primaryColor(d.hue),
                   value: pieCompletion,
                   size: 2 * clockRadius),
             ),
@@ -1225,7 +1362,7 @@ class TimerState extends State<Timer>
               width: 2 * clockRadius,
               height: 2 * clockRadius,
               decoration: containerShape(
-                backgroundColor(d.hue),
+                TimerBaseState.backgroundColor(d.hue),
               ),
               child: Center(
                 child: Container(
@@ -1239,11 +1376,12 @@ class TimerState extends State<Timer>
                           0.5, 1, unlerpUnit(0.0, 0.8, stopwatchPulseProgress)),
                       rotation: 45 / 2,
                     ),
-                    color: primaryColor(d.hue),
+                    color: TimerBaseState.primaryColor(d.hue),
                   ),
                 ),
               ),
-            )
+            ),
+          _ => throw wrongTimerVariantError(d.kind),
         }
         // size: 90),
         );
@@ -1252,70 +1390,141 @@ class TimerState extends State<Timer>
     double bounceDistance =
         10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
 
-    return nesting(
-      [
-        (next) => AnimatedBuilder(
-            animation: _appearanceAnimation,
-            child: next,
-            builder: (context, child) => FractionalTranslation(
-                  translation: Offset(
-                      0,
-                      0.6 *
-                          (1.0 -
-                              Curves.easeOut
-                                  .transform(_appearanceAnimation.value))),
-                  child: FuzzyLinearClip(
-                    angle: pi / 2,
-                    progress: _appearanceAnimation.value,
-                    child: child!,
-                  ),
-                )),
-        (next) => AnimatedBuilder(
-            animation: _slideActivateBounceAnimation,
-            builder: (context, child) => Transform.translate(
-                offset: _slideBounceDirection * bounceDistance, child: child),
-            child: next),
-        (next) => AnimatedTo.spring(
-            globalKey: animatedToKey,
-            enabled: !watchSignal(context, animatedToDisabled)!,
-            // tighter than default. ios sets this to .55
-            description: const Spring.withDamping(durationSeconds: 0.2),
-            child: next),
-        (next) => BoolSignalTween(
-            signal: _shouldFade,
-            duration: Duration(milliseconds: 90),
-            child: next,
-            builder: (context, progress, child) => Opacity(
-                // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
-                // opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
-                opacity: lerp(1, 0.4, progress),
-                child: child)),
-        (next) => SizeReporter(
-            key: transferrableKey, previousSize: previousSize, child: next),
-        if (widget.key is GlobalKey<TimerState>)
-          (next) => DraggableWidget<GlobalKey<TimerState>>(
-              data: widget.key as GlobalKey<TimerState>, child: next),
-        (next) => GestureDetector(
-            onTap: widget.onTap ??
-                () {
-                  context
-                      .findAncestorStateOfType<TimerScreenState>()
-                      ?.takeActionOn(widget.mobj.id);
-                },
-            behavior: HitTestBehavior.opaque,
-            child: next),
-        (next) => Padding(padding: EdgeInsets.all(timerGap / 2), child: next),
-      ],
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          clockDial,
-          SizedBox(width: timerGap * 0.4),
-          textPart,
-        ],
+    return buildShell(
+      context,
+      AnimatedBuilder(
+        animation: _slideActivateBounceAnimation,
+        builder: (context, child) => Transform.translate(
+            offset: _slideBounceDirection * bounceDistance, child: child),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            clockDial,
+            SizedBox(width: timerGap * 0.4),
+            textPart,
+          ],
+        ),
       ),
     );
+  }
+}
+
+class CompositeTimer extends TimerBase {
+  const CompositeTimer({
+    super.key,
+    required super.mobj,
+    super.animateIn = true,
+    required super.owningList,
+    super.onTap,
+  });
+
+  @override
+  State<CompositeTimer> createState() => CompositeTimerState();
+}
+
+class CompositeTimerState extends TimerBaseState<CompositeTimer> {
+  @override
+  TimerData get p => widget.mobj.peek()!;
+
+  final Map<String, Mobj<TimerData>> _childMobjs = {};
+  final Map<String, Timer> _childWidgets = {};
+
+  @override
+  void onInitState() {
+    _loadAndTrackChildren();
+  }
+
+  Future<void> _loadAndTrackChildren() async {
+    final d = widget.mobj.peek()!;
+    final results = await Future.wait(
+      d.children.map((id) => Mobj.fetch(id, type: const TimerDataType())),
+    );
+    for (int i = 0; i < d.children.length; i++) {
+      _childMobjs[d.children[i]] = results[i];
+      globalTimerHolm?.considerTracking(d.children[i]);
+    }
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = watchSignal(context, widget.mobj) ?? previousValue!;
+    final theme = Theme.of(context);
+
+    for (final childId in d.children) {
+      if (_childMobjs.containsKey(childId)) {
+        _childWidgets[childId] ??= Timer(
+          key: GlobalKey<TimerState>(),
+          mobj: _childMobjs[childId]!,
+          animateIn: false,
+          owningList: null,
+        );
+      }
+    }
+    _childWidgets.removeWhere((id, _) => !d.children.contains(id));
+
+    Widget compositeBody;
+    if (_childMobjs.isEmpty && d.children.isNotEmpty) {
+      compositeBody = SizedBox(
+        width: timerWidgetRadius.peek() * 2,
+        height: timerWidgetRadius.peek() * 2,
+      );
+    } else {
+      final childWidgets = d.children
+          .where(_childWidgets.containsKey)
+          .map((id) => _childWidgets[id]!)
+          .toList();
+
+      Widget titleWidget = const SizedBox.shrink();
+      if (d.title != null || _titleEditMode) {
+        titleWidget = DefaultTextStyle.merge(
+          style: TextStyle(color: theme.colorScheme.onSurface),
+          child: _titleEditMode
+              ? IntrinsicWidth(
+                  child: TextField(
+                    focusNode: _titleFocusNode,
+                    controller: _titleController,
+                    style: DefaultTextStyle.of(context).style,
+                    decoration:
+                        InputDecoration.collapsed(hintText: 'description'),
+                    onChanged: (text) {
+                      widget.mobj.value = p.withChanges(title: text);
+                    },
+                  ),
+                )
+              : Text(d.title!, overflow: TextOverflow.clip),
+        );
+      }
+
+      compositeBody = PinAnimation(
+        isPinned: whetherPinned,
+        child: Container(
+          padding: EdgeInsets.all(timerGap),
+          decoration: BoxDecoration(
+            color: TimerBaseState.backgroundColor(d.hue),
+            borderRadius: BorderRadius.circular(timerWidgetRadius.peek()),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (d.title != null || _titleEditMode) titleWidget,
+              IWrap(children: childWidgets),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return buildShell(context, compositeBody);
+  }
+
+  @override
+  void dispose() {
+    _childMobjs.clear();
+    _childWidgets.clear();
+    super.dispose();
   }
 }
 
@@ -1393,7 +1602,7 @@ class TimerTray extends StatefulWidget {
   State<TimerTray> createState() => _TimerTrayState();
 }
 
-typedef TimerWidgets = Map<MobjID<TimerData>, Timer>;
+typedef TimerWidgets = Map<MobjID<TimerData>, TimerBase>;
 
 class _TimerTrayState extends State<TimerTray> with SignalsMixin {
   late final GlobalKey wrapKey;
@@ -1432,18 +1641,18 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
           ));
     });
 
-    return DragTarget<GlobalKey<TimerState>>(
+    return DragTarget<GlobalKey<TimerBaseState>>(
       builder: (context, candidateData, rejectedData) => result,
-      onMove: (DragTargetDetails<GlobalKey<TimerState>> details) {
+      onMove: (DragTargetDetails<GlobalKey<TimerBaseState>> details) {
         // Could add visual feedback here if needed
       },
       onAcceptWithDetails: (details) {
         final insertion = insertionOf(wrapKey, details.offset);
         final tkey = details.data;
-        final timerId = (tkey.currentWidget! as Timer).mobj.id;
+        final timerId = (tkey.currentWidget! as TimerBase).mobj.id;
         final currentIndex = p.indexWhere((t) => t == timerId);
 
-        TimerState cs = details.data.currentState!;
+        TimerBaseState cs = details.data.currentState!;
         doInsertion(int at) {
           widget.mobj.value = p.toList()..insert(at, cs.widget.mobj.id);
         }
@@ -1646,28 +1855,46 @@ final List<Function(TimerScreenState)> radialActivatorFunctions = [
   },
 ];
 
-class NumeralDragActionRing extends StatefulWidget {
+class DragActionRing extends StatefulWidget {
   final Offset position;
   final Signal<int?> dragEvents;
-  final Listenable numeralDragActionRingBus;
+
+  /// used to close the ring if another one opens
+  final Listenable? numeralDragActionRingBus;
+
+  /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
   final Offset visualPosition;
-  const NumeralDragActionRing(
+  const DragActionRing(
       {super.key,
       required this.position,
       required this.dragEvents,
-      required this.numeralDragActionRingBus,
+      this.numeralDragActionRingBus,
       required this.visualPosition});
 
   @override
-  State<NumeralDragActionRing> createState() => NumeralDragActionRingState();
+  State<DragActionRing> createState() => DragActionRingState();
 }
 
-class NumeralDragActionRingState extends State<NumeralDragActionRing>
+class DragActionRingState extends State<DragActionRing>
     with TickerProviderStateMixin, SignalsMixin {
   double actionSizepAtSelection = 0;
   int numberSelected = -1;
-  late final UpDownAnimationController upDownAnimation;
-  late final AnimationController optionActivationAnimation;
+  late final UpDownAnimationController upDownAnimation =
+      UpDownAnimationController(
+    vsync: this,
+    riseDuration: Duration(milliseconds: 300),
+    fallDuration: Duration(milliseconds: 140),
+  );
+  late final AnimationController optionActivationAnimation =
+      AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 200),
+  );
+  late final AnimationController optionConsiderationAnimation =
+      AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 200),
+  );
   Function()? dragEventsSubscription;
 
   void _onOtherRingOpens() {
@@ -1677,17 +1904,8 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
   @override
   void initState() {
     super.initState();
-    widget.numeralDragActionRingBus.addListener(_onOtherRingOpens);
-    upDownAnimation = UpDownAnimationController(
-      vsync: this,
-      riseDuration: Duration(milliseconds: 300),
-      fallDuration: Duration(milliseconds: 140),
-    );
+    widget.numeralDragActionRingBus?.addListener(_onOtherRingOpens);
     upDownAnimation.forward();
-    optionActivationAnimation = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 200),
-    );
     optionActivationAnimation.addStatusListener((status) {
       if (!mounted) {
         return;
@@ -1714,6 +1932,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
         setState(() {
           numberSelected = v;
           actionSizepAtSelection = currentActionSize();
+          optionConsiderationAnimation.forward();
           optionActivationAnimation.forward();
         });
       } else {
@@ -1727,7 +1946,7 @@ class NumeralDragActionRingState extends State<NumeralDragActionRing>
     optionActivationAnimation.dispose();
     upDownAnimation.dispose();
     dragEventsSubscription?.call();
-    widget.numeralDragActionRingBus.removeListener(_onOtherRingOpens);
+    widget.numeralDragActionRingBus?.removeListener(_onOtherRingOpens);
     super.dispose();
   }
 
@@ -1998,14 +2217,24 @@ class TimerScreenState extends State<TimerScreen>
     TimerWidgets prevTimerWidgets = {};
     timerWidgets = Computed(() {
       TimerWidgets next = {};
-      for (MobjID t in timerListMobj.value!) {
-        next[t] = prevTimerWidgets[t] ??
-            Timer(
-                // if you remove the generic parameter here, drag and menu open stops working :)
-                key: GlobalKey<TimerState>(),
-                mobj: Mobj.getAlreadyLoaded(t, TimerDataType()),
-                animateIn: true,
-                owningList: timerListMobj.id);
+      for (final t in timerListMobj.value!) {
+        if (prevTimerWidgets.containsKey(t)) {
+          next[t] = prevTimerWidgets[t]!;
+        } else {
+          final mobj = Mobj.getAlreadyLoaded(t, TimerDataType());
+          // if you remove the generic parameter on the key, drag and menu open stops working :)
+          next[t] = mobj.peek()!.isComposite
+              ? CompositeTimer(
+                  key: GlobalKey<CompositeTimerState>(),
+                  mobj: mobj,
+                  animateIn: true,
+                  owningList: timerListMobj.id)
+              : Timer(
+                  key: GlobalKey<TimerState>(),
+                  mobj: mobj,
+                  animateIn: true,
+                  owningList: timerListMobj.id);
+        }
       }
       prevTimerWidgets = next;
       return next;
@@ -2047,7 +2276,7 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void openTimerMenu(BuildContext context, MobjID timerID) {
-    final wk = timerWidgets[timerID]!.key as GlobalKey<TimerState>?;
+    final wk = timerWidgets[timerID]!.key as GlobalKey<TimerBaseState>?;
     if (wk == null) {
       return;
     }
@@ -2138,8 +2367,8 @@ class TimerScreenState extends State<TimerScreen>
                     }),
                     menuItem(context, isRightHanded, Icon(Icons.label_outline),
                         'Title', () {
-                      final wk =
-                          timerWidgets[timerID]?.key as GlobalKey<TimerState>?;
+                      final wk = timerWidgets[timerID]?.key
+                          as GlobalKey<TimerBaseState>?;
                       wk?.currentState?.enterTitleEditMode();
                     }, isLast: true),
                   ]);
@@ -2928,7 +3157,7 @@ class TimerScreenState extends State<TimerScreen>
     // Get the timer's position and size using the globalkey, so that we can animate the exit in the EphemeralHost layer
     final timerWidget = timerWidgets.value[ki];
     if (timerWidget != null) {
-      final timerKey = timerWidget.key as GlobalKey<TimerState>;
+      final timerKey = timerWidget.key as GlobalKey<TimerBaseState>;
       final timerState = timerKey.currentState;
 
       assert(timerState != null && timerState.mounted);
@@ -2938,7 +3167,7 @@ class TimerScreenState extends State<TimerScreen>
             boring.renderBox(ephemeralAnimationLayer))!;
 
         // Create and add the deletion animation
-        (timerWidget.key as GlobalKey<TimerState>)
+        (timerWidget.key as GlobalKey<TimerBaseState>)
             .currentState!
             .animatedToDisabled
             .value = true;
@@ -2995,6 +3224,98 @@ class TimerScreenState extends State<TimerScreen>
   }
 }
 
+class DragActionRingController {
+  /// just visually closes the ring on trigger. Doesn't really need to be in controller but whatever.
+  final ChangeNotifier? suppressingNotifier;
+
+  /// -1 means mousedown, number means item has been selected, null means dismissed
+  late Signal<int?> dragEvents = Signal(null, debugLabel: 'dragEvents');
+  // UpDownAnimationController? get numeralDragIndicator =>
+  //     numeralDragActionRing?.currentState?.widget.upDownAnimation;
+  // AnimationController? get numeralDragIndicatorSelect =>
+  //     numeralDragActionRing?.currentState?.widget.optionActivationAnimation;
+  // GlobalKey<NumeralDragActionRingState>? numeralDragActionRing;
+  Offset _startDrag = Offset.zero;
+  bool hasTriggered = false;
+  bool dragActionRingDisabled = false;
+  final List<Function()> radialActivatorFunctions;
+  final List<double> radialActivatorPositions;
+  final List<Widget>? radialActivatorLabels;
+  final List<Widget> radialActivatorIcons;
+
+  DragActionRingController(
+      {this.suppressingNotifier,
+      required this.radialActivatorFunctions,
+      required this.radialActivatorPositions,
+      this.radialActivatorLabels,
+      required this.radialActivatorIcons});
+
+  void disable() {
+    dragActionRingDisabled = true;
+  }
+
+  void dispose() {
+    dragEvents.dispose();
+    suppressingNotifier?.removeListener(disable);
+  }
+
+  void onPanDown(
+      BuildContext context, Offset touchOrigin, Offset visualCenter) {
+    hasTriggered = false;
+    dragActionRingDisabled = false;
+    _startDrag = touchOrigin;
+
+    dragEvents.value = -1;
+    // it's a void listenable, so we can't just set the value (it'll be equivalent to the previous value and wont notify listeners)
+    // ignore: invalid_use_of_protected_member
+    final numeralDragActionRing = DragActionRing(
+      key: UniqueKey(),
+      position: touchOrigin,
+      visualPosition: visualCenter,
+      numeralDragActionRingBus: suppressingNotifier,
+      dragEvents: dragEvents,
+    );
+    context
+        .findAncestorStateOfType<SelfRemovalHostState>()
+        ?.add(numeralDragActionRing);
+  }
+
+  void onPanUpdate(BuildContext context, Offset p) {
+    Offset dp = p - _startDrag;
+    if (!dragActionRingDisabled &&
+        dp.distance > Thumbspan.of(context) * 0.34 &&
+        !hasTriggered) {
+      hasTriggered = true;
+      bool isRightHanded =
+          Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).peek()!;
+      final rectifiedActivatorPositions = isRightHanded
+          ? radialActivatorPositions
+          : radialActivatorPositions.map(flipAngleHorizontally).toList();
+      int dragResult = radialDragResult(
+          rectifiedActivatorPositions, offsetAngle(dp),
+          // no limit, will activate on the nearest option regardless of its distance. If you want to be more sophisticated, you can maintain an accumulator vector and not activate until the vector aligns somewhat closely with one of the options
+          hitSpan: pi);
+      if (dragResult == -1) {
+        dragEvents.value = null;
+      } else {
+        // activate
+        radialActivatorFunctions[dragResult]();
+        dragEvents.value = dragResult;
+        dragEvents.value = null;
+        // consider removing the hint
+        final dagc =
+            Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
+        dagc.value = dagc.peek()! | (dragResult == 0 ? 1 : 2);
+      }
+    }
+  }
+
+  void onPanEnd(BuildContext context) {
+    dragEvents.value = null;
+    suppressingNotifier?.removeListener(disable);
+  }
+}
+
 class NumeralButton extends StatefulWidget {
   final List<int> digits;
   final GlobalKey<TimersButtonState>? timerButtonKey;
@@ -3011,7 +3332,7 @@ class NumeralButton extends StatefulWidget {
 class _NumeralButtonState extends State<NumeralButton>
     with TickerProviderStateMixin, SignalsMixin {
   /// -1 means mousedown, number means item has been selected, null means dismissed
-  late Signal<int?> dragEvents = Signal(-1, debugLabel: 'dragEvents');
+  late Signal<int?> dragEvents = Signal(null, debugLabel: 'dragEvents');
   // UpDownAnimationController? get numeralDragIndicator =>
   //     numeralDragActionRing?.currentState?.widget.upDownAnimation;
   // AnimationController? get numeralDragIndicatorSelect =>
@@ -3046,7 +3367,7 @@ class _NumeralButtonState extends State<NumeralButton>
         // ignore: invalid_use_of_protected_member
         widget.otherDragActionRingStarted.notifyListeners();
         widget.otherDragActionRingStarted.addListener(_disable);
-        final numeralDragActionRing = NumeralDragActionRing(
+        final numeralDragActionRing = DragActionRing(
           key: UniqueKey(),
           position: p,
           visualPosition: boxRect(widget.timerButtonKey! as GlobalKey)!.center,

@@ -9,9 +9,9 @@ import 'mobj.dart';
 enum TimerKind {
   timer,
   stopwatch,
-  // loop,
-  // series,
-  // parallel,
+  loop,
+  series,
+  parallel,
 }
 
 class TimerData {
@@ -23,6 +23,10 @@ class TimerData {
   bool get isRunning => runningState == running;
   bool get isCompleted => runningState == completed;
   bool get isPaused => !isRunning;
+  bool get isComposite =>
+      kind == TimerKind.loop ||
+      kind == TimerKind.series ||
+      kind == TimerKind.parallel;
   static const paused = 0;
   static const running = 1;
   static const completed = 2;
@@ -57,6 +61,9 @@ class TimerData {
 
   final String? title;
 
+  /// if this timer is a child of a composite timer, the ID of that composite
+  final String? parentId;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -82,6 +89,7 @@ class TimerData {
     this.kind = TimerKind.timer,
     this.children = const [],
     this.title,
+    this.parentId,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -103,6 +111,8 @@ class TimerData {
     List<String>? children,
     String? title,
     bool titleNull = false,
+    String? parentId,
+    bool parentIdNull = false,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -120,6 +130,7 @@ class TimerData {
       kind: kind ?? this.kind,
       children: children ?? this.children,
       title: titleNull ? null : (title ?? this.title),
+      parentId: parentIdNull ? null : (parentId ?? this.parentId),
     );
   }
 
@@ -173,6 +184,7 @@ class TimerDataType extends TypeHelp<TimerData> {
         kind: TimerKind.values[const IntType().fromJson(json['kind'])],
         children: ListType(const StringType()).fromJson(json['children'] ?? []),
         title: Nullable(const StringType()).fromJson(json['title']),
+        parentId: Nullable(const StringType()).fromJson(json['parentId']),
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -196,6 +208,7 @@ class TimerDataType extends TypeHelp<TimerData> {
       'kind': const IntType().toJson(object.kind.index),
       'children': ListType(const StringType()).toJson(object.children),
       'title': Nullable(const StringType()).toJson(object.title),
+      'parentId': Nullable(const StringType()).toJson(object.parentId),
     };
   }
 }
@@ -216,6 +229,8 @@ TimerData cloneTimerDataWithChanges(
   List<String>? children,
   String? title,
   bool titleNull = false,
+  String? parentId,
+  bool parentIdNull = false,
 }) {
   return TimerData(
     startTime: startTime ?? old.startTime,
@@ -231,6 +246,7 @@ TimerData cloneTimerDataWithChanges(
         persistentAlarmNull ? null : (persistentAlarm ?? old.persistentAlarm),
     children: children ?? old.children,
     title: titleNull ? null : (title ?? old.title),
+    parentId: parentIdNull ? null : (parentId ?? old.parentId),
   );
 }
 
