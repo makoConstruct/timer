@@ -45,6 +45,9 @@ class TimerData {
   /// if not pinned, the timer will be deleted next time a new timer is created, unless it's currently playing
   final bool pinned;
 
+  /// set when the timer reaches zero until the user starts it again or resets
+  final bool completedRecently;
+
   final bool? persistentAlarm;
 
   final TimerKind kind;
@@ -60,8 +63,10 @@ class TimerData {
   double get transpired => runningState == TimerData.paused
       ? durationToSeconds(ranTime)
       : runningState == TimerData.running
-          ? durationToSeconds(DateTime.now().difference(startTime))
+          ? timeSinceLastStartTime
           : 0;
+  double get timeSinceLastStartTime =>
+      durationToSeconds(DateTime.now().difference(startTime));
 
   TimerData({
     DateTime? startTime,
@@ -72,6 +77,7 @@ class TimerData {
     this.ranTime = Duration.zero,
     this.isGoingOff = false,
     this.pinned = false,
+    this.completedRecently = false,
     this.persistentAlarm,
     this.kind = TimerKind.timer,
     this.children = const [],
@@ -90,6 +96,7 @@ class TimerData {
     Duration? ranTime,
     bool? isGoingOff,
     bool? pinned,
+    bool? completedRecently,
     bool? persistentAlarm,
     bool persistentAlarmNull = false,
     TimerKind? kind,
@@ -106,6 +113,7 @@ class TimerData {
       ranTime: ranTime ?? this.ranTime,
       isGoingOff: isGoingOff ?? this.isGoingOff,
       pinned: pinned ?? this.pinned,
+      completedRecently: completedRecently ?? this.completedRecently,
       persistentAlarm: persistentAlarmNull
           ? null
           : (persistentAlarm ?? this.persistentAlarm),
@@ -125,14 +133,16 @@ class TimerData {
           ? withChanges(
               runningState: TimerData.running,
               ranTime: Duration.zero,
-              startTime: DateTime.now())
+              startTime: DateTime.now(),
+              completedRecently: false)
           :
           // still resets if it was completed
           runningState == TimerData.completed
               ? withChanges(
                   runningState: TimerData.running,
                   ranTime: Duration.zero,
-                  startTime: DateTime.now())
+                  startTime: DateTime.now(),
+                  completedRecently: false)
               : withChanges(
                   runningState: TimerData.running,
                   ranTime: ranTime,
@@ -158,6 +168,8 @@ class TimerDataType extends TypeHelp<TimerData> {
             milliseconds:
                 (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
         isGoingOff: const BoolType().fromJson(json['isGoingOff']),
+        completedRecently:
+            const BoolType().fromJson(json['completedRecently'] ?? false),
         kind: TimerKind.values[const IntType().fromJson(json['kind'])],
         children: ListType(const StringType()).fromJson(json['children'] ?? []),
         title: Nullable(const StringType()).fromJson(json['title']),
@@ -180,6 +192,7 @@ class TimerDataType extends TypeHelp<TimerData> {
       'ranTime': const DoubleType()
           .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
       'isGoingOff': const BoolType().toJson(object.isGoingOff),
+      'completedRecently': const BoolType().toJson(object.completedRecently),
       'kind': const IntType().toJson(object.kind.index),
       'children': ListType(const StringType()).toJson(object.children),
       'title': Nullable(const StringType()).toJson(object.title),
@@ -197,6 +210,7 @@ TimerData cloneTimerDataWithChanges(
   Duration? ranTime,
   bool? isGoingOff,
   bool? pinned,
+  bool? completedRecently,
   bool? persistentAlarm,
   bool persistentAlarmNull = false,
   List<String>? children,
@@ -212,6 +226,7 @@ TimerData cloneTimerDataWithChanges(
     ranTime: ranTime ?? old.ranTime,
     isGoingOff: isGoingOff ?? old.isGoingOff,
     pinned: pinned ?? old.pinned,
+    completedRecently: completedRecently ?? old.completedRecently,
     persistentAlarm:
         persistentAlarmNull ? null : (persistentAlarm ?? old.persistentAlarm),
     children: children ?? old.children,

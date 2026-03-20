@@ -398,6 +398,7 @@ class TimerHolm {
       mobj.value = d.withChanges(
         runningState: TimerData.completed,
         isGoingOff: true,
+        completedRecently: true,
       );
       tt.vibrationRepeatTimer?.cancel();
       tt.vibrationRepeatTimer = async.Timer.periodic(
@@ -407,6 +408,7 @@ class TimerHolm {
       jukeBox.playAudio(audio);
       mobj.value = d.withChanges(
         runningState: TimerData.completed,
+        completedRecently: true,
       );
     }
   }
@@ -793,6 +795,7 @@ class TimerState extends State<Timer>
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
   late final AnimationController _selectedUnderlineAnimation;
+  late final AnimationController _completedRecentlyAnimation;
   late final Computed<bool> whetherPinned =
       Computed(() => widget.mobj.value?.pinned ?? false);
   late final Computed<bool> _shouldFade = Computed(() {
@@ -884,6 +887,8 @@ class TimerState extends State<Timer>
         duration: const Duration(milliseconds: 150), vsync: this);
     _selectedUnderlineAnimation = AnimationController(
         duration: const Duration(milliseconds: 250), vsync: this);
+    _completedRecentlyAnimation = AnimationController(
+        duration: const Duration(milliseconds: 570), vsync: this);
     _deletionAnimation = AnimationController(
         duration: const Duration(milliseconds: 240), vsync: this);
     _ticker = createTicker((d) {
@@ -906,12 +911,28 @@ class TimerState extends State<Timer>
       }
       if ((previousValue?.isRunning ?? false) != d.isRunning) {
         if (d.isRunning) {
+          _completedRecentlyAnimation.value = 0;
           _runningAnimation.forward();
           _ticker.start();
         } else {
           _runningAnimation.reverse();
           _ticker.stop();
         }
+      }
+      if (previousValue?.completedRecently != d.completedRecently &&
+          d.completedRecently) {
+        // acknowledge and begin display
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final d2 = widget.mobj.peek();
+          if (d2 != null && d2.completedRecently) {
+            widget.mobj.value = d2.withChanges(completedRecently: false);
+          }
+        });
+        _completedRecentlyAnimation.forward(from: 0);
+      }
+      // if we're just initializing for the first time and it didn't complete recently/has been acknowledged, don't run the acknowledgement animation
+      if (previousValue == null && !d.completedRecently) {
+        _completedRecentlyAnimation.value = 1;
       }
       moveAnimationTowardsState(_unpinnedIndicatorShowing, !d.pinned);
       moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
@@ -993,7 +1014,7 @@ class TimerState extends State<Timer>
 
     final dd = durationToSeconds(digitsToDuration(d.digits));
     // sometimes the background thread completes the timer, the currentTime wont be updated, so in that case it should be ignored.
-    double pieCompletion = d.transpired / dd;
+    double pieCompletion = d.timeSinceLastStartTime / dd;
     final durationDigits = d.digits;
     final timeDigits = durationToDigits(d.transpired,
         padLevel: padLevelFor(durationDigits.length));
@@ -1081,12 +1102,12 @@ class TimerState extends State<Timer>
                           scale: lerp(0.6, 1, v),
                           child: timeText(timeDigits)),
                       Stack(clipBehavior: Clip.none, children: [
+                        selectionUnderline,
                         Transform.scale(
                             alignment: Alignment.topLeft,
                             scale: lerp(1, 0.6, v),
                             child:
                                 timeText(durationDigits, withTimeLevel: true)),
-                        selectionUnderline,
                       ]),
                     ]));
           },
@@ -1182,11 +1203,24 @@ class TimerState extends State<Timer>
           },
         ],
         switch (d.kind) {
-          TimerKind.timer => Pie(
-              backgroundColor: backgroundColor(d.hue),
-              color: primaryColor(d.hue),
-              value: pieCompletion,
-              size: 2 * clockRadius),
+          TimerKind.timer => AnimatedBuilder(
+              animation: _completedRecentlyAnimation,
+              builder: (context, child) => Pie(
+                  innerRadp: (1 -
+                          Curves.easeOutCubic.transform(unlerpUnit(
+                                  0, 0.4, _completedRecentlyAnimation.value)) *
+                              0.3) *
+                      (1 -
+                          unlerpUnit(
+                              0.6,
+                              1,
+                              Curves.easeInCubic.transform(
+                                  _completedRecentlyAnimation.value))),
+                  backgroundColor: backgroundColor(d.hue),
+                  color: primaryColor(d.hue),
+                  value: pieCompletion,
+                  size: 2 * clockRadius),
+            ),
           TimerKind.stopwatch => Container(
               width: 2 * clockRadius,
               height: 2 * clockRadius,
@@ -2930,7 +2964,8 @@ class TimerScreenState extends State<TimerScreen>
     mobj.value = mobj.peek()!.withChanges(
         ranTime: Duration.zero,
         runningState: TimerData.paused,
-        startTime: DateTime.now());
+        startTime: DateTime.now(),
+        completedRecently: false);
   }
 
   void removeTimer(MobjID ki) {

@@ -164,12 +164,15 @@ class PersistentNotificationTask extends TaskHandler {
           jukeBox.playAudioLooping(audio.peek()!);
           timer.value = timer
               .peek()!
-              .withChanges(runningState: TimerData.completed, isGoingOff: true);
+              .withChanges(
+                  runningState: TimerData.completed,
+                  isGoingOff: true,
+                  completedRecently: true);
           showCompletionNotification(timer);
         } else {
           jukeBox.playAudio(audio.peek()!);
-          timer.value =
-              timer.peek()!.withChanges(runningState: TimerData.completed);
+          timer.value = timer.peek()!.withChanges(
+              runningState: TimerData.completed, completedRecently: true);
         }
       });
     } else {

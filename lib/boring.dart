@@ -912,7 +912,7 @@ String formatTime(List<int> digits, {int padLevel = 0}) {
 }
 
 /// displays the time with a "d" or "y" or "m" or "h" under the first section to make the meaning of the number easily felt. Doesn't show an "s", I think the seconds level is always clear enough..
-RichText formatTimeWithTimeLevel(List<int> digits,
+Text formatTimeWithTimeLevel(List<int> digits,
     {int padLevel = 0, int? centiseconds}) {
   List<String> parts = [""];
   int highestLevel = formatTimeFull(digits,
@@ -945,8 +945,7 @@ RichText formatTimeWithTimeLevel(List<int> digits,
     spans.add(TextSpan(text: ".${centiseconds.toString().padLeft(2, '0')}"));
   }
 
-  return RichText(
-      overflow: TextOverflow.visible, text: TextSpan(children: spans));
+  return Text.rich(TextSpan(children: spans), overflow: TextOverflow.visible);
 }
 
 /// see the above formatTime to understand what this is used for
@@ -1417,11 +1416,14 @@ class Pie extends StatelessWidget {
   final Color color;
   final double size;
 
+  /// the proportion of the radius of the filled pie relative to the background
+  final double innerRadp;
   const Pie({
     super.key,
     required this.value,
     required this.backgroundColor,
     required this.color,
+    this.innerRadp = 1,
     required this.size,
   });
 
@@ -1445,11 +1447,14 @@ class Pie extends StatelessWidget {
               ),
             ),
           ),
-          CustomPaint(
-            // size: Size(size, size),
-            painter: PiePainter(
-              value: value.clamp(0.0, 1.0),
-              color: color,
+          Transform.scale(
+            scale: innerRadp,
+            child: CustomPaint(
+              // size: Size(size, size),
+              painter: PiePainter(
+                value: value.clamp(0.0, 1.0),
+                color: color,
+              ),
             ),
           ),
         ],
