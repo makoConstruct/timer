@@ -1838,7 +1838,7 @@ HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
       lerp(lower.lightness, upper.lightness, t));
 }
 
-final List<double> radialActivatorPositions = [
+final List<double> numericRadialActivatorPositions = [
   -pi / 2,
   -pi,
 ];
@@ -1847,7 +1847,7 @@ void pausePlaySelected(TimerScreenState tss) {
   tss.pausePlaySelected();
 }
 
-final List<Function(TimerScreenState)> radialActivatorFunctions = [
+final List<Function(TimerScreenState)> numericRadialActivatorFunctions = [
   pausePlaySelected,
   (tss) {
     tss.numeralPressed([0, 0]);
@@ -1860,7 +1860,9 @@ class DragActionRing extends StatefulWidget {
   final Signal<int?> dragEvents;
 
   /// used to close the ring if another one opens
-  final Listenable? numeralDragActionRingBus;
+  final Listenable? suppressionBus;
+  final List<Widget> radialActivatorIcons;
+  final List<double> radialActivatorPositions;
 
   /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
   final Offset visualPosition;
@@ -1868,8 +1870,10 @@ class DragActionRing extends StatefulWidget {
       {super.key,
       required this.position,
       required this.dragEvents,
-      this.numeralDragActionRingBus,
-      required this.visualPosition});
+      this.suppressionBus,
+      required this.visualPosition,
+      required this.radialActivatorIcons,
+      required this.radialActivatorPositions});
 
   @override
   State<DragActionRing> createState() => DragActionRingState();
@@ -1904,7 +1908,7 @@ class DragActionRingState extends State<DragActionRing>
   @override
   void initState() {
     super.initState();
-    widget.numeralDragActionRingBus?.addListener(_onOtherRingOpens);
+    widget.suppressionBus?.addListener(_onOtherRingOpens);
     upDownAnimation.forward();
     optionActivationAnimation.addStatusListener((status) {
       if (!mounted) {
@@ -1946,7 +1950,7 @@ class DragActionRingState extends State<DragActionRing>
     optionActivationAnimation.dispose();
     upDownAnimation.dispose();
     dragEventsSubscription?.call();
-    widget.numeralDragActionRingBus?.removeListener(_onOtherRingOpens);
+    widget.suppressionBus?.removeListener(_onOtherRingOpens);
     super.dispose();
   }
 
@@ -2013,20 +2017,13 @@ class DragActionRingState extends State<DragActionRing>
       );
     }
 
-    List<Widget> radialActivatorWidgets = [
-      dragChoiceWidget(Icon(Icons.play_arrow_rounded)),
-      dragChoiceWidget(
-        Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 0,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [Icon(Icons.play_arrow_rounded), Text('+00')]),
-      ),
-    ];
+    final List<Widget> radialActivatorWidgets = widget.radialActivatorIcons
+        .map((icon) => dragChoiceWidget(icon))
+        .toList();
 
     Offset positionFor(int actionIndex, {double? overrideRisep}) {
       final angle = conditionallyApplyIf<double>(!isRightHanded,
-          flipAngleHorizontally, radialActivatorPositions[actionIndex]);
+          flipAngleHorizontally, widget.radialActivatorPositions[actionIndex]);
       return Offset.fromDirection(
           angle,
           lerp(
@@ -2037,7 +2034,7 @@ class DragActionRingState extends State<DragActionRing>
     }
 
     final List<Widget> numeralDragRadialActivators =
-        List.generate(radialActivatorFunctions.length, (i) {
+        List.generate(widget.radialActivatorPositions.length, (i) {
       Offset o = positionFor(i);
       return Positioned(
         left: o.dx,
@@ -2151,6 +2148,7 @@ class TimerScreenState extends State<TimerScreen>
   late final AnimationController buttonScaleFlashAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 1600));
   late final Signal<Offset?> buttonScaleDialCenter = Signal(Offset.zero);
+  final GlobalKey selectButtonKey = GlobalKey();
   late final Signal<double> buttonScaleDialAngle = Signal(0.0);
   async.Timer? buttonScaleDialLeavingTimer;
   late final Signal<int> currentlyPressingKey = Signal(0);
@@ -2166,6 +2164,16 @@ class TimerScreenState extends State<TimerScreen>
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
   /// we should probably persist this... but it doesn't matter much.
   late Signal<String> actionMode = Signal('play');
+  late final specialTimerCreateDragRingController = DragActionRingController(
+    radialActivatorFunctions: [
+      addNewStopwatch,
+    ],
+    radialActivatorPositions: [
+      // with an epsilon to make sure the label goes to the left
+      -pi / 2 - 0.001
+    ],
+    radialActivatorIcons: [Icon(Icons.square_rounded)],
+  );
   late final StreamController<void> modeActivationPulse =
       StreamController<void>.broadcast();
 
@@ -2491,38 +2499,23 @@ class TimerScreenState extends State<TimerScreen>
               child: Center(child: Icon(size: size, icon))));
     }
 
-    var selectButton = TimersButton(
-        // label: Icon(Icons.select_all),
-        // label: Icon(Icons.border_outer_rounded),
-        label: Icon(Icons.center_focus_strong),
-        onPanDown: (_) {
-          // vibrationSampleBoard();
-          AwesomeNotifications().createNotification(
-            content: NotificationContent(
-              id: timerHolm._notificationIdCounter++,
-              channelKey: 'timer_completion',
-              title: 'spare notification',
-              body: 'whatever',
-              bigPicture: 'resource://drawable/res_large_notification_icon',
-              notificationLayout: NotificationLayout.BigPicture,
-              locked: true,
-              autoDismissible: false,
-            ),
-            actionButtons: [
-              NotificationActionButton(
-                key: 'wooblywoobly',
-                label: 'wooblywoobly',
-                actionType: ActionType.SilentAction,
-                autoDismissible: true,
-              ),
-            ],
-          ).then((value) {
-            print("notification shown: $value");
-          }, onError: (error, stackTrace) {
-            print("error showing notification: $error");
-            print("stack trace: $stackTrace");
-          });
-        });
+    var selectButton = Builder(
+      builder: (context) => TimersButton(
+          // label: Icon(Icons.select_all),
+          // label: Icon(Icons.border_outer_rounded),
+          key: selectButtonKey,
+          label: Icon(Icons.center_focus_strong),
+          onPanDown: (Offset p) {
+            specialTimerCreateDragRingController.onPanDown(
+                context, p, boxRect(selectButtonKey as GlobalKey)!.center);
+          },
+          onPanUpdate: (Offset p) {
+            specialTimerCreateDragRingController.onPanUpdate(context, p);
+          },
+          onPanEnd: () {
+            specialTimerCreateDragRingController.onPanEnd(context);
+          }),
+    );
 
     var backspaceButton = TimersButton(
         key: deleteButtonKey,
@@ -2813,9 +2806,9 @@ class TimerScreenState extends State<TimerScreen>
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
           child: createStopwatchButton),
-      // Positioned.fromRect(
-      //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
-      //     child: selectButton),
+      Positioned.fromRect(
+          rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
+          child: selectButton),
     ];
 
     Widget editPopoverIcon(
@@ -3272,12 +3265,14 @@ class DragActionRingController {
       key: UniqueKey(),
       position: touchOrigin,
       visualPosition: visualCenter,
-      numeralDragActionRingBus: suppressingNotifier,
+      suppressionBus: suppressingNotifier,
       dragEvents: dragEvents,
+      radialActivatorIcons: radialActivatorIcons,
+      radialActivatorPositions: radialActivatorPositions,
     );
     context
-        .findAncestorStateOfType<SelfRemovalHostState>()
-        ?.add(numeralDragActionRing);
+        .findAncestorStateOfType<SelfRemovalHostState>()!
+        .add(numeralDragActionRing);
   }
 
   void onPanUpdate(BuildContext context, Offset p) {
@@ -3338,30 +3333,39 @@ class _NumeralButtonState extends State<NumeralButton> {
     dragActionRingController = DragActionRingController(
       suppressingNotifier: widget.otherDragActionRingStarted,
       radialActivatorFunctions: List.generate(
-        radialActivatorFunctions.length,
+        numericRadialActivatorFunctions.length,
         (i) => () {
           final tss = context.findAncestorStateOfType<TimerScreenState>();
           if (tss == null) {
             return;
           }
-          radialActivatorFunctions[i](tss);
+          numericRadialActivatorFunctions[i](tss);
           final isRightHanded = tss.isRightHandedMobj.peek()!;
           final rectifiedActivatorPositions = isRightHanded
-              ? radialActivatorPositions
-              : radialActivatorPositions.map(flipAngleHorizontally).toList();
+              ? numericRadialActivatorPositions
+              : numericRadialActivatorPositions
+                  .map(flipAngleHorizontally)
+                  .toList();
           final lti = tss.timerListMobj.peek()!.lastOrNull;
           if (lti != null) {
             final ts =
                 (tss.timerWidgets.peek()[lti]?.key as GlobalKey<TimerState>?)
                     ?.currentState;
             ts?._slideActivateBounceAnimation.forward(from: 0);
-            ts?._slideBounceDirection = Offset.fromDirection(
-                rectifiedActivatorPositions[i], 1);
+            ts?._slideBounceDirection =
+                Offset.fromDirection(rectifiedActivatorPositions[i], 1);
           }
         },
       ),
-      radialActivatorPositions: radialActivatorPositions,
-      radialActivatorIcons: const [],
+      radialActivatorPositions: numericRadialActivatorPositions,
+      radialActivatorIcons: [
+        Icon(Icons.play_arrow_rounded),
+        Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 0,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [Icon(Icons.play_arrow_rounded), Text('+00')]),
+      ],
     );
   }
 
@@ -3384,9 +3388,7 @@ class _NumeralButtonState extends State<NumeralButton> {
         widget.otherDragActionRingStarted
             .addListener(dragActionRingController.disable);
         dragActionRingController.onPanDown(
-            context,
-            p,
-            boxRect(widget.timerButtonKey! as GlobalKey)!.center);
+            context, p, boxRect(widget.timerButtonKey! as GlobalKey)!.center);
       },
       onPanUpdate: (Offset p) {
         dragActionRingController.onPanUpdate(context, p);
