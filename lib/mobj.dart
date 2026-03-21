@@ -177,7 +177,6 @@ class MobjRegistry {
   static final Map<MobjID, Mobj> loadedMobjs = {};
   static final Map<MobjID, Future<Mobj>> _loadingMobjs = {};
   static final Map<MobjID, String> _preloadedMobjEncodings = {};
-  static final Map<TypeHelp, List<QuerySet>> _querySets = {};
 
   // remember to await the future to make sure the root objects will be ready before other stuff happens
   // none of these ever deload/they're made root objects, they're essentially leaked here once
@@ -222,49 +221,6 @@ class MobjRegistry {
     }
     _loadingMobjs.clear();
     _preloadedMobjEncodings.clear();
-  }
-}
-
-class QueryTrack {
-  final Mobj m;
-  final Function() unsubscribe;
-  QueryTrack(this.m, this.unsubscribe);
-}
-
-bool alwaysTrue(dynamic v) {
-  return true;
-}
-
-class QuerySet {
-  final Map<MobjID, QueryTrack> inSet = {};
-  final TypeHelp requiredType;
-  final bool Function(dynamic) predicate;
-  late final StreamController<Mobj> _onAdded =
-      StreamController<Mobj>.broadcast();
-  Stream<Mobj> get onAdded => _onAdded.stream;
-  late final StreamController<Mobj> _onRemoved =
-      StreamController<Mobj>.broadcast();
-  Stream<Mobj> get onRemoved => _onRemoved.stream;
-
-  QuerySet(this.requiredType, [this.predicate = alwaysTrue]);
-
-  void add(Mobj mobj) {
-    if (!inSet.containsKey(mobj.id)) {
-      inSet[mobj.id] = QueryTrack(mobj, mobj.subscribe((v) {
-        if (v == null || !predicate(mobj)) {
-          remove(mobj);
-        }
-      }));
-      _onAdded.add(mobj);
-    }
-  }
-
-  void remove(Mobj mobj) {
-    final qt = inSet.remove(mobj.id);
-    if (qt != null) {
-      qt.unsubscribe();
-      _onRemoved.add(mobj);
-    }
   }
 }
 
@@ -343,15 +299,8 @@ class Mobj<T> extends Signal<T?> {
       _lastSequenceNumber = sequenceNumber;
     }
 
+    // why do this in a subscription instead of in the value setter?
     _systemSubscription = subscribe((v) {
-      // update query sets
-      for (QuerySet qs in MobjRegistry._querySets[_type] ?? []) {
-        if (qs.predicate(v)) {
-          qs.add(this);
-        } else {
-          qs.remove(this);
-        }
-      }
       // a Mobj writes back to db whenever it changes
       if (_blockInitialWriteBack) {
         _blockInitialWriteBack = false;
