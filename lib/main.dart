@@ -77,7 +77,7 @@ const databaseName = 'mako_timer_db';
 const double timerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(19);
+final Signal<double> timerWidgetRadius = Signal(26);
 
 const double standardLineWidth = 6;
 
@@ -1008,7 +1008,7 @@ class Timer extends TimerBase {
 
   static usualHeight() {
     final clockRadius = timerWidgetRadius.peek();
-    return 2 * clockRadius + timerGap * 2;
+    return 2 * clockRadius + timerGap;
   }
 }
 
@@ -1076,7 +1076,7 @@ class TimerState extends TimerBaseState<Timer> {
     _selectedUnderlineAnimation = AnimationController(
         duration: const Duration(milliseconds: 250), vsync: this);
     _completedRecentlyAnimation = AnimationController(
-        duration: const Duration(milliseconds: 570), vsync: this);
+        duration: const Duration(milliseconds: 510), vsync: this);
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
@@ -1274,9 +1274,8 @@ class TimerState extends TimerBaseState<Timer> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   timeText(timeDigits),
-                  Text(' / ', overflow: TextOverflow.clip),
-                  Text(boring.formatTime(durationDigits),
-                      overflow: TextOverflow.clip),
+                  Text(' / '),
+                  timeText(durationDigits, withTimeLevel: true),
                 ],
               ),
             TimerKind.stopwatch => timeText(timeDigits,
@@ -1308,9 +1307,10 @@ class TimerState extends TimerBaseState<Timer> {
     final stopwatchPulseProgress = stopwatchPulse *
         (1 -
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
+    final double innerTimerSpan = 2 * (clockRadius - timerOutline);
     final stopwatchPulseSize = lerp(
-        clockRadius * 2 - timerOutline * 2,
-        clockRadius * 2 * 0.28,
+        innerTimerSpan - timerOutline * 2,
+        (clockRadius - timerGap / 2) * 2 * 0.28,
         // Curves.easeOutCubic.transform(stopwatchPulse) *
         stopwatchPulseProgress);
 
@@ -1334,6 +1334,8 @@ class TimerState extends TimerBaseState<Timer> {
             return PinAnimation(
                 isPinned: whetherPinned,
                 child: Container(
+                    width: 2 * clockRadius,
+                    height: 2 * clockRadius,
                     padding: EdgeInsets.all(timerOutline),
                     decoration: containerShape(mt.foreBackColor),
                     child: next));
@@ -1342,25 +1344,28 @@ class TimerState extends TimerBaseState<Timer> {
         switch (d.kind) {
           TimerKind.timer => AnimatedBuilder(
               animation: _completedRecentlyAnimation,
-              builder: (context, child) => Pie(
-                  innerRadp: (1 -
-                          Curves.easeOutCubic.transform(unlerpUnit(
-                                  0, 0.4, _completedRecentlyAnimation.value)) *
-                              0.3) *
-                      (1 -
-                          unlerpUnit(
-                              0.6,
-                              1,
-                              Curves.easeInCubic.transform(
-                                  _completedRecentlyAnimation.value))),
-                  backgroundColor: TimerBaseState.backgroundColor(d.hue),
-                  color: TimerBaseState.primaryColor(d.hue),
-                  value: pieCompletion,
-                  size: 2 * clockRadius),
+              builder: (context, child) {
+                var pie = Pie(
+                    innerRadp: (1 -
+                            Curves.easeOutCubic.transform(unlerpUnit(0.2, 0.46,
+                                    _completedRecentlyAnimation.value)) *
+                                ((timerOutline * 2) / innerTimerSpan)) *
+                        (1 -
+                            unlerpUnit(
+                                0.5,
+                                1,
+                                Curves.easeInCubic.transform(
+                                    _completedRecentlyAnimation.value))),
+                    backgroundColor: TimerBaseState.backgroundColor(d.hue),
+                    color: TimerBaseState.primaryColor(d.hue),
+                    value: pieCompletion,
+                    size: innerTimerSpan);
+                return pie;
+              },
             ),
           TimerKind.stopwatch => Container(
-              width: 2 * clockRadius,
-              height: 2 * clockRadius,
+              width: innerTimerSpan,
+              height: innerTimerSpan,
               decoration: containerShape(
                 TimerBaseState.backgroundColor(d.hue),
               ),
@@ -1424,6 +1429,7 @@ class CompositeTimer extends TimerBase {
 }
 
 class CompositeTimerState extends TimerBaseState<CompositeTimer> {
+  final GlobalKey iWrapKey = GlobalKey();
   @override
   TimerData get p => widget.mobj.peek()!;
 
@@ -1451,7 +1457,9 @@ class CompositeTimerState extends TimerBaseState<CompositeTimer> {
   Widget build(BuildContext context) {
     final d = watchSignal(context, widget.mobj) ?? previousValue!;
     final theme = Theme.of(context);
+    final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
 
+    // [todo] this seems wrong, and is a consequence of the widget mapping at root being handled by tracking the timerlist signal. Maybe timerholm should be maintaining the widget map
     for (final childId in d.children) {
       if (_childMobjs.containsKey(childId)) {
         _childWidgets[childId] ??= Timer(
@@ -1464,60 +1472,73 @@ class CompositeTimerState extends TimerBaseState<CompositeTimer> {
     }
     _childWidgets.removeWhere((id, _) => !d.children.contains(id));
 
-    Widget compositeBody;
-    if (_childMobjs.isEmpty && d.children.isNotEmpty) {
-      compositeBody = SizedBox(
-        width: timerWidgetRadius.peek() * 2,
-        height: timerWidgetRadius.peek() * 2,
-      );
-    } else {
-      final childWidgets = d.children
-          .where(_childWidgets.containsKey)
-          .map((id) => _childWidgets[id]!)
-          .toList();
-
-      Widget titleWidget = const SizedBox.shrink();
-      if (d.title != null || _titleEditMode) {
-        titleWidget = DefaultTextStyle.merge(
-          style: TextStyle(color: theme.colorScheme.onSurface),
-          child: _titleEditMode
-              ? IntrinsicWidth(
-                  child: TextField(
-                    focusNode: _titleFocusNode,
-                    controller: _titleController,
-                    style: DefaultTextStyle.of(context).style,
-                    decoration:
-                        InputDecoration.collapsed(hintText: 'description'),
-                    onChanged: (text) {
-                      widget.mobj.value = p.withChanges(title: text);
-                    },
-                  ),
-                )
-              : Text(d.title!, overflow: TextOverflow.clip),
-        );
-      }
-
-      compositeBody = PinAnimation(
-        isPinned: whetherPinned,
-        child: Container(
-          padding: EdgeInsets.all(timerGap),
-          decoration: BoxDecoration(
-            color: TimerBaseState.backgroundColor(d.hue),
-            borderRadius: BorderRadius.circular(timerWidgetRadius.peek()),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (d.title != null || _titleEditMode) titleWidget,
-              IWrap(children: childWidgets),
-            ],
-          ),
-        ),
+    Widget? titleWidget;
+    if (d.title != null || _titleEditMode) {
+      titleWidget = DefaultTextStyle.merge(
+        style: TextStyle(color: theme.colorScheme.onSurface),
+        child: _titleEditMode
+            ? IntrinsicWidth(
+                child: TextField(
+                  focusNode: _titleFocusNode,
+                  controller: _titleController,
+                  style: DefaultTextStyle.of(context).style,
+                  decoration:
+                      InputDecoration.collapsed(hintText: 'description'),
+                  onChanged: (text) {
+                    widget.mobj.value = p.withChanges(title: text);
+                  },
+                ),
+              )
+            : Text(d.title!, overflow: TextOverflow.clip),
       );
     }
 
-    return buildShell(context, compositeBody);
+    final handleWidth = timerHeight / 4;
+    Widget handle = ConstrainedBox(
+        constraints:
+            BoxConstraints(minWidth: handleWidth, minHeight: timerHeight),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: titleWidget ?? const SizedBox.shrink(),
+        ));
+
+    Widget tail = Container(
+      width: timerHeight * 0.2,
+      height: timerHeight,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(5),
+      ),
+    );
+
+    List<Widget> childWidgets = [
+      handle,
+      ...d.children
+          .where(_childWidgets.containsKey)
+          .map<Widget>((id) => _childWidgets[id] as Widget)
+          .toList(),
+      tail
+    ];
+
+    return buildShell(
+        context,
+        PinAnimation(
+          isPinned: whetherPinned,
+          child: Container(
+            decoration: BoxDecoration(
+              color: TimerBaseState.backgroundColor(d.hue),
+              borderRadius: BorderRadius.circular(timerHeight / 4.5),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: timerHeight,
+                minWidth: timerHeight,
+              ),
+              child: IWrap(key: iWrapKey, children: childWidgets),
+            ),
+          ),
+        ));
   }
 
   @override
@@ -2167,12 +2188,17 @@ class TimerScreenState extends State<TimerScreen>
   late final specialTimerCreateDragRingController = DragActionRingController(
     radialActivatorFunctions: [
       addNewStopwatch,
+      () => addNewCompositeTimer(TimerKind.loop),
     ],
     radialActivatorPositions: [
       // with an epsilon to make sure the label goes to the left
-      -pi / 2 - 0.001
+      -pi / 2 - 0.001,
+      -pi
     ],
-    radialActivatorIcons: [Icon(Icons.square_rounded)],
+    radialActivatorIcons: [
+      Icon(Icons.square_rounded),
+      Icon(Icons.loop_rounded)
+    ],
   );
   late final StreamController<void> modeActivationPulse =
       StreamController<void>.broadcast();
@@ -2539,15 +2565,15 @@ class TimerScreenState extends State<TimerScreen>
         });
 
     // stopwatches probably shouldn't be timers, but need to go in the timer list
-    final createStopwatchButton = TimersButton(
-        label: proportionedIcon(Icons.stop),
-        onPanDown: (_) {
-          addNewStopwatch();
-        },
-        onPanEnd: () {
-          // start the stopwatch (starting on end gives the user more precision)
-          pausePlaySelected();
-        });
+    // final createStopwatchButton = TimersButton(
+    //     label: proportionedIcon(Icons.stop),
+    //     onPanDown: (_) {
+    //       addNewStopwatch();
+    //     },
+    //     onPanEnd: () {
+    //       // start the stopwatch (starting on end gives the user more precision)
+    //       pausePlaySelected();
+    //     });
 
     // todo: animate the play icon out when playing
     Widget playIcon(Icon otherIcon) {
@@ -2803,11 +2829,11 @@ class TimerScreenState extends State<TimerScreen>
       // Positioned.fromRect(
       //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
       //     child: pinButton),
+      // Positioned.fromRect(
+      //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
+      //     child: createStopwatchButton),
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
-          child: createStopwatchButton),
-      Positioned.fromRect(
-          rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
           child: selectButton),
     ];
 
@@ -3088,6 +3114,21 @@ class TimerScreenState extends State<TimerScreen>
         duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
   }
 
+  void addNewCompositeTimer(TimerKind kind) {
+    final ntid = UuidV4().generate();
+    final nt = Mobj<TimerData>.clobberCreate(
+      ntid,
+      type: const TimerDataType(),
+      // pinned starts true for composite timers because they're not so often faster to recreate than to reuse, so it's going to be very rare that the user wants them autodeleted
+      initial: TimerData(
+          kind: kind, hue: nextRandomHue(), selected: false, pinned: true),
+    );
+    timerListMobj.value = peekTimers().toList()..add(ntid);
+    cleanOldTimers(except: ntid);
+    timersScroller.animateTo(0,
+        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
+  }
+
   void cleanOldTimers({MobjID<TimerData>? except}) {
     // remove (previous) unpinned nonplaying timers
     final curTimers = peekTimers();
@@ -3217,12 +3258,15 @@ class TimerScreenState extends State<TimerScreen>
   }
 }
 
+/// manages a drag action ring. Use by calling the onPanDown, onPanUpdate, and onPanEnd methods from yours. Assumes that there's a SelfRemovalHostState above the given context, for the DragActionRing to live in.
+/// dispose when you're done with it
 class DragActionRingController {
   /// just visually closes the ring on trigger. Doesn't really need to be in controller but whatever.
   final ChangeNotifier? suppressingNotifier;
 
   /// -1 means mousedown, number means item has been selected, null means dismissed
-  late Signal<int?> dragEvents = Signal(null, debugLabel: 'dragEvents');
+  late final Signal<int?> _dragEvents = Signal(null, debugLabel: 'dragEvents');
+  ReadonlySignal<int?> get dragEvents => _dragEvents;
   // UpDownAnimationController? get numeralDragIndicator =>
   //     numeralDragActionRing?.currentState?.widget.upDownAnimation;
   // AnimationController? get numeralDragIndicatorSelect =>
@@ -3241,15 +3285,29 @@ class DragActionRingController {
       required this.radialActivatorFunctions,
       required this.radialActivatorPositions,
       this.radialActivatorLabels,
-      required this.radialActivatorIcons});
+      required this.radialActivatorIcons}) {
+    assert(radialActivatorIcons.length == radialActivatorPositions.length,
+        'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length');
+    assert(radialActivatorFunctions.length == radialActivatorIcons.length,
+        'DragActionRingController: radialActivatorFunctions and radialActivatorIcons should have the same length');
+  }
 
   void disable() {
     dragActionRingDisabled = true;
   }
 
   void dispose() {
-    dragEvents.dispose();
+    _dragEvents.dispose();
     suppressingNotifier?.removeListener(disable);
+  }
+
+  SelfRemovalHostState getSelfRemovalHostState(BuildContext context) {
+    final srh = context.findAncestorStateOfType<SelfRemovalHostState>();
+    if (srh == null) {
+      throw Exception(
+          'DragActionRingController: We require a SelfRemovalHostState as an ancestor of the context given to onPanDown, so that the DragActionRing we create can live in.');
+    }
+    return srh;
   }
 
   void onPanDown(
@@ -3258,7 +3316,7 @@ class DragActionRingController {
     dragActionRingDisabled = false;
     _startDrag = touchOrigin;
 
-    dragEvents.value = -1;
+    _dragEvents.value = -1;
     // it's a void listenable, so we can't just set the value (it'll be equivalent to the previous value and wont notify listeners)
     // ignore: invalid_use_of_protected_member
     final numeralDragActionRing = DragActionRing(
@@ -3266,13 +3324,11 @@ class DragActionRingController {
       position: touchOrigin,
       visualPosition: visualCenter,
       suppressionBus: suppressingNotifier,
-      dragEvents: dragEvents,
+      dragEvents: _dragEvents,
       radialActivatorIcons: radialActivatorIcons,
       radialActivatorPositions: radialActivatorPositions,
     );
-    context
-        .findAncestorStateOfType<SelfRemovalHostState>()!
-        .add(numeralDragActionRing);
+    getSelfRemovalHostState(context).add(numeralDragActionRing);
   }
 
   void onPanUpdate(BuildContext context, Offset p) {
@@ -3291,12 +3347,12 @@ class DragActionRingController {
           // no limit, will activate on the nearest option regardless of its distance. If you want to be more sophisticated, you can maintain an accumulator vector and not activate until the vector aligns somewhat closely with one of the options
           hitSpan: pi);
       if (dragResult == -1) {
-        dragEvents.value = null;
+        _dragEvents.value = null;
       } else {
         // activate
         radialActivatorFunctions[dragResult]();
-        dragEvents.value = dragResult;
-        dragEvents.value = null;
+        _dragEvents.value = dragResult;
+        _dragEvents.value = null;
         // consider removing the hint
         final dagc =
             Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
@@ -3306,7 +3362,7 @@ class DragActionRingController {
   }
 
   void onPanEnd(BuildContext context) {
-    dragEvents.value = null;
+    _dragEvents.value = null;
     suppressingNotifier?.removeListener(disable);
   }
 }
