@@ -177,6 +177,7 @@ class MobjRegistry {
   static final Map<MobjID, Mobj> loadedMobjs = {};
   static final Map<MobjID, Future<Mobj>> _loadingMobjs = {};
   static final Map<MobjID, String> _preloadedMobjEncodings = {};
+  static final Map<TypeHelp, List<QuerySet>> _querySets = {};
 
   // remember to await the future to make sure the root objects will be ready before other stuff happens
   // none of these ever deload/they're made root objects, they're essentially leaked here once
@@ -188,8 +189,8 @@ class MobjRegistry {
     MobjRegistry.db = db;
     // tombstone: we initially tried to use type information to preload every object fully as a Mobj. This wasn't possible, because it would have required dependent types. So we ended up pre-loading generic types as, EG, List<Object?>, which then broke at runtime
     if (preload) {
-      return db.kVs.all().get().then((v) {
-        for (final KV kv in v) {
+      return db.fetchActive().get().then((v) {
+        for (final kv in v) {
           _preloadedMobjEncodings[kv.id] = kv.value;
         }
       });
@@ -224,6 +225,49 @@ class MobjRegistry {
   }
 }
 
+class QueryTrack {
+  final Mobj m;
+  final Function() unsubscribe;
+  QueryTrack(this.m, this.unsubscribe);
+}
+
+bool alwaysTrue(dynamic v) {
+  return true;
+}
+
+class QuerySet {
+  final Map<MobjID, QueryTrack> inSet = {};
+  final TypeHelp requiredType;
+  final bool Function(dynamic) predicate;
+  late final StreamController<Mobj> _onAdded =
+      StreamController<Mobj>.broadcast();
+  Stream<Mobj> get onAdded => _onAdded.stream;
+  late final StreamController<Mobj> _onRemoved =
+      StreamController<Mobj>.broadcast();
+  Stream<Mobj> get onRemoved => _onRemoved.stream;
+
+  QuerySet(this.requiredType, [this.predicate = alwaysTrue]);
+
+  void add(Mobj mobj) {
+    if (!inSet.containsKey(mobj.id)) {
+      inSet[mobj.id] = QueryTrack(mobj, mobj.subscribe((v) {
+        if (v == null || !predicate(mobj)) {
+          remove(mobj);
+        }
+      }));
+      _onAdded.add(mobj);
+    }
+  }
+
+  void remove(Mobj mobj) {
+    final qt = inSet.remove(mobj.id);
+    if (qt != null) {
+      qt.unsubscribe();
+      _onRemoved.add(mobj);
+    }
+  }
+}
+
 /// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.
 /// Reactivity is purely in-memory via Signals; changes write through to the DB but the DB doesn't push changes back. Single-isolate only.
@@ -236,6 +280,16 @@ class Mobj<T> extends Signal<T?> {
   final TypeHelp<T> _type;
   // currently not really used [todo] stop leaking into the db maybe (but don't worry about leaking signals into memory..)
   int _refCount = 1;
+  bool _isActive;
+
+  /// whether the mobj is preloaded on MobjRegistry initialization.
+  bool get isActive => _isActive;
+  set isActive(bool value) {
+    if (value == _isActive) return;
+    _isActive = value;
+    writeBack();
+  }
+
   DateTime _lastTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastSequenceNumber = 0;
   String _valueEncoded = "";
@@ -278,10 +332,12 @@ class Mobj<T> extends Signal<T?> {
     String? debugLabel,
     DateTime? timestamp,
     int? sequenceNumber,
+    bool? isActive,
     required bool initialWriteBack,
     // on reflection I'm not sure we can support autodispose, because of the refcounting stuff
     // bool autoDispose = false,
-  }) : super(initial, debugLabel: debugLabel, autoDispose: false) {
+  })  : _isActive = isActive ?? true,
+        super(initial, debugLabel: debugLabel, autoDispose: false) {
     if (T == dynamic) {
       throw StateError(
           "dynamic mobj type. It's very unlikely that this is what you intended, we're not sure how it could be. In most cases, this is an accident that will prevent you from being able to cast your Mobjs to the actual intended type.");
@@ -301,6 +357,14 @@ class Mobj<T> extends Signal<T?> {
 
     // why do this in a subscription instead of in the value setter?
     _systemSubscription = subscribe((v) {
+      // update query sets
+      for (QuerySet qs in MobjRegistry._querySets[_type] ?? []) {
+        if (qs.predicate(v)) {
+          qs.add(this);
+        } else {
+          qs.remove(this);
+        }
+      }
       // a Mobj writes back to db whenever it changes
       if (_blockInitialWriteBack) {
         _blockInitialWriteBack = false;
@@ -387,7 +451,8 @@ class Mobj<T> extends Signal<T?> {
             id: id,
             value: valueEncoding,
             timestamp: DateTime.now(),
-            sequenceNumber: 0)
+            sequenceNumber: 0,
+            isActive: true)
         .then(
       (v) {
         MobjRegistry._loadingMobjs.remove(id);

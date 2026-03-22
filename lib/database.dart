@@ -67,6 +67,10 @@ class KVs extends Table with UUIDd {
   /// used when one process wants to override its previous value. Is subordinate to timestamp
   IntColumn get sequenceNumber => integer().withDefault(const Constant(0))();
   TextColumn get value => text()();
+
+  /// whether this row should be preloaded at startup
+  BoolColumn get isActive =>
+      boolean().withDefault(const Constant(false))();
 }
 
 @DriftDatabase(tables: [
@@ -99,8 +103,8 @@ ON CONFLICT(id) DO UPDATE SET
 
   /// inserts a row if it doesn't exist, returns the final value and whether an insert occurred
   'insertIfNotExistsAndReturn': '''
-  INSERT INTO k_vs (id, value, timestamp, sequence_number)
-  VALUES (:id, :value, :timestamp, :sequence_number)
+  INSERT INTO k_vs (id, value, timestamp, sequence_number, is_active)
+  VALUES (:id, :value, :timestamp, :sequence_number, :is_active)
   ON CONFLICT(id) DO NOTHING
   RETURNING
     (SELECT COUNT(*) FROM k_vs WHERE id = :id AND timestamp = :timestamp) as was_inserted,
@@ -108,7 +112,9 @@ ON CONFLICT(id) DO UPDATE SET
     (SELECT value FROM k_vs WHERE id = :id) as value,
     (SELECT timestamp FROM k_vs WHERE id = :id) as timestamp,
     (SELECT sequence_number FROM k_vs WHERE id = :id) as sequence_number
-'''
+''',
+
+  'fetchActive': 'SELECT * FROM k_vs WHERE is_active = 1'
 })
 class TheDatabase extends _$TheDatabase {
   TheDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());

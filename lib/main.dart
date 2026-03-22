@@ -1,4 +1,4 @@
-// this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code, for anyone who enjoys reading code.
+// this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code.
 
 import 'dart:io';
 import 'dart:isolate';
@@ -77,7 +77,7 @@ const databaseName = 'mako_timer_db';
 const double timerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(26);
+final Signal<double> timerWidgetRadius = Signal(30);
 
 const double standardLineWidth = 6;
 
