@@ -192,6 +192,7 @@ class MobjRegistry {
       return db.fetchActive().get().then((v) {
         for (final kv in v) {
           _preloadedMobjEncodings[kv.id] = kv.value;
+          print("preloaded ${kv.id}: ${kv.value}");
         }
       });
     } else {
@@ -316,6 +317,7 @@ class Mobj<T> extends Signal<T?> {
         timestamp: _lastTimestamp,
         sequenceNumber: _lastSequenceNumber,
         value: _valueEncoded,
+        isActive: _isActive,
       );
     } else {
       MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
@@ -473,6 +475,7 @@ class Mobj<T> extends Signal<T?> {
             initial: type.fromJson(jsonDecode(vv.value!)),
             debugLabel: debugLabel,
             initialWriteBack: false,
+            isActive: vv.isActive!,
             timestamp: vv.timestamp!,
             sequenceNumber: vv.sequenceNumber!,
           );

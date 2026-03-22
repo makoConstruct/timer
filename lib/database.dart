@@ -69,8 +69,7 @@ class KVs extends Table with UUIDd {
   TextColumn get value => text()();
 
   /// whether this row should be preloaded at startup
-  BoolColumn get isActive =>
-      boolean().withDefault(const Constant(false))();
+  BoolColumn get isActive => boolean().withDefault(const Constant(false))();
 }
 
 @DriftDatabase(tables: [
@@ -90,15 +89,17 @@ WITH comparison AS (
   FROM k_vs
   WHERE id = :id
 )
-INSERT INTO k_vs (id, value, timestamp, sequence_number) 
-VALUES (:id, :value, :timestamp, :sequence_number)
+INSERT INTO k_vs (id, value, timestamp, is_active, sequence_number) 
+VALUES (:id, :value, :timestamp, :is_active, :sequence_number)
 ON CONFLICT(id) DO UPDATE SET
   value = CASE WHEN (SELECT should_update FROM comparison) = 1
           THEN excluded.value ELSE k_vs.value END,
   timestamp = CASE WHEN (SELECT should_update FROM comparison) = 1
               THEN excluded.timestamp ELSE k_vs.timestamp END,
   sequence_number = CASE WHEN (SELECT should_update FROM comparison) = 1
-                  THEN excluded.sequence_number ELSE k_vs.sequence_number END
+                  THEN excluded.sequence_number ELSE k_vs.sequence_number END,
+  is_active = CASE WHEN (SELECT should_update FROM comparison) = 1
+                  THEN excluded.is_active ELSE k_vs.is_active END
 ''',
 
   /// inserts a row if it doesn't exist, returns the final value and whether an insert occurred
@@ -111,7 +112,8 @@ ON CONFLICT(id) DO UPDATE SET
     (SELECT id FROM k_vs WHERE id = :id) as id,
     (SELECT value FROM k_vs WHERE id = :id) as value,
     (SELECT timestamp FROM k_vs WHERE id = :id) as timestamp,
-    (SELECT sequence_number FROM k_vs WHERE id = :id) as sequence_number
+    (SELECT sequence_number FROM k_vs WHERE id = :id) as sequence_number,
+    (SELECT is_active FROM k_vs WHERE id = :id) as is_active
 ''',
 
   'fetchActive': 'SELECT * FROM k_vs WHERE is_active = 1'
