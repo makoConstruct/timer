@@ -1951,14 +1951,17 @@ class DragActionRingState extends State<DragActionRing>
     });
     dragEventsSubscription = widget.dragEvents.subscribe((v) {
       if (v == null) {
-        upDownAnimation.reverse();
+        if (numberSelected != -1) {
+          optionActivationAnimation.forward();
+        } else {
+          upDownAnimation.reverse();
+        }
         dragEventsSubscription?.call();
       } else if (v != -1) {
         setState(() {
           numberSelected = v;
           actionSizepAtSelection = currentActionSize();
           optionConsiderationAnimation.forward();
-          optionActivationAnimation.forward();
         });
       } else {
         upDownAnimation.forward();
@@ -1985,7 +1988,7 @@ class DragActionRingState extends State<DragActionRing>
   }
 
   Widget buildWithGivenAnimationParameters(
-      double risep, double fallp, double swipep) {
+      double risep, double fallp, double swipep, double releasep) {
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded =
@@ -2054,7 +2057,7 @@ class DragActionRingState extends State<DragActionRing>
                   (overrideRisep ?? risep) * (1 - fallpIfNotSelected)))));
     }
 
-    final List<Widget> numeralDragRadialActivators =
+    final List<Widget> unselectedNumeralDragRadialActivators =
         List.generate(widget.radialActivatorPositions.length, (i) {
       Offset o = positionFor(i);
       return Positioned(
@@ -2067,6 +2070,12 @@ class DragActionRingState extends State<DragActionRing>
       );
     });
 
+    Widget? selectedNumeralDragRadialActivator = null;
+    if (numberSelected != -1) {
+      selectedNumeralDragRadialActivator =
+          unselectedNumeralDragRadialActivators.removeAt(numberSelected);
+    }
+
     double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
 
     final revealFraction = 1 - Curves.easeOut.transform(swipep);
@@ -2075,31 +2084,60 @@ class DragActionRingState extends State<DragActionRing>
         : Offset.zero;
     final revealMaxRadius = totalSpan;
 
+    Widget radialRevealShaderMask({
+      required double fraction,
+      required double maxRadius,
+      required List<Widget> stackChildren,
+    }) {
+      return ShaderMask(
+        shaderCallback: (bounds) => createRadialRevealShader(
+          bounds: bounds,
+          center: Alignment(
+            revealCenter.dx / (bounds.size.width / 2),
+            revealCenter.dy / (bounds.size.height / 2),
+          ),
+          fraction: fraction,
+          fuzzyEdgeWidth: 20.0,
+          maxRadius: maxRadius,
+        ),
+        child: SizedBox(
+          width: totalSpan,
+          height: totalSpan,
+          child: Transform.translate(
+            offset: Offset(totalSpan / 2, totalSpan / 2),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: stackChildren,
+            ),
+          ),
+        ),
+      );
+    }
+
     return IgnorePointer(
         child: FractionalTranslation(
             translation: Offset(-0.5, -0.5),
-            child: ShaderMask(
-              shaderCallback: (bounds) => createRadialRevealShader(
-                bounds: bounds,
-                center: Alignment(revealCenter.dx / (bounds.size.width / 2),
-                    revealCenter.dy / (bounds.size.height / 2)),
-                fraction: revealFraction,
-                fuzzyEdgeWidth: 20.0,
-                maxRadius: revealMaxRadius,
-              ),
-              child: SizedBox(
-                  width: totalSpan,
-                  height: totalSpan,
-
-                  // so that child contents can still be relative to 0 and be centered within this
-                  child: Transform.translate(
-                    offset: Offset(totalSpan / 2, totalSpan / 2),
-                    // offset: Offset.zero,
-                    child: Stack(clipBehavior: Clip.none, children: [
-                      radialActivationRing,
-                      ...numeralDragRadialActivators
-                    ]),
-                  )),
+            child: Stack(
+              children: [
+                // disappearing on swipe
+                radialRevealShaderMask(
+                  fraction: revealFraction,
+                  maxRadius: revealMaxRadius,
+                  stackChildren: [
+                    radialActivationRing,
+                    ...unselectedNumeralDragRadialActivators,
+                  ],
+                ),
+                // disappearing on release
+                radialRevealShaderMask(
+                  fraction: 1 - Curves.easeOut.transform(releasep),
+                  maxRadius: revealMaxRadius * 0.8,
+                  stackChildren: [
+                    if (selectedNumeralDragRadialActivator != null)
+                      selectedNumeralDragRadialActivator,
+                  ],
+                ),
+              ],
             )));
   }
 
@@ -2109,11 +2147,17 @@ class DragActionRingState extends State<DragActionRing>
         left: widget.visualPosition.dx,
         top: widget.visualPosition.dy,
         child: AnimatedBuilder(
-          animation:
-              Listenable.merge([upDownAnimation, optionActivationAnimation]),
+          animation: Listenable.merge([
+            upDownAnimation,
+            optionConsiderationAnimation,
+            optionActivationAnimation
+          ]),
           builder: (context, child) {
-            return buildWithGivenAnimationParameters(upDownAnimation.value.$1,
-                upDownAnimation.value.$2, optionActivationAnimation.value);
+            return buildWithGivenAnimationParameters(
+                upDownAnimation.value.$1,
+                upDownAnimation.value.$2,
+                optionConsiderationAnimation.value,
+                optionActivationAnimation.value);
           },
         ));
   }
@@ -3094,7 +3138,7 @@ class TimerScreenState extends State<TimerScreen>
       type: const TimerDataType(),
       initial: TimerData(
         startTime: DateTime.now(),
-        runningState: TimerData.paused,
+        runningState: TimerData.running,
         hue: nextRandomHue(),
         selected: true,
         digits: const [],
@@ -3264,7 +3308,7 @@ class DragActionRingController {
   /// just visually closes the ring on trigger. Doesn't really need to be in controller but whatever.
   final ChangeNotifier? suppressingNotifier;
 
-  /// -1 means mousedown, number means item has been selected, null means dismissed
+  /// -1 means nothing is selected, number means item has been selected, null means dismissed
   late final Signal<int?> _dragEvents = Signal(null, debugLabel: 'dragEvents');
   ReadonlySignal<int?> get dragEvents => _dragEvents;
   // UpDownAnimationController? get numeralDragIndicator =>
@@ -3273,7 +3317,6 @@ class DragActionRingController {
   //     numeralDragActionRing?.currentState?.widget.optionActivationAnimation;
   // GlobalKey<NumeralDragActionRingState>? numeralDragActionRing;
   Offset _startDrag = Offset.zero;
-  bool hasTriggered = false;
   bool dragActionRingDisabled = false;
   final List<Function()> radialActivatorFunctions;
   final List<double> radialActivatorPositions;
@@ -3312,7 +3355,6 @@ class DragActionRingController {
 
   void onPanDown(
       BuildContext context, Offset touchOrigin, Offset visualCenter) {
-    hasTriggered = false;
     dragActionRingDisabled = false;
     _startDrag = touchOrigin;
 
@@ -3333,35 +3375,28 @@ class DragActionRingController {
 
   void onPanUpdate(BuildContext context, Offset p) {
     Offset dp = p - _startDrag;
-    if (!dragActionRingDisabled &&
-        dp.distance > Thumbspan.of(context) * 0.34 &&
-        !hasTriggered) {
-      hasTriggered = true;
+    if (!dragActionRingDisabled && dp.distance > Thumbspan.of(context) * 0.34) {
       bool isRightHanded =
           Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).peek()!;
       final rectifiedActivatorPositions = isRightHanded
           ? radialActivatorPositions
           : radialActivatorPositions.map(flipAngleHorizontally).toList();
-      int dragResult = radialDragResult(
+      _dragEvents.value = radialDragResult(
           rectifiedActivatorPositions, offsetAngle(dp),
           // no limit, will activate on the nearest option regardless of its distance. If you want to be more sophisticated, you can maintain an accumulator vector and not activate until the vector aligns somewhat closely with one of the options
           hitSpan: pi);
-      if (dragResult == -1) {
-        _dragEvents.value = null;
-      } else {
-        // activate
-        radialActivatorFunctions[dragResult]();
-        _dragEvents.value = dragResult;
-        _dragEvents.value = null;
-        // consider removing the hint
-        final dagc =
-            Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
-        dagc.value = dagc.peek()! | (dragResult == 0 ? 1 : 2);
-      }
     }
   }
 
   void onPanEnd(BuildContext context) {
+    if (_dragEvents.peek() != -1 && _dragEvents.peek() != null) {
+      radialActivatorFunctions[_dragEvents.peek()!]();
+      _dragEvents.value = null;
+      // consider removing the hint
+      final dagc =
+          Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
+      dagc.value = dagc.peek()! | (_dragEvents.peek() == 0 ? 1 : 2);
+    }
     _dragEvents.value = null;
     suppressingNotifier?.removeListener(disable);
   }

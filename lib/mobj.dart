@@ -192,7 +192,6 @@ class MobjRegistry {
       return db.fetchActive().get().then((v) {
         for (final kv in v) {
           _preloadedMobjEncodings[kv.id] = kv.value;
-          print("preloaded ${kv.id}: ${kv.value}");
         }
       });
     } else {
