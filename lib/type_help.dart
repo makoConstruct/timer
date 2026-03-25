@@ -1,5 +1,4 @@
 import 'package:makos_timer/boring.dart';
-import 'package:makos_timer/main.dart';
 import 'package:makos_timer/platform_audio.dart';
 
 import 'mobj.dart';
@@ -62,7 +61,7 @@ class TimerData {
   final String? title;
 
   /// if this timer is a child of a composite timer, the ID of that composite
-  final String? parentId;
+  final MobjID? parentId;
 
   Duration get duration => digitsToDuration(digits);
 
@@ -161,30 +160,29 @@ class TimerData {
 }
 
 class TimerDataType extends TypeHelp<TimerData> {
-  const TimerDataType() : super('TimerData');
+  TimerDataType() : super('TimerData');
 
   @override
   TimerData fromJsonValue(Object? json) {
     if (json is Map<String, dynamic>) {
       return TimerData(
-        startTime: Nullable(const DateTimeType()).fromJson(json['startTime']),
-        runningState: const IntType().fromJson(json['runningState']),
-        hue: const DoubleType().fromJson(json['hue']),
-        selected: const BoolType().fromJson(json['selected']),
-        digits: ListType(const IntType()).fromJson(json['digits']),
-        pinned: const BoolType().fromJson(json['pinned']),
-        persistentAlarm:
-            Nullable(const BoolType()).fromJson(json['persistentAlarm']),
+        startTime: Nullable(DateTimeType()).fromJson(json['startTime']),
+        runningState: IntType().fromJson(json['runningState']),
+        hue: DoubleType().fromJson(json['hue']),
+        selected: BoolType().fromJson(json['selected']),
+        digits: ListType(IntType()).fromJson(json['digits']),
+        pinned: BoolType().fromJson(json['pinned']),
+        persistentAlarm: Nullable(BoolType()).fromJson(json['persistentAlarm']),
         ranTime: Duration(
             milliseconds:
                 (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
-        isGoingOff: const BoolType().fromJson(json['isGoingOff']),
+        isGoingOff: BoolType().fromJson(json['isGoingOff']),
         completedRecently:
-            const BoolType().fromJson(json['completedRecently'] ?? false),
-        kind: TimerKind.values[const IntType().fromJson(json['kind'])],
-        children: ListType(const StringType()).fromJson(json['children'] ?? []),
-        title: Nullable(const StringType()).fromJson(json['title']),
-        parentId: Nullable(const StringType()).fromJson(json['parentId']),
+            BoolType().fromJson(json['completedRecently'] ?? false),
+        kind: TimerKind.values[IntType().fromJson(json['kind'])],
+        children: ListType(StringType()).fromJson(json['children'] ?? []),
+        title: Nullable(StringType()).fromJson(json['title']),
+        parentId: Nullable(StringType()).fromJson(json['parentId']),
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -193,22 +191,21 @@ class TimerDataType extends TypeHelp<TimerData> {
   @override
   Object? toJsonValue(TimerData object) {
     return {
-      'startTime': Nullable(const DateTimeType()).toJson(object.startTime),
-      'runningState': const IntType().toJson(object.runningState),
-      'hue': const DoubleType().toJson(object.hue),
-      'selected': const BoolType().toJson(object.selected),
-      'digits': ListType(const IntType()).toJson(object.digits),
-      'pinned': const BoolType().toJson(object.pinned),
-      'persistentAlarm':
-          Nullable(const BoolType()).toJson(object.persistentAlarm),
-      'ranTime': const DoubleType()
-          .toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
-      'isGoingOff': const BoolType().toJson(object.isGoingOff),
-      'completedRecently': const BoolType().toJson(object.completedRecently),
-      'kind': const IntType().toJson(object.kind.index),
-      'children': ListType(const StringType()).toJson(object.children),
-      'title': Nullable(const StringType()).toJson(object.title),
-      'parentId': Nullable(const StringType()).toJson(object.parentId),
+      'startTime': Nullable(DateTimeType()).toJson(object.startTime),
+      'runningState': IntType().toJson(object.runningState),
+      'hue': DoubleType().toJson(object.hue),
+      'selected': BoolType().toJson(object.selected),
+      'digits': ListType(IntType()).toJson(object.digits),
+      'pinned': BoolType().toJson(object.pinned),
+      'persistentAlarm': Nullable(BoolType()).toJson(object.persistentAlarm),
+      'ranTime':
+          DoubleType().toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
+      'isGoingOff': BoolType().toJson(object.isGoingOff),
+      'completedRecently': BoolType().toJson(object.completedRecently),
+      'kind': IntType().toJson(object.kind.index),
+      'children': ListType(StringType()).toJson(object.children),
+      'title': Nullable(StringType()).toJson(object.title),
+      'parentId': Nullable(StringType()).toJson(object.parentId),
     };
   }
 }
@@ -251,17 +248,15 @@ TimerData cloneTimerDataWithChanges(
 }
 
 class AudioInfoType extends TypeHelp<AudioInfo> {
-  const AudioInfoType() : super('AudioInfo');
+  AudioInfoType() : super('AudioInfo');
 
   @override
   AudioInfo fromJsonValue(Object? json) {
     if (json is Map<String, dynamic>) {
       return AudioInfo(
-        url: json['uri'] != null
-            ? const StringType().fromJson(json['uri'])
-            : null,
-        name: const StringType().fromJson(json['name']),
-        isLong: const BoolType().fromJson(json['isLong']),
+        url: json['uri'] != null ? StringType().fromJson(json['uri']) : null,
+        name: StringType().fromJson(json['name']),
+        isLong: BoolType().fromJson(json['isLong']),
       );
     }
     throw ArgumentError('Cannot convert $json to AudioInfo');
@@ -270,9 +265,9 @@ class AudioInfoType extends TypeHelp<AudioInfo> {
   @override
   Object? toJsonValue(AudioInfo object) {
     return {
-      'uri': object.url != null ? const StringType().toJson(object.url!) : null,
-      'name': const StringType().toJson(object.name),
-      'isLong': const BoolType().toJson(object.isLong),
+      'uri': object.url != null ? StringType().toJson(object.url!) : null,
+      'name': StringType().toJson(object.name),
+      'isLong': BoolType().toJson(object.isLong),
     };
   }
 }

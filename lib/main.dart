@@ -77,7 +77,7 @@ const databaseName = 'mako_timer_db';
 const double timerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(30);
+final Signal<double> timerWidgetRadius = Signal(25);
 
 const double standardLineWidth = 6;
 
@@ -133,66 +133,58 @@ Future<void> initializeDatabase() async {
   // initialize version one of the db
   await MobjRegistry.initialize(db);
   final fversion = Mobj.getOrCreate(dbVersionID,
-      type: const IntType(), initial: () => 0, debugLabel: "version");
+      type: IntType(), initial: () => 0, debugLabel: "version");
   await Future.wait(<Future>[
     // we know that the data required for the app is minimal enough that we should wait until it's loaded before showing anything... idk not sure I believe this
     Mobj.getOrCreate(timerListID,
-        type: ListType(const StringType()), initial: () => <MobjID>[]),
+        type: ListType(StringType()), initial: () => <MobjID>[]),
     Mobj.getOrCreate(transientTimerListID,
-        type: ListType(const StringType()), initial: () => <MobjID>[]),
-    Mobj.getOrCreate(nextHueID, type: const DoubleType(), initial: () => 0.252),
+        type: ListType(StringType()), initial: () => <MobjID>[]),
+    Mobj.getOrCreate(nextHueID, type: DoubleType(), initial: () => 0.252),
     Mobj.getOrCreate(isRightHandedID,
-        type: const BoolType(),
-        initial: () => true,
-        debugLabel: "is right handed"),
+        type: BoolType(), initial: () => true, debugLabel: "is right handed"),
     Mobj.getOrCreate(padVerticallyAscendingID,
-        type: const BoolType(),
+        type: BoolType(),
         initial: () => false,
         debugLabel: "pad vertically ascending"),
     Mobj.getOrCreate(selectedAudioID,
-        type: const AudioInfoType(),
+        type: AudioInfoType(),
         initial: () => PlatformAudio.assetSounds[0],
         debugLabel: "selected audio"),
     Mobj.getOrCreate(hasSelectedAudioID,
-        type: const BoolType(),
+        type: BoolType(),
         initial: () => false,
         debugLabel: "has selected audio"),
     Mobj.getOrCreate(persistentAlarmModeID,
-        type: const BoolType(),
+        type: BoolType(),
         initial: () => false,
         debugLabel: "persistent alarm mode"),
     Mobj.getOrCreate(timeFirstUsedApp,
-        type: const StringType(),
-        initial: () => '',
-        debugLabel: "first used app"),
+        type: StringType(), initial: () => '', debugLabel: "first used app"),
     Mobj.getOrCreate(hasCreatedTimerID,
-        type: const BoolType(),
+        type: BoolType(),
         initial: () => false,
         debugLabel: "has created timer"),
     Mobj.getOrCreate(exitedSetupID,
-        type: const BoolType(), initial: () => false, debugLabel: "left setup"),
+        type: BoolType(), initial: () => false, debugLabel: "left setup"),
     Mobj.getOrCreate(completedSetupID,
-        type: const BoolType(),
-        initial: () => false,
-        debugLabel: "completed setup"),
+        type: BoolType(), initial: () => false, debugLabel: "completed setup"),
     Mobj.getOrCreate(buttonSpanID,
-        type: const DoubleType(),
-        initial: () => 64.0,
-        debugLabel: "button span"),
+        type: DoubleType(), initial: () => 64.0, debugLabel: "button span"),
     Mobj.getOrCreate(buttonScaleDialOnID,
-        type: const BoolType(),
+        type: BoolType(),
         initial: () => false,
         debugLabel: "button scale dial on"),
     Mobj.getOrCreate(crankGameWinMessageIndexID,
-        type: const IntType(),
+        type: IntType(),
         initial: () => 0,
         debugLabel: "crank game win message index"),
     Mobj.getOrCreate(usedDragActionRecordID,
-        type: const IntType(),
+        type: IntType(),
         initial: () => 0,
         debugLabel: "used drag action count"),
     Mobj.getOrCreate(usedMenuCountID,
-        type: const IntType(), initial: () => 0, debugLabel: "used menu count"),
+        type: IntType(), initial: () => 0, debugLabel: "used menu count"),
     fversion,
   ]);
 }
@@ -291,13 +283,15 @@ class TimerHolm {
   // initialized to a high number to make sure that notifications from the main thread wont id collide with notifications from the background thread
   int _notificationIdCounter = 200000;
 
-  late EffectCleanup reaction;
   late EffectCleanup _backgroundedReaction;
+  late StreamSubscription<Mobj<TimerData>> _newTimerReaction;
+  late QuerySet<TimerData> allTimers;
   TimerHolm({required this.list, required this.jukeBox}) {
-    reaction = effect(() {
-      for (final tid in list.value!) {
-        considerTracking(tid);
-      }
+    allTimers = MobjRegistry.createQuerySet(TimerDataType());
+    // runs every time a new timer is created or loaded
+    _newTimerReaction = allTimers.forAll((mobj) {
+      // why route through id here, we have the mobj
+      considerTrackingMobj(mobj);
     });
     _backgroundedReaction = effect(() {
       if (!isBackgrounded.value) {
@@ -356,7 +350,7 @@ class TimerHolm {
         ..subscription = () {
           unsubscribedPreFuture = true;
         };
-      Mobj.fetch(tid, type: const TimerDataType()).then((mobj) {
+      Mobj.fetch(tid, type: TimerDataType()).then((mobj) {
         if (unsubscribedPreFuture) {
           // mobj.reduceRef
           tt.subscription = null;
@@ -366,6 +360,14 @@ class TimerHolm {
         tt.subscription = enlivenTimer(tt, mobj, jukeBox);
       });
       tracking[tid] = tt;
+    }
+  }
+
+  void considerTrackingMobj(Mobj<TimerData> mobj) {
+    if (!tracking.containsKey(mobj.id)) {
+      final tt = TimerTrack()..mobj = mobj;
+      tt.subscription = enlivenTimer(tt, mobj, jukeBox);
+      tracking[mobj.id] = tt;
     }
   }
 
@@ -387,10 +389,9 @@ class TimerHolm {
     tt.completionTimer = null;
     vibrateAlertOnce();
     final audio =
-        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType()).value!;
+        Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value!;
     final persistentAlarmMode =
-        Mobj.getAlreadyLoaded(persistentAlarmModeID, const BoolType()).value ??
-            false;
+        Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).value ?? false;
     // if ((d.persistentAlarm ?? persistentAlarmMode)) {
     if (isBackgrounded.peek() && (d.persistentAlarm ?? persistentAlarmMode)) {
       // then it needs to send a notification and scream repeatedly until acknowledged
@@ -411,24 +412,28 @@ class TimerHolm {
         completedRecently: true,
       );
     }
-    actuateParentCompositeTimers(mobj);
+    if (d.kind == TimerKind.timer) {
+      actuateParentCompositeTimers(mobj);
+    }
   }
 
+  /// calls the next timer in the chain and such
   void actuateParentCompositeTimers(Mobj<TimerData> childMobj) {
     final child = childMobj.peek();
     if (child?.parentId == null) return;
 
     final parentMobj =
-        Mobj.getAlreadyLoaded(child!.parentId!, const TimerDataType());
-    final parent = parentMobj.peek();
-    if (parent == null) return;
+        Mobj.seekTypedsAlreadyLoaded(child!.parentId!, [TimerDataType()]);
+    // if the parent isn't a timer, can't be actuated
+    if (parentMobj == null) return;
+    TimerData parent = parentMobj.peek()!;
 
     switch (parent.kind) {
       case TimerKind.series:
         final childIdx = parent.children.indexOf(childMobj.id);
         if (childIdx < parent.children.length - 1) {
           final nextId = parent.children[childIdx + 1];
-          final nextMobj = Mobj.getAlreadyLoaded(nextId, const TimerDataType());
+          final nextMobj = Mobj.getAlreadyLoaded(nextId, TimerDataType());
           nextMobj.value = nextMobj.peek()!.toggleRunning(reset: true);
         } else {
           parentMobj.value = parent.withChanges(
@@ -439,14 +444,19 @@ class TimerHolm {
       case TimerKind.loop:
         final childIdx = parent.children.indexOf(childMobj.id);
         final nextIdx = (childIdx + 1) % parent.children.length;
+        if (nextIdx <= childIdx) {
+          // then it's doing a loop, so;
+          // don't loop if the timer is too short, ie, if it's a 0 timer. This would be unbearable and the user could not have desired this.
+          if (totalDuration(parent) < 0.5) {
+            break;
+          }
+        }
         final nextId = parent.children[nextIdx];
-        final nextMobj = Mobj.getAlreadyLoaded(nextId, const TimerDataType());
+        final nextMobj = Mobj.getAlreadyLoaded(nextId, TimerDataType());
         nextMobj.value = nextMobj.peek()!.toggleRunning(reset: true);
       case TimerKind.parallel:
         final allCompleted = parent.children.every((id) =>
-            Mobj.getAlreadyLoaded(id, const TimerDataType())
-                .peek()
-                ?.isCompleted ??
+            Mobj.getAlreadyLoaded(id, TimerDataType()).peek()?.isCompleted ??
             false);
         if (allCompleted) {
           parentMobj.value = parent.withChanges(
@@ -470,16 +480,20 @@ class TimerHolm {
     return effect(() {
       final TimerData? d = mobj.value;
       if (d == null) {
-        // mobj.reduceRef();
+        // delete its children too if it has any
+        if (prev?.isComposite ?? false) {
+          for (final childId in prev!.children) {
+            Mobj.getAlreadyLoaded(childId, TimerDataType()).value = null;
+          }
+        }
         stopTracking(mobj.id);
-        prev?.children.forEach(stopTracking);
       } else {
-        // I'm unsure as to whether the children even need to be registered here. Child timers are kind of not autonomous?
-        if (prev?.isRunning != d.isRunning) {
+        if (prev?.isRunning != d.isRunning && d.kind == TimerKind.timer) {
           if (!d.isRunning) {
             tt.completionTimer?.cancel();
             tt.completionTimer = null;
-          } else if (d.kind == TimerKind.timer) {
+          } else {
+            // start the timer
             tt.completionTimer?.cancel();
             tt.completionTimer = async.Timer(
                 Duration(
@@ -489,16 +503,36 @@ class TimerHolm {
                             .ceil()), () {
               _timerGoesOff(tt, mobj);
             });
+
+            // stop all other timers that share a timercule with this one
+            // find the root ancestor
+            Mobj<TimerData> parent = mobj;
+            while (true) {
+              Mobj<TimerData>? nextParent = Mobj.seekTypedAlreadyLoaded(
+                  parent.peek()!.parentId!, TimerDataType());
+              if (nextParent == null) {
+                break;
+              }
+              parent = nextParent;
+            }
+            if (parent.id != mobj.id) {
+              // recurse over all descendents of the ancestor
+              void pauseAllDescendents(Mobj<TimerData> v) {
+                if (v.id == mobj.id) {
+                  return;
+                }
+                v.value = v.peek()!.withChanges(
+                    runningState: TimerData.paused, ranTime: Duration.zero);
+                for (final childId in v.peek()!.children) {
+                  final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+                  pauseAllDescendents(child);
+                }
+              }
+
+              pauseAllDescendents(parent);
+            }
           }
         }
-
-        // I think this is entirely managed by dismissAlarms()
-        // if(prev?.isGoingOff ?? false != d.isGoingOff) {
-        //   if(!d.isGoingOff){
-        //     tt.vibrationRepeatTimer?.cancel();
-        //     tt.vibrationRepeatTimer = null;
-        //   }
-        // }
       }
       prev = d;
     });
@@ -510,6 +544,22 @@ class TimerTrack {
   async.Timer? completionTimer;
   async.Timer? vibrationRepeatTimer;
   Mobj<TimerData>? mobj;
+}
+
+/// Whether the timer should be deleted automatically
+bool trivialAndClearable(Mobj<TimerData> mobj) {
+  final d = mobj.value;
+  if (d == null) {
+    return true;
+  }
+  if (d.pinned || d.isComposite || d.title != null || d.isRunning) {
+    return false;
+  }
+  final parent = Mobj.seekTypedAlreadyLoaded(d.parentId!, TimerDataType());
+  if (parent == null) {
+    return true;
+  }
+  return trivialAndClearable(parent);
 }
 
 // Global to cache screen corner radius
@@ -617,7 +667,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         },
         onGenerateInitialRoutes: (initialRouteName) {
           final completedSetup =
-              Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value ??
+              Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
                   false;
           if (completedSetup) {
             return <Route<dynamic>>[
@@ -667,8 +717,7 @@ class TimerMenu extends StatelessWidget {
     final mt = MakoThemeData.fromTheme(theme);
     final left = margin;
     final right = margin;
-    final buttonSpan =
-        Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType()).value!;
+    final buttonSpan = Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
     final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
     final top = centerOn.bottom - arrowHeight;
 
@@ -806,13 +855,11 @@ class _MenuRevealClipper extends CustomClipper<Path> {
 abstract class TimerBase extends StatefulWidget {
   final Mobj<TimerData> mobj;
   final bool animateIn;
-  final MobjID? owningList;
   final void Function()? onTap;
   const TimerBase({
     super.key,
     required this.mobj,
     this.animateIn = true,
-    required this.owningList,
     this.onTap,
   });
 }
@@ -839,9 +886,6 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   final FocusNode _titleFocusNode = FocusNode();
   late final TextEditingController _titleController = TextEditingController();
 
-  /// kept so that drag handlers will know to remove it from the list
-  late MobjID? owningList;
-
   static Color backgroundColor(double hue) =>
       hpluvToRGBColor([hue * 360, 100, 90]);
   static Color primaryColor(double hue) =>
@@ -856,12 +900,9 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   @override
   void initState() {
     super.initState();
-    owningList = widget.owningList;
     whetherPinned = Computed(() => widget.mobj.value?.pinned ?? false);
     _shouldFade = Computed(() {
-      final d = widget.mobj.value;
-      if (d == null) return false;
-      return !(d.isRunning || d.pinned || d.selected);
+      return trivialAndClearable(widget.mobj);
     });
     _appearanceAnimation = AnimationController(
         duration: const Duration(milliseconds: 180), vsync: this);
@@ -986,7 +1027,6 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
                 },
             behavior: HitTestBehavior.opaque,
             child: next),
-        (next) => Padding(padding: EdgeInsets.all(timerGap / 2), child: next),
       ],
       content,
     );
@@ -995,13 +1035,15 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
 
 /// Timer widget, contrast with Timer row from the database orm
 class Timer extends TimerBase {
-  const Timer({
+  Timer({
     super.key,
     required super.mobj,
     super.animateIn = true,
-    required super.owningList,
     super.onTap,
-  });
+  }) {
+    assert(!mobj.peek()!.isComposite,
+        "For composite timers, use a Timercule rather than a Timer");
+  }
 
   @override
   State<Timer> createState() => TimerState();
@@ -1149,7 +1191,7 @@ class TimerState extends TimerBaseState<Timer> {
 
     final dd = durationToSeconds(digitsToDuration(d.digits));
     // sometimes the background thread completes the timer, the currentTime wont be updated, so in that case it should be ignored.
-    double pieCompletion = d.timeSinceLastStartTime / dd;
+    double pieCompletion = d.transpired / dd;
     final durationDigits = d.digits;
     final timeDigits = durationToDigits(d.transpired,
         padLevel: padLevelFor(durationDigits.length));
@@ -1397,61 +1439,44 @@ class TimerState extends TimerBaseState<Timer> {
 
     return buildShell(
       context,
-      AnimatedBuilder(
-        animation: _slideActivateBounceAnimation,
-        builder: (context, child) => Transform.translate(
-            offset: _slideBounceDirection * bounceDistance, child: child),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            clockDial,
-            SizedBox(width: timerGap * 0.4),
-            textPart,
-          ],
-        ),
-      ),
+      Padding(
+          padding: EdgeInsets.all(timerGap / 2),
+          child: AnimatedBuilder(
+            animation: _slideActivateBounceAnimation,
+            builder: (context, child) => Transform.translate(
+                offset: _slideBounceDirection * bounceDistance, child: child),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                clockDial,
+                SizedBox(width: timerGap * 0.4),
+                textPart,
+              ],
+            ),
+          )),
     );
   }
 }
 
-class CompositeTimer extends TimerBase {
-  const CompositeTimer({
+class Timercule extends TimerBase {
+  const Timercule({
     super.key,
     required super.mobj,
     super.animateIn = true,
-    required super.owningList,
     super.onTap,
   });
 
   @override
-  State<CompositeTimer> createState() => CompositeTimerState();
+  State<Timercule> createState() => TimerculeState();
 }
 
-class CompositeTimerState extends TimerBaseState<CompositeTimer> {
+class TimerculeState extends TimerBaseState<Timercule> {
   final GlobalKey iWrapKey = GlobalKey();
   @override
   TimerData get p => widget.mobj.peek()!;
 
-  final Map<String, Mobj<TimerData>> _childMobjs = {};
-  final Map<String, Timer> _childWidgets = {};
-
-  @override
-  void onInitState() {
-    _loadAndTrackChildren();
-  }
-
-  Future<void> _loadAndTrackChildren() async {
-    final d = widget.mobj.peek()!;
-    final results = await Future.wait(
-      d.children.map((id) => Mobj.fetch(id, type: const TimerDataType())),
-    );
-    for (int i = 0; i < d.children.length; i++) {
-      _childMobjs[d.children[i]] = results[i];
-      globalTimerHolm?.considerTracking(d.children[i]);
-    }
-    if (mounted) setState(() {});
-  }
+  final Map<String, TimerBase> _childWidgets = {};
 
   @override
   Widget build(BuildContext context) {
@@ -1459,15 +1484,21 @@ class CompositeTimerState extends TimerBaseState<CompositeTimer> {
     final theme = Theme.of(context);
     final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
 
-    // [todo] this seems wrong, and is a consequence of the widget mapping at root being handled by tracking the timerlist signal. Maybe timerholm should be maintaining the widget map
     for (final childId in d.children) {
-      if (_childMobjs.containsKey(childId)) {
-        _childWidgets[childId] ??= Timer(
-          key: GlobalKey<TimerState>(),
-          mobj: _childMobjs[childId]!,
-          animateIn: false,
-          owningList: null,
-        );
+      if (!_childWidgets.containsKey(childId)) {
+        _childWidgets[childId] =
+            Mobj.getAlreadyLoaded(childId, TimerDataType()).peek()!.isComposite
+                ? Timercule(
+                    key: GlobalKey<TimerculeState>(),
+                    // we can assume already loaded because all timers are isActive.
+                    mobj: Mobj.getAlreadyLoaded(childId, TimerDataType()),
+                    animateIn: false,
+                  )
+                : Timer(
+                    key: GlobalKey<TimerState>(),
+                    mobj: Mobj.getAlreadyLoaded(childId, TimerDataType()),
+                    animateIn: false,
+                  );
       }
     }
     _childWidgets.removeWhere((id, _) => !d.children.contains(id));
@@ -1516,34 +1547,105 @@ class CompositeTimerState extends TimerBaseState<CompositeTimer> {
       handle,
       ...d.children
           .where(_childWidgets.containsKey)
-          .map<Widget>((id) => _childWidgets[id] as Widget)
-          .toList(),
+          .map<Widget>((id) => _childWidgets[id] as Widget),
       tail
     ];
 
-    return buildShell(
+    final mt = MakoThemeData.fromContext(context);
+
+    final content = buildShell(
         context,
-        PinAnimation(
-          isPinned: whetherPinned,
-          child: Container(
-            decoration: BoxDecoration(
-              color: TimerBaseState.backgroundColor(d.hue),
-              borderRadius: BorderRadius.circular(timerHeight / 4.5),
-            ),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: timerHeight,
-                minWidth: timerHeight,
-              ),
-              child: IWrap(key: iWrapKey, children: childWidgets),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: timerGap / 2),
+          child: PinAnimation(
+            isPinned: whetherPinned,
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: timerGap / 2,
+                  bottom: timerGap / 2,
+                  child: Container(
+                    // todo: shrink background vertically by timerGap/2, if possible. If not possible, maybe build that.
+                    decoration: BoxDecoration(
+                      // color: TimerBaseState.backgroundColor(d.hue),
+                      color: mt.foreBackColor,
+                      borderRadius: BorderRadius.circular(timerHeight / 4.5),
+                    ),
+                  ),
+                ),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: timerHeight,
+                    minWidth: timerHeight,
+                  ),
+                  child: IWrap(key: iWrapKey, children: childWidgets),
+                )
+              ],
             ),
           ),
         ));
+
+    return DragTarget<GlobalKey<TimerBaseState>>(
+      builder: (context, candidateData, rejectedData) => content,
+      onWillAcceptWithDetails: (details) {
+        // we have to ensure that this timer isn't any of our ancestors
+        bool checkAncestorsRecurse(Mobj<TimerData> ancestor) {
+          if (ancestor.id ==
+              (details.data.currentWidget! as TimerBase).mobj.id) {
+            return false;
+          }
+          final nextAncestor = Mobj.seekTypedAlreadyLoaded(
+              ancestor.peek()!.parentId!, TimerDataType());
+          if (nextAncestor == null) {
+            return true;
+          } else {
+            return checkAncestorsRecurse(nextAncestor);
+          }
+        }
+
+        return checkAncestorsRecurse(widget.mobj);
+      },
+      onAcceptWithDetails: (details) {
+        final iWrapInsertion = insertionOf(iWrapKey, details.offset);
+        final timerId = (details.data.currentWidget! as TimerBase).mobj.id;
+        final children = widget.mobj.peek()!.children;
+        final Mobj<TimerData> cm =
+            (details.data.currentWidget! as TimerBase).mobj;
+        // Convert IWrap-space insertion index to children-space (subtract 1 for handle)
+        final insertAt = (iWrapInsertion.midwayInsertionIndex() - 1)
+            .clamp(0, children.length);
+        final childIndex = children.indexOf(timerId);
+        if (childIndex != -1) {
+          // Already a child - reorder
+          final (operative, atIWrap) = iWrapInsertion.cleverInsertionIndexFor(
+              childIndex + 1, children.length + 2);
+          if (operative) {
+            final at = (atIWrap - 1).clamp(0, children.length);
+            widget.mobj.value = widget.mobj.peek()!.withChanges(
+                children: children.toList()
+                  ..insert(at, timerId)
+                  ..removeAt(childIndex > at ? childIndex + 1 : childIndex));
+          }
+        } else {
+          if (cm.peek()!.parentId != null) {
+            final oldList = Mobj.seekTypedsAlreadyLoaded(cm.peek()!.parentId!,
+                [TimerDataType(), ListType(StringType())])!;
+            final oldChildren = childrenOf(oldList);
+            writeBackChildren(oldList,
+                oldChildren.toList()..removeAt(oldChildren.indexOf(timerId)));
+          }
+          widget.mobj.value = widget.mobj.peek()!.withChanges(
+              children: children.toList()..insert(insertAt, timerId));
+          cm.value = cm.peek()!.withChanges(parentId: widget.mobj.id);
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
-    _childMobjs.clear();
     _childWidgets.clear();
     super.dispose();
   }
@@ -1640,7 +1742,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
   Widget build(BuildContext context) {
     final result = Watch((context) {
       final isRightHanded =
-          Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
+          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value!;
       return Align(
           alignment: isRightHanded
               ? FractionalOffset(0.8, 1)
@@ -1673,22 +1775,26 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
         final timerId = (tkey.currentWidget! as TimerBase).mobj.id;
         final currentIndex = p.indexWhere((t) => t == timerId);
 
-        TimerBaseState cs = details.data.currentState!;
+        final Mobj<TimerData> cm =
+            (details.data.currentWidget! as TimerBase).mobj;
         doInsertion(int at) {
-          widget.mobj.value = p.toList()..insert(at, cs.widget.mobj.id);
+          writeBackChildren(widget.mobj, p.toList()..insert(at, timerId));
         }
 
         //transaction start
-        if (cs.owningList == null) {
+        if (cm.peek()!.parentId == null) {
           doInsertion(insertion.midwayInsertionIndex());
         } else {
-          Mobj<List<MobjID>> oldList =
-              Mobj.getAlreadyLoaded(cs.owningList!, timerListType);
+          final oldList = Mobj.seekTypedsAlreadyLoaded(
+              cm.peek()!.parentId!, [TimerDataType(), ListType(StringType())])!;
+          final oldChildren = childrenOf(oldList);
+          final oldIndex = oldChildren.indexOf(timerId);
           simpleRemove() {
-            oldList.value = oldList.peek()!.toList()..removeAt(currentIndex);
+            writeBackChildren(
+                oldList, oldChildren.toList()..removeAt(oldIndex));
           }
 
-          if (cs.owningList == widget.mobj.id) {
+          if (cm.peek()!.parentId == widget.mobj.id) {
             assert(currentIndex != -1,
                 "item wasn't found inside of its owningList");
             if (insertion.index == currentIndex) {
@@ -1701,7 +1807,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
                   insertion.cleverInsertionIndexFor(currentIndex, p.length);
               if (operative) {
                 widget.mobj.value = p.toList()
-                  ..insert(at, cs.widget.mobj.id)
+                  ..insert(at, timerId)
                   ..removeAt(
                       currentIndex > at ? currentIndex + 1 : currentIndex);
               }
@@ -1711,7 +1817,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
             simpleRemove();
           }
         }
-        cs.owningList = widget.mobj.id;
+        cm.value = cm.peek()!.withChanges(parentId: widget.mobj.id);
 
         bool noDuplicates<T>(List<T> v) {
           for (int i = 0; i < v.length; ++i) {
@@ -1757,7 +1863,7 @@ class _TimerDeletionAnimationState extends State<_TimerDeletionAnimation> {
   @override
   Widget build(BuildContext context) {
     //    bool isRightHanded =
-    // Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
+    // Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value!;
     return Positioned(
       left: widget.rect.left,
       top: widget.rect.top,
@@ -1864,7 +1970,6 @@ final List<double> numericRadialActivatorPositions = [
   -pi,
 ];
 void pausePlaySelected(TimerScreenState tss) {
-  HapticFeedback.heavyImpact();
   tss.pausePlaySelected();
 }
 
@@ -1958,6 +2063,9 @@ class DragActionRingState extends State<DragActionRing>
         }
         dragEventsSubscription?.call();
       } else if (v != -1) {
+        if (v != numberSelected) {
+          HapticFeedback.heavyImpact();
+        }
         setState(() {
           numberSelected = v;
           actionSizepAtSelection = currentActionSize();
@@ -1992,7 +2100,7 @@ class DragActionRingState extends State<DragActionRing>
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded =
-        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).value!;
+        Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value!;
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
     // disable fade down if a number is selected
@@ -2168,7 +2276,7 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<MobjID<TimerData>?> selectedTimer = Signal(null);
   late final Computed<TimerWidgets> timerWidgets;
   late final Mobj<bool> isRightHandedMobj =
-      Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+      Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
   late final Signal<Rect> numPadBounds = Signal(Rect.zero);
   late final JukeBox jukeBox = JukeBox.create();
   late final TimerHolm timerHolm;
@@ -2185,11 +2293,11 @@ class TimerScreenState extends State<TimerScreen>
   // final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
   //     Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
   late final Mobj<double> nextHueMobj =
-      Mobj.getAlreadyLoaded(nextHueID, const DoubleType());
+      Mobj.getAlreadyLoaded(nextHueID, DoubleType());
   late final Mobj<bool> buttonScaleDialOn =
-      Mobj.getAlreadyLoaded(buttonScaleDialOnID, const BoolType());
+      Mobj.getAlreadyLoaded(buttonScaleDialOnID, BoolType());
   late final Mobj<double> buttonSpanMobj =
-      Mobj.getAlreadyLoaded(buttonSpanID, const DoubleType());
+      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType());
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
   late SmoothOffset modeMovementAnimation = SmoothOffset(
@@ -2201,11 +2309,11 @@ class TimerScreenState extends State<TimerScreen>
   // emits whenever a drag action ring is created, so that older ones can disable themselves
   late final ChangeNotifier onNewNumeralDragActionRing = ChangeNotifier();
   late final Computed<bool> userDragActionHintCondition = Computed(() {
-    final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
+    final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
     return (dagc.value! & 3) != 3;
   });
   late final Computed<bool> hasUsedMenuTwice = Computed(() {
-    final dagc = Mobj.getAlreadyLoaded(usedMenuCountID, const IntType());
+    final dagc = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
     return dagc.value! < 2;
   });
   late final AnimationController buttonScaleDialAnimation =
@@ -2302,16 +2410,10 @@ class TimerScreenState extends State<TimerScreen>
           final mobj = Mobj.getAlreadyLoaded(t, TimerDataType());
           // if you remove the generic parameter on the key, drag and menu open stops working :)
           next[t] = mobj.peek()!.isComposite
-              ? CompositeTimer(
-                  key: GlobalKey<CompositeTimerState>(),
-                  mobj: mobj,
-                  animateIn: true,
-                  owningList: timerListMobj.id)
+              ? Timercule(
+                  key: GlobalKey<TimerculeState>(), mobj: mobj, animateIn: true)
               : Timer(
-                  key: GlobalKey<TimerState>(),
-                  mobj: mobj,
-                  animateIn: true,
-                  owningList: timerListMobj.id);
+                  key: GlobalKey<TimerState>(), mobj: mobj, animateIn: true);
         }
       }
       prevTimerWidgets = next;
@@ -2348,8 +2450,8 @@ class TimerScreenState extends State<TimerScreen>
     modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
     modeActivationPulse.close();
-    timerHolm.reaction();
     timerHolm._backgroundedReaction();
+    timerHolm._newTimerReaction.cancel();
     super.dispose();
   }
 
@@ -2358,8 +2460,7 @@ class TimerScreenState extends State<TimerScreen>
     if (wk == null) {
       return;
     }
-    final menuCountMobj =
-        Mobj.getAlreadyLoaded(usedMenuCountID, const IntType());
+    final menuCountMobj = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
     if ((menuCountMobj.peek() ?? 0) < 2) {
       menuCountMobj.value = (menuCountMobj.peek() ?? 0) + 1;
     }
@@ -2738,7 +2839,11 @@ class TimerScreenState extends State<TimerScreen>
     // the lower part of the screen
     final buttonSize = Size(buttonSpan, buttonSpan);
     // this code is supposed to nudge things over a little to be perfectly centered if stuff is very close to being centered.
-    double tentativeRightPos = screenSize.width - buttonSpan / 2 * 1.16;
+    double backingDeflation = backingDeflationProportion * buttonSpan;
+    // positioned to make the space between the number pad backing and the edge of the screen equal
+    double tentativeRightPos =
+        screenSize.width - buttonSpan / 2 - backingDeflation;
+    // double tentativeRightPos = screenSize.width - buttonSpan / 2;
     final imperfection =
         ((tentativeRightPos - 2 * buttonSpan) - screenSize.width / 2) /
             screenSize.width;
@@ -2785,7 +2890,6 @@ class TimerScreenState extends State<TimerScreen>
           );
         });
 
-    final double backingDeflation = backingDeflationProportion * buttonSpan;
     Widget numeralBacking = Positioned.fromRect(
         rect: controlGridBound(Offset(-3, 0), Size(3, 4))
             .deflate(backingDeflation),
@@ -2842,10 +2946,8 @@ class TimerScreenState extends State<TimerScreen>
         if (!isRightHanded) {
           ix = 2 - ix;
         }
-        if (watchSignal(
-            context,
-            Mobj.getAlreadyLoaded(
-                padVerticallyAscendingID, const BoolType()))!) {
+        if (watchSignal(context,
+            Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType()))!) {
           iy = 2 - iy;
         }
         final ii = i + 1;
@@ -3075,8 +3177,7 @@ class TimerScreenState extends State<TimerScreen>
 
   bool toggleRunningOnMobj(Mobj<TimerData> timer, {bool reset = false}) {
     bool wasRunning = timer.peek()!.isRunning;
-    TimerData nv = timer.peek()!.toggleRunning(reset: reset);
-    timer.value = nv;
+    timer.value = timer.peek()!.toggleRunning(reset: reset);
     return !wasRunning;
   }
 
@@ -3105,7 +3206,7 @@ class TimerScreenState extends State<TimerScreen>
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
     Mobj<TimerData>.clobberCreate(
       ntid,
-      type: const TimerDataType(),
+      type: TimerDataType(),
       initial: TimerData(
         startTime: null,
         runningState: runningState ?? TimerData.paused,
@@ -3113,10 +3214,11 @@ class TimerScreenState extends State<TimerScreen>
         selected: selecting,
         digits: digits ?? const [],
         ranTime: Duration.zero,
+        parentId: timerListMobj.id,
         isGoingOff: false,
       ),
     );
-    Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value = true;
+    Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
 
     timerListMobj.value = peekTimers().toList()..add(ntid);
     if (selecting) {
@@ -3135,22 +3237,22 @@ class TimerScreenState extends State<TimerScreen>
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
     final nt = Mobj<TimerData>.clobberCreate(
       ntid,
-      type: const TimerDataType(),
+      type: TimerDataType(),
       initial: TimerData(
         startTime: DateTime.now(),
         runningState: TimerData.running,
         hue: nextRandomHue(),
-        selected: true,
+        selected: false,
         digits: const [],
         ranTime: Duration.zero,
         isGoingOff: false,
+        parentId: timerListMobj.id,
         kind: TimerKind.stopwatch,
       ),
     );
-    Mobj.getAlreadyLoaded(hasCreatedTimerID, const BoolType()).value = true;
+    Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
 
     timerListMobj.value = peekTimers().toList()..add(ntid);
-    _selectTimer(ntid);
 
     cleanOldTimers(except: ntid);
 
@@ -3160,12 +3262,15 @@ class TimerScreenState extends State<TimerScreen>
 
   void addNewCompositeTimer(TimerKind kind) {
     final ntid = UuidV4().generate();
-    final nt = Mobj<TimerData>.clobberCreate(
+    Mobj<TimerData>.clobberCreate(
       ntid,
-      type: const TimerDataType(),
+      type: TimerDataType(),
       // pinned starts true for composite timers because they're not so often faster to recreate than to reuse, so it's going to be very rare that the user wants them autodeleted
       initial: TimerData(
-          kind: kind, hue: nextRandomHue(), selected: false, pinned: true),
+          kind: kind,
+          hue: nextRandomHue(),
+          selected: false,
+          parentId: timerListMobj.id),
     );
     timerListMobj.value = peekTimers().toList()..add(ntid);
     cleanOldTimers(except: ntid);
@@ -3179,8 +3284,7 @@ class TimerScreenState extends State<TimerScreen>
     for (final tid in curTimers) {
       if (tid == except) continue;
       final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
-      if (!t.peek()!.pinned && !t.peek()!.isRunning) {
-        // delay slightly to make it clear what's happened (might not be necessary if we introduce deletion animations)
+      if (trivialAndClearable(t)) {
         deleteTimer(tid, pushAside: true);
       }
     }
@@ -3216,10 +3320,10 @@ class TimerScreenState extends State<TimerScreen>
         }
       }
     } else {
-      _selectAction('delete');
-      // if (timers().isNotEmpty) {
-      //   deleteTimer(timers().last);
-      // }
+      // _selectAction('delete');
+      if (timers().isNotEmpty) {
+        deleteTimer(timers().last);
+      }
     }
   }
 
@@ -3375,16 +3479,19 @@ class DragActionRingController {
 
   void onPanUpdate(BuildContext context, Offset p) {
     Offset dp = p - _startDrag;
-    if (!dragActionRingDisabled && dp.distance > Thumbspan.of(context) * 0.34) {
-      bool isRightHanded =
-          Mobj.getAlreadyLoaded(isRightHandedID, const BoolType()).peek()!;
-      final rectifiedActivatorPositions = isRightHanded
-          ? radialActivatorPositions
-          : radialActivatorPositions.map(flipAngleHorizontally).toList();
-      _dragEvents.value = radialDragResult(
-          rectifiedActivatorPositions, offsetAngle(dp),
-          // no limit, will activate on the nearest option regardless of its distance. If you want to be more sophisticated, you can maintain an accumulator vector and not activate until the vector aligns somewhat closely with one of the options
-          hitSpan: pi);
+    if (!dragActionRingDisabled) {
+      if (dp.distance > Thumbspan.of(context) * 0.34) {
+        bool isRightHanded =
+            Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).peek()!;
+        final rectifiedActivatorPositions = isRightHanded
+            ? radialActivatorPositions
+            : radialActivatorPositions.map(flipAngleHorizontally).toList();
+        _dragEvents.value = radialDragResult(
+            rectifiedActivatorPositions, offsetAngle(dp),
+            hitSpan: pi);
+      } else {
+        _dragEvents.value = -1;
+      }
     }
   }
 
@@ -3393,8 +3500,7 @@ class DragActionRingController {
       radialActivatorFunctions[_dragEvents.peek()!]();
       _dragEvents.value = null;
       // consider removing the hint
-      final dagc =
-          Mobj.getAlreadyLoaded(usedDragActionRecordID, const IntType());
+      final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
       dagc.value = dagc.peek()! | (_dragEvents.peek() == 0 ? 1 : 2);
     }
     _dragEvents.value = null;
@@ -3431,6 +3537,7 @@ class _NumeralButtonState extends State<NumeralButton> {
             return;
           }
           numericRadialActivatorFunctions[i](tss);
+          // cause the affected timer to bounce
           final isRightHanded = tss.isRightHandedMobj.peek()!;
           final rectifiedActivatorPositions = isRightHanded
               ? numericRadialActivatorPositions
@@ -3754,7 +3861,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         SizedBox(width: 32.0, child: Center(child: child));
 
     bool completedSetup = watchSignal(
-        context, Mobj.getAlreadyLoaded(completedSetupID, const BoolType()))!;
+        context, Mobj.getAlreadyLoaded(completedSetupID, BoolType()))!;
 
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
@@ -3822,31 +3929,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SliverList(
             delegate: SliverChildListDelegate([
-              // // Test InkButton
-              // Padding(
-              //   padding: const EdgeInsets.all(16.0),
-              //   child: InkButton(
-              //     borderRadius: BorderRadius.circular(12),
-              //     onTap: () {
-              //       print('InkButton tapped!');
-              //     },
-              //     child: Container(
-              //       height: 56,
-              //       decoration: BoxDecoration(
-              //         color: theme.colorScheme.surfaceContainerHigh,
-              //         borderRadius: BorderRadius.circular(12),
-              //       ),
-              //       child: Center(
-              //         child: Text('Test InkButton',
-              //             style: theme.textTheme.titleMedium),
-              //       ),
-              //     ),
-              //   ),
-              // ),
               // Right-handed mode setting
               Watch((context) {
                 final isRightHandedMobj =
-                    Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+                    Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
                 final isRightHanded = isRightHandedMobj.value ?? true;
                 return ListTile(
                   title: Text('${isRightHanded ? 'Right' : 'Left'}-handed mode',
@@ -3895,8 +3981,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               Watch((context) {
-                final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
-                    padVerticallyAscendingID, const BoolType());
+                final padVerticallyAscendingMobj =
+                    Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType());
                 final padVerticallyAscending =
                     padVerticallyAscendingMobj.value ?? false;
                 return ListTile(
@@ -3926,8 +4012,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: Text('Alarm sound', style: theme.textTheme.bodyLarge),
                   subtitle: Watch((context) {
                     return Text(
-                      Mobj.getAlreadyLoaded(
-                              selectedAudioID, const AudioInfoType())
+                      Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType())
                           .value!
                           .name,
                       style: theme.textTheme.bodyMedium
@@ -3961,8 +4046,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               }),
               // Persistent alarm mode setting
               Watch((context) {
-                final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
-                    persistentAlarmModeID, const BoolType());
+                final persistentAlarmModeMobj =
+                    Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType());
                 final persistentAlarmMode =
                     persistentAlarmModeMobj.value ?? false;
                 return SwitchListTile(
@@ -3983,8 +4068,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               Watch((context) {
-                final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
-                    buttonScaleDialOnID, const BoolType());
+                final buttonScaleDialOnOn =
+                    Mobj.getAlreadyLoaded(buttonScaleDialOnID, BoolType());
                 return ListTile(
                   title: Text('Button size', style: theme.textTheme.bodyLarge),
                   subtitle: Text(
@@ -4073,7 +4158,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: SeparatorGradient(
-                    color: MakoThemeData.fromContext(context).foreIndentColor),
+                    color:
+                        MakoThemeData.fromContext(context).lowestIndentColor),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
@@ -4318,9 +4404,9 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     super.initState();
     _loadSounds();
     listeningAudioEffectChange =
-        Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType())
+        Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType())
             .subscribe((event) {
-      Mobj.getAlreadyLoaded(hasSelectedAudioID, const BoolType()).value = true;
+      Mobj.getAlreadyLoaded(hasSelectedAudioID, BoolType()).value = true;
     });
   }
 
@@ -4380,7 +4466,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           : 0.0;
 
       final selectedAudio =
-          Mobj.getAlreadyLoaded(selectedAudioID, const AudioInfoType());
+          Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType());
       final jukeBox = Provider.of<JukeBox>(context, listen: false);
 
       Widget radioSelector(AudioInfo audio) {
@@ -4575,8 +4661,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   @override
   void initState() {
     super.initState();
-    final isRightHanded =
-        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+    final isRightHanded = Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
     createEffect(() {
       if (setIsRightHanded.value != null) {
         isRightHanded.value = setIsRightHanded.value!;
@@ -4584,13 +4669,13 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     });
     createEffect(() {
       if (numpadOrientation.value != null) {
-        Mobj.getAlreadyLoaded(padVerticallyAscendingID, const BoolType())
-            .value = numpadOrientation.value!;
+        Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType()).value =
+            numpadOrientation.value!;
       }
     });
     createEffect(() {
       if (ringMode.value != null) {
-        Mobj.getAlreadyLoaded(persistentAlarmModeID, const BoolType()).value =
+        Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).value =
             ringMode.value!;
       }
     });
@@ -4598,7 +4683,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     createEffect(() {
       if (allChoices.every((signal) => signal.value != null)) {
         // redundant but might as well set it as soon as possible, may change it later to only set exit in moveOn
-        Mobj.getAlreadyLoaded(completedSetupID, const BoolType()).value = true;
+        Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value = true;
         // final messenger = globalScaffoldMessengerKey.currentState!;
         // tombstone, wanted to have a "setup completed" then "enjoy the app" tweened message, but snackbars can't retain state between route transitions: https://github.com/flutter/flutter/issues/180212
         // final messenger = ScaffoldMessenger.of(context);
@@ -4710,8 +4795,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     final theme = Theme.of(context);
     final screenHeight = MediaQuery.of(context).size.height;
     final backgroundColor = theme.colorScheme.surfaceContainerLow;
-    final isRightHanded =
-        Mobj.getAlreadyLoaded(isRightHandedID, const BoolType());
+    final isRightHanded = Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
     const buttonAnimationDuration = Duration(milliseconds: 270);
 
     Widget handButton({

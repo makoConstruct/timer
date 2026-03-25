@@ -1,16 +1,55 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:collection/collection.dart';
 import 'package:drift/drift.dart';
+import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
 
+bool _typeHelpDescriptionDeepEquals(Object a, Object b) {
+  if (identical(a, b)) return true;
+  if (a is List && b is List) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!_typeHelpDescriptionDeepEquals(a[i] as Object, b[i] as Object)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return a == b;
+}
+
+int _typeHelpDescriptionDeepHash(Object o) {
+  if (o is List) {
+    return Object.hashAll(
+        o.map((e) => _typeHelpDescriptionDeepHash(e as Object)));
+  }
+  return o.hashCode;
+}
+
 /// these are just parser combinators. They used to be self-describing so that we could put type descriptions in the DB and use those to pre-parse any root objects, but it turned out that's impossible in dart (you can't construct a new generic type at runtime, which, since dart has runtime type information, means you also can't construct values of that type), and would only be elegant with dependent types.
 abstract class TypeHelp<T> {
   final Object typeDescription;
+  late final int _hashCode;
 
-  const TypeHelp(this.typeDescription);
+  /// couldn't be const because of the late final _hashCode cached value
+  TypeHelp(this.typeDescription) {
+    _hashCode = _typeHelpDescriptionDeepHash(typeDescription);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TypeHelp &&
+          runtimeType == other.runtimeType &&
+          _typeHelpDescriptionDeepEquals(
+              typeDescription, other.typeDescription));
+
+  @override
+  int get hashCode => _hashCode;
 
   T fromJson(Object? json) {
     return fromJsonValue(json);
@@ -25,7 +64,15 @@ abstract class TypeHelp<T> {
 }
 
 class IntType extends TypeHelp<int> {
-  const IntType() : super('int');
+  IntType._() : super('int');
+  static final IntType _instance = IntType._();
+  factory IntType() => _instance;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+
+  @override
+  int get hashCode => identityHashCode(this);
 
   @override
   int fromJsonValue(Object? json) {
@@ -39,7 +86,15 @@ class IntType extends TypeHelp<int> {
 }
 
 class DoubleType extends TypeHelp<double> {
-  const DoubleType() : super('double');
+  DoubleType._() : super('double');
+  static final DoubleType _instance = DoubleType._();
+  factory DoubleType() => _instance;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+
+  @override
+  int get hashCode => identityHashCode(this);
 
   @override
   double fromJsonValue(Object? json) {
@@ -54,7 +109,15 @@ class DoubleType extends TypeHelp<double> {
 }
 
 class BoolType extends TypeHelp<bool> {
-  const BoolType() : super('bool');
+  BoolType._() : super('bool');
+  static final BoolType _instance = BoolType._();
+  factory BoolType() => _instance;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+
+  @override
+  int get hashCode => identityHashCode(this);
 
   @override
   bool fromJsonValue(Object? json) {
@@ -67,7 +130,15 @@ class BoolType extends TypeHelp<bool> {
 }
 
 class StringType extends TypeHelp<String> {
-  const StringType() : super('string');
+  StringType._() : super('string');
+  static final StringType _instance = StringType._();
+  factory StringType() => _instance;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+
+  @override
+  int get hashCode => identityHashCode(this);
 
   @override
   String fromJsonValue(Object? json) {
@@ -148,7 +219,15 @@ class MapType<K, V> extends TypeHelp<Map<K, V>> {
 }
 
 class DateTimeType extends TypeHelp<DateTime> {
-  const DateTimeType() : super('datetime');
+  DateTimeType._() : super('datetime');
+  static final DateTimeType _instance = DateTimeType._();
+  factory DateTimeType() => _instance;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+
+  @override
+  int get hashCode => identityHashCode(this);
 
   @override
   DateTime fromJsonValue(Object? json) {
@@ -209,6 +288,53 @@ class MobjRegistry {
     _preloadedMobjEncodings.remove(id);
   }
 
+  static QuerySet<T> createQuerySet<T>(TypeHelp<T> type,
+      {bool Function(T)? predicate}) {
+    predicate = predicate ?? alwaysTrue;
+    final qs = QuerySet<T>(type, predicate);
+    multimapAdd(_querySets, type, qs);
+    // if you create any querysets, we have to attempt to parse all preloaded mobjs against it, we can't just select the ones with the right type
+    for (final e in _preloadedMobjEncodings.entries.toList()) {
+      Mobj<T>? mobj;
+      // wait, conceptual problem, I don't think anything actually has its type stored?.. so duck types would trip this up?
+      try {
+        // Only create and add if decode successful
+        mobj = Mobj.seekAlreadyLoaded<T>(e.key, type)!;
+      } on MobjTypeMismatchError catch (_) {
+        // type mismatches are expected here.
+      }
+      if (mobj != null) {
+        loadedMobjs[e.key] = mobj;
+        _preloadedMobjEncodings.remove(e.key);
+        final val = mobj.peek();
+        if (val != null && predicate(val)) {
+          qs.add(mobj);
+        }
+      }
+    }
+    return qs;
+  }
+
+  static Mobj<T>? seekTyped<T>(MobjID id, TypeHelp<T> type) {
+    Mobj<T>? mobj;
+    try {
+      mobj = Mobj.seekAlreadyLoaded<T>(id, type);
+    } on MobjTypeMismatchError catch (_) {
+      // type mismatches are expected here.
+    }
+    return mobj;
+  }
+
+  static Mobj? seekTypeds(MobjID id, List<TypeHelp> types) {
+    for (final type in types) {
+      final mobj = seekTyped(id, type);
+      if (mobj != null) {
+        return mobj;
+      }
+    }
+    return null;
+  }
+
   // deletes all Mobjs regardless of refCount. Sometimes necessary because it's really important that the background thread completely forgets all cached values for its mobjs after handing control back to the app thread, and because we haven't really encountered a practical need for refCounts so aren't using them.
   static void relinquishAll() {
     for (final mobj in loadedMobjs.values) {
@@ -225,8 +351,8 @@ class MobjRegistry {
   }
 }
 
-class QueryTrack {
-  final Mobj m;
+class QueryTrack<T> {
+  final Mobj<T> m;
   final Function() unsubscribe;
   QueryTrack(this.m, this.unsubscribe);
 }
@@ -235,23 +361,23 @@ bool alwaysTrue(dynamic v) {
   return true;
 }
 
-class QuerySet {
-  final Map<MobjID, QueryTrack> inSet = {};
-  final TypeHelp requiredType;
-  final bool Function(dynamic) predicate;
-  late final StreamController<Mobj> _onAdded =
-      StreamController<Mobj>.broadcast();
-  Stream<Mobj> get onAdded => _onAdded.stream;
-  late final StreamController<Mobj> _onRemoved =
-      StreamController<Mobj>.broadcast();
-  Stream<Mobj> get onRemoved => _onRemoved.stream;
+class QuerySet<T> {
+  final Map<MobjID, QueryTrack<T>> inSet = {};
+  final TypeHelp<T> requiredType;
+  final bool Function(T) predicate;
+  late final StreamController<Mobj<T>> _onAdded =
+      StreamController<Mobj<T>>.broadcast();
+  Stream<Mobj<T>> get onAdded => _onAdded.stream;
+  late final StreamController<Mobj<T>> _onRemoved =
+      StreamController<Mobj<T>>.broadcast();
+  Stream<Mobj<T>> get onRemoved => _onRemoved.stream;
 
   QuerySet(this.requiredType, [this.predicate = alwaysTrue]);
 
-  void add(Mobj mobj) {
+  void add(Mobj<T> mobj) {
     if (!inSet.containsKey(mobj.id)) {
       inSet[mobj.id] = QueryTrack(mobj, mobj.subscribe((v) {
-        if (v == null || !predicate(mobj)) {
+        if (v == null || !predicate(v)) {
           remove(mobj);
         }
       }));
@@ -259,13 +385,25 @@ class QuerySet {
     }
   }
 
-  void remove(Mobj mobj) {
+  void remove(Mobj<T> mobj) {
     final qt = inSet.remove(mobj.id);
     if (qt != null) {
       qt.unsubscribe();
       _onRemoved.add(mobj);
     }
   }
+
+  StreamSubscription<Mobj<T>> forAll(Function(Mobj<T>) callback) {
+    for (final mobj in inSet.values) {
+      callback(mobj.m);
+    }
+    return onAdded.listen(callback);
+  }
+}
+
+class MobjTypeMismatchError extends Error {
+  final String message;
+  MobjTypeMismatchError(this.message);
 }
 
 /// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
@@ -278,6 +416,7 @@ class Mobj<T> extends Signal<T?> {
 
   MobjID get id => _id;
   final TypeHelp<T> _type;
+  TypeHelp<T> get type => _type;
   // currently not really used [todo] stop leaking into the db maybe (but don't worry about leaking signals into memory..)
   int _refCount = 1;
   bool _isActive;
@@ -301,7 +440,7 @@ class Mobj<T> extends Signal<T?> {
   Future<void> writeBack() async {
     final v = peek();
     if (v != null) {
-      _valueEncoded = jsonEncode(_type.toJson(v));
+      _valueEncoded = Mobj.serialize(v, _type);
       final nextTimestamp = DateTime.now();
       if (nextTimestamp.isAtSameMomentAs(_lastTimestamp)) {
         _lastSequenceNumber++;
@@ -323,6 +462,18 @@ class Mobj<T> extends Signal<T?> {
       _systemSubscription();
       return Future.value();
     }
+  }
+
+  static String serialize<T>(T v, TypeHelp<T> type) =>
+      jsonEncode({'type': type.typeDescription, 'value': type.toJson(v)});
+  static T deserialize<T>(String s, TypeHelp<T> type) {
+    var dec = jsonDecode(s);
+    if (!const DeepCollectionEquality()
+        .equals(dec['type'], type.typeDescription)) {
+      throw MobjTypeMismatchError(
+          'Mobj.deserialize: type mismatch, expected ${type.typeDescription} but got ${dec['type']}');
+    }
+    return type.fromJson(dec['value']);
   }
 
   /// every new mobj is created this way
@@ -375,17 +526,29 @@ class Mobj<T> extends Signal<T?> {
     });
   }
 
+  static Mobj? seekTypedsAlreadyLoaded(MobjID id, List<TypeHelp> types) {
+    return MobjRegistry.seekTypeds(id, types);
+  }
+
+  static Mobj<T>? seekTypedAlreadyLoaded<T>(MobjID id, TypeHelp<T> type) {
+    return MobjRegistry.seekTyped(id, type);
+  }
+
   /// only returns non-null if the mobj has already been loaded from the db
   /// type is needed in case the object is in the _loadedMobjEncodings stage
   static Mobj<T>? seekAlreadyLoaded<T>(MobjID id, TypeHelp<T> type) {
     final Mobj? loaded = MobjRegistry.loadedMobjs[id];
     if (loaded != null) {
+      if (loaded.type != type) {
+        throw MobjTypeMismatchError(
+            'Mobj.seekAlreadyLoaded: type mismatch, expected ${type.typeDescription} but got ${loaded.type.typeDescription}');
+      }
       return loaded as Mobj<T>;
     }
     final pr = MobjRegistry._preloadedMobjEncodings[id];
     if (pr != null) {
       final p = Mobj<T>._createAndRegister(id, type,
-          initial: type.fromJson(jsonDecode(pr)),
+          initial: Mobj.deserialize(pr, type),
           debugLabel: id,
           initialWriteBack: false);
       MobjRegistry._preloadedMobjEncodings.remove(id);
@@ -446,7 +609,7 @@ class Mobj<T> extends Signal<T?> {
       return (await pf) as Mobj<T>;
     }
     final T iv = initial();
-    final valueEncoding = jsonEncode(type.toJson(iv));
+    final valueEncoding = Mobj.serialize(iv, type);
     final ret = MobjRegistry.db
         .insertIfNotExistsAndReturn(
             id: id,
@@ -471,7 +634,7 @@ class Mobj<T> extends Signal<T?> {
           return Mobj._createAndRegister(
             id,
             type,
-            initial: type.fromJson(jsonDecode(vv.value!)),
+            initial: Mobj.deserialize(vv.value!, type),
             debugLabel: debugLabel,
             initialWriteBack: false,
             isActive: vv.isActive!,
@@ -498,7 +661,7 @@ class Mobj<T> extends Signal<T?> {
       throw StateError("Mobj $id does not exist in the database");
     }
 
-    return type.fromJson(jsonDecode(kv.value));
+    return Mobj.deserialize(kv.value, type);
   }
 
   /// (can't be called "get" because Signal already has a method of that name)
@@ -509,20 +672,18 @@ class Mobj<T> extends Signal<T?> {
   }) async {
     Mobj<T>? s = Mobj.seekAlreadyLoaded<T>(id, type);
     if (s != null) {
-      print("was non-null");
       return s;
     } else {
       final Future<Mobj<T>> r = (MobjRegistry.db.kVs.select()
             ..where((t) => t.id.equals(id)))
           .getSingleOrNull()
           .then((s) {
-        print("got kv for $id, $s");
         if (s != null) {
           MobjRegistry._loadingMobjs.remove(id);
           return Mobj<T>._createAndRegister(
             id,
             type,
-            initial: type.fromJson(jsonDecode(s.value)),
+            initial: Mobj.deserialize(s.value, type),
             debugLabel: debugLabel,
             initialWriteBack: false,
           );

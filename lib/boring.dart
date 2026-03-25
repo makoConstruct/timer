@@ -200,6 +200,36 @@ class TrackedTimer {
   }
 }
 
+double totalDuration(TimerData d) {
+  if (d.kind == TimerKind.series || d.kind == TimerKind.loop) {
+    if (d.children.isEmpty) {
+      return 0;
+    }
+    double sum = 0;
+    for (final childId in d.children) {
+      final child = Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek();
+      if (child != null) {
+        sum += totalDuration(child);
+      }
+    }
+    return sum;
+  } else if (d.kind == TimerKind.parallel) {
+    if (d.children.isEmpty) {
+      return 0;
+    }
+    double maxDuration = 0;
+    for (final childId in d.children) {
+      final child = Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek();
+      if (child != null) {
+        maxDuration = max(maxDuration, totalDuration(child));
+      }
+    }
+    return maxDuration;
+  } else {
+    return d.duration.inMicroseconds / 1000000.0;
+  }
+}
+
 Rect rectFromAlign({
   required Alignment align,
   required Offset anchor,
@@ -486,6 +516,8 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
   @override
   void dispose() {
     previousSize.dispose();
+    popAnimation.dispose();
+    dragStartOffset.dispose();
     super.dispose();
   }
 }
@@ -2200,6 +2232,13 @@ class _CircularRevealRouteTransitionState
   }
 }
 
+void multimapAdd<K, V>(Map<K, List<V>> map, K key, V value) {
+  if (!map.containsKey(key)) {
+    map[key] = [];
+  }
+  map[key]!.add(value);
+}
+
 /// calls removed first
 void diffListsets<T>(List<T> earlier, List<T> newer,
     {void Function(T item)? added, void Function(T item)? removed}) {
@@ -2214,6 +2253,27 @@ void diffListsets<T>(List<T> earlier, List<T> newer,
     if (!earlierSet.contains(nt)) {
       added?.call(nt);
     }
+  }
+}
+
+/// abstractions for timer list management
+List<MobjID<TimerData>> childrenOf(Mobj host) {
+  if (host is Mobj<TimerData>) {
+    return host.peek()!.children;
+  }
+  if (host is Mobj<List<MobjID<TimerData>>>) {
+    return host.peek()!;
+  }
+  throw StateError("host is not a timer or timer list");
+}
+
+void writeBackChildren(Mobj host, List<MobjID<TimerData>> children) {
+  if (host is Mobj<TimerData>) {
+    host.value = host.peek()!.withChanges(children: children);
+  } else if (host is Mobj<List<MobjID<TimerData>>>) {
+    host.value = children;
+  } else {
+    throw StateError("host is not a timer or timer list");
   }
 }
 
@@ -2793,7 +2853,7 @@ class MakoThemeData {
             midBackColor: theme.colorScheme.surfaceContainerLow,
             foreBackColor: theme.colorScheme.surfaceContainerHighest,
             lowestIndentColor:
-                lightenColor(theme.colorScheme.surfaceContainerLowest, 0.05),
+                lightenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerHighest, 0.07),
             inkColor: theme.colorScheme.primary.withAlpha(30),
@@ -3052,7 +3112,7 @@ class _HintToastState extends State<HintToast>
   Widget infoText(BuildContext context, String content) {
     final hintColor = MakoThemeData.fromContext(context).hintTextColor;
     final hintTextStyle =
-        Theme.of(context).textTheme.bodySmall!.copyWith(color: hintColor);
+        Theme.of(context).textTheme.bodyMedium!.copyWith(color: hintColor);
     return RichText(
       text: TextSpan(
         children: [

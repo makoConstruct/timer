@@ -120,7 +120,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     super.initState();
     nextTargetSpeed = _nextTargetSpeed();
     _winMessageIndexMobj =
-        Mobj.getAlreadyLoaded(crankGameWinMessageIndexID, const IntType());
+        Mobj.getAlreadyLoaded(crankGameWinMessageIndexID, IntType());
     _tickController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),

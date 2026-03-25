@@ -157,17 +157,15 @@ class PersistentNotificationTask extends TaskHandler {
         vibrateAlertOnce();
 
         final persistentAlarmMode =
-            await Mobj.fetch(persistentAlarmModeID, type: const BoolType());
+            await Mobj.fetch(persistentAlarmModeID, type: BoolType());
         final audio = await Mobj.fetch(selectedAudioID, type: AudioInfoType());
 
         if (persistentAlarmMode.peek() == true) {
           jukeBox.playAudioLooping(audio.peek()!);
-          timer.value = timer
-              .peek()!
-              .withChanges(
-                  runningState: TimerData.completed,
-                  isGoingOff: true,
-                  completedRecently: true);
+          timer.value = timer.peek()!.withChanges(
+              runningState: TimerData.completed,
+              isGoingOff: true,
+              completedRecently: true);
           showCompletionNotification(timer);
         } else {
           jukeBox.playAudio(audio.peek()!);
@@ -326,7 +324,7 @@ class PersistentNotificationTask extends TaskHandler {
           noTimersCheck = null;
         };
         final futureTimerList =
-            Mobj.fetch(timerListID, type: ListType(const StringType()));
+            Mobj.fetch(timerListID, type: ListType(StringType()));
 
         futureTimerList.then((timerList) {
           if (cancelled) {
