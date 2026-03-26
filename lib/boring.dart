@@ -3186,3 +3186,88 @@ class SeparatorGradient extends StatelessWidget {
     );
   }
 }
+
+// Returns the (circular radius, rectangle height) for a given progress, for animating a vertically-growing progress bar
+(double, double) fluidBarRadiusAndHeightForProgress(
+    double width, double height, double p) {
+  // Compute geometric area allocations as above
+  final circularArea = pi * width / 2 * width / 2;
+  final rectangularArea = width * (height - width / 2);
+  final totalArea = rectangularArea + circularArea;
+
+  // circular phase
+  double circularp = unlerpUnit(0, circularArea / totalArea, p);
+  double radius = sqrt((circularp * circularArea) / pi);
+  // rectangle "vertical" phase, after circle is fully grown
+  double rectp = unlerpUnit(circularArea / totalArea, 1, p);
+  double rectHeight = lerp(radius * 2, height, rectp);
+
+  return (radius, rectHeight);
+}
+
+/// alignment only really pays attention to the taller dimension, it's always centered on the other
+Positioned fluidBar(
+    {required Size size,
+    required double progress,
+    required Alignment alignment,
+    required Widget child}) {
+  double smallerDim, largerDim;
+  if (size.width < size.height) {
+    smallerDim = size.width;
+    largerDim = size.height;
+  } else {
+    smallerDim = size.height;
+    largerDim = size.width;
+  }
+  final (radius, rectHeight) =
+      fluidBarRadiusAndHeightForProgress(smallerDim, largerDim, progress);
+  double left, top, width, height;
+  double basePosition(
+      double childSpan, double containerSpan, double alignment) {
+    if (alignment == 0) {
+      return containerSpan / 2 - childSpan / 2;
+    } else if (alignment == -1) {
+      return max(0, smallerDim / 2 - childSpan / 2);
+    } else if (alignment == 1) {
+      return containerSpan -
+          smallerDim / 2 -
+          (childSpan / 2 < smallerDim / 2
+              ? childSpan / 2
+              : (childSpan - smallerDim / 2));
+    } else {
+      throw UnimplementedError("Alignment $alignment is not supported");
+    }
+  }
+
+  if (smallerDim == size.width) {
+    left = smallerDim / 2 - radius;
+    top = basePosition(rectHeight, largerDim, alignment.y);
+    width = radius * 2;
+    height = rectHeight;
+  } else {
+    left = basePosition(rectHeight, largerDim, alignment.x);
+    top = smallerDim / 2 - radius;
+    width = rectHeight;
+    height = radius * 2;
+  }
+  return Positioned(
+    left: left,
+    top: top,
+    child: SizedBox(
+      width: width,
+      height: height,
+      child: child,
+    ),
+  );
+}
+
+Positioned extrudedPositioned(
+    {required double extrusion, required Widget child}) {
+  return Positioned(
+    left: -extrusion,
+    top: -extrusion,
+    right: -extrusion,
+    bottom: -extrusion,
+    child: child,
+  );
+}

@@ -567,19 +567,11 @@ class _ProgressBar extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final rectangularHeight = constraints.maxHeight - thickness / 2;
         final crankGameTheme = CrankGameTheme.fromContext(context);
-        final rectangularArea = thickness * rectangularHeight;
-        final circularArea = pi * thickness / 2 * thickness / 2;
-        final totalArea = rectangularArea + circularArea;
-        final startingp = circularArea / totalArea * 0.33;
-        final augmentedProgress = lerp(startingp, 1, progress);
-        final radius = sqrt(
-            (unlerpUnit(0, circularArea / totalArea, augmentedProgress) *
-                    circularArea) /
-                pi);
-        final verticalProgress =
-            unlerpUnit(circularArea / totalArea, 1, augmentedProgress);
+
+        final (radius, rectHeight) = fluidBarRadiusAndHeightForProgress(
+            thickness, constraints.maxHeight, progress);
+
         return Container(
             width: thickness,
             decoration: BoxDecoration(
@@ -592,24 +584,19 @@ class _ProgressBar extends StatelessWidget {
             ),
             child: Stack(
               children: [
-                Positioned(
-                  left: thickness / 2 - radius,
-                  bottom: thickness / 2 - radius,
-                  child: Container(
-                    // duration: const Duration(milliseconds: 100),
-                    width: radius * 2,
-                    height: lerp(
-                        radius * 2, constraints.maxHeight, verticalProgress),
-                    decoration: BoxDecoration(
+                fluidBar(
+                    size: Size(thickness, constraints.maxHeight),
+                    progress: progress,
+                    alignment: Alignment.bottomCenter,
+                    child: Container(
+                        decoration: BoxDecoration(
                       color: isWithinBounds
                           ? crankGameTheme.withinBoundsColor
                           : isTooSlow
                               ? crankGameTheme.tooSlowColor
                               : crankGameTheme.tooFastColor,
                       borderRadius: BorderRadius.circular(radius),
-                    ),
-                  ),
-                ),
+                    ))),
               ],
             ));
       },

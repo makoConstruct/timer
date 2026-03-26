@@ -469,7 +469,7 @@ class TimerHolm {
     }
   }
 
-  /// how each timer is subscribed to and responded to
+  /// how each timer is subscribed to and responded to, imbued with spirit and voice
   void Function() enlivenTimer(
       TimerTrack tt, Mobj<TimerData> mobj, JukeBox jukeBox) {
     // once null always null
@@ -485,6 +485,13 @@ class TimerHolm {
           for (final childId in prev!.children) {
             Mobj.getAlreadyLoaded(childId, TimerDataType()).value = null;
           }
+        }
+        //remove it from its parent
+        final parent = Mobj.seekTypedsAlreadyLoaded(
+            prev!.parentId!, [TimerDataType(), ListType(StringType())]);
+        if (parent != null && parent.peek() != null) {
+          writeBackChildren(
+              parent, childrenOf(parent).toList()..remove(mobj.id));
         }
         stopTracking(mobj.id);
       } else {
@@ -552,7 +559,11 @@ bool trivialAndClearable(Mobj<TimerData> mobj) {
   if (d == null) {
     return true;
   }
-  if (d.pinned || d.isComposite || d.title != null || d.isRunning) {
+  if (d.pinned ||
+      d.isComposite ||
+      d.title != null ||
+      d.isRunning ||
+      d.selected) {
     return false;
   }
   final parent = Mobj.seekTypedAlreadyLoaded(d.parentId!, TimerDataType());
@@ -872,7 +883,6 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
   // currently inactive. I was considering using this for doing a deletion where most of the deletion animation happens in-place and then it's shunted out into another layer just for the end.
-  late final AnimationController _deletionAnimation;
   late final Computed<bool> whetherPinned;
   late final Computed<bool> _shouldFade;
   final GlobalKey animatedToKey = GlobalKey();
@@ -915,14 +925,40 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
         duration: const Duration(milliseconds: 150), vsync: this);
     _unpinnedIndicatorFullyShowing = AnimationController(
         duration: const Duration(milliseconds: 150), vsync: this);
-    _deletionAnimation = AnimationController(
-        duration: const Duration(milliseconds: 240), vsync: this);
     onInitState();
     createEffect(() {
       final TimerData? d = widget.mobj.value;
       final prev = previousValue;
       if (d == null) {
-        _deletionAnimation.forward();
+        // move this widget into a transient overlay deletion animation, and trust timerHolm to remove this from its parent in time for the next render so that there wont be a globalkey collision.
+        // but only do this if its parent was also not deleted, because if the parent was deleted, it will be animating the disappearance instead
+        final parent = Mobj.seekTypedsAlreadyLoaded(
+            prev!.parentId!, [TimerDataType(), ListType(StringType())]);
+        if (parent == null ||
+            parent.peek() != null ||
+            parent is Mobj<List<String>>) {
+          if (mounted) {
+            final renderBox = context.findRenderObject() as RenderBox?;
+            if (renderBox != null && renderBox.hasSize) {
+              final ephemeralAnimationLayer = context
+                  .findAncestorStateOfType<TimerScreenState>()!
+                  .ephemeralAnimationLayer;
+              Rect tr = boxRectRelativeTo(
+                  boring.renderBox(widget.key as GlobalKey),
+                  ephemeralAnimationLayer.currentContext?.findRenderObject()
+                      as RenderBox?)!;
+              animatedToDisabled.value = true;
+              ephemeralAnimationLayer.currentState!.add(_TimerDeletionAnimation(
+                key: UniqueKey(),
+                direction: false,
+                rect: tr,
+                timerWidget: widget,
+                duration: const Duration(milliseconds: 270),
+              ));
+            }
+          }
+        }
+
         disable();
         return;
       }
@@ -939,7 +975,6 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     _appearanceAnimation.dispose();
     _unpinnedIndicatorShowing.dispose();
     _unpinnedIndicatorFullyShowing.dispose();
-    _deletionAnimation.dispose();
     animatedToDisabled.dispose();
     previousSize.dispose();
     _titleFocusNode.dispose();
@@ -1201,31 +1236,35 @@ class TimerState extends TimerBaseState<Timer> {
 
     // Selected underline animation
     // why is this still clipping (why does it seem to move down so far)
-    Widget selectionUnderline = AnimatedBuilder(
-      animation: _selectedUnderlineAnimation,
-      builder: (context, child) {
-        final progress =
-            Curves.easeOut.transform(_selectedUnderlineAnimation.value);
-        final underlineHeight = 9.0;
-        final gap = 3.0;
+    Widget selectionUnderline = extrudedPositioned(
+      extrusion: 3,
+      child: AnimatedBuilder(
+        animation: _selectedUnderlineAnimation,
+        builder: (context, child) {
+          final progress =
+              Curves.easeOut.transform(_selectedUnderlineAnimation.value);
+          final underlineHeight = 9.0;
+          final gap = 3.0;
 
-        return Positioned(
-          left: 0,
-          right: 0,
-          bottom: -underlineHeight - gap,
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: progress,
-            child: Container(
-              height: underlineHeight,
-              decoration: BoxDecoration(
-                color: mt.foreBackColor,
-                borderRadius: BorderRadius.circular(underlineHeight / 2),
-              ),
-            ),
-          ),
-        );
-      },
+          return LayoutBuilder(builder: (context, constraints) {
+            return Stack(
+              children: [
+                fluidBar(
+                  size: Size(constraints.maxWidth, constraints.maxHeight),
+                  alignment: Alignment.centerLeft,
+                  progress: progress,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: mt.foreBackColor,
+                      borderRadius: BorderRadius.circular(80),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          });
+        },
+      ),
     );
 
     Widget timeText(List<int> digits,
@@ -1278,14 +1317,13 @@ class TimerState extends TimerBaseState<Timer> {
                           alignment: Alignment.bottomLeft,
                           scale: lerp(0.6, 1, v),
                           child: timeText(timeDigits)),
-                      Stack(clipBehavior: Clip.none, children: [
-                        selectionUnderline,
-                        Transform.scale(
-                            alignment: Alignment.topLeft,
-                            scale: lerp(1, 0.6, v),
-                            child:
-                                timeText(durationDigits, withTimeLevel: true)),
-                      ]),
+                      Transform.scale(
+                          alignment: Alignment.topLeft,
+                          scale: lerp(1, 0.6, v),
+                          child: Stack(clipBehavior: Clip.none, children: [
+                            selectionUnderline,
+                            timeText(durationDigits, withTimeLevel: true),
+                          ])),
                     ]));
           },
         ),
@@ -1476,7 +1514,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
   @override
   TimerData get p => widget.mobj.peek()!;
 
-  final Map<String, TimerBase> _childWidgets = {};
+  // used to check for differences
+  List<MobjID<TimerData>>? _prevChildren;
+  Map<String, TimerBase> _childWidgets = {};
 
   @override
   Widget build(BuildContext context) {
@@ -1484,56 +1524,64 @@ class TimerculeState extends TimerBaseState<Timercule> {
     final theme = Theme.of(context);
     final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
 
-    for (final childId in d.children) {
-      if (!_childWidgets.containsKey(childId)) {
-        _childWidgets[childId] =
-            Mobj.getAlreadyLoaded(childId, TimerDataType()).peek()!.isComposite
+    if (_prevChildren != d.children) {
+      Map<String, TimerBase> newMap = {};
+      for (final childId in d.children) {
+        final childMobj = Mobj.getAlreadyLoaded(childId, TimerDataType());
+        newMap[childId] = _childWidgets[childId] ??
+            (childMobj.peek()!.isComposite
                 ? Timercule(
                     key: GlobalKey<TimerculeState>(),
                     // we can assume already loaded because all timers are isActive.
-                    mobj: Mobj.getAlreadyLoaded(childId, TimerDataType()),
+                    mobj: childMobj,
                     animateIn: false,
                   )
                 : Timer(
                     key: GlobalKey<TimerState>(),
-                    mobj: Mobj.getAlreadyLoaded(childId, TimerDataType()),
+                    mobj: childMobj,
                     animateIn: false,
-                  );
+                  ));
       }
+      _childWidgets = newMap;
     }
-    _childWidgets.removeWhere((id, _) => !d.children.contains(id));
 
     Widget? titleWidget;
     if (d.title != null || _titleEditMode) {
-      titleWidget = DefaultTextStyle.merge(
-        style: TextStyle(color: theme.colorScheme.onSurface),
-        child: _titleEditMode
-            ? IntrinsicWidth(
-                child: TextField(
-                  focusNode: _titleFocusNode,
-                  controller: _titleController,
-                  style: DefaultTextStyle.of(context).style,
-                  decoration:
-                      InputDecoration.collapsed(hintText: 'description'),
-                  onChanged: (text) {
-                    widget.mobj.value = p.withChanges(title: text);
-                  },
-                ),
-              )
-            : Text(d.title!, overflow: TextOverflow.clip),
+      titleWidget = Padding(
+        padding: const EdgeInsets.all(timerGap / 2),
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: theme.colorScheme.onSurface),
+          child: _titleEditMode
+              ? IntrinsicWidth(
+                  child: TextField(
+                    focusNode: _titleFocusNode,
+                    controller: _titleController,
+                    style: DefaultTextStyle.of(context).style,
+                    decoration:
+                        InputDecoration.collapsed(hintText: 'description'),
+                    onChanged: (text) {
+                      widget.mobj.value = p.withChanges(title: text);
+                    },
+                  ),
+                )
+              : Text(d.title!, overflow: TextOverflow.clip),
+        ),
       );
     }
 
     final handleWidth = timerHeight / 4;
-    Widget handle = ConstrainedBox(
-        constraints:
-            BoxConstraints(minWidth: handleWidth, minHeight: timerHeight),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: titleWidget ?? const SizedBox.shrink(),
-        ));
+    Widget handle = Container(
+      constraints: BoxConstraints(
+          minWidth: handleWidth,
+          minHeight: timerHeight,
+          maxWidth: timerHeight * 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: titleWidget ?? const SizedBox.shrink()),
+    );
 
     Widget tail = Container(
       width: timerHeight * 0.2,
@@ -1580,7 +1628,10 @@ class TimerculeState extends TimerBaseState<Timercule> {
                     minHeight: timerHeight,
                     minWidth: timerHeight,
                   ),
-                  child: IWrap(key: iWrapKey, children: childWidgets),
+                  child: IWrap(
+                      key: iWrapKey,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: childWidgets),
                 )
               ],
             ),
@@ -1627,6 +1678,10 @@ class TimerculeState extends TimerBaseState<Timercule> {
                 children: children.toList()
                   ..insert(at, timerId)
                   ..removeAt(childIndex > at ? childIndex + 1 : childIndex));
+          } else {
+            context
+                .findAncestorStateOfType<TimerScreenState>()
+                ?.openTimerMenu(context, details.data, timerId);
           }
         } else {
           if (cm.peek()!.parentId != null) {
@@ -1638,7 +1693,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
           }
           widget.mobj.value = widget.mobj.peek()!.withChanges(
               children: children.toList()..insert(insertAt, timerId));
-          cm.value = cm.peek()!.withChanges(parentId: widget.mobj.id);
+          // why selected false? because if a user drags a timer onto a composite timer, it indicates that they're done editing it
+          cm.value =
+              cm.peek()!.withChanges(parentId: widget.mobj.id, selected: false);
         }
       },
     );
@@ -1801,7 +1858,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
               // it's not a drag action, so open the right click menu
               context
                   .findAncestorStateOfType<TimerScreenState>()
-                  ?.openTimerMenu(context, timerId);
+                  ?.openTimerMenu(context, details.data, timerId);
             } else {
               final (operative, at) =
                   insertion.cleverInsertionIndexFor(currentIndex, p.length);
@@ -2274,6 +2331,7 @@ class DragActionRingState extends State<DragActionRing>
 class TimerScreenState extends State<TimerScreen>
     with SignalsMixin, TickerProviderStateMixin {
   late final Signal<MobjID<TimerData>?> selectedTimer = Signal(null);
+  late final EffectCleanup watchingForUnselection;
   late final Computed<TimerWidgets> timerWidgets;
   late final Mobj<bool> isRightHandedMobj =
       Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
@@ -2324,6 +2382,7 @@ class TimerScreenState extends State<TimerScreen>
   final GlobalKey selectButtonKey = GlobalKey();
   late final Signal<double> buttonScaleDialAngle = Signal(0.0);
   async.Timer? buttonScaleDialLeavingTimer;
+  final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
   Rect editPopoverControls = Rect.zero;
   late final UpDownAnimationController editPopoverAnimation =
@@ -2419,14 +2478,19 @@ class TimerScreenState extends State<TimerScreen>
       prevTimerWidgets = next;
       return next;
     });
-
-    // selected timer controls
+    // watching the selected timer
     createEffect(() {
-      // doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
-      editPopoverAnimation.towards(selectedTimer.value != null &&
-          Mobj.getAlreadyLoaded(selectedTimer.value!, TimerDataType())
-                  .peek()!
-                  .kind !=
+      final sv = selectedTimer.value;
+      // clear selectedTimer if the selected timer is no longer selected
+      if (sv != null) {
+        final svm = Mobj.getAlreadyLoaded(sv!, TimerDataType()).value;
+        if (svm == null || svm.selected == false) {
+          selectedTimer.value = null;
+        }
+      }
+      // edit popover doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
+      editPopoverAnimation.towards(sv != null &&
+          Mobj.getAlreadyLoaded(sv!, TimerDataType()).peek()!.kind !=
               TimerKind.stopwatch &&
           (!isFirstPressForSelectedTimer.value ||
               currentlyPressingKey.value == 0));
@@ -2450,21 +2514,25 @@ class TimerScreenState extends State<TimerScreen>
     modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
     modeActivationPulse.close();
+    for (final unsub in _timerDeletionSubs.values) {
+      unsub();
+    }
     timerHolm._backgroundedReaction();
     timerHolm._newTimerReaction.cancel();
     super.dispose();
   }
 
-  void openTimerMenu(BuildContext context, MobjID timerID) {
-    final wk = timerWidgets[timerID]!.key as GlobalKey<TimerBaseState>?;
-    if (wk == null) {
-      return;
-    }
+  void openTimerMenu(BuildContext context, GlobalKey<TimerBaseState> timerKey,
+      MobjID<TimerData> timerID) {
+    // final tm = Mobj.getAlreadyLoaded(timerID, TimerDataType());
+    // final tmParent = Mobj.seekTypedsAlreadyLoaded(tm.peek()!.parentId!, [TimerDataType(), ListType(StringType())])!;
+    // final indexInParent = childrenOf(tmParent).indexOf(timerID);
+
     final menuCountMobj = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
     if ((menuCountMobj.peek() ?? 0) < 2) {
       menuCountMobj.value = (menuCountMobj.peek() ?? 0) + 1;
     }
-    Rect p = boxRect(wk)!;
+    Rect p = boxRect(timerKey)!;
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
@@ -3285,7 +3353,7 @@ class TimerScreenState extends State<TimerScreen>
       if (tid == except) continue;
       final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
       if (trivialAndClearable(t)) {
-        deleteTimer(tid, pushAside: true);
+        deleteTimer(tid);
       }
     }
   }
@@ -3335,39 +3403,9 @@ class TimerScreenState extends State<TimerScreen>
     }
   }
 
-  void deleteTimer(MobjID ki, {bool pushAside = false}) {
-    // Get the timer's position and size using the globalkey, so that we can animate the exit in the EphemeralHost layer
-    final timerWidget = timerWidgets.value[ki];
-    if (timerWidget != null) {
-      final timerKey = timerWidget.key as GlobalKey<TimerBaseState>;
-      final timerState = timerKey.currentState;
-
-      assert(timerState != null && timerState.mounted);
-      final renderBox = timerState!.context.findRenderObject() as RenderBox?;
-      if (renderBox != null && renderBox.hasSize) {
-        Rect tr = boxRectRelativeTo(boring.renderBox(timerKey),
-            boring.renderBox(ephemeralAnimationLayer))!;
-
-        // Create and add the deletion animation
-        (timerWidget.key as GlobalKey<TimerBaseState>)
-            .currentState!
-            .animatedToDisabled
-            .value = true;
-        final deletionAnimationWidget = _TimerDeletionAnimation(
-          key: UniqueKey(),
-          direction: pushAside,
-          rect: tr,
-          timerWidget: timerWidget,
-          duration: const Duration(milliseconds: 270),
-        );
-
-        ephemeralAnimationLayer.currentState!.add(deletionAnimationWidget);
-      }
-    }
-
-    removeTimer(ki);
+  void deleteTimer(MobjID ki) {
+    // everything is triggered by this and code that responds to it in various places
     Mobj.getAlreadyLoaded(ki, TimerDataType()).value = null;
-    // [todo] reduceRef
   }
 
   void resetTimer(MobjID ki) {
