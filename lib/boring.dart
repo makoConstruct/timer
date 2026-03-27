@@ -2832,6 +2832,7 @@ class MakoThemeData {
   Color foreBackColor;
   Color foreIndentColor;
   Color inkColor;
+  Color harderForeIndentColor;
   Color hintTextColor;
   MakoThemeData({
     required this.lowestBackColor,
@@ -2840,6 +2841,7 @@ class MakoThemeData {
     required this.foreBackColor,
     required this.foreIndentColor,
     required this.inkColor,
+    required this.harderForeIndentColor,
     required this.hintTextColor,
   });
   static MakoThemeData fromContext(BuildContext context) {
@@ -2856,6 +2858,8 @@ class MakoThemeData {
                 lightenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerHighest, 0.07),
+            harderForeIndentColor:
+                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.21),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: darkenColor(theme.colorScheme.onSurface, 0.4),
           )
@@ -2867,6 +2871,8 @@ class MakoThemeData {
                 darkenColor(theme.colorScheme.surfaceContainerHighest, 0.05),
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
+            harderForeIndentColor:
+                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.018),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
           );

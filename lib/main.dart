@@ -1518,11 +1518,47 @@ class TimerculeState extends TimerBaseState<Timercule> {
   List<MobjID<TimerData>>? _prevChildren;
   Map<String, TimerBase> _childWidgets = {};
 
+  late final Signal<double> depth = Signal(0.0);
+  void Function()? _parentDepthDispose;
+
+  void _subscribeToParentDepth() {
+    _parentDepthDispose?.call();
+    final parent = context.findAncestorStateOfType<TimerculeState>();
+    if (parent != null) {
+      _parentDepthDispose = effect(() {
+        depth.value = parent.depth.value + 1;
+      });
+    } else {
+      depth.value = 0;
+      _parentDepthDispose = null;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _subscribeToParentDepth();
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = watchSignal(context, widget.mobj) ?? previousValue!;
     final theme = Theme.of(context);
     final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
+    final depth = watchSignal(context, this.depth);
+    final depthi = depth.floor();
+    final depthp = (depth - depthi) % 1;
+    final mt = MakoThemeData.fromContext(context);
+    final highlightLevels = [
+      mt.foreBackColor,
+      mt.harderForeIndentColor,
+    ];
+    final firstColor = highlightLevels[depthi % highlightLevels.length];
+    final secondColor = highlightLevels[(depthi + 1) % highlightLevels.length];
+    final backgroundColor = lerpColor(firstColor, secondColor, depthp);
+    final buttonSpan = watchSignal(
+        context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
+    final cornerRadius = backingCornerRounding * buttonSpan;
 
     if (_prevChildren != d.children) {
       Map<String, TimerBase> newMap = {};
@@ -1599,8 +1635,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
       tail
     ];
 
-    final mt = MakoThemeData.fromContext(context);
-
     final content = buildShell(
         context,
         Padding(
@@ -1618,8 +1652,8 @@ class TimerculeState extends TimerBaseState<Timercule> {
                     // todo: shrink background vertically by timerGap/2, if possible. If not possible, maybe build that.
                     decoration: BoxDecoration(
                       // color: TimerBaseState.backgroundColor(d.hue),
-                      color: mt.foreBackColor,
-                      borderRadius: BorderRadius.circular(timerHeight / 4.5),
+                      color: backgroundColor,
+                      borderRadius: BorderRadius.circular(cornerRadius),
                     ),
                   ),
                 ),
@@ -1703,6 +1737,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
 
   @override
   void dispose() {
+    _parentDepthDispose?.call();
     _childWidgets.clear();
     super.dispose();
   }
