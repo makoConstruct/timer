@@ -2859,7 +2859,7 @@ class MakoThemeData {
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerHighest, 0.07),
             harderForeIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.21),
+                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.35),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: darkenColor(theme.colorScheme.onSurface, 0.4),
           )
@@ -2876,6 +2876,15 @@ class MakoThemeData {
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
           );
+  }
+
+  Color timerculeHighlightBackground(double depth) {
+    final highlightLevels = <Color>[foreBackColor, harderForeIndentColor];
+    final depthi = depth.floor();
+    final depthp = (depth - depthi) % 1;
+    final firstColor = highlightLevels[depthi % highlightLevels.length];
+    final secondColor = highlightLevels[(depthi + 1) % highlightLevels.length];
+    return lerpColor(firstColor, secondColor, depthp);
   }
 }
 
@@ -3276,4 +3285,142 @@ Positioned extrudedPositioned(
     bottom: -extrusion,
     child: child,
   );
+}
+
+/// Shared layout for [TimerculeParallelPainter] and [TimerculeSerialPainter].
+/// [TimerculeCyclePainter] uses [timerculeRectHeight] as ring thickness.
+const double timerculeCornerRadius = 4;
+const double timerculeRectHeight = 11;
+const double timerculeRectWidth = 15;
+const double timerculeGap = 3;
+void timerculeIconScaling(Canvas canvas, Size size) {
+  final parallelHeight = 2 * timerculeRectHeight + timerculeGap;
+  final scale = min(size.width, size.height) / parallelHeight;
+  canvas.translate(size.width / 2, size.height / 2);
+  canvas.scale(scale, scale);
+}
+
+class TimerculeParallelPainter extends CustomPainter {
+  TimerculeParallelPainter({this.color = Colors.black});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final contentH = 2 * timerculeRectHeight + timerculeGap;
+
+    timerculeIconScaling(canvas, size);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(-timerculeRectWidth / 2, -contentH / 2,
+              timerculeRectWidth, timerculeRectHeight),
+          Radius.circular(timerculeCornerRadius),
+        ),
+        paint);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(-timerculeRectWidth / 2, timerculeGap / 2,
+              timerculeRectWidth, timerculeRectHeight),
+          Radius.circular(timerculeCornerRadius),
+        ),
+        paint);
+  }
+
+  @override
+  bool shouldRepaint(TimerculeParallelPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class TimerculeSerialPainter extends CustomPainter {
+  TimerculeSerialPainter({this.color = Colors.black});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    // decided we want them to be square
+    double w = timerculeRectHeight;
+    timerculeIconScaling(canvas, size);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(-w - timerculeGap / 2, -timerculeRectHeight / 2, w,
+              timerculeRectHeight),
+          Radius.circular(timerculeCornerRadius),
+        ),
+        paint);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(timerculeGap / 2, -timerculeRectHeight / 2, w,
+              timerculeRectHeight),
+          Radius.circular(timerculeCornerRadius),
+        ),
+        paint);
+  }
+
+  @override
+  bool shouldRepaint(TimerculeSerialPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class TimerculeCyclePainter extends CustomPainter {
+  TimerculeCyclePainter({this.color = Colors.black});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final innerR = timerculeGap / 2 * 3.65;
+    final bottomThickness = timerculeGap * 1.1;
+    final outerR =
+        (bottomThickness + innerR * 2 + timerculeRectHeight * 0.8) / 2;
+    final innerCenter = Offset(0, outerR - (bottomThickness + innerR));
+
+    timerculeIconScaling(canvas, size);
+    if (innerR <= 0) {
+      canvas.drawCircle(Offset.zero, outerR, paint);
+    } else {
+      final path = Path()
+        ..addOval(Rect.fromCircle(center: Offset.zero, radius: outerR))
+        ..addOval(Rect.fromCircle(center: innerCenter, radius: innerR))
+        ..fillType = PathFillType.evenOdd;
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(TimerculeCyclePainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+Widget timerKindIcon(TimerKind kind,
+    {Color color = Colors.black, double size = 20}) {
+  switch (kind) {
+    case TimerKind.loop:
+      return CustomPaint(
+          size: Size(size, size), painter: TimerculeCyclePainter(color: color));
+    case TimerKind.series:
+      return CustomPaint(
+          size: Size(size, size),
+          painter: TimerculeSerialPainter(color: color));
+    case TimerKind.parallel:
+      return CustomPaint(
+          size: Size(size, size),
+          painter: TimerculeParallelPainter(color: color));
+    case TimerKind.stopwatch:
+      return Icon(Icons.square_rounded, color: color, size: size);
+    case TimerKind.timer:
+      return Icon(Icons.circle_rounded, color: color, size: size);
+  }
 }

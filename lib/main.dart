@@ -495,49 +495,118 @@ class TimerHolm {
         }
         stopTracking(mobj.id);
       } else {
-        if (prev?.isRunning != d.isRunning && d.kind == TimerKind.timer) {
-          if (!d.isRunning) {
-            tt.completionTimer?.cancel();
-            tt.completionTimer = null;
-          } else {
-            // start the timer
-            tt.completionTimer?.cancel();
-            tt.completionTimer = async.Timer(
-                Duration(
-                    milliseconds:
-                        (d.duration - DateTime.now().difference(d.startTime))
+        if (prev?.isRunning != d.isRunning) {
+          switch (d.kind) {
+            case TimerKind.timer:
+              if (!d.isRunning) {
+                tt.completionTimer?.cancel();
+                tt.completionTimer = null;
+                // consider stopping all timercules this is part of
+                MobjID? parentId = d.parentId;
+                while (true) {
+                  if (parentId == null) {
+                    break;
+                  }
+                  final parent =
+                      Mobj.seekTypedAlreadyLoaded(parentId, TimerDataType());
+                  if (parent == null) {
+                    break;
+                  }
+                  if (parent.peek()!.kind == TimerKind.parallel) {
+                    // then it may pause depending on how the siblings are
+                    if (!parent.peek()!.children.any((id) =>
+                        Mobj.getAlreadyLoaded(id, TimerDataType())
+                            .peek()!
+                            .isRunning)) {
+                      parent.value = parent
+                          .peek()!
+                          .withChanges(runningState: d.runningState);
+                    }
+                  } else {
+                    //then it should pause
+                    parent.value = parent
+                        .peek()!
+                        .withChanges(runningState: d.runningState);
+                  }
+                  parentId = parent.peek()!.parentId;
+                }
+              } else {
+                // start the timer
+                tt.completionTimer?.cancel();
+                tt.completionTimer = async.Timer(
+                    Duration(
+                        milliseconds: (d.duration -
+                                DateTime.now().difference(d.startTime))
                             .inMilliseconds
                             .ceil()), () {
-              _timerGoesOff(tt, mobj);
-            });
+                  _timerGoesOff(tt, mobj);
+                });
 
-            // stop all other timers that share a timercule with this one
-            // find the root ancestor
-            Mobj<TimerData> parent = mobj;
-            while (true) {
-              Mobj<TimerData>? nextParent = Mobj.seekTypedAlreadyLoaded(
-                  parent.peek()!.parentId!, TimerDataType());
-              if (nextParent == null) {
-                break;
-              }
-              parent = nextParent;
-            }
-            if (parent.id != mobj.id) {
-              // recurse over all descendents of the ancestor
-              void pauseAllDescendents(Mobj<TimerData> v) {
-                if (v.id == mobj.id) {
-                  return;
+                // stop all other timers that share a timercule with this one
+                // find the root ancestor
+                Mobj<TimerData> parent = mobj;
+                while (true) {
+                  Mobj<TimerData>? nextParent = Mobj.seekTypedAlreadyLoaded(
+                      parent.peek()!.parentId!, TimerDataType());
+                  if (nextParent == null) {
+                    break;
+                  }
+                  parent = nextParent;
                 }
-                v.value = v.peek()!.withChanges(
-                    runningState: TimerData.paused, ranTime: Duration.zero);
-                for (final childId in v.peek()!.children) {
+                if (parent.id != mobj.id) {
+                  // recurse over all descendents of the ancestor
+                  void pauseAllDescendents(Mobj<TimerData> v) {
+                    if (v.id == mobj.id) {
+                      return;
+                    }
+                    v.value = v.peek()!.withChanges(
+                        runningState: TimerData.paused, ranTime: Duration.zero);
+                    for (final childId in v.peek()!.children) {
+                      final child =
+                          Mobj.getAlreadyLoaded(childId, TimerDataType());
+                      pauseAllDescendents(child);
+                    }
+                  }
+                  // but also make sure that each ancestor is running
+                  // we face a real conceptual problem here, setting them running will cause them to run the first child, which will then cause this child to stop. We need a sense of direction of dataflow.
+
+                  pauseAllDescendents(parent);
+                }
+              }
+            // loop and series are the same here because the difference between them only occurs at the end, which is handled by the end timer
+            case TimerKind.loop:
+            case TimerKind.series:
+              if (d.isRunning) {
+                // find the first paused timer, and resume it. If there are none, start the first child timer
+                if (d.children.isEmpty) {
+                  break;
+                }
+                MobjID<TimerData> childToStart = d.children.first;
+                for (final childId in d.children) {
                   final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
-                  pauseAllDescendents(child);
+                  if (child.peek()!.isPaused) {
+                    childToStart = childId;
+                  }
+                }
+                final child =
+                    Mobj.getAlreadyLoaded(childToStart, TimerDataType());
+                child.value = child.peek()!.toggleRunning(reset: false);
+              } else if (d.isPaused) {
+                // pause all child timers
+                for (final childId in d.children) {
+                  final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+                  child.value = child.peek()!.toggleRunning(reset: true);
                 }
               }
-
-              pauseAllDescendents(parent);
-            }
+            case TimerKind.parallel:
+              // start all child timers
+              if (d.isRunning) {
+                for (final childId in d.children) {
+                  final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+                  child.value = child.peek()!.toggleRunning(reset: false);
+                }
+              }
+            default:
           }
         }
       }
@@ -1146,6 +1215,7 @@ class TimerState extends TimerBaseState<Timer> {
 
   @override
   void onInitState() {
+    print("init timer");
     _runningAnimation = AnimationController(
         duration: const Duration(milliseconds: 80), vsync: this);
     _slideActivateBounceAnimation = AnimationController(
@@ -1208,7 +1278,9 @@ class TimerState extends TimerBaseState<Timer> {
       _completedRecentlyAnimation.forward(from: 0);
     }
     // if we're just initializing for the first time and it didn't complete recently/has been acknowledged, don't run the acknowledgement animation
-    if (prev == null && !d.completedRecently) {
+    if (prev == null &&
+        d.runningState == TimerData.completed &&
+        !d.completedRecently) {
       _completedRecentlyAnimation.value = 1;
     }
     moveAnimationTowardsState(_selectedUnderlineAnimation, d.selected);
@@ -1546,16 +1618,8 @@ class TimerculeState extends TimerBaseState<Timercule> {
     final theme = Theme.of(context);
     final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
     final depth = watchSignal(context, this.depth);
-    final depthi = depth.floor();
-    final depthp = (depth - depthi) % 1;
     final mt = MakoThemeData.fromContext(context);
-    final highlightLevels = [
-      mt.foreBackColor,
-      mt.harderForeIndentColor,
-    ];
-    final firstColor = highlightLevels[depthi % highlightLevels.length];
-    final secondColor = highlightLevels[(depthi + 1) % highlightLevels.length];
-    final backgroundColor = lerpColor(firstColor, secondColor, depthp);
+    final backgroundColor = mt.timerculeHighlightBackground(depth);
     final buttonSpan = watchSignal(
         context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
     final cornerRadius = backingCornerRounding * buttonSpan;
@@ -1605,18 +1669,25 @@ class TimerculeState extends TimerBaseState<Timercule> {
       );
     }
 
-    final handleWidth = timerHeight / 4;
     Widget handle = Container(
       constraints: BoxConstraints(
-          minWidth: handleWidth,
-          minHeight: timerHeight,
+          minWidth: timerHeight * 0.7,
+          minHeight: timerHeight + timerGap,
           maxWidth: timerHeight * 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(5),
       ),
-      child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: titleWidget ?? const SizedBox.shrink()),
+      child: Stack(
+        children: [
+          Positioned.fill(
+              child: Center(
+                  child: timerKindIcon(d.kind,
+                      color: mt.timerculeHighlightBackground(depth + 1)))),
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+              child: titleWidget ?? const SizedBox.shrink()),
+        ],
+      ),
     );
 
     Widget tail = Container(
@@ -2431,19 +2502,52 @@ class TimerScreenState extends State<TimerScreen>
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
   /// we should probably persist this... but it doesn't matter much.
   late Signal<String> actionMode = Signal('play');
+  double hexAngleFor(int i) {
+    // with an epsilon on the first one to make sure the label goes to the left
+    final lumpNudge = pi / 3 * 0.24;
+    final lumpBase = -(pi / 2 + pi / 3 + lumpNudge);
+    final lumpEnd = -pi / 2 - pi;
+    double splay(int i) => lumpBase + (i - 1) * (lumpEnd - lumpBase) / 2;
+    switch (i) {
+      case 0:
+        return -pi / 2 - 0.001;
+      case 1:
+        return splay(1);
+      case 2:
+        return splay(2);
+      case 3:
+        return splay(3);
+      default:
+        throw Exception('Invalid index $i');
+    }
+  }
+
+  static const Size dragActionRingIconSize = Size.square(26);
   late final specialTimerCreateDragRingController = DragActionRingController(
     radialActivatorFunctions: [
       addNewStopwatch,
       () => addNewCompositeTimer(TimerKind.loop),
+      () => addNewCompositeTimer(TimerKind.series),
+      () => addNewCompositeTimer(TimerKind.parallel),
     ],
-    radialActivatorPositions: [
-      // with an epsilon to make sure the label goes to the left
-      -pi / 2 - 0.001,
-      -pi
-    ],
+    radialActivatorPositions: List.generate(4, hexAngleFor),
     radialActivatorIcons: [
       Icon(Icons.square_rounded),
-      Icon(Icons.loop_rounded)
+      Builder(
+          builder: (context) => CustomPaint(
+              size: dragActionRingIconSize,
+              painter: TimerculeCyclePainter(
+                  color: Theme.of(context).colorScheme.onPrimary))),
+      Builder(
+          builder: (context) => CustomPaint(
+              size: dragActionRingIconSize,
+              painter: TimerculeSerialPainter(
+                  color: Theme.of(context).colorScheme.onPrimary))),
+      Builder(
+          builder: (context) => CustomPaint(
+              size: dragActionRingIconSize,
+              painter: TimerculeParallelPainter(
+                  color: Theme.of(context).colorScheme.onPrimary))),
     ],
   );
   late final StreamController<void> modeActivationPulse =
