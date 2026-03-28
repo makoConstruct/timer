@@ -470,6 +470,7 @@ class TimerHolm {
   }
 
   /// how each timer is subscribed to and responded to, imbued with spirit and voice
+  /// I'm not sure how I really feel about this approach, where everything is reactions. There are many situations where we had to fully understand how this reaction converges with itself when it causes reactions in the process of doing its thing. Yet, there was always a way to make it converge.
   void Function() enlivenTimer(
       TimerTrack tt, Mobj<TimerData> mobj, JukeBox jukeBox) {
     // once null always null
@@ -498,10 +499,11 @@ class TimerHolm {
         if (prev?.isRunning != d.isRunning) {
           switch (d.kind) {
             case TimerKind.timer:
+              // delete most of this, this should be handled by the thing that triggers the change in state, since it needs to propagate in one direction or another, without stepping on itself, which may be possible with effects, but effects make it less clear what's happening
               if (!d.isRunning) {
                 tt.completionTimer?.cancel();
                 tt.completionTimer = null;
-                // consider stopping all timercules this is part of
+                // consider stopping any timercule this is a part of
                 MobjID? parentId = d.parentId;
                 while (true) {
                   if (parentId == null) {
@@ -973,6 +975,8 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   /// called after base animations are initialized, before the reactive effect is created
   void onInitState() {}
 
+  bool toggleRunning({bool reset = false});
+
   /// called by the reactive effect whenever timer data changes
   void onTimerDataChanged(TimerData d, TimerData? prev) {}
 
@@ -1035,6 +1039,11 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
       onTimerDataChanged(d, prev);
       previousValue = d;
+      // report selected status to TimerScreenState
+      if (d.selected && prev?.selected != d.selected) {
+        context.findAncestorStateOfType<TimerScreenState>()?.selectedTimerKey =
+            widget.key as GlobalKey;
+      }
     });
   }
 
@@ -1123,12 +1132,10 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
           (next) => DraggableWidget<GlobalKey<TimerBaseState>>(
               data: widget.key as GlobalKey<TimerBaseState>, child: next),
         (next) => GestureDetector(
-            onTap: widget.onTap ??
-                () {
-                  context
-                      .findAncestorStateOfType<TimerScreenState>()
-                      ?.takeActionOn(widget.mobj.id);
-                },
+            onTap: () {
+              context.findAncestorStateOfType<TimerScreenState>()?.takeActionOn(
+                  widget.mobj.id, widget.key as GlobalKey<TimerBaseState>);
+            },
             behavior: HitTestBehavior.opaque,
             child: next),
       ],
@@ -1143,7 +1150,6 @@ class Timer extends TimerBase {
     super.key,
     required super.mobj,
     super.animateIn = true,
-    super.onTap,
   }) {
     assert(!mobj.peek()!.isComposite,
         "For composite timers, use a Timercule rather than a Timer");
@@ -1253,6 +1259,66 @@ class TimerState extends TimerBaseState<Timer> {
       currentTime = nd;
       // we don't set the timer off/change its state, enlivenTimer bindings do that
     });
+  }
+
+  @override
+  bool toggleRunning({bool reset = false}) {
+    // you may have to update parent timercules
+    bool wasRunning = p.isRunning;
+    bool nowRunning = !wasRunning;
+    widget.mobj.value = p.toggleRunning(reset: reset);
+    if (nowRunning) {
+      // then it just flags everything above as running
+      TimerBaseState cur = this;
+      while (true) {
+        final parent = cur.context.findAncestorStateOfType<TimerBaseState>();
+        if (parent == null) {
+          break;
+        }
+        final pp = parent.widget.mobj.peek();
+        if (pp != null && !pp.isRunning) {
+          parent.widget.mobj.value = pp.toggleRunning(reset: false);
+        }
+        cur = parent;
+      }
+    } else {
+      TimerBaseState cur = this;
+      while (true) {
+        final parent = cur.context.findAncestorStateOfType<TimerBaseState>();
+        if (parent == null) {
+          break;
+        }
+        final pp = parent.widget.mobj.peek();
+        if (pp == null) {
+          break;
+        }
+        // we can assume that only one child is running at a time in any non-parallel parent
+        switch (pp.kind) {
+          case TimerKind.loop:
+          case TimerKind.series:
+            if (pp.isRunning) {
+              parent.widget.mobj.value = pp.toggleRunning(reset: false);
+            }
+          case TimerKind.parallel:
+            if (pp.isRunning) {
+              if (!pp.children.any((id) =>
+                  Mobj.getAlreadyLoaded(id, TimerDataType())
+                      .peek()!
+                      .isRunning)) {
+                parent.widget.mobj.value = pp.toggleRunning(reset: false);
+              } else {
+                // if this timer stays running then its parents should also keep running, so break.
+                break;
+              }
+            }
+          default:
+            throw StateError(
+                "parent timercule kind ${pp.kind} shouldn't appear in a non-composite timer");
+        }
+        cur = parent;
+      }
+    }
+    return nowRunning;
   }
 
   @override
@@ -1574,7 +1640,6 @@ class Timercule extends TimerBase {
     super.key,
     required super.mobj,
     super.animateIn = true,
-    super.onTap,
   });
 
   @override
@@ -1592,6 +1657,35 @@ class TimerculeState extends TimerBaseState<Timercule> {
 
   late final Signal<double> depth = Signal(0.0);
   void Function()? _parentDepthDispose;
+
+  @override
+  bool toggleRunning({bool reset = false}) {
+    bool wasRunning = p.isRunning;
+    bool nowRunning = !wasRunning;
+    widget.mobj.value = p.toggleRunning(reset: reset);
+    // this may have impacts on its family
+    if (p.children.isNotEmpty) {
+      if (nowRunning) {
+        // start the first child
+        Mobj.getAlreadyLoaded(p.children.first, TimerDataType()).value =
+            Mobj.getAlreadyLoaded(p.children.first, TimerDataType())
+                .peek()!
+                .toggleRunning(reset: false);
+      } else {
+        // pause all children
+        _ensureChildWidgetsFresh(p);
+        for (final childId in p.children) {
+          final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+          if (child.peek()!.isRunning) {
+            ((_childWidgets[childId]?.key as GlobalKey).currentState
+                    as TimerBaseState)
+                .toggleRunning(reset: reset);
+          }
+        }
+      }
+    }
+    return nowRunning;
+  }
 
   void _subscribeToParentDepth() {
     _parentDepthDispose?.call();
@@ -1612,18 +1706,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
     _subscribeToParentDepth();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final d = watchSignal(context, widget.mobj) ?? previousValue!;
-    final theme = Theme.of(context);
-    final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
-    final depth = watchSignal(context, this.depth);
-    final mt = MakoThemeData.fromContext(context);
-    final backgroundColor = mt.timerculeHighlightBackground(depth);
-    final buttonSpan = watchSignal(
-        context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
-    final cornerRadius = backingCornerRounding * buttonSpan;
-
+  _ensureChildWidgetsFresh(TimerData d) {
     if (_prevChildren != d.children) {
       Map<String, TimerBase> newMap = {};
       for (final childId in d.children) {
@@ -1644,7 +1727,20 @@ class TimerculeState extends TimerBaseState<Timercule> {
       }
       _childWidgets = newMap;
     }
+  }
 
+  @override
+  Widget build(BuildContext context) {
+    final d = watchSignal(context, widget.mobj) ?? previousValue!;
+    final theme = Theme.of(context);
+    final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
+    final depth = watchSignal(context, this.depth);
+    final mt = MakoThemeData.fromContext(context);
+    final backgroundColor = mt.timerculeHighlightBackground(depth);
+    final buttonSpan = watchSignal(
+        context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
+    final cornerRadius = backingCornerRounding * buttonSpan;
+    _ensureChildWidgetsFresh(d);
     Widget? titleWidget;
     if (d.title != null || _titleEditMode) {
       titleWidget = Padding(
@@ -2436,7 +2532,8 @@ class DragActionRingState extends State<DragActionRing>
 
 class TimerScreenState extends State<TimerScreen>
     with SignalsMixin, TickerProviderStateMixin {
-  late final Signal<MobjID<TimerData>?> selectedTimer = Signal(null);
+  late final Signal<MobjID?> selectedTimer = Signal(null);
+  GlobalKey? selectedTimerKey;
   late final EffectCleanup watchingForUnselection;
   late final Computed<TimerWidgets> timerWidgets;
   late final Mobj<bool> isRightHandedMobj =
@@ -2763,7 +2860,8 @@ class TimerScreenState extends State<TimerScreen>
         });
   }
 
-  void takeActionOn(MobjID<TimerData> timerID) {
+  void takeActionOn(
+      MobjID<TimerData> timerID, GlobalKey<TimerBaseState> timerKey) {
     String mode = actionMode.peek();
     if (mode == 'pin') {
       togglePin(timerID);
@@ -2771,7 +2869,7 @@ class TimerScreenState extends State<TimerScreen>
       deleteTimer(timerID);
     } else {
       mode = 'play';
-      toggleRunning(timerID, reset: false);
+      toggleRunning(timerKey, reset: false);
     }
     modeActivationPulse.add(null);
     _selectTimer(null);
@@ -3370,33 +3468,15 @@ class TimerScreenState extends State<TimerScreen>
         ));
   }
 
-  void toggleStopPlay() {
-    final p = selectedOrLastTimerState();
-    if (p != null) {
-      toggleRunningOnMobj(p, reset: true);
-    }
-  }
-
-  bool toggleRunning(MobjID timer, {bool reset = false}) {
-    final mt = Mobj.getAlreadyLoaded(timer, TimerDataType());
-    return toggleRunningOnMobj(mt, reset: reset);
-  }
-
-  bool toggleRunningOnMobj(Mobj<TimerData> timer, {bool reset = false}) {
-    bool wasRunning = timer.peek()!.isRunning;
-    timer.value = timer.peek()!.toggleRunning(reset: reset);
-    return !wasRunning;
+  bool toggleRunning(GlobalKey timerKey, {bool reset = false}) {
+    return (timerKey.currentState as TimerBaseState)
+        .toggleRunning(reset: reset);
   }
 
   void pausePlaySelected({bool reset = false}) {
     if (selectedTimer.peek() != null) {
-      if (toggleRunning(selectedTimer.peek()!, reset: reset)) {
+      if (toggleRunning(selectedTimerKey!, reset: reset)) {
         _selectTimer(null);
-      }
-    } else {
-      final last = timers().lastOrNull;
-      if (last != null) {
-        toggleRunning(last, reset: reset);
       }
     }
   }
