@@ -3661,7 +3661,7 @@ class DragActionRingController {
   void onPanUpdate(BuildContext context, Offset p) {
     Offset dp = p - _startDrag;
     if (!dragActionRingDisabled) {
-      if (dp.distance > Thumbspan.of(context) * 0.34) {
+      if (dp.distance > Thumbspan.of(context) * 0.3) {
         bool isRightHanded =
             Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).peek()!;
         final rectifiedActivatorPositions = isRightHanded

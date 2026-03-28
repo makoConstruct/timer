@@ -965,7 +965,7 @@ Text formatTimeWithTimeLevel(List<int> digits,
               top: -4,
               right: 0,
               child: Text(datetimeMaximaInitial[highestLevel],
-                  style: TextStyle(fontSize: 9)))
+                  style: TextStyle(fontSize: 7)))
         ]),
       )));
     }
