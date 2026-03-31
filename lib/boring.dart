@@ -213,7 +213,7 @@ double totalDuration(TimerData d) {
       }
     }
     return sum;
-  } else if (d.kind == TimerKind.parallel) {
+  } else if (d.kind == TimerKind.parallelStartJustified) {
     if (d.children.isEmpty) {
       return 0;
     }
@@ -1184,6 +1184,19 @@ double durationToSeconds(Duration v) {
 Duration secondsToDuration(double v) {
   return Duration(microseconds: (v * 1000000).toInt());
 }
+
+Duration? maxRemainingDurationOfList(List<Duration?> durations) {
+  Duration max = Duration.zero;
+  for (final duration in durations) {
+    if (duration == null) continue;
+    if (duration > max) {
+      max = duration;
+    }
+  }
+  return max;
+}
+
+Duration maxDuration(Duration a, Duration b) => a > b ? a : b;
 
 /// the number of logical pixels per degree, like, from the user's eye, a degree over from the center of the screen, the number of pixels that would be in that arc. This is *the* salient metric for deciding how big to make things, logical pixels are *supposed* to track along with it, but they're actually wildly inaccurate so we might want a better metric at some point.
 double lpixPerDegree(BuildContext context) {
@@ -2872,7 +2885,7 @@ class MakoThemeData {
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
             harderForeIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.018),
+                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.06),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
           );
@@ -3301,7 +3314,8 @@ void timerculeIconScaling(Canvas canvas, Size size) {
 }
 
 class TimerculeParallelPainter extends CustomPainter {
-  TimerculeParallelPainter({this.color = Colors.black});
+  final bool? rightJustified;
+  TimerculeParallelPainter({this.color = Colors.black, this.rightJustified});
 
   final Color color;
 
@@ -3312,19 +3326,26 @@ class TimerculeParallelPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final contentH = 2 * timerculeRectHeight + timerculeGap;
+    final topWidth = rightJustified == null
+        ? timerculeRectWidth
+        : timerculeRectHeight * 2 + timerculeGap;
+    final bottomWidth = rightJustified == null ? topWidth : timerculeRectHeight;
+    final bottomOffset = (rightJustified == null || !rightJustified!)
+        ? -topWidth / 2
+        : topWidth / 2 - bottomWidth;
 
     timerculeIconScaling(canvas, size);
     canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTWH(-timerculeRectWidth / 2, -contentH / 2,
-              timerculeRectWidth, timerculeRectHeight),
+          Rect.fromLTWH(
+              -topWidth / 2, -contentH / 2, topWidth, timerculeRectHeight),
           Radius.circular(timerculeCornerRadius),
         ),
         paint);
     canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTWH(-timerculeRectWidth / 2, timerculeGap / 2,
-              timerculeRectWidth, timerculeRectHeight),
+          Rect.fromLTWH(
+              bottomOffset, timerculeGap / 2, bottomWidth, timerculeRectHeight),
           Radius.circular(timerculeCornerRadius),
         ),
         paint);
@@ -3414,10 +3435,16 @@ Widget timerKindIcon(TimerKind kind,
       return CustomPaint(
           size: Size(size, size),
           painter: TimerculeSerialPainter(color: color));
-    case TimerKind.parallel:
+    case TimerKind.parallelStartJustified:
       return CustomPaint(
           size: Size(size, size),
-          painter: TimerculeParallelPainter(color: color));
+          painter:
+              TimerculeParallelPainter(color: color, rightJustified: false));
+    case TimerKind.parallelEndJustified:
+      return CustomPaint(
+          size: Size(size, size),
+          painter:
+              TimerculeParallelPainter(color: color, rightJustified: true));
     case TimerKind.stopwatch:
       return Icon(Icons.square_rounded, color: color, size: size);
     case TimerKind.timer:

@@ -32,7 +32,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   provider: ^6.1.4
   nb_utils: ^7.1.4
-  animated_to: ^0.4.0
+  animated_to: ^0.8.1
   springster: any #tracking animated_to's springster dependency
   improved_wrap: ^1.1.1
   # animated_containers: ^1.2.0

@@ -10,7 +10,8 @@ enum TimerKind {
   stopwatch,
   loop,
   series,
-  parallel,
+  parallelStartJustified,
+  parallelEndJustified
 }
 
 class TimerData {
@@ -25,7 +26,8 @@ class TimerData {
   bool get isComposite =>
       kind == TimerKind.loop ||
       kind == TimerKind.series ||
-      kind == TimerKind.parallel;
+      kind == TimerKind.parallelStartJustified ||
+      kind == TimerKind.parallelEndJustified;
   static const paused = 0;
   static const running = 1;
   static const completed = 2;
@@ -133,9 +135,10 @@ class TimerData {
     );
   }
 
-  TimerData toggleRunning({required bool reset}) => isRunning
+  TimerData toggleRunning({Duration? delay, required bool reset}) => isRunning
       ? reset
-          ? withChanges(runningState: TimerData.paused, ranTime: Duration.zero)
+          ? withChanges(
+              runningState: TimerData.completed, ranTime: Duration.zero)
           : withChanges(
               runningState: TimerData.paused,
               ranTime: DateTime.now().difference(startTime))
@@ -151,12 +154,54 @@ class TimerData {
               ? withChanges(
                   runningState: TimerData.running,
                   ranTime: Duration.zero,
-                  startTime: DateTime.now(),
+                  startTime: DateTime.now().add(delay ?? Duration.zero),
                   completedRecently: false)
               : withChanges(
                   runningState: TimerData.running,
                   ranTime: ranTime,
-                  startTime: DateTime.now().subtract(ranTime));
+                  startTime: DateTime.now()
+                      .add(delay ?? Duration.zero)
+                      .subtract(ranTime));
+}
+
+/// for cycles and stopwatches (which have infinite duration) we just return zero
+Duration? remainingTimerDuration(TimerData? d) {
+  if (d == null) return null;
+  switch (d.kind) {
+    case TimerKind.timer:
+      return d.duration -
+          (d.isRunning
+              ? maxDuration(
+                  Duration.zero, DateTime.now().difference(d.startTime))
+              : d.ranTime);
+    case TimerKind.loop:
+    case TimerKind.series:
+      Duration total = Duration.zero;
+      for (final childId in d.children) {
+        final child =
+            Mobj.seekAlreadyLoaded<TimerData>(childId, TimerDataType())?.peek();
+        if (child == null) return null;
+        final childDur = remainingTimerDuration(child);
+        if (childDur == null) return null;
+        total += childDur;
+      }
+      return total;
+    case TimerKind.parallelStartJustified:
+    case TimerKind.parallelEndJustified:
+      if (d.children.isEmpty) return null;
+      Duration maxDur = Duration.zero;
+      for (final childId in d.children) {
+        final child =
+            Mobj.seekAlreadyLoaded<TimerData>(childId, TimerDataType())?.peek();
+        if (child == null) return null;
+        final childDur = remainingTimerDuration(child);
+        if (childDur == null) return null;
+        if (childDur > maxDur) maxDur = childDur;
+      }
+      return maxDur;
+    case TimerKind.stopwatch:
+      return Duration.zero;
+  }
 }
 
 class TimerDataType extends TypeHelp<TimerData> {

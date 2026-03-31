@@ -28,7 +28,7 @@ import 'package:makos_timer/platform_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:makos_timer/background_service_stuff.dart';
-import 'package:makos_timer/boring.dart';
+import 'package:makos_timer/boring.dart' hide maxDuration;
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/crank_game.dart';
 import 'package:makos_timer/database.dart';
@@ -453,7 +453,8 @@ class TimerHolm {
         final nextMobj =
             Mobj.getAlreadyLoaded(parent.children[nextIdx], TimerDataType());
         toggleRunning(nextMobj, reset: false);
-      case TimerKind.parallel:
+      case TimerKind.parallelStartJustified:
+      case TimerKind.parallelEndJustified:
         final allCompleted = parent.children.every((id) =>
             Mobj.getAlreadyLoaded(id, TimerDataType()).peek()?.isCompleted ??
             false);
@@ -558,54 +559,118 @@ bool toggleRunning(Mobj<TimerData> mobj, {bool reset = false}) {
   return nowRunning;
 }
 
-void _startChildren(TimerData parent, {required bool reset}) {
-  switch (parent.kind) {
-    case TimerKind.loop:
-    case TimerKind.series:
-      int toStart = 0;
-      // if any of the timers are paused rather than completed, resume at that point in the chain.
-      for (int index = 0; index < parent.children.length; index++) {
-        final childId = parent.children[index];
-        if (!Mobj.getAlreadyLoaded(childId, TimerDataType()).peek()!.isPaused) {
-          toStart = index;
-          break;
-        }
-      }
-      _startSingle(
-          Mobj.getAlreadyLoaded(parent.children[toStart], TimerDataType()),
-          reset: false);
-    case TimerKind.parallel:
+void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
+  void parallelStartJustified() {
+    void startFresh() {
       for (final childId in parent.children) {
         final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
         if (!child.peek()!.isRunning) {
-          _startSingle(child, reset: reset);
+          _startSingle(child, reset: reset, delay: delay);
         }
       }
+    }
+
+    if (parent.isCompleted || reset) {
+      startFresh();
+    } else if (parent.isPaused) {
+      // then some of them aren't completed, so to continue, only restart those ones
+      bool somethingStarted = false;
+      for (final childId in parent.children) {
+        final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+        if (child.peek()!.runningState != TimerData.completed) {
+          _startSingle(child, reset: reset, delay: delay);
+          somethingStarted = true;
+        }
+      }
+      if (!somethingStarted) {
+        // it's paused, but nothing in it is paused, that shouldn't be possible, but we can repair it
+        startFresh();
+      }
+    }
+  }
+
+  switch (parent.kind) {
+    case TimerKind.loop:
+    case TimerKind.series:
+      // if any of the timers are paused rather than completed, resume at that point in the chain.
+      if (parent.isCompleted || reset) {
+        _startSingle(
+            Mobj.getAlreadyLoaded(parent.children.first, TimerDataType()),
+            reset: reset,
+            delay: delay);
+      } else if (parent.isPaused) {
+        int toStart = 0;
+        for (int index = 0; index < parent.children.length; index++) {
+          final childId = parent.children[index];
+          final c = Mobj.getAlreadyLoaded(childId, TimerDataType()).peek()!;
+          if (!c.isCompleted) {
+            toStart = index;
+            break;
+          }
+        }
+        _startSingle(
+            Mobj.getAlreadyLoaded(parent.children[toStart], TimerDataType()),
+            reset: reset,
+            delay: delay);
+      }
+    case TimerKind.parallelStartJustified:
+      parallelStartJustified();
+    case TimerKind.parallelEndJustified:
+      // determine the max duration of the children, and start subtimers with delays to pad.
+      if (parent.isCompleted || reset) {
+        List<Duration?> childDurations = parent.children
+            .map((childId) => remainingTimerDuration(
+                Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek()))
+            .toList();
+        final Duration? md = maxRemainingDurationOfList(childDurations);
+        if (md == null) {
+          // oh, maybe instead of this, it should run end-justified parallel just wrt the ones that have finite durations.
+          parallelStartJustified();
+        } else {
+          for (int i = 0; i < parent.children.length; i++) {
+            final d = childDurations[i];
+            final innerDelay = d == null
+                ? Duration.zero
+                : maxDuration(Duration.zero, md - d) + (delay ?? Duration.zero);
+            _startSingle(
+                Mobj.getAlreadyLoaded(parent.children[i], TimerDataType()),
+                reset: reset,
+                delay: innerDelay);
+          }
+        }
+      } else if (parent.isPaused) {
+        for (final childId in parent.children) {
+          final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+          if (!child.peek()!.isCompleted) {
+            _startSingle(child, reset: reset, delay: delay);
+          }
+        }
+      }
+
     default:
       break;
   }
 }
 
-void _startSingle(Mobj<TimerData> mobj, {required bool reset}) {
+void _startSingle(Mobj<TimerData> mobj,
+    {required bool reset, Duration? delay}) {
   final data = mobj.peek()!;
   if (data.isRunning) return;
-  mobj.value = data.toggleRunning(reset: reset);
+  mobj.value = data.toggleRunning(reset: reset, delay: delay);
   if (data.isComposite && data.children.isNotEmpty) {
-    _startChildren(data, reset: reset);
+    _startChildren(data, reset: reset, delay: delay);
   }
 }
 
 void _pauseRunningChildren(TimerData parent, {required bool reset}) {
   for (final childId in parent.children) {
-    final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
-    if (child.peek()!.isRunning) {
-      _pauseSingle(child, reset: reset);
-    }
+    _pauseSingle(Mobj.getAlreadyLoaded(childId, TimerDataType()), reset: reset);
   }
 }
 
 void _pauseSingle(Mobj<TimerData> mobj, {required bool reset}) {
   final data = mobj.peek()!;
+  // is this incorrect? if reset is on, shouldn't we go from paused to completed? Yes. It's not correct.
   if (!data.isRunning) return;
   mobj.value = data.toggleRunning(reset: reset);
   if (data.isComposite && data.children.isNotEmpty) {
@@ -633,11 +698,12 @@ void _pauseAncestorsIfNeeded(MobjID? parentId) {
   switch (pp.kind) {
     case TimerKind.loop:
     case TimerKind.series:
-      parentMobj.value = pp.toggleRunning(reset: false);
-    case TimerKind.parallel:
+      parentMobj.value = pp.toggleRunning(reset: true);
+      _pauseRunningChildren(pp, reset: true);
+    case TimerKind.parallelStartJustified:
       if (!pp.children.any((id) =>
           Mobj.getAlreadyLoaded(id, TimerDataType()).peek()!.isRunning)) {
-        parentMobj.value = pp.toggleRunning(reset: false);
+        parentMobj.value = pp.toggleRunning(reset: true);
       } else {
         return;
       }
@@ -1757,10 +1823,12 @@ class TimerculeState extends TimerBaseState<Timercule> {
                     minHeight: timerHeight,
                     minWidth: timerHeight,
                   ),
-                  child: IWrap(
-                      key: iWrapKey,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: childWidgets),
+                  child: AnimatedToBoundary(
+                    child: IWrap(
+                        key: iWrapKey,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: childWidgets),
+                  ),
                 )
               ],
             ),
@@ -2526,24 +2594,28 @@ class TimerScreenState extends State<TimerScreen>
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
   /// we should probably persist this... but it doesn't matter much.
   late Signal<String> actionMode = Signal('play');
-  double hexAngleFor(int i) {
-    // with an epsilon on the first one to make sure the label goes to the left
-    final lumpNudge = pi / 3 * 0.24;
-    final lumpBase = -(pi / 2 + pi / 3 + lumpNudge);
-    final lumpEnd = -pi / 2 - pi;
-    double splay(int i) => lumpBase + (i - 1) * (lumpEnd - lumpBase) / 2;
-    switch (i) {
-      case 0:
-        return -pi / 2 - 0.001;
-      case 1:
-        return splay(1);
-      case 2:
-        return splay(2);
-      case 3:
-        return splay(3);
-      default:
-        throw Exception('Invalid index $i');
-    }
+  double decAngleFor(int i) {
+    // position for when there were only 4
+    // // with an epsilon on the first one to make sure the label goes to the left
+    // final lumpNudge = pi / 3 * 0.24;
+    // final lumpBase = -(pi / 2 + pi / 3 + lumpNudge);
+    // final lumpEnd = -pi / 2 - pi;
+    // double splay(int i) => lumpBase + (i - 1) * (lumpEnd - lumpBase) / 2;
+    // switch (i) {
+    //   case 0:
+    //     return -pi / 2 - 0.001;
+    //   case 1:
+    //     return splay(1);
+    //   case 2:
+    //     return splay(2);
+    //   case 3:
+    //     return splay(3);
+    //   default:
+    //     throw Exception('Invalid index $i');
+    // }
+    final base = -pi / 2;
+    final s = pi / 4;
+    return base - s * i + (i == 0 ? -0.001 : 0);
   }
 
   static const Size dragActionRingIconSize = Size.square(26);
@@ -2552,9 +2624,10 @@ class TimerScreenState extends State<TimerScreen>
       addNewStopwatch,
       () => addNewCompositeTimer(TimerKind.loop),
       () => addNewCompositeTimer(TimerKind.series),
-      () => addNewCompositeTimer(TimerKind.parallel),
+      () => addNewCompositeTimer(TimerKind.parallelStartJustified),
+      () => addNewCompositeTimer(TimerKind.parallelEndJustified),
     ],
-    radialActivatorPositions: List.generate(4, hexAngleFor),
+    radialActivatorPositions: List.generate(5, decAngleFor),
     radialActivatorIcons: [
       Icon(Icons.square_rounded),
       Builder(
@@ -2571,7 +2644,14 @@ class TimerScreenState extends State<TimerScreen>
           builder: (context) => CustomPaint(
               size: dragActionRingIconSize,
               painter: TimerculeParallelPainter(
-                  color: Theme.of(context).colorScheme.onPrimary))),
+                  color: Theme.of(context).colorScheme.onPrimary,
+                  rightJustified: false))),
+      Builder(
+          builder: (context) => CustomPaint(
+              size: dragActionRingIconSize,
+              painter: TimerculeParallelPainter(
+                  color: Theme.of(context).colorScheme.onPrimary,
+                  rightJustified: true))),
     ],
   );
   late final StreamController<void> modeActivationPulse =
@@ -3555,9 +3635,13 @@ class TimerScreenState extends State<TimerScreen>
     final mobj = Mobj.getAlreadyLoaded(ki, TimerDataType());
     mobj.value = mobj.peek()!.withChanges(
         ranTime: Duration.zero,
-        runningState: TimerData.paused,
+        runningState: TimerData.completed,
         startTime: DateTime.now(),
         completedRecently: false);
+    // also reset children
+    for (final childId in mobj.peek()!.children) {
+      resetTimer(childId);
+    }
   }
 
   void removeTimer(MobjID ki) {
