@@ -3402,10 +3402,9 @@ class TimerculeCyclePainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
-    final innerR = timerculeGap / 2 * 3.65;
+    final innerR = timerculeGap / 2 * 3.8;
     final bottomThickness = timerculeGap * 1.1;
-    final outerR =
-        (bottomThickness + innerR * 2 + timerculeRectHeight * 0.8) / 2;
+    final outerR = (bottomThickness + innerR * 2 + timerculeRectHeight) / 2;
     final innerCenter = Offset(0, outerR - (bottomThickness + innerR));
 
     timerculeIconScaling(canvas, size);

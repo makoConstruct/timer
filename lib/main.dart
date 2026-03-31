@@ -1671,6 +1671,7 @@ class Timercule extends TimerBase {
 
 class TimerculeState extends TimerBaseState<Timercule> {
   final GlobalKey iWrapKey = GlobalKey();
+  final ValueNotifier<Size?> _handleSizeNotifier = ValueNotifier(null);
   @override
   TimerData get p => widget.mobj.peek()!;
 
@@ -1759,14 +1760,15 @@ class TimerculeState extends TimerBaseState<Timercule> {
       );
     }
 
-    Widget handle = Container(
-      constraints: BoxConstraints(
-          minWidth: timerHeight * 0.7,
-          minHeight: timerHeight + timerGap,
-          maxWidth: timerHeight * 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(5),
-      ),
+    Widget handleContainer({required Widget child}) => Container(
+          constraints: BoxConstraints(
+              minWidth: timerHeight * 0.7,
+              minHeight: timerHeight + timerGap,
+              maxWidth: timerHeight * 2),
+          child: child,
+        );
+
+    Widget handle = handleContainer(
       child: Stack(
         children: [
           Positioned.fill(
@@ -1781,20 +1783,12 @@ class TimerculeState extends TimerBaseState<Timercule> {
     );
 
     Widget tail = Container(
-      width: timerHeight * 0.2,
+      width: timerHeight * 0.3,
       height: timerHeight,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(5),
       ),
     );
-
-    List<Widget> childWidgets = [
-      handle,
-      ...d.children
-          .where(_childWidgets.containsKey)
-          .map<Widget>((id) => _childWidgets[id] as Widget),
-      tail
-    ];
 
     final content = buildShell(
         context,
@@ -1827,9 +1821,21 @@ class TimerculeState extends TimerBaseState<Timercule> {
                     child: IWrap(
                         key: iWrapKey,
                         crossAxisAlignment: WrapCrossAlignment.center,
-                        children: childWidgets),
+                        alignment: WrapAlignment.end,
+                        children: [
+                          SizeFollower(sizeNotifier: _handleSizeNotifier),
+                          ...d.children
+                              .where(_childWidgets.containsKey)
+                              .map<Widget>((id) => _childWidgets[id] as Widget),
+                          tail
+                        ]),
                   ),
-                )
+                ),
+                Positioned(
+                    top: 0,
+                    left: 0,
+                    child: SizeReporter(
+                        previousSize: _handleSizeNotifier, child: handle)),
               ],
             ),
           ),
@@ -1902,6 +1908,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
   void dispose() {
     _parentDepthDispose?.call();
     _childWidgets.clear();
+    _handleSizeNotifier.dispose();
     super.dispose();
   }
 }
