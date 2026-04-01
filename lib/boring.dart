@@ -15,6 +15,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/margin_shader_mask.dart';
 import 'package:makos_timer/mobj.dart';
+import 'package:makos_timer/size_reporter.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:screen_corner_radius/screen_corner_radius.dart';
@@ -454,6 +455,7 @@ DragAnchorStrategy dragAnchorStrategy(ValueNotifier<Offset> dragStartOffset) =>
 
 class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
     with TickerProviderStateMixin {
+  /// when it's positioned normally, it reports to this, when it's being dragged, it restricts size to this
   final previousSize = ValueNotifier<Size>(Size.zero);
   final dragStartOffset = ValueNotifier<Offset>(Offset.zero);
   late final AnimationController popAnimation;
@@ -470,45 +472,52 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
     return ValueListenableBuilder(
       valueListenable: dragStartOffset,
       builder: (context, offset, child) {
-        return ValueListenableBuilder(
-          valueListenable: previousSize,
-          builder: (context, size, child) {
-            return LongPressDraggable<T>(
-                delay: Duration(milliseconds: 180),
-                data: widget.data,
-                // this parameter isn't really supposed to do a mutation when called, but I don't know how else to get the touch point offset
-                dragAnchorStrategy: dragAnchorStrategy(dragStartOffset),
-                // the Material is a workaround for https://github.com/flutter/flutter/issues/39379
-                feedback: Material(
-                  color: Colors.transparent,
-                  child: AnimatedBuilder(
-                    animation: popAnimation,
-                    builder: (context, child) {
-                      return Transform.translate(
-                        offset: lerpOffset(
-                                -dragStartOffset.value,
-                                -sizeToOffset(previousSize.value / 2),
-                                popAnimation.value) +
-                            Offset(
-                                0,
-                                Curves.easeInOut.transform(popAnimation.value) *
-                                    20),
-                        child: widget.child,
-                      );
-                    },
-                  ),
-                ),
-                onDragStarted: () {
-                  previousSize.value = context.size ?? Size(30, 30);
-                  popAnimation.forward(from: 0);
-                },
-                // onDragEnd: (details) {
-                // },
-                childWhenDragging:
-                    SizedBox(width: size.width, height: size.height),
-                child: widget.child);
-          },
-        );
+        return LongPressDraggable<T>(
+            delay: Duration(milliseconds: 180),
+            data: widget.data,
+            // this parameter isn't really supposed to do a mutation when called, but I don't know how else to get the touch point offset
+            dragAnchorStrategy: dragAnchorStrategy(dragStartOffset),
+            // the Material is a workaround for https://github.com/flutter/flutter/issues/39379
+            feedback: ValueListenableBuilder(
+                valueListenable: previousSize,
+                builder: (context, psize, child) {
+                  return Material(
+                    color: Colors.transparent,
+                    child: AnimatedBuilder(
+                      animation: popAnimation,
+                      builder: (context, child) {
+                        return Transform.translate(
+                          offset: lerpOffset(
+                                  -dragStartOffset.value,
+                                  -sizeToOffset(psize / 2),
+                                  popAnimation.value) +
+                              Offset(
+                                  0,
+                                  Curves.easeInOut
+                                          .transform(popAnimation.value) *
+                                      20),
+                          child: child,
+                        );
+                      },
+                      child: SizedBox(
+                          width: psize.width,
+                          height: psize.height,
+                          child: widget.child),
+                    ),
+                  );
+                }),
+            onDragStarted: () {
+              popAnimation.forward(from: 0);
+            },
+            // onDragEnd: (details) {
+            // },
+            childWhenDragging: ValueListenableBuilder(
+                valueListenable: previousSize,
+                builder: (context, value, child) {
+                  return SizedBox(width: value.width, height: value.height);
+                }),
+            child:
+                SizeReporter(previousSize: previousSize, child: widget.child));
       },
     );
   }
