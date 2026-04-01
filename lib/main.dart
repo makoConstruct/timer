@@ -1995,12 +1995,12 @@ class TimerTray extends StatefulWidget {
   });
 
   @override
-  State<TimerTray> createState() => _TimerTrayState();
+  State<TimerTray> createState() => TimerTrayState();
 }
 
 typedef TimerWidgets = Map<MobjID<TimerData>, TimerBase>;
 
-class _TimerTrayState extends State<TimerTray> with SignalsMixin {
+class TimerTrayState extends State<TimerTray> with SignalsMixin {
   late final GlobalKey wrapKey;
 
   @override
@@ -2037,78 +2037,7 @@ class _TimerTrayState extends State<TimerTray> with SignalsMixin {
           ));
     });
 
-    return DragTarget<GlobalKey<TimerBaseState>>(
-      builder: (context, candidateData, rejectedData) => result,
-      onMove: (DragTargetDetails<GlobalKey<TimerBaseState>> details) {
-        // Could add visual feedback here if needed
-      },
-      onAcceptWithDetails: (details) {
-        final insertion = insertionOf(wrapKey, details.offset);
-        final tkey = details.data;
-        final timerId = (tkey.currentWidget! as TimerBase).mobj.id;
-        final currentIndex = p.indexWhere((t) => t == timerId);
-
-        final Mobj<TimerData> cm =
-            (details.data.currentWidget! as TimerBase).mobj;
-        doInsertion(int at) {
-          writeBackChildren(widget.mobj, p.toList()..insert(at, timerId));
-        }
-
-        //transaction start
-        if (cm.peek()!.parentId == null) {
-          doInsertion(insertion.midwayInsertionIndex());
-        } else {
-          final oldList = Mobj.seekTypedsAlreadyLoaded(
-              cm.peek()!.parentId!, [TimerDataType(), ListType(StringType())])!;
-          final oldChildren = childrenOf(oldList);
-          final oldIndex = oldChildren.indexOf(timerId);
-          simpleRemove() {
-            writeBackChildren(
-                oldList, oldChildren.toList()..removeAt(oldIndex));
-          }
-
-          if (cm.peek()!.parentId == widget.mobj.id) {
-            assert(currentIndex != -1,
-                "item wasn't found inside of its owningList");
-            if (insertion.index == currentIndex) {
-              // it's not a drag action, so open the right click menu
-              context
-                  .findAncestorStateOfType<TimerScreenState>()
-                  ?.openTimerMenu(context, details.data, timerId);
-            } else {
-              final (operative, at) =
-                  insertion.cleverInsertionIndexFor(currentIndex, p.length);
-              if (operative) {
-                widget.mobj.value = p.toList()
-                  ..insert(at, timerId)
-                  ..removeAt(
-                      currentIndex > at ? currentIndex + 1 : currentIndex);
-              }
-            }
-          } else {
-            doInsertion(insertion.midwayInsertionIndex());
-            simpleRemove();
-          }
-        }
-        cm.value = cm.peek()!.withChanges(parentId: widget.mobj.id);
-
-        bool noDuplicates<T>(List<T> v) {
-          for (int i = 0; i < v.length; ++i) {
-            for (int j = i + 1; j < v.length; ++j) {
-              if (v[i] == v[j]) {
-                return false;
-              }
-            }
-          }
-          return true;
-        }
-
-        assert(noDuplicates(p));
-
-        widget.onTimerDropped?.call(timerId);
-        //transaction end
-      },
-    );
+    return result;
   }
 }
 
@@ -2558,7 +2487,7 @@ class TimerScreenState extends State<TimerScreen>
   List<MobjID<TimerData>> timers() => timerListMobj.value!;
   List<MobjID<TimerData>> peekTimers() => timerListMobj.peek()!;
 
-  GlobalKey timerTrayKey = GlobalKey();
+  GlobalKey<TimerTrayState> timerTrayKey = GlobalKey<TimerTrayState>();
   GlobalKey pinButtonKey = GlobalKey();
   GlobalKey deleteButtonKey = GlobalKey();
   GlobalKey<SelfRemovalHostState> ephemeralAnimationLayer = GlobalKey();
@@ -3451,7 +3380,74 @@ class TimerScreenState extends State<TimerScreen>
                 _handleKeyPress(event);
                 return KeyEventResult.handled;
               },
-              child: child)
+              child: child),
+          // the dragtarget for the timer tray encompasses the entire TimerScreen so that you can drop above or below the widget to get above or below the top or bottom row. Otherwise, this can be difficult or impossible, which is a problem when you consider timercules, which unlike timers, can't be dragged after by dragging onto the second half
+          (child) => DragTarget<GlobalKey<TimerBaseState>>(
+              builder: (context, candidateData, rejectedData) => child,
+              onMove: (DragTargetDetails<GlobalKey<TimerBaseState>> details) {},
+              onAcceptWithDetails: (details) {
+                final wrapKey = timerTrayKey.currentState!.wrapKey;
+                final p = timerListMobj.peek()!;
+                final insertion = insertionOf(wrapKey, details.offset);
+                final timerId =
+                    (details.data.currentWidget! as TimerBase).mobj.id;
+                final currentIndex = p.indexWhere((t) => t == timerId);
+                final Mobj<TimerData> cm =
+                    (details.data.currentWidget! as TimerBase).mobj;
+                doInsertion(int at) {
+                  writeBackChildren(
+                      timerListMobj, p.toList()..insert(at, timerId));
+                }
+
+                //transaction start
+                if (cm.peek()!.parentId == null) {
+                  doInsertion(insertion.midwayInsertionIndex());
+                } else {
+                  final oldList = Mobj.seekTypedsAlreadyLoaded(
+                      cm.peek()!.parentId!,
+                      [TimerDataType(), ListType(StringType())])!;
+                  final oldChildren = childrenOf(oldList);
+                  final oldIndex = oldChildren.indexOf(timerId);
+                  simpleRemove() {
+                    writeBackChildren(
+                        oldList, oldChildren.toList()..removeAt(oldIndex));
+                  }
+
+                  if (cm.peek()!.parentId == timerListMobj.id) {
+                    assert(currentIndex != -1,
+                        "item wasn't found inside of its owningList");
+                    if (insertion.index == currentIndex) {
+                      openTimerMenu(context, details.data, timerId);
+                    } else {
+                      final (operative, at) = insertion.cleverInsertionIndexFor(
+                          currentIndex, p.length);
+                      if (operative) {
+                        timerListMobj.value = p.toList()
+                          ..insert(at, timerId)
+                          ..removeAt(currentIndex > at
+                              ? currentIndex + 1
+                              : currentIndex);
+                      }
+                    }
+                  } else {
+                    doInsertion(insertion.midwayInsertionIndex());
+                    simpleRemove();
+                  }
+                }
+                cm.value = cm.peek()!.withChanges(parentId: timerListMobj.id);
+
+                bool noDuplicates<T>(List<T> v) {
+                  for (int i = 0; i < v.length; ++i) {
+                    for (int j = i + 1; j < v.length; ++j) {
+                      if (v[i] == v[j]) return false;
+                    }
+                  }
+                  return true;
+                }
+
+                assert(noDuplicates(p));
+                //transaction end
+              }),
         ],
         SelfRemovalHost(
           key: ephemeralAnimationLayer,
