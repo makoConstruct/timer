@@ -1104,10 +1104,13 @@ Function() cancellableFutureThen<T>(Future<T> future, Function(T) then) {
 }
 
 /// where padLevel is the number of figures to include as 0 values if the duration isn't really that long
-List<int> durationToDigits(double d, {int padLevel = 1}) {
+/// isNegative just adds a second. I can't exactly explain why countdowns feel better with an extra second added, so that they end at 0 instead of lingering at a 0 for a second before triggering. I think it has something to do with rounding. Rounding down properly generally means negative numbers go more negative, rather than going towards zero, and if we did this without the added second the second place would be as if it were rounding up. Indeed, if this supported centiseconds, you'd want to add an extra centisecond instead of a second. But we shouldn't show centiseconds in any countdowns in practice, so we'll keep it crude like this.
+List<int> durationToDigits(double d,
+    {int padLevel = 1, bool isNegative = false}) {
   List<int> digits = [];
   bool started = false;
-  Duration dur = Duration(microseconds: (d * 1000000).toInt());
+  Duration dur =
+      Duration(microseconds: ((d + (isNegative ? 1 : 0)) * 1000000).toInt());
   int days = dur.inDays;
   // Years
   if (days >= 365 || padLevel > 4) {

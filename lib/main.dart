@@ -1385,11 +1385,13 @@ class TimerState extends TimerBaseState<Timer> {
 
     // final thumbSpan = Thumbspan.of(context);
 
-    final dd = durationToSeconds(digitsToDuration(d.digits));
-    // sometimes the background thread completes the timer, the currentTime wont be updated, so in that case it should be ignored.
-    double pieCompletion = d.transpired / dd;
+    final totalDuration = durationToSeconds(digitsToDuration(d.digits));
+    double dt = d.transpired;
+    double pieCompletion = dt / totalDuration;
     final durationDigits = d.digits;
-    final timeDigits = durationToDigits(d.transpired,
+    bool timeIsNegative = dt < 0;
+    final timeDigits = durationToDigits(dt.abs(),
+        isNegative: timeIsNegative,
         padLevel: padLevelFor(durationDigits.length));
 
     List<int> withDigitsReplacedWith(List<int> v, int d) =>
@@ -1429,21 +1431,27 @@ class TimerState extends TimerBaseState<Timer> {
     );
 
     Widget timeText(List<int> digits,
-        {int? centiseconds, bool withTimeLevel = false}) {
+        {int? centiseconds,
+        bool withTimeLevel = false,
+        bool isNegative = false}) {
       // adds a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
       Widget fmt(List<int> ds, int? cs, {bool maybeWithTimeLevel = false}) {
+        final Widget r;
         if (maybeWithTimeLevel && withTimeLevel) {
-          return boring.formatTimeWithTimeLevel(
+          r = boring.formatTimeWithTimeLevel(
             ds,
             padLevel: padLevelFor(ds.length),
             centiseconds: cs,
           );
         } else {
           final base = boring.formatTime(ds);
-          return Text(
+          r = Text(
               overflow: TextOverflow.clip,
               cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}');
         }
+        return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [if (isNegative) Text('-'), r]);
       }
 
       return Stack(
@@ -1477,7 +1485,8 @@ class TimerState extends TimerBaseState<Timer> {
                       Transform.scale(
                           alignment: Alignment.bottomLeft,
                           scale: lerp(0.6, 1, v),
-                          child: timeText(timeDigits)),
+                          child:
+                              timeText(timeDigits, isNegative: timeIsNegative)),
                       Transform.scale(
                           alignment: Alignment.topLeft,
                           scale: lerp(1, 0.6, v),
@@ -1514,13 +1523,14 @@ class TimerState extends TimerBaseState<Timer> {
             TimerKind.timer => Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  timeText(timeDigits),
+                  timeText(timeDigits, isNegative: timeIsNegative),
                   Text(' / '),
                   timeText(durationDigits, withTimeLevel: true),
                 ],
               ),
             TimerKind.stopwatch => timeText(timeDigits,
-                centiseconds: ((d.transpired % 1) * 100).toInt(),
+                centiseconds: ((dt % 1) * 100).toInt(),
+                isNegative: timeIsNegative,
                 withTimeLevel: true),
             _ => throw wrongTimerVariantError(d.kind),
           }
@@ -1535,7 +1545,8 @@ class TimerState extends TimerBaseState<Timer> {
             : switch (d.kind) {
                 TimerKind.timer => animatedTextPartForTimer,
                 TimerKind.stopwatch => timeText(timeDigits,
-                    centiseconds: ((d.transpired % 1) * 100).toInt(),
+                    centiseconds: ((dt % 1) * 100).toInt(),
+                    isNegative: timeIsNegative,
                     withTimeLevel: true),
                 _ => throw wrongTimerVariantError(d.kind),
               });
