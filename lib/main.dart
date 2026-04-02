@@ -839,7 +839,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         scaffoldMessengerKey: globalScaffoldMessengerKey,
         title: 'timer',
         theme: makeTheme(Brightness.light),
-        darkTheme: makeTheme(Brightness.dark),
+        // darkTheme: makeTheme(Brightness.dark),
+        darkTheme: makeTheme(Brightness.light),
         onGenerateRoute: (settings) {
           if (settings.name == '/') {
             return CircularRevealRoute(
@@ -891,22 +892,25 @@ class TimerMenu extends StatelessWidget {
   final double? estimatedWidth;
   final Animation<double> animation;
   static const double buttonHeight = 40;
+  final Color? backgroundColor;
   final double arrowHeight;
-  const TimerMenu(
-      {super.key,
-      this.estimatedWidth,
-      required this.timerID,
-      required this.centerOn,
-      required this.items,
-      required this.animation,
-      required this.arrowHeight});
-
+  const TimerMenu({
+    super.key,
+    this.estimatedWidth,
+    required this.timerID,
+    required this.centerOn,
+    required this.items,
+    required this.animation,
+    required this.arrowHeight,
+    this.backgroundColor,
+  });
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       const double margin = 12;
       final theme = Theme.of(context);
       final mt = MakoThemeData.fromTheme(theme);
+      final backgroundColor = this.backgroundColor ?? mt.foreBackColor;
       final buttonSpan =
           Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
       final arrowCenter = topLeftManhattanCenter(centerOn);
@@ -933,7 +937,7 @@ class TimerMenu extends StatelessWidget {
                   arrowHeight: arrowHeight,
                 ),
                 child: Container(
-                  color: mt.foreBackColor,
+                  color: backgroundColor,
                   child: Column(children: items.toList()),
                 ),
               ),
@@ -2710,14 +2714,15 @@ class TimerScreenState extends State<TimerScreen>
       final sv = selectedTimer.value;
       // clear selectedTimer if the selected timer is no longer selected
       if (sv != null) {
-        final svm = Mobj.getAlreadyLoaded(sv!, TimerDataType()).value;
+        final svm = Mobj.getAlreadyLoaded(sv, TimerDataType()).value;
         if (svm == null || svm.selected == false) {
           selectedTimer.value = null;
         }
       }
       // edit popover doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
+      // this is null excepting, understandably, you can't peek it, it was just deleted
       editPopoverAnimation.towards(sv != null &&
-          Mobj.getAlreadyLoaded(sv!, TimerDataType()).peek()!.kind !=
+          Mobj.getAlreadyLoaded(sv, TimerDataType()).peek()!.kind !=
               TimerKind.stopwatch &&
           (!isFirstPressForSelectedTimer.value ||
               currentlyPressingKey.value == 0));
@@ -2749,8 +2754,11 @@ class TimerScreenState extends State<TimerScreen>
     super.dispose();
   }
 
-  void openTimerMenu(BuildContext context, GlobalKey<TimerBaseState> timerKey,
-      MobjID<TimerData> timerID) {
+  void openTimerMenu(
+    BuildContext context,
+    GlobalKey<TimerBaseState> timerKey,
+    MobjID<TimerData> timerID,
+  ) {
     // final tm = Mobj.getAlreadyLoaded(timerID, TimerDataType());
     // final tmParent = Mobj.seekTypedsAlreadyLoaded(tm.peek()!.parentId!, [TimerDataType(), ListType(StringType())])!;
     // final indexInParent = childrenOf(tmParent).indexOf(timerID);
@@ -2763,13 +2771,25 @@ class TimerScreenState extends State<TimerScreen>
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
+    final backgroundColor = theme.brightness == Brightness.light
+        ? theme.colorScheme.primary
+        : mt.foreBackColor;
+    final foregroundColor = theme.brightness == Brightness.light
+        ? theme.colorScheme.onPrimary
+        : theme.colorScheme.onSurface;
+    final indentColor = theme.brightness == Brightness.light
+        ? theme.colorScheme.onPrimary.withValues(alpha: 0.14)
+        : mt.harderForeIndentColor;
     const double menuItemPadding = 8;
+    Color inkColor = TimerBaseState.backgroundColor(
+        Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!.hue);
     Widget menuItem(BuildContext context, bool isRightHanded, Widget icon,
         String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
       return InkButton(
-          backgroundColor: mt.foreBackColor,
-          inkColor: mt.inkColor,
+          backgroundColor: backgroundColor,
+          inkColor: inkColor.withValues(alpha: 0.6),
+          inkColorFaded: inkColor.withValues(alpha: 0.3),
           onTap: () {
             action();
             Navigator.of(context).pop();
@@ -2793,7 +2813,8 @@ class TimerScreenState extends State<TimerScreen>
                   Expanded(
                       child: Text(
                     label,
-                    style: theme.textTheme.bodyMedium,
+                    style: theme.textTheme.bodyMedium!
+                        .copyWith(color: foregroundColor),
                   )),
                   SizedBox(width: TimerMenu.buttonHeight * 0.2),
                 ]),
@@ -2822,29 +2843,38 @@ class TimerScreenState extends State<TimerScreen>
                   centerOn: p,
                   // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
                   estimatedWidth: totalVisibleMenuItemHeight,
+                  backgroundColor: backgroundColor,
                   animation: animation,
                   items: [
                     menuItem(
-                        context, isRightHanded, Icon(Icons.delete), 'Delete',
-                        () {
+                        context,
+                        isRightHanded,
+                        Icon(Icons.delete, color: foregroundColor),
+                        'Delete', () {
                       deleteTimer(timerID);
                     }, isFirst: true),
-                    SeparatorGradient(),
+                    SeparatorGradient(color: indentColor),
                     menuItem(
                         context,
                         isRightHanded,
                         Transform.rotate(
                             angle: -pi / 2,
-                            child: Icon(Icons.rotate_90_degrees_cw_rounded)),
+                            child: Icon(Icons.rotate_90_degrees_cw_rounded,
+                                color: foregroundColor)),
                         'Reset', () {
                       resetTimer(timerID);
                     }),
                     menuItem(
-                        context, isRightHanded, Icon(Icons.push_pin), 'Pin',
-                        () {
+                        context,
+                        isRightHanded,
+                        Icon(Icons.push_pin, color: foregroundColor),
+                        'Pin', () {
                       togglePin(timerID);
                     }),
-                    menuItem(context, isRightHanded, Icon(Icons.label_outline),
+                    menuItem(
+                        context,
+                        isRightHanded,
+                        Icon(Icons.label_outline, color: foregroundColor),
                         'Title', () {
                       final wk = timerWidgets[timerID]?.key
                           as GlobalKey<TimerBaseState>?;

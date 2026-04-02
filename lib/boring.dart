@@ -2470,6 +2470,7 @@ class InkButton extends StatefulWidget {
   final Duration fadeDuration;
   final double fuzzyEdgeWidth;
   final Color? inkColor;
+  final Color? inkColorFaded;
   final earlyFadeDuration = const Duration(milliseconds: 170);
   final BorderRadius? borderRadius;
   final Duration fadeDelay;
@@ -2482,6 +2483,7 @@ class InkButton extends StatefulWidget {
     this.fuzzyEdgeWidth = 12.0,
     this.backgroundColor,
     this.inkColor,
+    this.inkColorFaded,
     this.borderRadius,
     this.child,
     this.builder,
@@ -2509,8 +2511,10 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
       _wells.add(InkWelling(
         key: key,
         origin: touchPoint,
+        fadeColor: widget.inkColorFaded ??
+            (Theme.of(context).colorScheme.primary.withAlpha(40)),
         color: widget.inkColor ??
-            Theme.of(context).colorScheme.primary.withAlpha(60),
+            Theme.of(context).colorScheme.primary.withAlpha(40),
         fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
         borderRadius: widget.borderRadius,
         onFinished: () {
@@ -2527,10 +2531,7 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
           vsync: this,
           duration: widget.fadeDuration,
         ),
-        child: ColoredBox(
-            color: widget.inkColor ??
-                Theme.of(context).colorScheme.primary.withAlpha(60),
-            child: widget.builder?.call(context, true)),
+        child: widget.builder?.call(context, true),
       ));
     });
   }
@@ -2588,6 +2589,7 @@ class InkWelling extends StatefulWidget {
   final AnimationController bloomController;
   final AnimationController fadeController;
   final Widget? child;
+  final Color? fadeColor;
   final BorderRadius? borderRadius;
   final VoidCallback onFinished;
 
@@ -2597,6 +2599,7 @@ class InkWelling extends StatefulWidget {
     required this.color,
     this.fuzzyEdgeWidth = 12.0,
     this.borderRadius,
+    this.fadeColor,
     required this.onFinished,
     required this.bloomController,
     required this.fadeController,
@@ -2644,29 +2647,35 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  double colorFadep() {
+    return unlerpUnit(0.6, 1, widget.bloomController.value);
+  }
+
   @override
   Widget build(BuildContext context) {
-    Widget result = AnimatedBuilder(
+    return Positioned.fill(
+        child: AnimatedBuilder(
       animation:
           Listenable.merge([widget.bloomController, widget.fadeController]),
       builder: (context, child) {
+        final color = lerpColor(
+            widget.color, widget.fadeColor ?? widget.color, colorFadep());
+        print(color);
         return Opacity(
           opacity: (1.0 -
-              (lerp(0.6, 1, widget.fadeController.value) *
-                  Curves.easeIn.transform(
-                      unlerpUnit(0.6, 1, widget.bloomController.value)))),
+              (widget.fadeController.value *
+                  Curves.easeIn.transform(colorFadep()))),
           child: FuzzyCircleClip(
             progress: Curves.easeOutCubic
                 .transform(unlerpUnit(0, 0.5, widget.bloomController.value)),
             origin: widget.origin,
             fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
-            child: child!,
+            child: ColoredBox(color: color, child: child),
           ),
         );
       },
-      child: ColoredBox(color: widget.color, child: widget.child),
-    );
-    return Positioned.fill(child: result);
+      child: widget.child,
+    ));
   }
 }
 
