@@ -395,21 +395,18 @@ class TimerHolm {
     if (isBackgrounded.peek() && (d.persistentAlarm ?? persistentAlarmMode)) {
       // then it needs to send a notification and scream repeatedly until acknowledged
       jukeBox.playAudioLooping(audio);
-      mobj.value = d.withChanges(
-        runningState: TimerData.completed,
-        isGoingOff: true,
-        completedRecently: true,
-      );
+      mobj.value = d
+          .withRunningState(
+            TimerData.completed,
+          )
+          .withChanges(isGoingOff: true);
       tt.vibrationRepeatTimer?.cancel();
       tt.vibrationRepeatTimer = async.Timer.periodic(
           const Duration(seconds: 8), (_) => vibrateAlertOnce());
       _sendCompletionNotification(tt);
     } else {
       jukeBox.playAudio(audio);
-      mobj.value = d.withChanges(
-        runningState: TimerData.completed,
-        completedRecently: true,
-      );
+      mobj.value = d.withRunningState(TimerData.completed);
     }
     // actuate any parent timers
     returnAndContinueParent(mobj);
@@ -433,7 +430,7 @@ class TimerHolm {
         if (childIdx < parent.children.length - 1) {
           final nextMobj = Mobj.getAlreadyLoaded(
               parent.children[childIdx + 1], TimerDataType());
-          toggleRunning(nextMobj, reset: false);
+          startTimer(nextMobj, reset: false);
         } else {
           parentMobj.value = parent.withChanges(
             runningState: TimerData.completed,
@@ -453,7 +450,7 @@ class TimerHolm {
         }
         final nextMobj =
             Mobj.getAlreadyLoaded(parent.children[nextIdx], TimerDataType());
-        toggleRunning(nextMobj, reset: false);
+        startTimer(nextMobj, reset: false);
       case TimerKind.parallelStartJustified:
       case TimerKind.parallelEndJustified:
         final allCompleted = parent.children.every((id) =>
@@ -482,6 +479,7 @@ class TimerHolm {
     TimerData? prev;
     return effect(() {
       final TimerData? d = mobj.value;
+      print("enlivenTimer: $d");
       if (d == null) {
         // delete its children too if it has any
         if (prev?.isComposite ?? false) {
@@ -502,10 +500,7 @@ class TimerHolm {
           switch (d.kind) {
             case TimerKind.timer:
               // delete most of this, this should be handled by the thing that triggers the change in state, since it needs to propagate in one direction or another, without stepping on itself, which may be possible with effects, but effects make it less clear what's happening
-              if (!d.isRunning) {
-                tt.completionTimer?.cancel();
-                tt.completionTimer = null;
-              } else {
+              if (d.isRunning) {
                 // start the timer
                 tt.completionTimer?.cancel();
                 tt.completionTimer = async.Timer(
@@ -516,6 +511,9 @@ class TimerHolm {
                             .ceil()), () {
                   _timerGoesOff(tt, mobj);
                 });
+              } else {
+                tt.completionTimer?.cancel();
+                tt.completionTimer = null;
               }
             // tombstone: the reason timercule behaviors are handled by togglePlaying methods is that when we were handling them here, the reaction would get in its own way. Starting a timer in a timercule parent would also start the parent, which would then start the first child, and pause all others, which may then again cycle or something, I don't know, I don't think it did cycle, but things weren't working right, and it was hard to reason about a pure reactive approach, so I decided to just use methods.
             default:
@@ -569,10 +567,10 @@ void startTimer(Mobj<TimerData> mobj, {required bool reset, Duration? delay}) {
   mobj.value = d.withRunningState(TimerData.running, reset: reset);
 }
 
-void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
+void _startChildren(TimerData host, {required bool reset, Duration? delay}) {
   void parallelStartJustified() {
     void startFresh() {
-      for (final childId in parent.children) {
+      for (final childId in host.children) {
         final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
         if (!child.peek()!.isRunning) {
           _startSingle(child, reset: reset, delay: delay);
@@ -580,12 +578,12 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
       }
     }
 
-    if (parent.isCompleted || reset) {
+    if (host.isCompleted || reset) {
       startFresh();
-    } else if (parent.isPaused) {
+    } else if (host.isPaused) {
       // then some of them aren't completed, so to continue, only restart those ones
       bool somethingStarted = false;
-      for (final childId in parent.children) {
+      for (final childId in host.children) {
         final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
         if (child.peek()!.runningState != TimerData.completed) {
           _startSingle(child, reset: reset, delay: delay);
@@ -599,19 +597,19 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
     }
   }
 
-  switch (parent.kind) {
+  switch (host.kind) {
     case TimerKind.loop:
     case TimerKind.series:
       // if any of the timers are paused rather than completed, resume at that point in the chain.
-      if (parent.isCompleted || reset) {
+      if (host.isCompleted || reset) {
         _startSingle(
-            Mobj.getAlreadyLoaded(parent.children.first, TimerDataType()),
+            Mobj.getAlreadyLoaded(host.children.first, TimerDataType()),
             reset: reset,
             delay: delay);
-      } else if (parent.isPaused) {
+      } else if (host.isPaused) {
         int toStart = 0;
-        for (int index = 0; index < parent.children.length; index++) {
-          final childId = parent.children[index];
+        for (int index = 0; index < host.children.length; index++) {
+          final childId = host.children[index];
           final c = Mobj.getAlreadyLoaded(childId, TimerDataType()).peek()!;
           if (!c.isCompleted) {
             toStart = index;
@@ -619,7 +617,7 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
           }
         }
         _startSingle(
-            Mobj.getAlreadyLoaded(parent.children[toStart], TimerDataType()),
+            Mobj.getAlreadyLoaded(host.children[toStart], TimerDataType()),
             reset: reset,
             delay: delay);
       }
@@ -627,8 +625,8 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
       parallelStartJustified();
     case TimerKind.parallelEndJustified:
       // determine the max duration of the children, and start subtimers with delays to pad.
-      if (parent.isCompleted || reset) {
-        List<Duration?> childDurations = parent.children
+      if (host.isCompleted || reset) {
+        List<Duration?> childDurations = host.children
             .map((childId) => remainingTimerDuration(
                 Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek()))
             .toList();
@@ -637,20 +635,20 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
           // oh, maybe instead of this, it should run end-justified parallel just wrt the ones that have finite durations.
           parallelStartJustified();
         } else {
-          for (int i = 0; i < parent.children.length; i++) {
+          for (int i = 0; i < host.children.length; i++) {
             final d = childDurations[i];
             final innerDelay = d == null
                 ? Duration.zero
                 : maxDuration(Duration.zero, md - d) + (delay ?? Duration.zero);
             _startSingle(
-                Mobj.getAlreadyLoaded(parent.children[i], TimerDataType()),
+                Mobj.getAlreadyLoaded(host.children[i], TimerDataType()),
                 reset: reset,
                 delay: innerDelay);
           }
         }
-      } else if (parent.isPaused) {
+      } else if (host.isPaused) {
         bool somethingStarted = false;
-        for (final childId in parent.children) {
+        for (final childId in host.children) {
           final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
           if (!child.peek()!.isCompleted) {
             _startSingle(child, reset: reset, delay: delay);
@@ -659,7 +657,7 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
         }
         if (!somethingStarted) {
           // it's paused, but nothing in it is paused, that shouldn't be possible, but we can repair it
-          for (final childId in parent.children) {
+          for (final childId in host.children) {
             final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
             child.value =
                 child.peek()!.withRunningState(TimerData.paused, reset: reset);
@@ -1463,25 +1461,21 @@ class TimerState extends TimerBaseState<Timer> {
         bool isNegative = false}) {
       // adds a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
       Widget fmt(List<int> ds, int? cs, {bool maybeWithTimeLevel = false}) {
-        final Widget r;
         if (maybeWithTimeLevel && withTimeLevel) {
-          r = boring.formatTimeWithTimeLevel(
+          return boring.formatTimeWithTimeLevel(
             ds,
             padLevel: padLevelFor(ds.length),
             centiseconds: cs,
           );
-        } else {
-          final base = boring.formatTime(ds);
-          r = Text(
-              overflow: TextOverflow.clip,
-              cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}');
         }
-        return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [if (isNegative) Text('-'), r]);
+        final base = boring.formatTime(ds);
+        return Text(
+            overflow: TextOverflow.clip,
+            cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}');
       }
 
       return Stack(
+        clipBehavior: Clip.none,
         children: [
           Opacity(
               opacity: 0,
@@ -1490,6 +1484,16 @@ class TimerState extends TimerBaseState<Timer> {
                 centiseconds != null ? 0 : null,
               )),
           fmt(digits, centiseconds, maybeWithTimeLevel: true),
+          if (isNegative)
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FractionalTranslation(
+                  translation: const Offset(-1, 0),
+                  child: Text('-'),
+                ),
+              ),
+            ),
         ],
       );
     }
@@ -2810,6 +2814,7 @@ class TimerScreenState extends State<TimerScreen>
                   timerID: timerID,
                   arrowHeight: arrowHeight,
                   centerOn: p,
+                  // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
                   estimatedWidth: totalVisibleMenuItemHeight,
                   animation: animation,
                   items: [

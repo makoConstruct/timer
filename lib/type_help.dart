@@ -68,11 +68,10 @@ class TimerData {
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
-  double get transpired => runningState == TimerData.paused
-      ? durationToSeconds(ranTime)
-      : runningState == TimerData.running
-          ? timeSinceLastStartTime
-          : 0;
+  double get transpired =>
+      runningState == TimerData.paused || runningState == TimerData.completed
+          ? durationToSeconds(ranTime)
+          : timeSinceLastStartTime;
   double get timeSinceLastStartTime =>
       durationToSeconds(DateTime.now().difference(startTime));
 
@@ -149,7 +148,7 @@ class TimerData {
         return withChanges(
             runningState: TimerData.running,
             ranTime: Duration.zero,
-            startTime: (reset
+            startTime: ((reset || this.runningState == TimerData.completed)
                     ? DateTime.now()
                     : this.runningState == running
                         ? startTime
@@ -206,10 +205,12 @@ Duration? remainingTimerDuration(TimerData? d) {
   switch (d.kind) {
     case TimerKind.timer:
       return d.duration -
-          (d.isRunning
+          (d.runningState == TimerData.running
               ? maxDuration(
                   Duration.zero, DateTime.now().difference(d.startTime))
-              : d.ranTime);
+              : d.runningState == TimerData.paused
+                  ? d.ranTime
+                  : Duration.zero);
     case TimerKind.loop:
     case TimerKind.series:
       Duration total = Duration.zero;

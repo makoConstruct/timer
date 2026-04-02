@@ -3372,7 +3372,7 @@ class TimerculeParallelPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(TimerculeParallelPainter oldDelegate) =>
-      oldDelegate.color != color;
+      oldDelegate.color != color || oldDelegate.rightJustified != rightJustified;
 }
 
 class TimerculeSerialPainter extends CustomPainter {
