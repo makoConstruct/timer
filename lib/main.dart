@@ -416,6 +416,7 @@ class TimerHolm {
   }
 
   /// calls the next timer in the chain and such
+  /// it's kind of like the reverse of a program stack, like we're going to be creating a lot of unnecessary stack frames that don't mean anything and don't do anything on unwind. I considered rearranging this to use a more conventional interpreter structure but it just wasn't necessary.
   void returnAndContinueParent(Mobj<TimerData> childMobj) {
     final child = childMobj.peek();
     if (child?.parentId == null) return;
@@ -540,23 +541,32 @@ bool toggleRunning(Mobj<TimerData> mobj, {bool reset = false}) {
   final wasRunning = data.isRunning;
   final nowRunning = !wasRunning;
 
-  mobj.value = data.toggleRunning(reset: reset);
-
-  if (data.isComposite && data.children.isNotEmpty) {
-    if (nowRunning) {
-      _startChildren(data, reset: reset);
-    } else {
-      _pauseRunningChildren(data, reset: reset);
-    }
-  }
-
   if (nowRunning) {
-    _startAncestors(data.parentId);
+    startTimer(mobj, reset: reset);
   } else {
-    _pauseAncestorsIfNeeded(data.parentId);
+    pauseTimer(mobj, reset: reset);
   }
 
   return nowRunning;
+}
+
+void pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
+  final d = mobj.peek()!;
+  if (d.isComposite && d.children.isNotEmpty) {
+    _pauseRunningChildren(d, reset: reset);
+  }
+  _pauseAncestorsIfNeeded(d.parentId);
+
+  mobj.value = d.withRunningState(TimerData.paused, reset: reset);
+}
+
+void startTimer(Mobj<TimerData> mobj, {required bool reset, Duration? delay}) {
+  final d = mobj.peek()!;
+  if (d.isComposite && d.children.isNotEmpty) {
+    _startChildren(d, reset: reset, delay: delay);
+  }
+  _startAncestors(d.parentId);
+  mobj.value = d.withRunningState(TimerData.running, reset: reset);
 }
 
 void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
@@ -639,10 +649,20 @@ void _startChildren(TimerData parent, {required bool reset, Duration? delay}) {
           }
         }
       } else if (parent.isPaused) {
+        bool somethingStarted = false;
         for (final childId in parent.children) {
           final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
           if (!child.peek()!.isCompleted) {
             _startSingle(child, reset: reset, delay: delay);
+            somethingStarted = true;
+          }
+        }
+        if (!somethingStarted) {
+          // it's paused, but nothing in it is paused, that shouldn't be possible, but we can repair it
+          for (final childId in parent.children) {
+            final child = Mobj.getAlreadyLoaded(childId, TimerDataType());
+            child.value =
+                child.peek()!.withRunningState(TimerData.paused, reset: reset);
           }
         }
       }

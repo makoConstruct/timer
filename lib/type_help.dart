@@ -135,33 +135,69 @@ class TimerData {
     );
   }
 
-  TimerData toggleRunning({Duration? delay, required bool reset}) => isRunning
-      ? reset
-          ? withChanges(
-              runningState: TimerData.completed, ranTime: Duration.zero)
-          : withChanges(
-              runningState: TimerData.paused,
-              ranTime: DateTime.now().difference(startTime))
-      : reset
-          ? withChanges(
-              runningState: TimerData.running,
-              ranTime: Duration.zero,
-              startTime: DateTime.now(),
-              completedRecently: false)
-          :
-          // still resets if it was completed
-          runningState == TimerData.completed
-              ? withChanges(
-                  runningState: TimerData.running,
-                  ranTime: Duration.zero,
-                  startTime: DateTime.now().add(delay ?? Duration.zero),
-                  completedRecently: false)
-              : withChanges(
-                  runningState: TimerData.running,
-                  ranTime: ranTime,
-                  startTime: DateTime.now()
-                      .add(delay ?? Duration.zero)
-                      .subtract(ranTime));
+  /// also affects ranTime, startTime, completedRecently
+  TimerData withRunningState(int runningState,
+      {bool reset = false, Duration? delay}) {
+    switch (runningState) {
+      case TimerData.paused:
+        return withChanges(
+            runningState: TimerData.paused,
+            ranTime:
+                reset ? Duration.zero : DateTime.now().difference(startTime));
+      case TimerData.running:
+        // ranTime is just meant to be ignored while it's running though
+        return withChanges(
+            runningState: TimerData.running,
+            ranTime: Duration.zero,
+            startTime: (reset
+                    ? DateTime.now()
+                    : this.runningState == running
+                        ? startTime
+                        : (DateTime.now().subtract(ranTime)))
+                .add(delay ?? Duration.zero),
+            completedRecently: false);
+      case TimerData.completed:
+        return withChanges(
+            runningState: TimerData.completed,
+            ranTime: duration,
+            completedRecently: true);
+      default:
+        throw Exception('Invalid running state: $runningState');
+    }
+  }
+
+  TimerData toggleRunning({Duration? delay, required bool reset}) =>
+      withRunningState(isRunning ? TimerData.paused : TimerData.running,
+          reset: reset, delay: delay);
+
+  // [todo] confirm that the above reimplementation works and delete this
+  // TimerData toggleRunning({Duration? delay, required bool reset}) => isRunning
+  //     ? reset
+  //         ? withChanges(
+  //             runningState: TimerData.completed, ranTime: Duration.zero)
+  //         : withChanges(
+  //             runningState: TimerData.paused,
+  //             ranTime: DateTime.now().difference(startTime))
+  //     : reset
+  //         ? withChanges(
+  //             runningState: TimerData.running,
+  //             ranTime: Duration.zero,
+  //             startTime: DateTime.now(),
+  //             completedRecently: false)
+  //         :
+  //         // still resets if it was completed
+  //         runningState == TimerData.completed
+  //             ? withChanges(
+  //                 runningState: TimerData.running,
+  //                 ranTime: Duration.zero,
+  //                 startTime: DateTime.now().add(delay ?? Duration.zero),
+  //                 completedRecently: false)
+  //             : withChanges(
+  //                 runningState: TimerData.running,
+  //                 ranTime: ranTime,
+  //                 startTime: DateTime.now()
+  //                     .add(delay ?? Duration.zero)
+  //                     .subtract(ranTime));
 }
 
 /// for cycles and stopwatches (which have infinite duration) we just return zero

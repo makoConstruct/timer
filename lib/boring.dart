@@ -3331,6 +3331,13 @@ class TimerculeParallelPainter extends CustomPainter {
 
   final Color color;
 
+  // @override
+  // bool operator ==(Object other) {
+  //   return other is TimerculeParallelPainter &&
+  //       other.color == color &&
+  //       other.rightJustified == rightJustified;
+  // }
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
