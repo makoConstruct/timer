@@ -890,11 +890,13 @@ class TimerMenu extends StatelessWidget {
   final MobjID<TimerData> timerID;
   final Rect centerOn;
   final List<Widget> items;
+  final double? estimatedWidth;
   final Animation<double> animation;
   static const double buttonHeight = 40;
   final double arrowHeight;
   const TimerMenu(
       {super.key,
+      this.estimatedWidth,
       required this.timerID,
       required this.centerOn,
       required this.items,
@@ -903,40 +905,45 @@ class TimerMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const double margin = 12;
-    final theme = Theme.of(context);
-    final mt = MakoThemeData.fromTheme(theme);
-    final left = margin;
-    final right = margin;
-    final buttonSpan = Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
-    final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
-    final top = centerOn.bottom - arrowHeight;
-
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, child) {
-        return Stack(children: [
-          Positioned(
-            left: left,
-            top: top,
-            right: right,
-            child: ClipPath(
-              clipper: _MenuRevealClipper(
-                progress: Curves.easeOutCubic.transform(animation.value),
-                // happens to make the origin be the center of the clockface
-                origin: topLeftManhattanCenter(centerOn) - Offset(left, top),
-                cornerRounding: cornerRounding,
-                arrowHeight: arrowHeight,
-              ),
-              child: Container(
-                color: mt.foreBackColor,
-                child: Column(children: items.toList()),
+    return LayoutBuilder(builder: (context, constraints) {
+      const double margin = 12;
+      final theme = Theme.of(context);
+      final mt = MakoThemeData.fromTheme(theme);
+      final buttonSpan =
+          Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
+      final arrowCenter = topLeftManhattanCenter(centerOn);
+      final width = min(estimatedWidth ?? buttonSpan * 3.8,
+          constraints.maxWidth - margin * 2);
+      final left = min(max(margin, arrowCenter.dx - width / 2),
+          constraints.maxWidth - margin - width);
+      final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
+      final top = centerOn.bottom - arrowHeight;
+      return AnimatedBuilder(
+        animation: animation,
+        builder: (context, child) {
+          return Stack(children: [
+            Positioned(
+              left: left,
+              top: top,
+              width: width,
+              child: ClipPath(
+                clipper: _MenuRevealClipper(
+                  progress: Curves.easeOutCubic.transform(animation.value),
+                  // happens to make the origin be the center of the clockface
+                  origin: arrowCenter - Offset(left, top),
+                  cornerRounding: cornerRounding,
+                  arrowHeight: arrowHeight,
+                ),
+                child: Container(
+                  color: mt.foreBackColor,
+                  child: Column(children: items.toList()),
+                ),
               ),
             ),
-          ),
-        ]);
-      },
-    );
+          ]);
+        },
+      );
+    });
   }
 }
 
@@ -2746,10 +2753,10 @@ class TimerScreenState extends State<TimerScreen>
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
+    const double menuItemPadding = 8;
     Widget menuItem(BuildContext context, bool isRightHanded, Widget icon,
         String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
-      const double padding = 8;
       return InkButton(
           backgroundColor: mt.foreBackColor,
           inkColor: mt.inkColor,
@@ -2759,10 +2766,10 @@ class TimerScreenState extends State<TimerScreen>
           },
           child: Padding(
               padding: EdgeInsets.only(
-                  top: isFirst ? (padding + arrowHeight) : 0,
-                  bottom: isLast ? padding : 0,
-                  left: padding,
-                  right: padding),
+                  top: isFirst ? (menuItemPadding + arrowHeight) : 0,
+                  bottom: isLast ? menuItemPadding : 0,
+                  left: menuItemPadding,
+                  right: menuItemPadding),
               child: Row(
                 mainAxisSize: MainAxisSize.max,
                 mainAxisAlignment: isRightHanded
@@ -2783,6 +2790,9 @@ class TimerScreenState extends State<TimerScreen>
               )));
     }
 
+    double totalVisibleMenuItemHeight =
+        TimerMenu.buttonHeight * 4 + 14 + menuItemPadding * 2;
+
     showGeneralDialog(
         context: context,
         barrierDismissible: true,
@@ -2800,6 +2810,7 @@ class TimerScreenState extends State<TimerScreen>
                   timerID: timerID,
                   arrowHeight: arrowHeight,
                   centerOn: p,
+                  estimatedWidth: totalVisibleMenuItemHeight,
                   animation: animation,
                   items: [
                     menuItem(
