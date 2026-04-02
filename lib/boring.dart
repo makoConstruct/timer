@@ -2897,7 +2897,7 @@ class MakoThemeData {
             foreIndentColor:
                 darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
             harderForeIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.06),
+                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.1),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
           );
@@ -3372,7 +3372,8 @@ class TimerculeParallelPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(TimerculeParallelPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.rightJustified != rightJustified;
+      oldDelegate.color != color ||
+      oldDelegate.rightJustified != rightJustified;
 }
 
 class TimerculeSerialPainter extends CustomPainter {

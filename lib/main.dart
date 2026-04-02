@@ -2207,8 +2207,14 @@ void pausePlaySelected(TimerScreenState tss) {
 }
 
 final List<Function(TimerScreenState)> numericRadialActivatorFunctions = [
-  pausePlaySelected,
   (tss) {
+    final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
+    dagc.value = dagc.peek()! | 1;
+    pausePlaySelected(tss);
+  },
+  (tss) {
+    final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
+    dagc.value = dagc.peek()! | 2;
     tss.numeralPressed([0, 0]);
     pausePlaySelected(tss);
   },
@@ -2801,8 +2807,8 @@ class TimerScreenState extends State<TimerScreen>
         context: context,
         barrierDismissible: true,
         barrierLabel: 'Timer menu',
-        barrierColor: mt.lowestBackColor.withAlpha(60),
-        transitionDuration: Duration(milliseconds: 250),
+        barrierColor: mt.lowestBackColor.withAlpha(120),
+        transitionDuration: Duration(milliseconds: 600),
         transitionBuilder: (context, animation, secondaryAnimation, child) =>
             child,
         pageBuilder: (context, animation, secondaryAnimation) {
@@ -3813,10 +3819,6 @@ class DragActionRingController {
   void onPanEnd(BuildContext context) {
     if (_dragEvents.peek() != -1 && _dragEvents.peek() != null) {
       radialActivatorFunctions[_dragEvents.peek()!]();
-      _dragEvents.value = null;
-      // consider removing the hint
-      final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
-      dagc.value = dagc.peek()! | (_dragEvents.peek() == 0 ? 1 : 2);
     }
     _dragEvents.value = null;
     suppressingNotifier?.removeListener(disable);
