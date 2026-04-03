@@ -2714,11 +2714,13 @@ class TimerScreenState extends State<TimerScreen>
           selectedTimer.value = null;
         }
       }
+      // control editPopoverAnimation
       // edit popover doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
       // this is null excepting, understandably, you can't peek it, it was just deleted
-      editPopoverAnimation.towards(sv != null &&
-          Mobj.getAlreadyLoaded(sv, TimerDataType()).peek()!.kind !=
-              TimerKind.stopwatch &&
+      final timerData =
+          sv != null ? Mobj.getAlreadyLoaded(sv, TimerDataType()).peek() : null;
+      editPopoverAnimation.towards(timerData != null &&
+          timerData.kind == TimerKind.timer &&
           (!isFirstPressForSelectedTimer.value ||
               currentlyPressingKey.value == 0));
     });
