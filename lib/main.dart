@@ -1824,8 +1824,8 @@ class TimerculeState extends TimerBaseState<Timercule> {
     );
 
     Widget tail = Container(
-      width: timerHeight * 0.3,
-      height: timerHeight,
+      width: timerHeight * 0.333,
+      height: timerHeight * 0.333,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(5),
       ),
@@ -2776,8 +2776,10 @@ class TimerScreenState extends State<TimerScreen>
         ? theme.colorScheme.onPrimary.withValues(alpha: 0.14)
         : darkenColor(backgroundColor, 0.1);
     const double menuItemPadding = 8;
-    Color inkColor = TimerBaseState.backgroundColor(
-        Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!.hue);
+    TimerData td = Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!;
+    Color inkColor = td.isComposite
+        ? foregroundColor
+        : TimerBaseState.backgroundColor(td.hue);
     Widget menuItem(BuildContext context, bool isRightHanded, Widget icon,
         String label, Function() action,
         {bool isFirst = false, bool isLast = false}) {
