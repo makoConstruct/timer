@@ -1427,36 +1427,31 @@ class TimerState extends TimerBaseState<Timer> {
         List.filled(v.length, d);
 
     // Selected underline animation
-    // why is this still clipping (why does it seem to move down so far)
-    Widget selectionUnderline = extrudedPositioned(
-      extrusion: 3,
-      child: AnimatedBuilder(
-        animation: _selectedUnderlineAnimation,
-        builder: (context, child) {
-          final progress =
-              Curves.easeOut.transform(_selectedUnderlineAnimation.value);
-          final underlineHeight = 9.0;
-          final gap = 3.0;
+    Widget selectionUnderline = AnimatedBuilder(
+      animation: _selectedUnderlineAnimation,
+      builder: (context, child) {
+        final progress =
+            Curves.easeOut.transform(_selectedUnderlineAnimation.value);
+        final underlineHeight = 9.0;
+        final gap = 3.0;
 
-          return LayoutBuilder(builder: (context, constraints) {
-            return Stack(
-              children: [
-                fluidBar(
-                  size: Size(constraints.maxWidth, constraints.maxHeight),
-                  alignment: Alignment.centerLeft,
-                  progress: progress,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: mt.foreBackColor,
-                      borderRadius: BorderRadius.circular(80),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          });
-        },
-      ),
+        return Positioned(
+          left: 0,
+          right: 0,
+          bottom: -underlineHeight - gap,
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: progress,
+            child: Container(
+              height: underlineHeight,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(underlineHeight / 2),
+              ),
+            ),
+          ),
+        );
+      },
     );
 
     Widget timeText(List<int> digits,
@@ -1526,8 +1521,8 @@ class TimerState extends TimerBaseState<Timer> {
                           alignment: Alignment.topLeft,
                           scale: lerp(1, 0.6, v),
                           child: Stack(clipBehavior: Clip.none, children: [
-                            selectionUnderline,
                             timeText(durationDigits, withTimeLevel: true),
+                            selectionUnderline,
                           ])),
                     ]));
           },
