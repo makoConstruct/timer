@@ -839,8 +839,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         scaffoldMessengerKey: globalScaffoldMessengerKey,
         title: 'timer',
         theme: makeTheme(Brightness.light),
-        // darkTheme: makeTheme(Brightness.dark),
-        darkTheme: makeTheme(Brightness.light),
+        darkTheme: makeTheme(Brightness.dark),
+        // darkTheme: makeTheme(Brightness.light),
         onGenerateRoute: (settings) {
           if (settings.name == '/') {
             return CircularRevealRoute(
@@ -2773,13 +2773,13 @@ class TimerScreenState extends State<TimerScreen>
     final mt = MakoThemeData.fromTheme(theme);
     final backgroundColor = theme.brightness == Brightness.light
         ? theme.colorScheme.primary
-        : mt.foreBackColor;
+        : lightenColor(mt.foreBackColor, 0.1);
     final foregroundColor = theme.brightness == Brightness.light
         ? theme.colorScheme.onPrimary
         : theme.colorScheme.onSurface;
     final indentColor = theme.brightness == Brightness.light
         ? theme.colorScheme.onPrimary.withValues(alpha: 0.14)
-        : mt.harderForeIndentColor;
+        : darkenColor(backgroundColor, 0.1);
     const double menuItemPadding = 8;
     Color inkColor = TimerBaseState.backgroundColor(
         Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!.hue);
@@ -2828,7 +2828,7 @@ class TimerScreenState extends State<TimerScreen>
         context: context,
         barrierDismissible: true,
         barrierLabel: 'Timer menu',
-        barrierColor: mt.lowestBackColor.withAlpha(120),
+        barrierColor: mt.lowestBackColor.withAlpha(0),
         transitionDuration: Duration(milliseconds: 600),
         transitionBuilder: (context, animation, secondaryAnimation, child) =>
             child,

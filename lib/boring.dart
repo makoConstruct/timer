@@ -649,9 +649,7 @@ Color darkenColor(Color c, double amount) {
 
 Color lightenColor(Color c, double amount) {
   final hsl = HSLuvColor.fromColor(c);
-  return hsl
-      .addLightness(hsl.lightness + amount * (100 - hsl.lightness))
-      .toColor();
+  return hsl.addLightness(amount * (100 - hsl.lightness)).toColor();
 }
 
 Color grey(double v) {
