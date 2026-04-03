@@ -214,7 +214,8 @@ double totalDuration(TimerData d) {
       }
     }
     return sum;
-  } else if (d.kind == TimerKind.parallelStartJustified) {
+  } else if (d.kind == TimerKind.parallelStartJustified ||
+      d.kind == TimerKind.parallelEndJustified) {
     if (d.children.isEmpty) {
       return 0;
     }
