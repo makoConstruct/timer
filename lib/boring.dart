@@ -3243,7 +3243,7 @@ void vibrateAlertOnce() async {
 class HintToast extends StatefulWidget {
   final Widget? child;
   final String? message;
-  final Computed<bool> showCondition;
+  final ReadonlySignal<bool> showCondition;
   final bool startOpen;
 
   const HintToast({

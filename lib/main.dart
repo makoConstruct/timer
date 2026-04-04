@@ -161,7 +161,9 @@ Future<void> initializeDatabase() async {
         initial: () => false,
         debugLabel: "persistent alarm mode"),
     Mobj.getOrCreate(timeFirstUsedApp,
-        type: StringType(), initial: () => '', debugLabel: "first used app"),
+        type: DateTimeType(),
+        initial: () => DateTime.now(),
+        debugLabel: "first used app"),
     Mobj.getOrCreate(hasCreatedTimerID,
         type: BoolType(),
         initial: () => false,
@@ -186,6 +188,10 @@ Future<void> initializeDatabase() async {
         debugLabel: "used drag action count"),
     Mobj.getOrCreate(usedMenuCountID,
         type: IntType(), initial: () => 0, debugLabel: "used menu count"),
+    Mobj.getOrCreate(hintGetsCompositeTimersID,
+        type: BoolType(),
+        initial: () => false,
+        debugLabel: "has created cycle timer"),
     fversion,
   ]);
 }
@@ -525,6 +531,12 @@ class TimerHolm {
             // tombstone: the reason timercule behaviors are handled by togglePlaying methods is that when we were handling them here, the reaction would get in its own way. Starting a timer in a timercule parent would also start the parent, which would then start the first child, and pause all others, which may then again cycle or something, I don't know, I don't think it did cycle, but things weren't working right, and it was hard to reason about a pure reactive approach, so I decided to just use methods.
             default:
           }
+        }
+
+        /// check if it's a cycle timer to dismiss that hint
+        if (d.isComposite && d.children.length > 1) {
+          Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value =
+              true;
         }
       }
       prev = d;
@@ -2725,11 +2737,24 @@ class TimerScreenState extends State<TimerScreen>
   late final Computed<bool> userDragActionHintCondition = Computed(() {
     final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
     return (dagc.value! & 3) != 3;
-  });
+  }, autoDispose: true);
   late final Computed<bool> hasUsedMenuTwice = Computed(() {
     final dagc = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
     return dagc.value! < 2;
-  });
+  }, autoDispose: true);
+  // I'd also like this to go away after the user's just been using the app for a while...
+  late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
+      () =>
+          (DateTime.now()
+                  .difference(
+                      Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
+                          .value!)
+                  .inDays <
+              7) &&
+          !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType())
+                  .value ??
+              false),
+      autoDispose: true);
   late final AnimationController buttonScaleDialAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   late final AnimationController buttonScaleFlashAnimation =
@@ -3589,7 +3614,11 @@ class TimerScreenState extends State<TimerScreen>
             showCondition: hasUsedMenuTwice,
             message:
                 "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
-          )
+          ),
+          HintToast(
+              showCondition: hintGetsCompositeTimersCondition,
+              message:
+                  "some timers allow you to drag other timers inside of them. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings.")
         ],
       ),
     );

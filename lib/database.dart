@@ -38,6 +38,9 @@ const MobjID persistentAlarmModeID = 'fb66e93f-84d1-4809-a997-293218a83ddc';
 // cursor made this id up lol
 const MobjID usedMenuCountID = '91012689-136a-4b23-9629-5a71657709a4';
 
+/// whether the user has created a cycle timer
+const MobjID hintGetsCompositeTimersID = 'aa1b4520-d435-41f4-a13f-d5a1b2d617ae';
+
 mixin UUIDd on Table {
   TextColumn get id => text()();
 
