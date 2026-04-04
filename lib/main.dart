@@ -192,6 +192,10 @@ Future<void> initializeDatabase() async {
         type: BoolType(),
         initial: () => false,
         debugLabel: "has created cycle timer"),
+    Mobj.getOrCreate(numberOfTimersCreatedID,
+        type: IntType(),
+        initial: () => 0,
+        debugLabel: "number of timers created"),
     fversion,
   ]);
 }
@@ -2745,12 +2749,15 @@ class TimerScreenState extends State<TimerScreen>
   // I'd also like this to go away after the user's just been using the app for a while...
   late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
       () =>
-          (DateTime.now()
-                  .difference(
-                      Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
-                          .value!)
-                  .inDays <
-              7) &&
+          (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
+              20) &&
+          // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
+          // (DateTime.now()
+          //         .difference(
+          //             Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
+          //                 .value!)
+          //         .inDays <
+          //     7) &&
           !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType())
                   .value ??
               false),
@@ -3618,7 +3625,7 @@ class TimerScreenState extends State<TimerScreen>
           HintToast(
               showCondition: hintGetsCompositeTimersCondition,
               message:
-                  "some timers allow you to drag other timers inside of them. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings.")
+                  "'timercules' like 'cycle' and 'series' allow you to drag other timers into them, to build structures. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings. Play around with them.")
         ],
       ),
     );
@@ -3803,6 +3810,8 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
     Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
+    final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
+    n.value = n.peek()! + 1;
 
     timerListMobj.value = peekTimers().toList()..add(ntid);
     if (selecting) {
@@ -3819,7 +3828,7 @@ class TimerScreenState extends State<TimerScreen>
     final ntid = UuidV4().generate();
 
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
-    final nt = Mobj<TimerData>.clobberCreate(
+    Mobj<TimerData>.clobberCreate(
       ntid,
       type: TimerDataType(),
       initial: TimerData(
@@ -3835,6 +3844,8 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
     Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
+    final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
+    n.value = n.peek()! + 1;
 
     timerListMobj.value = peekTimers().toList()..add(ntid);
 
@@ -3857,6 +3868,9 @@ class TimerScreenState extends State<TimerScreen>
           parentId: timerListMobj.id),
     );
     timerListMobj.value = peekTimers().toList()..add(ntid);
+    final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
+    n.value = n.peek()! + 1;
+
     cleanOldTimers(except: ntid);
     timersScroller.animateTo(0,
         duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);

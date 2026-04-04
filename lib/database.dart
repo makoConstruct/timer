@@ -41,6 +41,10 @@ const MobjID usedMenuCountID = '91012689-136a-4b23-9629-5a71657709a4';
 /// whether the user has created a cycle timer
 const MobjID hintGetsCompositeTimersID = 'aa1b4520-d435-41f4-a13f-d5a1b2d617ae';
 
+/// total count of timers ever created in this install (plain, stopwatch, composite)
+const MobjID numberOfTimersCreatedID =
+    'f1d7810e-0a88-4a61-b7c3-9ad89604c890';
+
 mixin UUIDd on Table {
   TextColumn get id => text()();
 
