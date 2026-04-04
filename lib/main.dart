@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:async' as async;
 import 'dart:ui';
 
+import 'package:animated_containers/ranimated_container.dart';
 import 'package:animated_containers/retargetable_easers.dart'
     hide defaultPulserFunction;
 import 'package:animated_to/animated_to.dart';
@@ -1929,7 +1930,8 @@ class TimerculeState extends TimerBaseState<Timercule> {
                   right: 0,
                   top: timerGap / 2,
                   bottom: timerGap / 2,
-                  child: Container(
+                  child: RanimatedContainer(
+                    animationDuration: Duration(milliseconds: 165),
                     // todo: shrink background vertically by timerGap/2, if possible. If not possible, maybe build that.
                     decoration: BoxDecoration(
                       // color: TimerBaseState.backgroundColor(d.hue),
@@ -2311,17 +2313,22 @@ class DragActionRing extends StatefulWidget {
   /// used to close the ring if another one opens
   final Listenable? suppressionBus;
   final List<Widget> radialActivatorIcons;
+  final List<Widget>? radialActivatorLabels;
   final List<double> radialActivatorPositions;
 
   /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
   final Offset visualPosition;
+  final bool? shuntRight;
+
   const DragActionRing(
       {super.key,
       required this.position,
       required this.dragEvents,
       this.suppressionBus,
       required this.visualPosition,
+      this.shuntRight,
       required this.radialActivatorIcons,
+      this.radialActivatorLabels,
       required this.radialActivatorPositions});
 
   @override
@@ -2332,6 +2339,7 @@ class DragActionRingState extends State<DragActionRing>
     with TickerProviderStateMixin, SignalsMixin {
   double actionSizepAtSelection = 0;
   int numberSelected = -1;
+  late final List<AnimationController> labelAnimations;
   late final UpDownAnimationController upDownAnimation =
       UpDownAnimationController(
     vsync: this,
@@ -2357,6 +2365,11 @@ class DragActionRingState extends State<DragActionRing>
   @override
   void initState() {
     super.initState();
+    labelAnimations = List.generate(
+      widget.radialActivatorPositions.length,
+      (_) => AnimationController(
+          vsync: this, duration: Duration(milliseconds: 200)),
+    );
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     upDownAnimation.forward();
     optionActivationAnimation.addStatusListener((status) {
@@ -2388,6 +2401,8 @@ class DragActionRingState extends State<DragActionRing>
       } else if (v != -1) {
         if (v != numberSelected) {
           HapticFeedback.heavyImpact();
+          if (numberSelected != -1) labelAnimations[numberSelected].reverse();
+          labelAnimations[v].forward();
         }
         setState(() {
           numberSelected = v;
@@ -2395,6 +2410,7 @@ class DragActionRingState extends State<DragActionRing>
           optionConsiderationAnimation.forward();
         });
       } else {
+        if (numberSelected != -1) labelAnimations[numberSelected].reverse();
         setState(() {
           numberSelected = -1;
           optionConsiderationAnimation.reverse();
@@ -2406,7 +2422,9 @@ class DragActionRingState extends State<DragActionRing>
 
   @override
   void dispose() {
+    for (final c in labelAnimations) c.dispose();
     optionActivationAnimation.dispose();
+    optionConsiderationAnimation.dispose();
     upDownAnimation.dispose();
     dragEventsSubscription?.call();
     widget.suppressionBus?.removeListener(_onOtherRingOpens);
@@ -2425,9 +2443,10 @@ class DragActionRingState extends State<DragActionRing>
   Widget buildWithGivenAnimationParameters(
       double risep, double fallp, double swipep, double releasep) {
     final theme = Theme.of(context);
+    final mt = MakoThemeData.fromTheme(theme);
     final thumbSpan = Thumbspan.of(context);
-    final isRightHanded =
-        Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value!;
+    final isRightHanded = watchSignal(
+        context, Mobj.getAlreadyLoaded(isRightHandedID, BoolType()))!;
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
     // disable fade down if a number is selected
@@ -2549,10 +2568,60 @@ class DragActionRingState extends State<DragActionRing>
       );
     }
 
+    Positioned labelWidgetAt(int index, double progress) {
+      final angle = conditionallyApplyIf<double>(!isRightHanded,
+          flipAngleHorizontally, widget.radialActivatorPositions[index]);
+      final labelPos =
+          Offset.fromDirection(angle, radius + actionRadiusMax * 0.8);
+      // alignment parameters are projected to the manhattan unit square
+      var rawTx = cos(angle);
+      final rawTy = sin(angle);
+      if (widget.shuntRight != null) {
+        if (rawTx.abs() < 0.07) {
+          rawTx = widget.shuntRight! ? 1 : -1;
+        } else {
+          rawTx = rawTx.sign;
+        }
+      }
+      final m = max(rawTx.abs(), rawTy.abs());
+      final double fontSize = 38;
+      return Positioned(
+        left: labelPos.dx,
+        top: labelPos.dy,
+        child: FractionalTranslation(
+          translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
+          child: FuzzyCircleClip(
+            origin: RelAlignment(
+              originAlignX: -labelPos.dx,
+              originAlignY: -labelPos.dy,
+            ),
+            progress: progress,
+            fuzzyEdgeWidth: 20.0,
+            child: DefaultTextStyle(
+              style: controlPadTextStyle.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontSize: fontSize,
+                  shadows: [
+                    Shadow(
+                      color: mt.lowestBackColor.withValues(alpha: 1),
+                      offset: Offset(0, 0),
+                      blurRadius: 17,
+                    ),
+                  ]),
+              child: SignedPadding(
+                  insets: EdgeInsets.symmetric(vertical: -fontSize * 0.57),
+                  child: widget.radialActivatorLabels![index]),
+            ),
+          ),
+        ),
+      );
+    }
+
     return IgnorePointer(
         child: FractionalTranslation(
             translation: Offset(-0.5, -0.5),
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
                 // disappearing on swipe
                 radialRevealShaderMask(
@@ -2572,6 +2641,22 @@ class DragActionRingState extends State<DragActionRing>
                       selectedNumeralDragRadialActivator,
                   ],
                 ),
+                if (widget.radialActivatorLabels != null)
+                  SizedBox(
+                    width: totalSpan,
+                    height: totalSpan,
+                    child: Transform.translate(
+                      offset: Offset(totalSpan / 2, totalSpan / 2),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          for (int i = 0; i < labelAnimations.length; i++)
+                            if (labelAnimations[i].value > 0)
+                              labelWidgetAt(i, labelAnimations[i].value),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             )));
   }
@@ -2585,7 +2670,8 @@ class DragActionRingState extends State<DragActionRing>
           animation: Listenable.merge([
             upDownAnimation,
             optionConsiderationAnimation,
-            optionActivationAnimation
+            optionActivationAnimation,
+            ...labelAnimations,
           ]),
           builder: (context, child) {
             return buildWithGivenAnimationParameters(
@@ -2687,11 +2773,12 @@ class TimerScreenState extends State<TimerScreen>
     // }
     final base = -pi / 2;
     final s = pi / 4;
-    return base - s * i + (i == 0 ? -0.001 : 0);
+    return base - s * i;
   }
 
   static const Size dragActionRingIconSize = Size.square(26);
   late final specialTimerCreateDragRingController = DragActionRingController(
+    shuntRight: false,
     radialActivatorFunctions: [
       addNewStopwatch,
       () => addNewCompositeTimer(TimerKind.loop),
@@ -2724,6 +2811,13 @@ class TimerScreenState extends State<TimerScreen>
               painter: TimerculeParallelPainter(
                   color: Theme.of(context).colorScheme.onPrimary,
                   rightJustified: true))),
+    ],
+    radialActivatorLabels: const [
+      Text('stopwatch'),
+      Text('cycle'),
+      Text('series'),
+      Text('simultaneous (start)'),
+      Text('simultaneous (end)'),
     ],
   );
   late final StreamController<void> modeActivationPulse =
@@ -3849,12 +3943,16 @@ class DragActionRingController {
   final List<Widget>? radialActivatorLabels;
   final List<Widget> radialActivatorIcons;
 
+  /// whether to shunt text to the right or to the left, when the angle is close to a vertical position. Important for radial menus that're closer to the side of the screen. It's with respect to handedness, the meaning flips when the handedness flips.
+  final bool? shuntRight;
+
   DragActionRingController(
       {this.suppressingNotifier,
       required this.radialActivatorFunctions,
       required this.radialActivatorPositions,
       this.radialActivatorLabels,
-      required this.radialActivatorIcons}) {
+      required this.radialActivatorIcons,
+      this.shuntRight}) {
     assert(radialActivatorIcons.length == radialActivatorPositions.length,
         'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length');
     assert(radialActivatorFunctions.length == radialActivatorIcons.length,
@@ -3893,7 +3991,9 @@ class DragActionRingController {
       visualPosition: visualCenter,
       suppressionBus: suppressingNotifier,
       dragEvents: _dragEvents,
+      shuntRight: shuntRight,
       radialActivatorIcons: radialActivatorIcons,
+      radialActivatorLabels: radialActivatorLabels,
       radialActivatorPositions: radialActivatorPositions,
     );
     getSelfRemovalHostState(context).add(numeralDragActionRing);

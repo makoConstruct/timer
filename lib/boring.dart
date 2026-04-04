@@ -3063,6 +3063,156 @@ class ContainerShrunk extends StatelessWidget {
   }
 }
 
+/// Same role as [Padding], but [EdgeInsets] may be negative on any edge.
+/// [RenderPadding] requires [EdgeInsets.isNonNegative] (`shifted_box.dart`).
+///
+/// The child is laid out with minima from the deflated constraints and maxima
+/// from the incoming constraints (same idea as wrapping it in [OverflowBox] with
+/// [maxWidth]/[maxHeight] set to the parent's max). It is then centered in the
+/// slot whose width/height are the deflated max when that axis is bounded, and
+/// the child's size when unbounded—so small children sit centered when there is
+/// slack (including from negative insets opening extra space), instead of
+/// top-start alignment at [EdgeInsets.left]/[top] alone.
+class SignedPadding extends SingleChildRenderObjectWidget {
+  final EdgeInsets insets;
+
+  const SignedPadding({
+    super.key,
+    required this.insets,
+    super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderSignedPadding(padding: insets);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderObject renderObject) {
+    (renderObject as _RenderSignedPadding).padding = insets;
+  }
+}
+
+class _RenderSignedPadding extends RenderShiftedBox {
+  _RenderSignedPadding({
+    required EdgeInsets padding,
+    RenderBox? child,
+  })  : _padding = padding,
+        super(child);
+
+  EdgeInsets get padding => _padding;
+  EdgeInsets _padding;
+  set padding(EdgeInsets value) {
+    if (value == _padding) {
+      return;
+    }
+    _padding = value;
+    markNeedsLayout();
+  }
+
+  BoxConstraints _childConstraints(BoxConstraints parent, EdgeInsets inset) {
+    final inner = parent.deflate(inset);
+    return BoxConstraints(
+      minWidth: inner.minWidth,
+      maxWidth: parent.maxWidth,
+      minHeight: inner.minHeight,
+      maxHeight: parent.maxHeight,
+    );
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    if (child != null) {
+      return child!.getMinIntrinsicWidth(max(0.0, height - _padding.vertical)) +
+          _padding.horizontal;
+    }
+    return _padding.horizontal;
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    if (child != null) {
+      return child!.getMaxIntrinsicWidth(max(0.0, height - _padding.vertical)) +
+          _padding.horizontal;
+    }
+    return _padding.horizontal;
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    if (child != null) {
+      return child!
+              .getMinIntrinsicHeight(max(0.0, width - _padding.horizontal)) +
+          _padding.vertical;
+    }
+    return _padding.vertical;
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    if (child != null) {
+      return child!
+              .getMaxIntrinsicHeight(max(0.0, width - _padding.horizontal)) +
+          _padding.vertical;
+    }
+    return _padding.vertical;
+  }
+
+  @override
+  @protected
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    if (child == null) {
+      return constraints
+          .constrain(Size(_padding.horizontal, _padding.vertical));
+    }
+    final inner = constraints.deflate(_padding);
+    final childConstraints = _childConstraints(constraints, _padding);
+    final Size childSize = child!.getDryLayout(childConstraints);
+    final slotW = inner.hasBoundedWidth ? inner.maxWidth : childSize.width;
+    final slotH = inner.hasBoundedHeight ? inner.maxHeight : childSize.height;
+    return constraints.constrain(
+      Size(_padding.horizontal + slotW, _padding.vertical + slotH),
+    );
+  }
+
+  @override
+  double? computeDryBaseline(
+      covariant BoxConstraints constraints, TextBaseline baseline) {
+    if (child == null) {
+      return null;
+    }
+    final inner = constraints.deflate(_padding);
+    final childConstraints = _childConstraints(constraints, _padding);
+    final Size childSize = child!.getDryLayout(childConstraints);
+    final slotH = inner.hasBoundedHeight ? inner.maxHeight : childSize.height;
+    final dy = _padding.top + (slotH - childSize.height) / 2;
+    final BaselineOffset result =
+        BaselineOffset(child!.getDryBaseline(childConstraints, baseline)) + dy;
+    return result.offset;
+  }
+
+  @override
+  void performLayout() {
+    final BoxConstraints c = constraints;
+    final EdgeInsets inset = _padding;
+    if (child == null) {
+      size = c.constrain(Size(inset.horizontal, inset.vertical));
+      return;
+    }
+    final inner = c.deflate(inset);
+    child!.layout(_childConstraints(c, inset), parentUsesSize: true);
+    final slotW = inner.hasBoundedWidth ? inner.maxWidth : child!.size.width;
+    final slotH = inner.hasBoundedHeight ? inner.maxHeight : child!.size.height;
+    final BoxParentData childParentData = child!.parentData! as BoxParentData;
+    childParentData.offset = Offset(
+      inset.left + (slotW - child!.size.width) / 2,
+      inset.top + (slotH - child!.size.height) / 2,
+    );
+    size = c.constrain(
+      Size(inset.horizontal + slotW, inset.vertical + slotH),
+    );
+  }
+}
+
 void vibrationSampleBoard() async {
   Future<void> pause() => Future.delayed(const Duration(milliseconds: 2000));
   await Vibration.vibrate(
