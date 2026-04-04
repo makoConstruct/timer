@@ -3343,7 +3343,7 @@ class TimerculeParallelPainter extends CustomPainter {
     final topWidth = rightJustified == null
         ? timerculeRectWidth
         : timerculeRectHeight * 2 + timerculeGap;
-    final bottomWidth = rightJustified == null ? topWidth : timerculeRectHeight;
+    final bottomWidth = rightJustified == null ? topWidth : topWidth * 2 / 3;
     final bottomOffset = (rightJustified == null || !rightJustified!)
         ? -topWidth / 2
         : topWidth / 2 - bottomWidth;

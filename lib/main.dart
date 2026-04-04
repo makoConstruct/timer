@@ -2395,7 +2395,11 @@ class DragActionRingState extends State<DragActionRing>
           optionConsiderationAnimation.forward();
         });
       } else {
-        upDownAnimation.forward();
+        setState(() {
+          numberSelected = -1;
+          optionConsiderationAnimation.reverse();
+          upDownAnimation.forward();
+        });
       }
     });
   }
@@ -2501,7 +2505,7 @@ class DragActionRingState extends State<DragActionRing>
       );
     });
 
-    Widget? selectedNumeralDragRadialActivator = null;
+    Widget? selectedNumeralDragRadialActivator;
     if (numberSelected != -1) {
       selectedNumeralDragRadialActivator =
           unselectedNumeralDragRadialActivators.removeAt(numberSelected);
@@ -2895,10 +2899,13 @@ class TimerScreenState extends State<TimerScreen>
                       height: TimerMenu.buttonHeight,
                       child: Center(child: icon)),
                   Expanded(
-                      child: Text(
-                    label,
-                    style: theme.textTheme.bodyMedium!
-                        .copyWith(color: foregroundColor),
+                      child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Text(
+                      label,
+                      style: theme.textTheme.bodyMedium!
+                          .copyWith(color: foregroundColor),
+                    ),
                   )),
                   SizedBox(width: TimerMenu.buttonHeight * 0.2),
                 ]),
