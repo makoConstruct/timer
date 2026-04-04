@@ -3187,23 +3187,39 @@ class SeparatorGradient extends StatelessWidget {
   final double height;
   const SeparatorGradient({super.key, this.color, this.height = 14});
 
+  static double _easeInOut(double t) =>
+      t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+  static LinearGradient _gradient(Color col) {
+    const steps = 4;
+    final transparent = col.withAlpha(0);
+    final colors = <Color>[];
+    final stops = <double>[];
+    for (int i = 0; i <= steps; i++) {
+      final t = i / steps;
+      colors.add(Color.lerp(transparent, col, _easeInOut(t))!);
+      stops.add(t * 0.5);
+    }
+    for (int i = 1; i <= steps; i++) {
+      final t = i / steps;
+      colors.add(Color.lerp(transparent, col, _easeInOut(1 - t))!);
+      stops.add(0.5 + t * 0.5);
+    }
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: colors,
+      stops: stops,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = MakoThemeData.fromContext(context);
     final col = color ?? theme.foreIndentColor;
     return Container(
       height: height,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            col.withAlpha(0),
-            col,
-            col.withAlpha(0),
-          ],
-        ),
-      ),
+      decoration: BoxDecoration(gradient: _gradient(col)),
     );
   }
 }
