@@ -987,14 +987,14 @@ class TimerMenu extends StatelessWidget {
       final backgroundColor = this.backgroundColor ?? mt.foreBackColor;
       final buttonSpan =
           Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
-      Offset arrowCenter = topLeftManhattanCenter(centerOn);
+      Offset tentativeArrowCenter = topLeftManhattanCenter(centerOn);
       // correct arrowCenter to make sure it's not too close to either side
       final minDistanceFromSide =
           margin + backingCornerRounding * buttonSpan + arrowHeight;
-      arrowCenter = Offset(
-          clampDouble(arrowCenter.dx, minDistanceFromSide,
+      final arrowCenter = Offset(
+          clampDouble(tentativeArrowCenter.dx, minDistanceFromSide,
               constraints.maxWidth - minDistanceFromSide),
-          arrowCenter.dy);
+          tentativeArrowCenter.dy);
       final width = min(estimatedWidth ?? buttonSpan * 3.8,
           constraints.maxWidth - margin * 2);
       final left = min(max(margin, arrowCenter.dx - width / 2),
@@ -1006,7 +1006,7 @@ class TimerMenu extends StatelessWidget {
         builder: (context, child) {
           final curve = animation.status == AnimationStatus.forward
               ? Curves.easeOutQuart
-              : Curves.easeOutCubic;
+              : Curves.easeOut;
           return Stack(children: [
             Positioned(
               left: left,
@@ -1014,7 +1014,8 @@ class TimerMenu extends StatelessWidget {
               width: width,
               child: ClipPath(
                 clipper: _MenuRevealClipper(
-                  progress: curve.transform(animation.value),
+                  progress:
+                      curve.transform(unlerpUnit(0, 0.7, animation.value)),
                   // happens to make the origin be the center of the clockface
                   origin: arrowCenter - Offset(left, top),
                   cornerRounding: cornerRounding,
@@ -1022,7 +1023,11 @@ class TimerMenu extends StatelessWidget {
                 ),
                 child: Container(
                   color: backgroundColor,
-                  child: Column(children: items.toList()),
+                  child: Opacity(
+                    opacity: Curves.easeInOut
+                        .transform(unlerpUnit(0.37, 1, animation.value)),
+                    child: Column(children: items.toList()),
+                  ),
                 ),
               ),
             ),
@@ -1089,11 +1094,17 @@ class _MenuRevealClipper extends CustomClipper<Path> {
           center: intermediateOriginTarget, radius: intermediateTargetSpan / 2),
       Radius.circular(cornerRounding),
     );
+    // final lerpr = RRect.lerp(
+    //     earlyRect,
+    //     RRect.lerp(
+    //         intermediateRect, targetRect, unlerpUnit(0.37, 1, progress))!,
+    //     unlerpUnit(0.2, 0.65, progress))!;
+
     final lerpr = RRect.lerp(
-        earlyRect,
-        RRect.lerp(
-            intermediateRect, targetRect, unlerpUnit(0.37, 1, progress))!,
-        unlerpUnit(0.2, 0.65, progress))!;
+        RRect.fromRectAndRadius(Rect.fromCircle(center: origin, radius: 0),
+            Radius.circular(lerp(size.width / 2, cornerRounding, progress))),
+        targetRect,
+        progress)!;
 
     Path arrowPath = Path();
     {
@@ -2900,7 +2911,7 @@ class TimerScreenState extends State<TimerScreen>
         barrierDismissible: true,
         barrierLabel: 'Timer menu',
         barrierColor: mt.lowestBackColor.withAlpha(0),
-        transitionDuration: Duration(milliseconds: 600),
+        transitionDuration: Duration(milliseconds: 370),
         transitionBuilder: (context, animation, secondaryAnimation, child) =>
             child,
         pageBuilder: (context, animation, secondaryAnimation) {
