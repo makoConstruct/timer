@@ -173,7 +173,6 @@ class JukeBox {
 Rect negativeInfinityRect() => Rect.fromLTRB(
     double.infinity, double.infinity, -double.infinity, -double.infinity);
 
-
 double totalDuration(TimerData d) {
   if (d.kind == TimerKind.series || d.kind == TimerKind.loop) {
     if (d.children.isEmpty) {
@@ -2959,8 +2958,7 @@ class PinAnimation extends StatelessWidget {
               // final pinRetraction =
               //     unlerpUnit((pinLength + gap) / pinLengthTotal, 1, movementp) *
               //         pinLength;
-              final center =
-                  Offset(constraints.maxWidth / 2, constraints.maxHeight / 2);
+              final center = Offset(r, r);
               final distance =
                   (lerp(r + stabDistance, r, movementp) + squareRad + gap) /
                       sqrt(2);
