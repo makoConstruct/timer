@@ -1007,6 +1007,10 @@ class TimerMenu extends StatelessWidget {
           final curve = animation.status == AnimationStatus.forward
               ? Curves.easeOutQuart
               : Curves.easeOut;
+          final p = animation.status == AnimationStatus.forward
+              ? animation.value
+              // so that it's effectively shorter on the reverse traversal
+              : unlerpUnit(0.5, 1, animation.value);
           return Stack(children: [
             Positioned(
               left: left,
@@ -1014,8 +1018,7 @@ class TimerMenu extends StatelessWidget {
               width: width,
               child: ClipPath(
                 clipper: _MenuRevealClipper(
-                  progress:
-                      curve.transform(unlerpUnit(0, 0.7, animation.value)),
+                  progress: curve.transform(unlerpUnit(0, 0.7, p)),
                   // happens to make the origin be the center of the clockface
                   origin: arrowCenter - Offset(left, top),
                   cornerRounding: cornerRounding,
@@ -1024,8 +1027,7 @@ class TimerMenu extends StatelessWidget {
                 child: Container(
                   color: backgroundColor,
                   child: Opacity(
-                    opacity: Curves.easeInOut
-                        .transform(unlerpUnit(0.37, 1, animation.value)),
+                    opacity: Curves.easeInOut.transform(unlerpUnit(0.37, 1, p)),
                     child: Column(children: items.toList()),
                   ),
                 ),
