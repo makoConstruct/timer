@@ -268,11 +268,7 @@ class MobjRegistry {
     MobjRegistry.db = db;
     // tombstone: we initially tried to use type information to preload every object fully as a Mobj. This wasn't possible, because it would have required dependent types. So we ended up pre-loading generic types as, EG, List<Object?>, which then broke at runtime
     if (preload) {
-      return db.fetchActive().get().then((v) {
-        for (final kv in v) {
-          _preloadedMobjEncodings[kv.id] = kv.value;
-        }
-      });
+      return reloadPreload();
     } else {
       return Future.value();
     }
@@ -280,6 +276,14 @@ class MobjRegistry {
 
   static Mobj<T>? seek<T>(MobjID<T> id, TypeHelp<T> type) {
     return Mobj.seekAlreadyLoaded(id, type);
+  }
+
+  static Future<void> reloadPreload() {
+    return db.fetchActive().get().then((v) {
+      for (final kv in v) {
+        _preloadedMobjEncodings[kv.id] = kv.value;
+      }
+    });
   }
 
   static void unregister(MobjID id) {
@@ -307,6 +311,15 @@ class MobjRegistry {
         loadedMobjs[e.key] = mobj;
         _preloadedMobjEncodings.remove(e.key);
         final val = mobj.peek();
+        if (val != null && predicate(val)) {
+          qs.add(mobj);
+        }
+      }
+    }
+    // also check already-loaded Mobj instances (e.g. fetched before this QuerySet existed)
+    for (final mobj in loadedMobjs.values.toList()) {
+      if (mobj._type == type) {
+        final val = (mobj as Mobj<T>).peek();
         if (val != null && predicate(val)) {
           qs.add(mobj);
         }
@@ -398,6 +411,16 @@ class QuerySet<T> {
       callback(mobj.m);
     }
     return onAdded.listen(callback);
+  }
+
+  void dispose() {
+    MobjRegistry._querySets[requiredType]?.remove(this);
+    for (final qt in inSet.values) {
+      qt.unsubscribe();
+    }
+    inSet.clear();
+    _onAdded.close();
+    _onRemoved.close();
   }
 }
 

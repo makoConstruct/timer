@@ -173,33 +173,6 @@ class JukeBox {
 Rect negativeInfinityRect() => Rect.fromLTRB(
     double.infinity, double.infinity, -double.infinity, -double.infinity);
 
-/// information regarding a timer that we're currently monitoring/running
-class TrackedTimer {
-  final Mobj<TimerData> mobj;
-  Timer? secondCountdownIndicatorTimer;
-  Timer? triggerTimer;
-  Function()? mobjUnsubscribe;
-
-  TrackedTimer(this.mobj);
-
-  double secondsRemaining() {
-    return max(
-        (mobj.value!.duration -
-                    DateTime.now().difference(mobj.value!.startTime))
-                .inMicroseconds
-                .toDouble() /
-            1000000,
-        0);
-  }
-
-  void endTrackedTimer() {
-    mobjUnsubscribe?.call();
-    triggerTimer?.cancel();
-    triggerTimer = null;
-    secondCountdownIndicatorTimer?.cancel();
-    secondCountdownIndicatorTimer = null;
-  }
-}
 
 double totalDuration(TimerData d) {
   if (d.kind == TimerKind.series || d.kind == TimerKind.loop) {

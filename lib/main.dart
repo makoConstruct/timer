@@ -286,7 +286,10 @@ class TimerHolm {
   late EffectCleanup _backgroundedReaction;
   late StreamSubscription<Mobj<TimerData>> _newTimerReaction;
   late QuerySet<TimerData> allTimers;
-  TimerHolm({required this.list, required this.jukeBox}) {
+  TimerHolm(
+      {required this.list,
+      required this.jukeBox,
+      bool dismissOnForeground = true}) {
     allTimers = MobjRegistry.createQuerySet(TimerDataType());
     // runs every time a new timer is created or loaded
     _newTimerReaction = allTimers.forAll((mobj) {
@@ -297,7 +300,7 @@ class TimerHolm {
       }
     });
     _backgroundedReaction = effect(() {
-      if (!isBackgrounded.value) {
+      if (dismissOnForeground && !isBackgrounded.value) {
         dismissAlarms();
       }
     });
@@ -305,7 +308,7 @@ class TimerHolm {
 
   void dismissAlarms() {
     jukeBox.stopAudio();
-    print("main dismissAlarms");
+    print("dismissAlarms");
     AwesomeNotifications().cancelAll();
     for (final tt in tracking.values) {
       print("dismissing alarm ${tt.mobj?.id}");
@@ -525,6 +528,19 @@ class TimerHolm {
       }
       prev = d;
     });
+  }
+
+  void dispose() {
+    _backgroundedReaction();
+    _newTimerReaction.cancel();
+    allTimers.dispose();
+    for (final tt in tracking.values) {
+      tt.completionTimer?.cancel();
+      tt.startAlarmTimer?.cancel();
+      tt.vibrationRepeatTimer?.cancel();
+      tt.subscription?.call();
+    }
+    tracking.clear();
   }
 }
 
