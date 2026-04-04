@@ -987,7 +987,14 @@ class TimerMenu extends StatelessWidget {
       final backgroundColor = this.backgroundColor ?? mt.foreBackColor;
       final buttonSpan =
           Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
-      final arrowCenter = topLeftManhattanCenter(centerOn);
+      Offset arrowCenter = topLeftManhattanCenter(centerOn);
+      // correct arrowCenter to make sure it's not too close to either side
+      final minDistanceFromSide =
+          margin + backingCornerRounding * buttonSpan + arrowHeight;
+      arrowCenter = Offset(
+          clampDouble(arrowCenter.dx, minDistanceFromSide,
+              constraints.maxWidth - minDistanceFromSide),
+          arrowCenter.dy);
       final width = min(estimatedWidth ?? buttonSpan * 3.8,
           constraints.maxWidth - margin * 2);
       final left = min(max(margin, arrowCenter.dx - width / 2),
@@ -999,7 +1006,7 @@ class TimerMenu extends StatelessWidget {
         builder: (context, child) {
           final curve = animation.status == AnimationStatus.forward
               ? Curves.easeOutQuart
-              : Curves.easeIn;
+              : Curves.easeOutCubic;
           return Stack(children: [
             Positioned(
               left: left,
@@ -2899,7 +2906,6 @@ class TimerScreenState extends State<TimerScreen>
         pageBuilder: (context, animation, secondaryAnimation) {
           return Watch(
             (context) {
-              ThemeData theme = Theme.of(context);
               bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
               return TimerMenu(
                   timerID: timerID,
