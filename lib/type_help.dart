@@ -65,6 +65,10 @@ class TimerData {
   /// if this timer is a child of a composite timer, the ID of that composite
   final MobjID? parentId;
 
+  /// if true, the alarm fires when startTime arrives (i.e. when the delay ends),
+  /// not at startTime + duration. Set when started with a delay (right-justified parallel children).
+  final bool soundsOnStart;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -90,6 +94,7 @@ class TimerData {
     this.children = const [],
     this.title,
     this.parentId,
+    this.soundsOnStart = false,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -113,6 +118,7 @@ class TimerData {
     bool titleNull = false,
     String? parentId,
     bool parentIdNull = false,
+    bool? soundsOnStart,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -131,6 +137,7 @@ class TimerData {
       children: children ?? this.children,
       title: titleNull ? null : (title ?? this.title),
       parentId: parentIdNull ? null : (parentId ?? this.parentId),
+      soundsOnStart: soundsOnStart ?? this.soundsOnStart,
     );
   }
 
@@ -141,6 +148,7 @@ class TimerData {
       case TimerData.paused:
         return withChanges(
             runningState: TimerData.paused,
+            soundsOnStart: false,
             ranTime:
                 reset ? Duration.zero : DateTime.now().difference(startTime));
       case TimerData.running:
@@ -154,11 +162,13 @@ class TimerData {
                         ? startTime
                         : (DateTime.now().subtract(ranTime)))
                 .add(delay ?? Duration.zero),
-            completedRecently: false);
+            completedRecently: false,
+            soundsOnStart: delay != null && delay > Duration.zero);
       case TimerData.completed:
         return withChanges(
             runningState: TimerData.completed,
             ranTime: duration,
+            soundsOnStart: false,
             completedRecently: true);
       default:
         throw Exception('Invalid running state: $runningState');
@@ -265,6 +275,7 @@ class TimerDataType extends TypeHelp<TimerData> {
         children: ListType(StringType()).fromJson(json['children'] ?? []),
         title: Nullable(StringType()).fromJson(json['title']),
         parentId: Nullable(StringType()).fromJson(json['parentId']),
+        soundsOnStart: BoolType().fromJson(json['soundsOnStart'] ?? false),
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -288,6 +299,7 @@ class TimerDataType extends TypeHelp<TimerData> {
       'children': ListType(StringType()).toJson(object.children),
       'title': Nullable(StringType()).toJson(object.title),
       'parentId': Nullable(StringType()).toJson(object.parentId),
+      'soundsOnStart': BoolType().toJson(object.soundsOnStart),
     };
   }
 }

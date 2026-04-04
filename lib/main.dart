@@ -290,8 +290,11 @@ class TimerHolm {
     allTimers = MobjRegistry.createQuerySet(TimerDataType());
     // runs every time a new timer is created or loaded
     _newTimerReaction = allTimers.forAll((mobj) {
-      // why route through id here, we have the mobj
-      considerTrackingMobj(mobj);
+      if (!tracking.containsKey(mobj.id)) {
+        final tt = TimerTrack()..mobj = mobj;
+        tracking[mobj.id] = tt;
+        tt.subscription = enlivenTimer(tt, mobj, jukeBox);
+      }
     });
     _backgroundedReaction = effect(() {
       if (!isBackgrounded.value) {
@@ -343,34 +346,6 @@ class TimerHolm {
     );
   }
 
-  void considerTracking(MobjID tid) {
-    if (!tracking.containsKey(tid)) {
-      bool unsubscribedPreFuture = false;
-      final tt = TimerTrack()
-        ..subscription = () {
-          unsubscribedPreFuture = true;
-        };
-      Mobj.fetch(tid, type: TimerDataType()).then((mobj) {
-        if (unsubscribedPreFuture) {
-          // mobj.reduceRef
-          tt.subscription = null;
-          return;
-        }
-        tt.mobj = mobj;
-        tt.subscription = enlivenTimer(tt, mobj, jukeBox);
-      });
-      tracking[tid] = tt;
-    }
-  }
-
-  void considerTrackingMobj(Mobj<TimerData> mobj) {
-    if (!tracking.containsKey(mobj.id)) {
-      final tt = TimerTrack()..mobj = mobj;
-      tt.subscription = enlivenTimer(tt, mobj, jukeBox);
-      tracking[mobj.id] = tt;
-    }
-  }
-
   void stopTracking(MobjID id) {
     final tt = tracking[id];
     if (tt == null) {
@@ -378,38 +353,56 @@ class TimerHolm {
     }
     tt.completionTimer?.cancel();
     tt.completionTimer = null;
+    tt.startAlarmTimer?.cancel();
+    tt.startAlarmTimer = null;
     tt.subscription?.call();
     tt.subscription = null;
     tt.mobj = null;
     tracking.remove(id);
   }
 
-  void _timerGoesOff(TimerTrack tt, Mobj<TimerData> mobj) {
-    final d = mobj.value!;
-    tt.completionTimer = null;
+  void _timerStartAlarm(TimerTrack tt, Mobj<TimerData> mobj) {
+    tt.startAlarmTimer = null;
     vibrateAlertOnce();
     final audio =
         Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value!;
-    final persistentAlarmMode =
-        Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).value ?? false;
-    if (isBackgrounded.peek() && (d.persistentAlarm ?? persistentAlarmMode)) {
-      // then it needs to send a notification and scream repeatedly until acknowledged
-      jukeBox.playAudioLooping(audio);
-      mobj.value = d
-          .withRunningState(
-            TimerData.completed,
-          )
-          .withChanges(isGoingOff: true);
-      tt.vibrationRepeatTimer?.cancel();
-      tt.vibrationRepeatTimer = async.Timer.periodic(
-          const Duration(seconds: 8), (_) => vibrateAlertOnce());
-      _sendCompletionNotification(tt);
-    } else {
-      jukeBox.playAudio(audio);
+    jukeBox.playAudio(audio);
+  }
+
+  void _timerGoesOff(TimerTrack tt, Mobj<TimerData> mobj) {
+    final d = mobj.value!;
+    tt.completionTimer = null;
+    if (d.soundsOnStart) {
+      // alarm already played at start; complete silently
       mobj.value = d.withRunningState(TimerData.completed);
+      returnAndContinueParent(mobj);
+      return;
+    } else {
+      vibrateAlertOnce();
+      final audio =
+          Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value!;
+      final persistentAlarmMode =
+          Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).value ??
+              false;
+      if (isBackgrounded.peek() && (d.persistentAlarm ?? persistentAlarmMode)) {
+        // then it needs to send a notification and scream repeatedly until acknowledged
+        jukeBox.playAudioLooping(audio);
+        mobj.value = d
+            .withRunningState(
+              TimerData.completed,
+            )
+            .withChanges(isGoingOff: true);
+        tt.vibrationRepeatTimer?.cancel();
+        tt.vibrationRepeatTimer = async.Timer.periodic(
+            const Duration(seconds: 8), (_) => vibrateAlertOnce());
+        _sendCompletionNotification(tt);
+      } else {
+        jukeBox.playAudio(audio);
+        mobj.value = d.withRunningState(TimerData.completed);
+      }
+      // actuate any parent timers
+      returnAndContinueParent(mobj);
     }
-    // actuate any parent timers
-    returnAndContinueParent(mobj);
   }
 
   /// calls the next timer in the chain and such
@@ -439,7 +432,6 @@ class TimerHolm {
           }
         }
       case TimerKind.parallelStartJustified:
-      case TimerKind.parallelEndJustified:
         final allCompleted = parent.children.every((id) =>
             Mobj.getAlreadyLoaded(id, TimerDataType()).peek()?.isCompleted ??
             false);
@@ -450,6 +442,7 @@ class TimerHolm {
           );
           returnAndContinueParent(parentMobj);
         }
+      // parallelEndJustified: completion is handled by TimerTrack.completionTimer in enlivenTimer
       default:
         break;
     }
@@ -487,16 +480,40 @@ class TimerHolm {
             case TimerKind.timer:
               // delete most of this, this should be handled by the thing that triggers the change in state, since it needs to propagate in one direction or another, without stepping on itself, which may be possible with effects, but effects make it less clear what's happening
               if (d.isRunning) {
-                // start the timer
+                tt.startAlarmTimer?.cancel();
                 tt.completionTimer?.cancel();
+                final total = Duration(
+                    microseconds: (totalDuration(d) * 1000000).round());
+                final elapsed = DateTime.now().difference(d.startTime);
+                if (d.soundsOnStart) {
+                  // fire start alarm when startTime arrives (startTime is in the future by the delay)
+                  final timeUntilStart = d.startTime.difference(DateTime.now());
+                  tt.startAlarmTimer = async.Timer(
+                      timeUntilStart.isNegative
+                          ? Duration.zero
+                          : timeUntilStart,
+                      () => _timerStartAlarm(tt, mobj));
+                }
                 tt.completionTimer = async.Timer(
                     Duration(
-                        milliseconds: (d.duration -
-                                DateTime.now().difference(d.startTime))
-                            .inMilliseconds
-                            .ceil()), () {
-                  _timerGoesOff(tt, mobj);
-                });
+                        milliseconds: (total - elapsed).inMilliseconds.ceil()),
+                    () => _timerGoesOff(tt, mobj));
+              } else {
+                tt.startAlarmTimer?.cancel();
+                tt.startAlarmTimer = null;
+                tt.completionTimer?.cancel();
+                tt.completionTimer = null;
+              }
+            case TimerKind.parallelEndJustified:
+              if (d.isRunning) {
+                tt.completionTimer?.cancel();
+                final total = Duration(
+                    microseconds: (totalDuration(d) * 1000000).round());
+                final elapsed = DateTime.now().difference(d.startTime);
+                tt.completionTimer = async.Timer(
+                    Duration(
+                        milliseconds: (total - elapsed).inMilliseconds.ceil()),
+                    () => _timerGoesOff(tt, mobj));
               } else {
                 tt.completionTimer?.cancel();
                 tt.completionTimer = null;
@@ -527,6 +544,7 @@ void resetTimer(MobjID ki) {
 class TimerTrack {
   Function()? subscription;
   async.Timer? completionTimer;
+  async.Timer? startAlarmTimer;
   async.Timer? vibrationRepeatTimer;
   Mobj<TimerData>? mobj;
 }
@@ -739,8 +757,10 @@ void _startAncestors(MobjID? parentId) {
   final parentMobj = Mobj.seekTypedAlreadyLoaded(parentId, TimerDataType());
   if (parentMobj == null) return;
   final pp = parentMobj.peek();
-  if (pp == null || pp.isRunning) return;
-  parentMobj.value = pp.toggleRunning(reset: false);
+  if (pp == null) return;
+  if (!pp.isRunning) {
+    parentMobj.value = pp.toggleRunning(reset: false);
+  }
   _startAncestors(pp.parentId);
 }
 
