@@ -165,7 +165,7 @@ class TimerData {
     }
   }
 
-  TimerData toggleRunning({Duration? delay, required bool reset}) =>
+  TimerData toggleRunning({Duration? delay, bool reset = false}) =>
       withRunningState(isRunning ? TimerData.paused : TimerData.running,
           reset: reset, delay: delay);
 
