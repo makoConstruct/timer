@@ -481,7 +481,7 @@ class Mobj<T> extends Signal<T?> {
         isActive: _isActive,
       );
     } else {
-      MobjRegistry.db.kVs.delete().where((t) => t.id.equals(_id));
+      (MobjRegistry.db.kVs.delete()..where((t) => t.id.equals(_id))).go();
       _systemSubscription();
       return Future.value();
     }
