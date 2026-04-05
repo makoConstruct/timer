@@ -38,6 +38,7 @@ import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:screen_corner_radius/screen_corner_radius.dart';
+import 'package:shadow_widget/shadow_widget.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
@@ -2384,7 +2385,7 @@ class DragActionRingState extends State<DragActionRing>
     labelAnimations = List.generate(
       widget.radialActivatorPositions.length,
       (_) => AnimationController(
-          vsync: this, duration: Duration(milliseconds: 200)),
+          vsync: this, duration: Duration(milliseconds: 360)),
     );
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     upDownAnimation.forward();
@@ -2584,12 +2585,13 @@ class DragActionRingState extends State<DragActionRing>
       );
     }
 
-    Positioned labelWidgetAt(int index, double progress) {
+    Widget labelWidgetAt(int index, double progress) {
       final angle = conditionallyApplyIf<double>(!isRightHanded,
           flipAngleHorizontally, widget.radialActivatorPositions[index]);
       final labelPos =
           Offset.fromDirection(angle, radius + actionRadiusMax * 0.8);
       // alignment parameters are projected to the manhattan unit square
+
       var rawTx = cos(angle);
       final rawTy = sin(angle);
       if (widget.shuntRight != null) {
@@ -2601,35 +2603,54 @@ class DragActionRingState extends State<DragActionRing>
       }
       final m = max(rawTx.abs(), rawTy.abs());
       final double fontSize = 38;
-      return Positioned(
-        left: labelPos.dx,
-        top: labelPos.dy,
-        child: FractionalTranslation(
-          translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
-          child: FuzzyCircleClip(
-            origin: RelAlignment(
-              originAlignX: -labelPos.dx,
-              originAlignY: -labelPos.dy,
-            ),
-            progress: progress,
-            fuzzyEdgeWidth: 20.0,
-            child: DefaultTextStyle(
+      return nesting(
+        [
+          (w) => Positioned(left: labelPos.dx, top: labelPos.dy, child: w),
+          (w) => FractionalTranslation(
+              translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
+              child: w),
+          (w) => FuzzyCircleClip(
+              origin: RelAlignment(
+                originAlignX: -labelPos.dx,
+                originAlignY: -labelPos.dy,
+              ),
+              progress: progress,
+              fuzzyEdgeWidth: 20.0,
+              child: w),
+          (w) => Transform.translate(
+              offset: angleToOffset(angle) *
+                  (actionRadiusMax * 0.2) *
+                  Curves.easeInCubic.transform(1 - progress),
+              child: w),
+          (w) => ShadowWidget(
+                color: mt.lowestBackColor.withValues(alpha: 1),
+                offset: Offset.zero,
+                blurRadius: 4,
+                child: w,
+              ),
+          // (child) => DecoratedBox(
+          //     decoration: BoxDecoration(
+          //       borderRadius: BorderRadius.circular(fontSize * 0.5),
+          //       boxShadow: [
+          //         BoxShadow(
+          //           color: mt.lowestBackColor.withValues(alpha: 0.45),
+          //           offset: Offset.zero,
+          //           blurRadius: 5,
+          //           spreadRadius: 2,
+          //         ),
+          //       ],
+          //     ),
+          //     child: child),
+          (w) => DefaultTextStyle(
               style: controlPadTextStyle.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontSize: fontSize,
-                  shadows: [
-                    Shadow(
-                      color: mt.lowestBackColor.withValues(alpha: 1),
-                      offset: Offset(0, 0),
-                      blurRadius: 17,
-                    ),
-                  ]),
-              child: SignedPadding(
-                  insets: EdgeInsets.symmetric(vertical: -fontSize * 0.57),
-                  child: widget.radialActivatorLabels![index]),
-            ),
-          ),
-        ),
+                color: theme.colorScheme.primary,
+                fontSize: fontSize,
+              ),
+              child: w)
+        ],
+        SignedPadding(
+            insets: EdgeInsets.symmetric(vertical: -fontSize * 0.57),
+            child: widget.radialActivatorLabels![index]),
       );
     }
 
@@ -2668,7 +2689,8 @@ class DragActionRingState extends State<DragActionRing>
                         children: [
                           for (int i = 0; i < labelAnimations.length; i++)
                             if (labelAnimations[i].value > 0)
-                              labelWidgetAt(i, labelAnimations[i].value),
+                              labelWidgetAt(i,
+                                  unlerpUnit(0.4, 1, labelAnimations[i].value)),
                         ],
                       ),
                     ),
