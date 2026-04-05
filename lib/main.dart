@@ -2356,6 +2356,8 @@ class DragActionRingState extends State<DragActionRing>
     with TickerProviderStateMixin, SignalsMixin {
   double actionSizepAtSelection = 0;
   int numberSelected = -1;
+  // mirrors numberSelected, but not always
+  int centeredNumber = -1;
   late final List<AnimationController> labelAnimations;
   late final UpDownAnimationController upDownAnimation =
       UpDownAnimationController(
@@ -2385,7 +2387,7 @@ class DragActionRingState extends State<DragActionRing>
     labelAnimations = List.generate(
       widget.radialActivatorPositions.length,
       (_) => AnimationController(
-          vsync: this, duration: Duration(milliseconds: 360)),
+          vsync: this, duration: Duration(milliseconds: 540)),
     );
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     upDownAnimation.forward();
@@ -2423,6 +2425,7 @@ class DragActionRingState extends State<DragActionRing>
         }
         setState(() {
           numberSelected = v;
+          centeredNumber = v;
           actionSizepAtSelection = currentActionSize();
           optionConsiderationAnimation.forward();
         });
@@ -2542,16 +2545,16 @@ class DragActionRingState extends State<DragActionRing>
     });
 
     Widget? selectedNumeralDragRadialActivator;
-    if (numberSelected != -1) {
+    if (centeredNumber != -1) {
       selectedNumeralDragRadialActivator =
-          unselectedNumeralDragRadialActivators.removeAt(numberSelected);
+          unselectedNumeralDragRadialActivators.removeAt(centeredNumber);
     }
 
     double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
 
     final revealFraction = 1 - Curves.easeOut.transform(swipep);
-    final revealCenter = numberSelected != -1
-        ? positionFor(numberSelected, overrideRisep: 1)
+    final revealCenter = centeredNumber != -1
+        ? positionFor(centeredNumber, overrideRisep: 1)
         : Offset.zero;
     final revealMaxRadius = totalSpan;
 
@@ -2620,20 +2623,20 @@ class DragActionRingState extends State<DragActionRing>
           (w) => Transform.translate(
               offset: angleToOffset(angle) *
                   (actionRadiusMax * 0.2) *
-                  Curves.easeInCubic.transform(1 - progress),
+                  easeIn(1 - progress),
               child: w),
-          (w) => ShadowWidget(
-                color: mt.lowestBackColor.withValues(alpha: 1),
-                offset: Offset.zero,
-                blurRadius: 4,
-                child: w,
-              ),
+          // (w) => ShadowWidget(
+          //       color: mt.lowestBackColor.withValues(alpha: 1),
+          //       offset: Offset.zero,
+          //       blurRadius: 4,
+          //       child: w,
+          //     ),
           // (child) => DecoratedBox(
           //     decoration: BoxDecoration(
           //       borderRadius: BorderRadius.circular(fontSize * 0.5),
           //       boxShadow: [
           //         BoxShadow(
-          //           color: mt.lowestBackColor.withValues(alpha: 0.45),
+          //           color: mt.lowestBackColor.withValues(alpha: 0.8),
           //           offset: Offset.zero,
           //           blurRadius: 5,
           //           spreadRadius: 2,
@@ -2645,6 +2648,13 @@ class DragActionRingState extends State<DragActionRing>
               style: controlPadTextStyle.copyWith(
                 color: theme.colorScheme.primary,
                 fontSize: fontSize,
+                shadows: [
+                  Shadow(
+                    color: mt.lowestBackColor.withValues(alpha: 0.8),
+                    offset: Offset.zero,
+                    blurRadius: 5,
+                  ),
+                ],
               ),
               child: w)
         ],
@@ -2689,8 +2699,10 @@ class DragActionRingState extends State<DragActionRing>
                         children: [
                           for (int i = 0; i < labelAnimations.length; i++)
                             if (labelAnimations[i].value > 0)
-                              labelWidgetAt(i,
-                                  unlerpUnit(0.4, 1, labelAnimations[i].value)),
+                              labelWidgetAt(
+                                  i,
+                                  unlerpUnit(
+                                      0.66, 1, labelAnimations[i].value)),
                         ],
                       ),
                     ),
@@ -2768,11 +2780,11 @@ class TimerScreenState extends State<TimerScreen>
     final dagc = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
     return dagc.value! < 2;
   }, autoDispose: true);
-  // I'd also like this to go away after the user's just been using the app for a while...
   late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
       () =>
+          // also goes away if the user just uses timers and ignores the timercule feature
           (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
-              20) &&
+              10) &&
           // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
           // (DateTime.now()
           //         .difference(

@@ -1767,12 +1767,6 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
   }
 }
 
-class FuzzyCircleShader {
-  /// Creates a radial gradient shader with a fuzzy edge for circular reveal effects.
-  /// By default, minRadius is the distance from center to the nearest edge of bounds,
-  /// and maxRadius is the distance to the farthest corner.
-}
-
 Shader createRadialRevealShader({
   required Rect bounds,
   required Alignment center,
@@ -3267,7 +3261,11 @@ class _HintToastState extends State<HintToast>
     super.initState();
 
     animation =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 280));
+        AnimationController(vsync: this, duration: Duration(milliseconds: 280))
+          ..value = 0;
+    Timer(Duration(milliseconds: 520), () {
+      animation.forward();
+    });
 
     createEffect(() {
       if (widget.showCondition.value) {
