@@ -1183,11 +1183,14 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   late final Signal<bool> animatedToDisabled = Signal(false);
   final previousSize = ValueNotifier<Size?>(null);
   final transferrableKey = GlobalKey();
+  MobjID<TimerData>? parentBeforeDrag;
+  int? indexBeforeDrag;
   bool hasDisabled = false;
   TimerData? previousValue;
   bool _titleEditMode = false;
   final FocusNode _titleFocusNode = FocusNode();
   late final TextEditingController _titleController = TextEditingController();
+  TimerScreenState? _timerScreen;
 
   static Color backgroundColor(double hue) =>
       hpluvToRGBColor([hue * 360, 100, 90]);
@@ -1203,6 +1206,8 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   @override
   void initState() {
     super.initState();
+    _timerScreen = context.findAncestorStateOfType<TimerScreenState>();
+    _timerScreen?.timerWidgetCache[widget.mobj.id] = widget;
     whetherPinned = Computed(() => widget.mobj.value?.pinned ?? false);
     _shouldFade = Computed(() {
       return trivialAndClearable(widget.mobj);
@@ -1264,6 +1269,10 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
 
   @override
   void dispose() {
+    final cache = _timerScreen?.timerWidgetCache;
+    if (cache != null && cache[widget.mobj.id] == widget) {
+      cache.remove(widget.mobj.id);
+    }
     disable();
     _appearanceAnimation.dispose();
     _unpinnedIndicatorShowing.dispose();
@@ -1307,6 +1316,13 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     });
   }
 
+  int getIndexWithinParent() {
+    final pcs = childrenOf(Mobj.seekTypedsAlreadyLoaded(
+        widget.mobj.peek()!.parentId!,
+        [TimerDataType(), ListType(StringType())])!);
+    return pcs.indexOf(widget.mobj.id);
+  }
+
   Widget buildShell(BuildContext context, Widget content) {
     return nesting(
       [
@@ -1345,7 +1361,28 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
             key: transferrableKey, previousSize: previousSize, child: next),
         if (widget.key is GlobalKey<TimerBaseState>)
           (next) => DraggableWidget<GlobalKey<TimerBaseState>>(
-              data: widget.key as GlobalKey<TimerBaseState>, child: next),
+              data: widget.key as GlobalKey<TimerBaseState>,
+              onDragStarted: () {
+                // record current place within parent to later use to determine whether it's an operative drag or whether it's a menu opening longclick
+                parentBeforeDrag = widget.mobj.peek()!.parentId;
+                indexBeforeDrag = getIndexWithinParent();
+              },
+              onDragEnd: () {
+                if (parentBeforeDrag == widget.mobj.peek()!.parentId &&
+                    getIndexWithinParent() == indexBeforeDrag!) {
+                  // it's an operative drag, open the menu
+                  // delayed because menu needs its new position
+                  // WidgetsBinding.instance.addPostFrameCallback((_) {
+                  context
+                      .findAncestorStateOfType<TimerScreenState>()
+                      ?.openTimerMenu(
+                          context,
+                          widget.key as GlobalKey<TimerBaseState>,
+                          widget.mobj.id);
+                  // });
+                }
+              },
+              child: next),
         (next) => GestureDetector(
             onTap: () {
               context
@@ -1819,10 +1856,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
   @override
   TimerData get p => widget.mobj.peek()!;
 
-  // used to check for differences
-  List<MobjID<TimerData>>? _prevChildren;
-  Map<String, TimerBase> _childWidgets = {};
-
   late final Signal<double> depth = Signal(0.0);
   void Function()? _parentDepthDispose;
 
@@ -1845,29 +1878,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
     _subscribeToParentDepth();
   }
 
-  _ensureChildWidgetsFresh(TimerData d) {
-    if (_prevChildren != d.children) {
-      Map<String, TimerBase> newMap = {};
-      for (final childId in d.children) {
-        final childMobj = Mobj.getAlreadyLoaded(childId, TimerDataType());
-        newMap[childId] = _childWidgets[childId] ??
-            (childMobj.peek()!.isComposite
-                ? Timercule(
-                    key: GlobalKey<TimerculeState>(),
-                    // we can assume already loaded because all timers are isActive.
-                    mobj: childMobj,
-                    animateIn: false,
-                  )
-                : Timer(
-                    key: GlobalKey<TimerState>(),
-                    mobj: childMobj,
-                    animateIn: false,
-                  ));
-      }
-      _childWidgets = newMap;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final d = watchSignal(context, widget.mobj) ?? previousValue!;
@@ -1879,7 +1889,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
     final buttonSpan = watchSignal(
         context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
     final cornerRadius = backingCornerRounding * buttonSpan;
-    _ensureChildWidgetsFresh(d);
     Widget? titleWidget;
     if (d.title != null || _titleEditMode) {
       titleWidget = Padding(
@@ -1969,9 +1978,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
                         alignment: WrapAlignment.end,
                         children: [
                           SizeFollower(sizeNotifier: _handleSizeNotifier),
-                          ...d.children
-                              .where(_childWidgets.containsKey)
-                              .map<Widget>((id) => _childWidgets[id] as Widget),
+                          ...d.children.map<Widget>((id) =>
+                              _timerScreen?.timerWidgetCache[id] ??
+                              _timerScreen!._createTimerWidget(id)),
                           tail
                         ]),
                   ),
@@ -2026,10 +2035,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
                 children: children.toList()
                   ..insert(at, timerId)
                   ..removeAt(childIndex > at ? childIndex + 1 : childIndex));
-          } else {
-            context
-                .findAncestorStateOfType<TimerScreenState>()
-                ?.openTimerMenu(context, details.data, timerId);
           }
         } else {
           if (cm.peek()!.parentId != null) {
@@ -2052,7 +2057,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
   @override
   void dispose() {
     _parentDepthDispose?.call();
-    _childWidgets.clear();
     _handleSizeNotifier.dispose();
     super.dispose();
   }
@@ -2625,6 +2629,7 @@ class DragActionRingState extends State<DragActionRing>
                   (actionRadiusMax * 0.2) *
                   easeIn(1 - progress),
               child: w),
+          // tombstone: it seems as if you can't nest these inside the FuzzyCircleClip, they get their boundaries clipped and messed up. I really don't understand why!
           // (w) => ShadowWidget(
           //       color: mt.lowestBackColor.withValues(alpha: 1),
           //       offset: Offset.zero,
@@ -2739,6 +2744,16 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<MobjID?> selectedTimer = Signal(null);
   late final EffectCleanup watchingForUnselection;
   late final Computed<TimerWidgets> timerWidgets;
+  final Map<MobjID<TimerData>, TimerBase> timerWidgetCache = {};
+
+  TimerBase _createTimerWidget(MobjID<TimerData> id, {bool animateIn = false}) {
+    final mobj = Mobj.getAlreadyLoaded(id, TimerDataType());
+    return mobj.peek()!.isComposite
+        ? Timercule(
+            key: GlobalKey<TimerculeState>(), mobj: mobj, animateIn: animateIn)
+        : Timer(key: GlobalKey<TimerState>(), mobj: mobj, animateIn: animateIn);
+  }
+
   late final Mobj<bool> isRightHandedMobj =
       Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
   late final Signal<Rect> numPadBounds = Signal(Rect.zero);
@@ -2934,23 +2949,11 @@ class TimerScreenState extends State<TimerScreen>
         buttonScaleDialAnimation.reverse();
       }
     });
-    TimerWidgets prevTimerWidgets = {};
     timerWidgets = Computed(() {
       TimerWidgets next = {};
       for (final t in timerListMobj.value!) {
-        if (prevTimerWidgets.containsKey(t)) {
-          next[t] = prevTimerWidgets[t]!;
-        } else {
-          final mobj = Mobj.getAlreadyLoaded(t, TimerDataType());
-          // if you remove the generic parameter on the key, drag and menu open stops working :)
-          next[t] = mobj.peek()!.isComposite
-              ? Timercule(
-                  key: GlobalKey<TimerculeState>(), mobj: mobj, animateIn: true)
-              : Timer(
-                  key: GlobalKey<TimerState>(), mobj: mobj, animateIn: true);
-        }
+        next[t] = timerWidgetCache[t] ?? _createTimerWidget(t, animateIn: true);
       }
-      prevTimerWidgets = next;
       return next;
     });
     // watching the selected timer
@@ -3414,7 +3417,9 @@ class TimerScreenState extends State<TimerScreen>
     // the lower part of the screen
     final buttonSize = Size(buttonSpan, buttonSpan);
     // this code is supposed to nudge things over a little to be perfectly centered if stuff is very close to being centered.
-    double backingDeflation = backingDeflationProportion * buttonSpan;
+    // double backingDeflation = backingDeflationProportion * buttonSpan;
+    // makes it much easier to keep gaps between timers and gap between bottom timer and control pad backing equal
+    double backingDeflation = timerGap / 2;
     // positioned to make the space between the number pad backing and the edge of the screen equal
     double tentativeRightPos =
         screenSize.width - buttonSpan / 2 - backingDeflation;
@@ -3675,6 +3680,7 @@ class TimerScreenState extends State<TimerScreen>
 
     return nesting(
         [
+          (child) => AnimatedToBoundary(child: child),
           (child) => AnnotatedRegion<SystemUiOverlayStyle>(
               value: SystemUiOverlayStyle(
                 systemNavigationBarContrastEnforced: false,
@@ -3736,9 +3742,7 @@ class TimerScreenState extends State<TimerScreen>
                   if (cm.peek()!.parentId == timerListMobj.id) {
                     assert(currentIndex != -1,
                         "item wasn't found inside of its owningList");
-                    if (insertion.index == currentIndex) {
-                      openTimerMenu(context, details.data, timerId);
-                    } else {
+                    if (insertion.index != currentIndex) {
                       final (operative, at) = insertion.cleverInsertionIndexFor(
                           currentIndex, p.length);
                       if (operative) {
@@ -4141,12 +4145,15 @@ class _NumeralButtonState extends State<NumeralButton> {
                   .toList();
           final lti = tss.timerListMobj.peek()!.lastOrNull;
           if (lti != null) {
-            final ts =
-                (tss.timerWidgets.peek()[lti]?.key as GlobalKey<TimerState>?)
-                    ?.currentState;
-            ts?._slideActivateBounceAnimation.forward(from: 0);
-            ts?._slideBounceDirection =
-                Offset.fromDirection(rectifiedActivatorPositions[i], 1);
+            final sts = tss.selectedTimer.peek();
+            if (sts != null) {
+              final ts =
+                  (tss.timerWidgetCache[sts]?.key as GlobalKey<TimerState>?)
+                      ?.currentState;
+              ts?._slideActivateBounceAnimation.forward(from: 0);
+              ts?._slideBounceDirection =
+                  Offset.fromDirection(rectifiedActivatorPositions[i], 1);
+            }
           }
         },
       ),
@@ -5741,10 +5748,7 @@ Otherwise, if you generally pay close attention to your phone, it's much more co
           SliverToBoxAdapter(
               key: skipKey,
               child: Padding(
-                padding: EdgeInsets.only(
-                    left: standardSpacing,
-                    right: standardSpacing,
-                    bottom: standardSpacing),
+                padding: EdgeInsets.all(standardSpacing),
                 child: Row(
                   mainAxisSize: MainAxisSize.max,
                   children: [
@@ -5758,30 +5762,32 @@ Otherwise, if you generally pay close attention to your phone, it's much more co
                           onTap: () {
                             moveOn();
                           },
-                          inkColor: theme.colorScheme.primary,
                           borderRadius:
                               BorderRadius.circular(buttonCornerRadius),
-                          builder: (context, isOn) => SizedBox(
-                                height: standardButtonHeight,
-                                child: Center(
-                                    child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                      Watch(
-                                        (context) => Text(
-                                            allChoicesCompleted.value
-                                                ? 'setup complete, click to continue'
-                                                : 'skip setup',
-                                            style: theme.textTheme.titleMedium!
-                                                .copyWith(
-                                                    color: isOn
-                                                        ? theme.colorScheme
-                                                            .onPrimary
-                                                        : theme.colorScheme
-                                                            .onSurface)),
-                                      ),
-                                    ])),
+                          builder: (context, isOn) => Container(
+                                color:
+                                    backgroundColorFor(Theme.of(context), isOn),
+                                child: SizedBox(
+                                  height: standardButtonHeight,
+                                  child: Center(
+                                      child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                        Watch(
+                                          (context) => Text(
+                                              allChoicesCompleted.value
+                                                  ? 'setup complete, click to continue'
+                                                  : 'skip setup',
+                                              style: theme
+                                                  .textTheme.titleMedium!
+                                                  .copyWith(
+                                                      color: foregroundColorFor(
+                                                          Theme.of(context),
+                                                          isOn))),
+                                        ),
+                                      ])),
+                                ),
                               )),
                     ),
                   ],

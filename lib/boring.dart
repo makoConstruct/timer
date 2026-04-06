@@ -296,7 +296,14 @@ class FutureAssumer<T> extends StatelessWidget {
 class DraggableWidget<T> extends StatefulWidget {
   final Widget child;
   final T? data;
-  const DraggableWidget({super.key, required this.child, this.data});
+  final Function()? onDragStarted;
+  final Function()? onDragEnd;
+  const DraggableWidget(
+      {super.key,
+      required this.child,
+      this.data,
+      this.onDragStarted,
+      this.onDragEnd});
   @override
   State<DraggableWidget> createState() => _DraggableWidgetState();
 }
@@ -481,9 +488,11 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
                 }),
             onDragStarted: () {
               popAnimation.forward(from: 0);
+              widget.onDragStarted?.call();
             },
-            // onDragEnd: (details) {
-            // },
+            onDragEnd: (details) {
+              widget.onDragEnd?.call();
+            },
             childWhenDragging: ValueListenableBuilder(
                 valueListenable: previousSize,
                 builder: (context, value, child) {
@@ -2819,7 +2828,7 @@ Color foregroundColorFor(ThemeData theme, bool isOn) {
 Color backgroundColorFor(ThemeData theme, bool isOn) {
   return isOn
       ? theme.colorScheme.primary
-      : theme.colorScheme.surfaceContainerLowest;
+      : theme.colorScheme.surfaceContainerHigh;
 }
 
 class MakoThemeData {
@@ -3264,7 +3273,9 @@ class _HintToastState extends State<HintToast>
         AnimationController(vsync: this, duration: Duration(milliseconds: 280))
           ..value = 0;
     Timer(Duration(milliseconds: 520), () {
-      animation.forward();
+      if (widget.showCondition.peek()) {
+        animation.forward();
+      }
     });
 
     createEffect(() {
