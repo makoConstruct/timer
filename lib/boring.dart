@@ -1580,13 +1580,11 @@ class DelayedRectTween extends Tween<Rect?> {
   final RectTween _innerTween;
 
   DelayedRectTween({
-    required Rect? begin,
-    required Rect? end,
+    required super.begin,
+    required super.end,
     this.delay = 0.0,
     RectTween? innerTween,
-  })  : _innerTween =
-            innerTween ?? MaterialRectArcTween(begin: begin, end: end),
-        super(begin: begin, end: end);
+  }) : _innerTween = innerTween ?? MaterialRectArcTween(begin: begin, end: end);
 
   @override
   Rect? lerp(double t) {
@@ -2634,7 +2632,6 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
       builder: (context, child) {
         final color = lerpColor(
             widget.color, widget.fadeColor ?? widget.color, colorFadep());
-        print(color);
         return Opacity(
           opacity: (1.0 -
               (widget.fadeController.value *
