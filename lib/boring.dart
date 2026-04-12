@@ -3621,3 +3621,54 @@ Widget timerKindIcon(TimerKind kind,
       return Icon(Icons.circle_rounded, color: color, size: size);
   }
 }
+
+class SquishBoundaryPlane extends StatelessWidget {
+  SquishBoundaryPlane({
+    super.key,
+    required this.theme,
+    required this.mt,
+  });
+
+  final ThemeData theme;
+  final MakoThemeData mt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: mt.foreBackColor,
+              border: Border(
+                right: BorderSide(
+                  color: mt.midBackColor.withValues(alpha: 0.35),
+                  width: 1,
+                ),
+              ),
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: Text(
+                List.filled(7, 'DANGER SQUISH EDGE ').join(),
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+                style: theme.textTheme.labelSmall!.copyWith(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

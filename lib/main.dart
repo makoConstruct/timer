@@ -7,10 +7,6 @@ import 'dart:async';
 import 'dart:async' as async;
 import 'dart:ui';
 
-import 'package:animated_containers/ranimated_container.dart';
-import 'package:animated_containers/retargetable_easers.dart'
-    hide defaultPulserFunction;
-// import 'package:animated_to/animated_to.dart';
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:awesome_notifications/awesome_notifications.dart'
@@ -25,12 +21,12 @@ import 'package:flutter/physics.dart' as physics;
 import 'package:flutter/scheduler.dart' hide Priority;
 import 'package:flutter/services.dart';
 import 'package:hsluv/extensions.dart';
-import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/platform_audio.dart';
+import 'package:hsluv/hsluvcolor.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:makos_timer/background_service_stuff.dart';
-import 'package:makos_timer/boring.dart' hide maxDuration;
+import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/crank_game.dart';
 import 'package:makos_timer/journeying_game.dart';
@@ -2012,8 +2008,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
                   right: 0,
                   top: timerGap / 2,
                   bottom: timerGap / 2,
-                  child: RanimatedContainer(
-                    animationDuration: Duration(milliseconds: 165),
+                  child: AnisizedContainer(
                     // todo: shrink background vertically by timerGap/2, if possible. If not possible, maybe build that.
                     decoration: BoxDecoration(
                       // color: TimerBaseState.backgroundColor(d.hue),
@@ -2235,6 +2230,8 @@ class TimerTrayState extends State<TimerTray> with SignalsMixin {
     return result;
   }
 }
+
+
 
 class TimerScreen extends StatefulWidget {
   const TimerScreen({super.key});
@@ -2780,10 +2777,8 @@ class TimerScreenState extends State<TimerScreen>
       Mobj.getAlreadyLoaded(buttonSpanID, DoubleType());
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
-  late SmoothOffset modeMovementAnimation = SmoothOffset(
-      vsync: this,
-      initialValue: Offset.zero,
-      duration: Duration(milliseconds: 200));
+  final GlobalKey modeHighlightAnimoveKey = GlobalKey();
+  final Signal<Offset> modeHighlightAnchor = Signal(Offset.zero);
   late AnimationController modeLivenessAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   // emits whenever a drag action ring is created, so that older ones can disable themselves
@@ -2829,6 +2824,8 @@ class TimerScreenState extends State<TimerScreen>
           riseDuration: Duration(milliseconds: 400),
           fallDuration: Duration(milliseconds: 200));
   late final ScrollController timersScroller = ScrollController();
+  late final AnimationController squishPanelController = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 16000));
   late final Signal<bool> isFirstPressForSelectedTimer = Signal(true);
 
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
@@ -2922,12 +2919,7 @@ class TimerScreenState extends State<TimerScreen>
     // make sure the mode indicator follows the current mode
     createEffect(() {
       void moveTo(GlobalKey target) {
-        Offset t = boxRect(target)!.center;
-        if (modeLivenessAnimation.value == 0) {
-          modeMovementAnimation.value = t;
-        } else {
-          modeMovementAnimation.target(t);
-        }
+        modeHighlightAnchor.value = boxRect(target)!.center;
         modeLivenessAnimation.forward();
       }
 
@@ -2981,6 +2973,7 @@ class TimerScreenState extends State<TimerScreen>
 
   @override
   void dispose() {
+    squishPanelController.dispose();
     timersScroller.dispose();
     selectedTimer.dispose();
     timerWidgets.dispose();
@@ -2993,7 +2986,6 @@ class TimerScreenState extends State<TimerScreen>
     actionMode.dispose();
     isFirstPressForSelectedTimer.dispose();
     currentlyPressingKey.dispose();
-    modeMovementAnimation.dispose();
     modeLivenessAnimation.dispose();
     modeActivationPulse.close();
     for (final unsub in _timerDeletionSubs.values) {
@@ -3480,36 +3472,50 @@ class TimerScreenState extends State<TimerScreen>
                     backingCornerRounding * buttonSpan))));
 
     final double modalHighlightSpan = buttonSpan - 2 * backingDeflation;
-    Widget modalHighlightBacking = AnimatedBuilder(
-      animation:
-          Listenable.merge([modeMovementAnimation, modeLivenessAnimation]),
-      builder: (context, child) {
-        return positionedAt(
-            modeMovementAnimation.value,
-            FractionalTranslation(
-              translation: Offset(-0.5, -0.5),
-              child: SizedBox(
-                width: modalHighlightSpan * modeLivenessAnimation.value,
-                height: modalHighlightSpan * modeLivenessAnimation.value,
-                child: PulserAnimation(
-                    pulses: modeActivationPulse.stream,
-                    duration: Duration(milliseconds: 440),
-                    builder: (context, child, progresses) {
-                      final p = min(
-                          1.0,
-                          progresses.fold(0.0,
-                              (a, b) => a + 0.55 * defaultPulserFunction(b)));
-                      return Container(
-                          decoration: BoxDecoration(
-                              color: lerpColor(mt.foreBackColor,
-                                  theme.colorScheme.primary, p),
-                              borderRadius: BorderRadius.circular(
-                                  backingCornerRounding * buttonSpan)));
-                    }),
-              ),
-            ));
-      },
-    );
+    Widget modalHighlightBacking = Watch((context) {
+      final anchor = modeHighlightAnchor.watch(context);
+      return AnimatedBuilder(
+        animation: modeLivenessAnimation,
+        builder: (context, child) {
+          return positionedAt(
+              anchor,
+              Animove(
+                key: modeHighlightAnimoveKey,
+                enabled: modeLivenessAnimation.value > 0,
+                simulationFactory: (c, t, v) => TimelyParabolicSimulation(
+                  c,
+                  t,
+                  v,
+                  duration: 0.2,
+                ),
+                child: FractionalTranslation(
+                  translation: Offset(-0.5, -0.5),
+                  child: SizedBox(
+                    width: modalHighlightSpan * modeLivenessAnimation.value,
+                    height: modalHighlightSpan * modeLivenessAnimation.value,
+                    child: PulserAnimation(
+                        pulses: modeActivationPulse.stream,
+                        duration: Duration(milliseconds: 440),
+                        builder: (context, child, progresses) {
+                          final p = min(
+                              1.0,
+                              progresses.fold(
+                                  0.0,
+                                  (a, b) =>
+                                      a + 0.55 * defaultPulserFunction(b)));
+                          return Container(
+                              decoration: BoxDecoration(
+                                  color: lerpColor(mt.foreBackColor,
+                                      theme.colorScheme.primary, p),
+                                  borderRadius: BorderRadius.circular(
+                                      backingCornerRounding * buttonSpan)));
+                        }),
+                  ),
+                ),
+              ));
+        },
+      );
+    });
 
     final numeralPartAnchor = Offset(-3, 0);
     final outerPaletteAnchor = Offset(-4, 0);
@@ -3560,6 +3566,20 @@ class TimerScreenState extends State<TimerScreen>
       Positioned.fromRect(
           rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
           child: selectButton),
+      Positioned.fromRect(
+        rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
+        child: TimersButton(
+          label: proportionedIcon(Icons.view_sidebar_outlined),
+          onPanEnd: () {
+            if (squishPanelController.status == AnimationStatus.forward ||
+                squishPanelController.status == AnimationStatus.completed) {
+              squishPanelController.reverse();
+            } else {
+              squishPanelController.forward();
+            }
+          },
+        ),
+      ),
     ];
 
     Widget editPopoverIcon(
@@ -3784,22 +3804,39 @@ class TimerScreenState extends State<TimerScreen>
                           left: 0,
                           right: 0,
                           top: 0,
-                          child: SingleChildScrollView(
-                              controller: timersScroller,
-                              reverse: true,
-                              child: Column(children: [
-                                // ensure it can be scrolled down to center the top row of timers
-                                SizedBox(
-                                    height: screenSize.height -
-                                        controlsh -
-                                        timerHeight),
-                                // ConstrainedBox(
-                                //     constraints: BoxConstraints(
-                                //         minHeight: screenSize.height),
-                                //     child: timersWidget),
-                                timersWidget,
-                                SizedBox(height: controlsh),
-                              ])),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              AnimatedBuilder(
+                                animation: squishPanelController,
+                                builder: (context, child) {
+                                  final w = screenSize.width *
+                                      0.7 *
+                                      squishPanelController.value;
+                                  return SizedBox(
+                                    width: w,
+                                    child: w <= 0
+                                        ? null
+                                        : SquishBoundaryPlane(
+                                            theme: theme, mt: mt),
+                                  );
+                                },
+                              ),
+                              Expanded(
+                                child: SingleChildScrollView(
+                                    controller: timersScroller,
+                                    reverse: true,
+                                    child: Column(children: [
+                                      SizedBox(
+                                          height: screenSize.height -
+                                              controlsh -
+                                              timerHeight),
+                                      timersWidget,
+                                      SizedBox(height: controlsh),
+                                    ])),
+                              ),
+                            ],
+                          ),
                         ),
                         ...controls,
                         editPopoverBacking,

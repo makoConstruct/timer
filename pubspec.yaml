@@ -58,7 +58,6 @@ dependencies:
   flutter_ringtone_manager: ^1.1.2
   flutter_refresh_rate_control: ^0.0.4+1
   screen_corner_radius: ^3.0.0
-  animated_containers: ^1.2.1
   # liquid_glass_renderer: ^0.2.0-dev.4
   vibration: ^3.1.8
   shadow_widget: ^0.1.1
