@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:ui';
 
+import 'package:flutter/material.dart';
 import 'package:makos_timer/boring.dart';
 
 // how generation works: you define a sequence of entity types, which have 'radius's, which are how far away they can affect the generation of other things, the lower it is the fewer need to be loaded at once. Each type is given all instances of the previous types, via the GenerationContext, within `radius` range of it, and it then generates its stuff using that.
@@ -10,7 +11,7 @@ import 'package:makos_timer/boring.dart';
 class Coord {
   final int x;
   final int y;
-  Coord({required this.x, required this.y});
+  Coord(this.x, this.y);
   @override
   String toString() {
     return 'Coord(x: $x, y: $y)';
@@ -24,7 +25,7 @@ class Coord {
   @override
   int get hashCode => x.hashCode ^ y.hashCode;
   Coord operator +(Coord other) {
-    return Coord(x: x + other.x, y: y + other.y);
+    return Coord(x + other.x, y + other.y);
   }
 
   Offset toOffset() {
@@ -32,23 +33,23 @@ class Coord {
   }
 
   Coord operator -(Coord other) {
-    return Coord(x: x - other.x, y: y - other.y);
+    return Coord(x - other.x, y - other.y);
   }
 
   Coord operator *(int other) {
-    return Coord(x: x * other, y: y * other);
+    return Coord(x * other, y * other);
   }
 
   Coord operator /(int other) {
-    return Coord(x: x ~/ other, y: y ~/ other);
+    return Coord(x ~/ other, y ~/ other);
   }
 
   Coord operator %(int other) {
-    return Coord(x: x % other, y: y % other);
+    return Coord(x % other, y % other);
   }
 
   Coord operator ~/(int other) {
-    return Coord(x: x ~/ other, y: y ~/ other);
+    return Coord(x ~/ other, y ~/ other);
   }
 }
 
@@ -57,14 +58,14 @@ const double loadingBorderSlop = 2;
 
 /// iterates over the surrounding coords, anticlockwise, starting from center right
 void overSurroundingCoords(Coord coord, Function(Coord) callback) {
-  callback(coord + Coord(x: 1, y: 0));
-  callback(coord + Coord(x: 1, y: 1));
-  callback(coord + Coord(x: 0, y: 1));
-  callback(coord + Coord(x: -1, y: 1));
-  callback(coord + Coord(x: -1, y: 0));
-  callback(coord + Coord(x: -1, y: -1));
-  callback(coord + Coord(x: 0, y: -1));
-  callback(coord + Coord(x: 1, y: -1));
+  callback(coord + Coord(1, 0));
+  callback(coord + Coord(1, 1));
+  callback(coord + Coord(0, 1));
+  callback(coord + Coord(-1, 1));
+  callback(coord + Coord(-1, 0));
+  callback(coord + Coord(-1, -1));
+  callback(coord + Coord(0, -1));
+  callback(coord + Coord(1, -1));
 }
 
 /// contains one type of thing, in a grid, where the cells of the grid correspond to the radius of effect of that type of thing.
@@ -77,7 +78,7 @@ class GenerationLayer<T, GC extends GenerationContext,
 
   /// todo: this needs to consider the camera bounds, not the position of the player
   void moveTo(GC gc, Offset p) {
-    final coord = Coord(x: (p.dx / radius).floor(), y: (p.dy / radius).floor());
+    final coord = Coord((p.dx / radius).floor(), (p.dy / radius).floor());
 
     overSurroundingCoords(coord, (c) {
       // Compute cellSeed as a hash function of gc.seed, generator.name, and c
@@ -144,3 +145,49 @@ class GenerationThingType<GC extends GenerationContext> {
 // so to conclude, base_set(x,y) = random_set(hash(x,y), floor(n_variants*0.45)) + lcg(x,y) - lcg(x+1,y) - lcg(x,y+1)
 // we then choose our final tile variant as choose(base_set(x,y) - base_set(x-1,y) - base_set(x,y-1))
 // able to guarantee that this will at least contain lcg(x,y).
+
+class JourneyingGameScreen extends StatefulWidget {
+  const JourneyingGameScreen({super.key});
+
+  @override
+  State<JourneyingGameScreen> createState() => _JourneyingGameScreenState();
+}
+
+class _JourneyingGameScreenState extends State<JourneyingGameScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: LayoutBuilder(builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final isWide = width > height;
+        final crossSpan = isWide ? height : width;
+        final mainSpan = isWide ? width : height;
+        const controlsMinExtent = 150.0;
+        final worldSpan = (mainSpan - controlsMinExtent).clamp(0.0, crossSpan);
+
+        final worldWidget = SizedBox(
+          width: isWide ? worldSpan : worldSpan.clamp(0.0, width),
+          height: isWide ? worldSpan.clamp(0.0, height) : worldSpan,
+          child: Container(
+            color: Colors.black12,
+          ),
+        );
+
+        final controlsWidget = Expanded(
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 150, minHeight: 150),
+            padding: const EdgeInsets.all(16),
+            child: const Placeholder(),
+          ),
+        );
+
+        if (isWide) {
+          return Row(children: [worldWidget, controlsWidget]);
+        } else {
+          return Column(children: [worldWidget, controlsWidget]);
+        }
+      }),
+    );
+  }
+}

@@ -31,10 +31,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   provider: ^6.1.4
   nb_utils: ^7.1.4
-  # animated_to: ^0.8.1
-  animated_to:
-    path: /home/mako/programming/colab/animated_to
-  # animove: ^1.2.0
+  # animove: ^1.3.0
   animove:
     path: /home/mako/programming/animove
   springster: any #tracking animated_to's springster dependency

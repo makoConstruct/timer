@@ -2,8 +2,26 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
-import 'package:makos_timer/main.dart' show maybeFlippedBackgroundColors;
+import 'package:makos_timer/main.dart'
+    show controlPadTextStyle, maybeFlippedBackgroundColors;
 import 'package:makos_timer/mobj.dart';
+
+/// Overrides [controlPadTextStyle]’s `height` (1.71, for numeral vertical centering).
+/// Flutter’s [TextStyle.height] is a line-height multiplier on the font size; lower
+/// = tighter wrapped lines. Adjust this one value to taste.
+const double crankGameLineHeight = 0.75;
+
+TextStyle _crankGameText(
+  Color color,
+  double fontSize, {
+  FontWeight? fontWeight,
+}) =>
+    controlPadTextStyle.copyWith(
+      color: color,
+      fontSize: fontSize,
+      height: crankGameLineHeight,
+      fontWeight: fontWeight,
+    );
 
 class CrankGameScreen extends StatefulWidget {
   final GlobalKey? iconKey;
@@ -305,8 +323,9 @@ class _CrankGameScreenState extends State<CrankGameScreen>
             const SizedBox(width: 8),
             Text(
               'Crank Game',
-              style: TextStyle(
-                color: theme.colorScheme.onSurface,
+              style: _crankGameText(
+                theme.colorScheme.onSurface,
+                28,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -397,13 +416,11 @@ class _CrankGameScreenState extends State<CrankGameScreen>
               children: [
                 Text(
                   'Speed: ${_currentSpeed.toStringAsFixed(2)} rps',
-                  style: theme.textTheme.bodyLarge,
+                  style: _crankGameText(theme.colorScheme.onSurface, 28),
                 ),
                 Text(
                   'Target: ${targetSpeed.toStringAsFixed(2)} rps',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                  style: _crankGameText(theme.colorScheme.onSurfaceVariant, 24),
                 ),
                 const SizedBox(height: 8),
                 // Speed indicator arrow
@@ -411,7 +428,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                   _hasWon
                       ? 'You won!'
                       : "Please simply rotate the dial at ${targetSpeed.toStringAsFixed(2)}rps for five seconds",
-                  style: theme.textTheme.headlineSmall,
+                  style: _crankGameText(theme.colorScheme.onSurface, 34),
                 ),
                 const SizedBox(height: 8),
                 RotatedBox(
@@ -422,15 +439,13 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                     children: [
                       Text(
                         'difficulty (error margin)',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                        style: _crankGameText(
+                            theme.colorScheme.onSurfaceVariant, 22),
                       ),
                       Text(
                         '${(errorMargin * 100).toStringAsFixed(1)}%',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                        style: _crankGameText(
+                            theme.colorScheme.onSurfaceVariant, 22),
                       ),
                     ],
                   ),
@@ -461,26 +476,23 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                           Text(
                             textAlign: TextAlign.center,
                             'Successfully produced high purity rotation at ${targetSpeed.toStringAsFixed(2)} rotations per second',
-                            style: theme.textTheme.headlineLarge?.copyWith(
-                              color: theme.colorScheme.onSurface,
-                            ),
+                            style:
+                                _crankGameText(theme.colorScheme.onSurface, 40),
                           ),
                           Padding(
                             padding: const EdgeInsets.only(top: 30.0),
                             child: Text(
                               textAlign: TextAlign.center,
                               _currentWinMessage!,
-                              style: theme.textTheme.headlineLarge?.copyWith(
-                                color: theme.colorScheme.onSurface,
-                              ),
+                              style: _crankGameText(
+                                  theme.colorScheme.onSurface, 40),
                             ),
                           ),
                           const SizedBox(height: 30.0),
                           Text(
                             'Tap for next challenge (${nextTargetSpeed.toStringAsFixed(2)}rps)',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                            style: _crankGameText(
+                                theme.colorScheme.onSurfaceVariant, 28),
                           ),
                         ],
                       ),
