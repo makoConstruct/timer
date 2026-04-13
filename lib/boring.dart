@@ -3640,35 +3640,119 @@ class SquishBoundaryPlane extends StatelessWidget {
         Positioned.fill(
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: mt.foreBackColor,
-              border: Border(
-                right: BorderSide(
-                  color: mt.midBackColor.withValues(alpha: 0.35),
-                  width: 1,
-                ),
-              ),
+              color: const Color.fromARGB(255, 206, 24, 94),
             ),
           ),
         ),
         Align(
           alignment: Alignment.centerRight,
-          child: Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: RotatedBox(
-              quarterTurns: 3,
-              child: Text(
-                List.filled(7, 'DANGER SQUISH EDGE ').join(),
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                style: theme.textTheme.labelSmall!.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
+          child: RotatedBox(
+            quarterTurns: 3,
+            child: Text(
+              List.filled(7, 'SQUISH DANGER EDGE ').join(),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              style: theme.textTheme.labelSmall!.copyWith(
+                color: Colors.black,
               ),
             ),
           ),
         ),
       ],
     );
+  }
+}
+
+class SpecialTimerShapesPainter extends CustomPainter {
+  SpecialTimerShapesPainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final hub = Offset(size.width / 2, size.height / 2);
+    final scale = min(size.width, size.height) * 0.016;
+    final formationRadius = 9.0 * scale;
+    final formationStartAngle = -1.77;
+    final double squareSide = 14 * scale;
+    final double pillWidth = 15 * scale;
+    final double pillHeight = 10 * scale;
+    final squareRotation = -0.34;
+    final triangleCircumradius = 7.6 * scale;
+    final triangleGraphicRotation = pi;
+    final pillRotation = -pi / 4;
+
+    Offset polarSlot(int slot) {
+      final a = formationStartAngle + slot * 2 * pi / 3;
+      return hub + Offset(cos(a), sin(a)) * formationRadius;
+    }
+
+    final fill = Paint()..color = color;
+    final sqC = polarSlot(0) + Offset(-scale * 1, -scale * 0.6) * 2;
+    canvas.save();
+    canvas.translate(sqC.dx, sqC.dy);
+    canvas.rotate(squareRotation);
+    canvas.drawRect(
+        Rect.fromCenter(
+            center: Offset.zero, width: squareSide, height: squareSide),
+        fill);
+    canvas.restore();
+
+    final pillC = polarSlot(1);
+    canvas.save();
+    canvas.translate(pillC.dx, pillC.dy);
+    canvas.rotate(pillRotation);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromCenter(
+                center: Offset.zero, width: pillWidth, height: pillHeight),
+            Radius.circular(pillHeight / 2)),
+        fill);
+    canvas.restore();
+
+    final triC = polarSlot(2);
+    final theta0 = -pi / 2 + triangleGraphicRotation;
+    final triPath = Path();
+    for (var k = 0; k < 3; k++) {
+      final t = theta0 + k * 2 * pi / 3;
+      final vx = triC.dx + triangleCircumradius * cos(t);
+      final vy = triC.dy + triangleCircumradius * sin(t);
+      if (k == 0) {
+        triPath.moveTo(vx, vy);
+      } else {
+        triPath.lineTo(vx, vy);
+      }
+    }
+    triPath.close();
+    canvas.drawPath(triPath, fill);
+  }
+
+  @override
+  bool shouldRepaint(covariant SpecialTimerShapesPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class SpecialTimerShapesLabel extends StatelessWidget {
+  const SpecialTimerShapesLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
+    return ScalingAspectRatio(
+        child: SizedBox(
+            width: 50,
+            height: 50,
+            child:
+                CustomPaint(painter: SpecialTimerShapesPainter(color: color))));
+  }
+}
+
+class Thumbspan {
+  /// measured in logical pixels
+  double thumbspan;
+  Thumbspan(this.thumbspan);
+  static double of(BuildContext context, {bool listen = false}) {
+    return Provider.of<Thumbspan>(context, listen: listen).thumbspan;
   }
 }

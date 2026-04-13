@@ -341,6 +341,89 @@ TimerData cloneTimerDataWithChanges(
   );
 }
 
+class Coord {
+  final int x;
+  final int y;
+  const Coord(this.x, this.y);
+  Coord withChanges({int? x, int? y}) => Coord(x ?? this.x, y ?? this.y);
+}
+
+class CoordType extends TypeHelp<Coord> {
+  CoordType() : super('Coord');
+
+  @override
+  Coord fromJsonValue(Object? json) {
+    if (json is Map<String, dynamic>) {
+      return Coord(IntType().fromJson(json['x']), IntType().fromJson(json['y']));
+    }
+    throw ArgumentError('Cannot convert $json to Coord');
+  }
+
+  @override
+  Object? toJsonValue(Coord object) => {
+        'x': IntType().toJson(object.x),
+        'y': IntType().toJson(object.y),
+      };
+}
+
+class JourneyPlayer {
+  final Coord pos;
+  final List<MobjID?> inventory;
+  const JourneyPlayer({required this.pos, required this.inventory});
+  JourneyPlayer withChanges({Coord? pos, List<MobjID?>? inventory}) =>
+      JourneyPlayer(pos: pos ?? this.pos, inventory: inventory ?? this.inventory);
+}
+
+class JourneyPlayerType extends TypeHelp<JourneyPlayer> {
+  JourneyPlayerType() : super('JourneyPlayer');
+
+  @override
+  JourneyPlayer fromJsonValue(Object? json) {
+    if (json is Map<String, dynamic>) {
+      return JourneyPlayer(
+        pos: CoordType().fromJson(json['pos']),
+        inventory: ListType(Nullable(StringType())).fromJson(json['inventory']),
+      );
+    }
+    throw ArgumentError('Cannot convert $json to JourneyPlayer');
+  }
+
+  @override
+  Object? toJsonValue(JourneyPlayer object) => {
+        'pos': CoordType().toJson(object.pos),
+        'inventory': ListType(Nullable(StringType())).toJson(object.inventory),
+      };
+}
+
+class JourneyState {
+  final String seed;
+  final MobjID player;
+  const JourneyState({required this.seed, required this.player});
+  JourneyState withChanges({String? seed, MobjID? player}) =>
+      JourneyState(seed: seed ?? this.seed, player: player ?? this.player);
+}
+
+class JourneyStateType extends TypeHelp<JourneyState> {
+  JourneyStateType() : super('JourneyState');
+
+  @override
+  JourneyState fromJsonValue(Object? json) {
+    if (json is Map<String, dynamic>) {
+      return JourneyState(
+        seed: StringType().fromJson(json['seed']),
+        player: StringType().fromJson(json['player']),
+      );
+    }
+    throw ArgumentError('Cannot convert $json to JourneyState');
+  }
+
+  @override
+  Object? toJsonValue(JourneyState object) => {
+        'seed': StringType().toJson(object.seed),
+        'player': StringType().toJson(object.player),
+      };
+}
+
 class AudioInfoType extends TypeHelp<AudioInfo> {
   AudioInfoType() : super('AudioInfo');
 

@@ -272,15 +272,6 @@ void onDataReceived(Object data) {
 
 final Signal<bool> isBackgrounded = Signal(false);
 
-class Thumbspan {
-  /// measured in logical pixels
-  double thumbspan;
-  Thumbspan(this.thumbspan);
-  static double of(BuildContext context, {bool listen = false}) {
-    return Provider.of<Thumbspan>(context, listen: listen).thumbspan;
-  }
-}
-
 TimerHolm? globalTimerHolm;
 
 /// this is in charge of running timer sounds in response to changes to the timer list
@@ -2231,8 +2222,6 @@ class TimerTrayState extends State<TimerTray> with SignalsMixin {
   }
 }
 
-
-
 class TimerScreen extends StatefulWidget {
   const TimerScreen({super.key});
 
@@ -3246,7 +3235,7 @@ class TimerScreenState extends State<TimerScreen>
           // label: Icon(Icons.select_all),
           // label: Icon(Icons.border_outer_rounded),
           key: selectButtonKey,
-          label: const _SpecialTimerShapesLabel(),
+          label: const SpecialTimerShapesLabel(),
           onPanDown: (Offset p) {
             specialTimerCreateDragRingController.onPanDown(
                 context, p, boxRect(selectButtonKey as GlobalKey)!.center);
@@ -4243,90 +4232,6 @@ const controlPadTextStyle = TextStyle(
   height: 1.71, // Controls line height, adjust to fine-tune vertical centering
 );
 
-class _SpecialTimerShapesPainter extends CustomPainter {
-  _SpecialTimerShapesPainter({required this.color});
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final hub = Offset(size.width / 2, size.height / 2);
-    final scale = min(size.width, size.height) * 0.0174;
-    final formationRadius = 9.0 * scale;
-    final formationStartAngle = -1.77;
-    final double squareSide = 14 * scale;
-    final double pillWidth = 15 * scale;
-    final double pillHeight = 10 * scale;
-    final squareRotation = -0.34;
-    final triangleCircumradius = 7.6 * scale;
-    final triangleGraphicRotation = pi;
-    final pillRotation = -pi / 4;
-
-    Offset polarSlot(int slot) {
-      final a = formationStartAngle + slot * 2 * pi / 3;
-      return hub + Offset(cos(a), sin(a)) * formationRadius;
-    }
-
-    final fill = Paint()..color = color;
-    final sqC = polarSlot(0) + Offset(-scale * 1, -scale * 0.6) * 2;
-    canvas.save();
-    canvas.translate(sqC.dx, sqC.dy);
-    canvas.rotate(squareRotation);
-    canvas.drawRect(
-        Rect.fromCenter(
-            center: Offset.zero, width: squareSide, height: squareSide),
-        fill);
-    canvas.restore();
-
-    final pillC = polarSlot(1);
-    canvas.save();
-    canvas.translate(pillC.dx, pillC.dy);
-    canvas.rotate(pillRotation);
-    canvas.drawRRect(
-        RRect.fromRectAndRadius(
-            Rect.fromCenter(
-                center: Offset.zero, width: pillWidth, height: pillHeight),
-            Radius.circular(pillHeight / 2)),
-        fill);
-    canvas.restore();
-
-    final triC = polarSlot(2);
-    final theta0 = -pi / 2 + triangleGraphicRotation;
-    final triPath = Path();
-    for (var k = 0; k < 3; k++) {
-      final t = theta0 + k * 2 * pi / 3;
-      final vx = triC.dx + triangleCircumradius * cos(t);
-      final vy = triC.dy + triangleCircumradius * sin(t);
-      if (k == 0) {
-        triPath.moveTo(vx, vy);
-      } else {
-        triPath.lineTo(vx, vy);
-      }
-    }
-    triPath.close();
-    canvas.drawPath(triPath, fill);
-  }
-
-  @override
-  bool shouldRepaint(covariant _SpecialTimerShapesPainter oldDelegate) =>
-      oldDelegate.color != color;
-}
-
-class _SpecialTimerShapesLabel extends StatelessWidget {
-  const _SpecialTimerShapesLabel();
-
-  @override
-  Widget build(BuildContext context) {
-    final color =
-        IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
-    return ScalingAspectRatio(
-        child: SizedBox(
-            width: 50,
-            height: 50,
-            child: CustomPaint(
-                painter: _SpecialTimerShapesPainter(color: color))));
-  }
-}
-
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
   final Object label;
@@ -4581,9 +4486,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     Widget trailing(Widget child) =>
         SizedBox(width: 32.0, child: Center(child: child));
-
-    bool completedSetup = watchSignal(
-        context, Mobj.getAlreadyLoaded(completedSetupID, BoolType()))!;
 
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
@@ -4950,29 +4852,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
 
-              // ListTile(
-              //   title: Text('Journeying game',
-              //       style: theme.textTheme.bodyLarge),
-              //   subtitle: Text(
-              //     "A world to wander.",
-              //     style: theme.textTheme.bodyMedium
-              //         ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              //   ),
-              //   trailing: trailing(Icon(
-              //     Icons.explore_rounded,
-              //     color: theme.colorScheme.primary,
-              //     size: 24,
-              //   )),
-              //   onTap: () {
-              //     Navigator.push(
-              //       context,
-              //       MaterialPageRoute(
-              //         builder: (context) => const JourneyingGameScreen(),
-              //       ),
-              //     );
-              //   },
-              //   contentPadding: listItemPadding,
-              // ),
+              ListTile(
+                title:
+                    Text('Journeying game', style: theme.textTheme.bodyLarge),
+                subtitle: Text(
+                  "A world to wander.",
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                trailing: trailing(Icon(
+                  Icons.explore_rounded,
+                  color: theme.colorScheme.primary,
+                  size: 24,
+                )),
+                onTap: () {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const JourneyingGameScreen(),
+                    ),
+                  );
+                },
+                contentPadding: listItemPadding,
+              ),
 
               // if (!completedSetup) ...[
               if (true) ...[
