@@ -4868,7 +4868,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () {
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(
+                    CircularRevealRoute(
                       builder: (context) => const JourneyingGameScreen(),
                     ),
                   );

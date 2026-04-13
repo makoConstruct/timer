@@ -1705,7 +1705,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
 
         final revealOrigin = boxRect(iconOriginKey)?.center ??
             buttonCenter ??
-            sizeToOffset(screenSize) / 2;
+            Offset(screenSize.width / 2, screenSize.height * 2.4);
 
         return Transform.scale(
           scale: scale,

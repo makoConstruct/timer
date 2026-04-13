@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:makos_timer/boring.dart';
+import 'package:makos_timer/buffered_grid_image.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart';
 import 'package:makos_timer/mobj.dart';
@@ -227,7 +228,7 @@ class _JourneyingGameScreenState extends State<JourneyingGameScreen> {
                             BoxConstraints.loose(Size(itemWidth, itemWidth)),
                         icon: const Icon(Icons.settings),
                         onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
+                          CircularRevealRoute(
                             builder: (_) => const JourneySettingsScreen(),
                           ),
                         ),
@@ -323,7 +324,7 @@ class WorldView extends StatefulWidget {
 class _WorldViewState extends State<WorldView>
     with SingleTickerProviderStateMixin {
   static const _spring =
-      SpringDescription(mass: 1, stiffness: 150, damping: 25);
+      SpringDescription(mass: 1, stiffness: 100, damping: 20);
 
   late final Ticker _ticker;
   final ValueNotifier<Offset> _scrollOffset = ValueNotifier(Offset.zero);
@@ -336,6 +337,27 @@ class _WorldViewState extends State<WorldView>
 
   Coord? _lastCamera;
 
+  late final BufferedGridImage _bgBuffer = BufferedGridImage(
+    paintTile: _paintBgTile,
+  );
+
+  static final Paint _bgFill = Paint()..color = const Color(0xFF000000);
+
+  static void _paintBgTile(Canvas canvas, Coord tile) {
+    canvas.drawRect(const Rect.fromLTWH(0, 0, 1, 1), _bgFill);
+    final tx = tile.x, ty = tile.y;
+    final p = weightedAverage([
+      (1, perlin(Offset(tx.toDouble(), ty.toDouble()) / 8, 0xDEADBEEF)),
+      (0.2, scalarFromHashInt(hashCorner(tx, ty, 6))),
+      (0.4, perlin(Offset(tx.toDouble(), ty.toDouble()) / 5, 85))
+    ]);
+    canvas.drawCircle(
+      const Offset(0.5, 0.5),
+      0.15,
+      Paint()..color = p > 0.5 ? grey(0.2) : grey(0.12),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -346,6 +368,7 @@ class _WorldViewState extends State<WorldView>
   void dispose() {
     _ticker.dispose();
     _scrollOffset.dispose();
+    _bgBuffer.dispose();
     super.dispose();
   }
 
@@ -384,6 +407,11 @@ class _WorldViewState extends State<WorldView>
       final viewHeight = constraints.maxHeight;
       final trueItemWidth = viewWidth / 32;
       final scale = trueItemWidth;
+      final viewTilesW = viewWidth / scale;
+      final viewTilesH = viewHeight / scale;
+
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      _bgBuffer.resize(viewTilesW, viewTilesH, (scale * dpr).ceil());
 
       if (cam != _lastCamera) {
         _lastCamera = cam;
@@ -392,10 +420,12 @@ class _WorldViewState extends State<WorldView>
         });
       }
 
-      return ListenableBuilder(
+      return ClipRect(
+          child: ListenableBuilder(
         listenable: _scrollOffset,
         builder: (context, _) {
           final offset = _scrollOffset.value;
+          _bgBuffer.moveCamera(offset);
 
           return Transform.translate(
             offset: Offset(viewWidth / 2, viewHeight / 2),
@@ -408,15 +438,11 @@ class _WorldViewState extends State<WorldView>
                   clipBehavior: Clip.none,
                   children: [
                     CustomPaint(
-                      painter: _WorldPainter(
-                        offset: offset,
-                        viewWidth: viewWidth / scale,
-                        viewHeight: viewHeight / scale,
-                      ),
+                      painter: _BufferedWorldPainter(bgBuffer: _bgBuffer),
                     ),
                     Positioned(
-                      left: cam.x - 0.25,
-                      top: cam.y - 0.25,
+                      left: cam.x + 0.25,
+                      top: cam.y + 0.25,
                       width: 0.5,
                       height: 0.5,
                       child: DecoratedBox(
@@ -432,55 +458,23 @@ class _WorldViewState extends State<WorldView>
             ),
           );
         },
-      );
+      ));
     });
   }
 }
 
-class _WorldPainter extends CustomPainter {
-  final Offset offset;
-  final double viewWidth;
-  final double viewHeight;
+class _BufferedWorldPainter extends CustomPainter {
+  final BufferedGridImage bgBuffer;
 
-  _WorldPainter({
-    required this.offset,
-    required this.viewWidth,
-    required this.viewHeight,
-  });
+  _BufferedWorldPainter({required this.bgBuffer});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final startX = (offset.dx - viewWidth / 2).floor();
-    final endX = (offset.dx + viewWidth / 2).ceil() + 1;
-    final startY = (offset.dy - viewHeight / 2).floor();
-    final endY = (offset.dy + viewHeight / 2).ceil() + 1;
-
-    final bgPaint = Paint()..color = Colors.grey.withValues(alpha: 0.15);
-
-    for (var ty = startY; ty <= endY; ty++) {
-      for (var tx = startX; tx <= endX; tx++) {
-        final p = weightedAverage([
-          (
-            1,
-            smoothstepStrength(0.3, 1, 1,
-                perlin(Offset(tx.toDouble(), ty.toDouble()) / 8, 0xDEADBEEF))
-          ),
-          (0.2, scalarFromHashInt(hashCorner(tx, ty, 6))),
-          (0.4, perlin(Offset(tx.toDouble(), ty.toDouble()) / 5, 85))
-        ]);
-        // if (p > 0.5) {
-        canvas.drawCircle(
-          Offset(tx.toDouble(), ty.toDouble()),
-          0.15,
-          Paint()..color = Colors.grey.withValues(alpha: p),
-        );
-        // }
-      }
-    }
+    bgBuffer.render(canvas);
   }
 
   @override
-  bool shouldRepaint(_WorldPainter old) => offset != old.offset;
+  bool shouldRepaint(_BufferedWorldPainter old) => true;
 }
 
 class JourneySettingsScreen extends StatefulWidget {
