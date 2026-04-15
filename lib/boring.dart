@@ -62,16 +62,19 @@ void scrollToWithPadding(
   final padding = MediaQuery.of(context).padding.bottom;
   final baseTarget = revealed.offset;
   final target =
-      (baseTarget >= position.pixels ? baseTarget + padding : baseTarget)
-          .clamp(position.minScrollExtent, position.maxScrollExtent);
+      (baseTarget >= position.pixels ? baseTarget + padding : baseTarget).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
   position.animateTo(target, duration: duration, curve: curve);
 }
 
 // Using platform audio for content:// URI support (for using system ringtones)
 // On Linux, uses audioplayers instead since platform_audio doesn't work there, though audioplayers doesn't work perfectly, we're not actually doing a linux target, linux is just for testing
 class JukeBox {
-  static final AssetSource _defaultSound =
-      AssetSource('sounds/jingles_STEEL16.ogg');
+  static final AssetSource _defaultSound = AssetSource(
+    'sounds/jingles_STEEL16.ogg',
+  );
   AudioPlayer? _audioPlayer; // Only used on Linux
 
   static JukeBox create() {
@@ -155,8 +158,9 @@ class JukeBox {
       await _audioPlayer!.play(_defaultSound);
     } else {
       // Get the user's actual default notification sound
-      final defaultSound =
-          await PlatformAudio.getDefaultAudio(PlatformAudioType.notification);
+      final defaultSound = await PlatformAudio.getDefaultAudio(
+        PlatformAudioType.notification,
+      );
       await playAudio(defaultSound!);
     }
   }
@@ -171,7 +175,11 @@ class JukeBox {
 }
 
 Rect negativeInfinityRect() => Rect.fromLTRB(
-    double.infinity, double.infinity, -double.infinity, -double.infinity);
+  double.infinity,
+  double.infinity,
+  -double.infinity,
+  -double.infinity,
+);
 
 double totalDuration(TimerData d) {
   if (d.kind == TimerKind.series || d.kind == TimerKind.loop) {
@@ -261,7 +269,9 @@ Rect? boxRectRelativeTo(RenderBox? key, RenderBox? ancestor) {
 
 /// only defers once, assumes it'll be there on the next frame
 void getStateMaybeDeferring<T extends State>(
-    GlobalKey<T> k, void Function(T) to) {
+  GlobalKey<T> k,
+  void Function(T) to,
+) {
   final tk = k.currentState;
   if (tk == null) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -280,17 +290,19 @@ class FutureAssumer<T> extends StatelessWidget {
   const FutureAssumer({super.key, required this.future, required this.builder});
   @override
   build(BuildContext context) => FutureBuilder(
-      future: future,
-      builder: (context, snapshot) {
-        final theme = Theme.of(context);
-        return snapshot.hasError
-            ? Container(
-                color: theme.colorScheme.errorContainer,
-                child: Text(snapshot.error.toString()))
-            : snapshot.hasData
-                ? builder(context, snapshot.data as T)
-                : Container(color: theme.colorScheme.errorContainer);
-      });
+    future: future,
+    builder: (context, snapshot) {
+      final theme = Theme.of(context);
+      return snapshot.hasError
+          ? Container(
+              color: theme.colorScheme.errorContainer,
+              child: Text(snapshot.error.toString()),
+            )
+          : snapshot.hasData
+          ? builder(context, snapshot.data as T)
+          : Container(color: theme.colorScheme.errorContainer);
+    },
+  );
 }
 
 class DraggableWidget<T> extends StatefulWidget {
@@ -298,12 +310,13 @@ class DraggableWidget<T> extends StatefulWidget {
   final T? data;
   final Function()? onDragStarted;
   final Function()? onDragEnd;
-  const DraggableWidget(
-      {super.key,
-      required this.child,
-      this.data,
-      this.onDragStarted,
-      this.onDragEnd});
+  const DraggableWidget({
+    super.key,
+    required this.child,
+    this.data,
+    this.onDragStarted,
+    this.onDragEnd,
+  });
   @override
   State<DraggableWidget> createState() => _DraggableWidgetState();
 }
@@ -324,15 +337,20 @@ class PeriodicTimerFromEpoch implements Timer {
   final Function(Timer) callback;
   Timer? firstTickTimer;
   Timer? periodicTimer;
-  PeriodicTimerFromEpoch(
-      {required this.period, required this.epoch, required this.callback}) {
-    firstTickTimer =
-        Timer(normalizeDuration(epoch.difference(DateTime.now()), period), () {
-      firstTickTimer = null;
-      periodicTimer = Timer.periodic(period, (timer) {
-        callback(this);
-      });
-    });
+  PeriodicTimerFromEpoch({
+    required this.period,
+    required this.epoch,
+    required this.callback,
+  }) {
+    firstTickTimer = Timer(
+      normalizeDuration(epoch.difference(DateTime.now()), period),
+      () {
+        firstTickTimer = null;
+        periodicTimer = Timer.periodic(period, (timer) {
+          callback(this);
+        });
+      },
+    );
   }
 
   @override
@@ -350,7 +368,10 @@ class PeriodicTimerFromEpoch implements Timer {
 }
 
 List<T> generatedReverseIfNot<T>(
-    bool condition, int length, T Function(int) generator) {
+  bool condition,
+  int length,
+  T Function(int) generator,
+) {
   return condition
       ? List.generate(length, (i) => generator(i))
       : List.generate(length, (i) => generator(length - i - 1));
@@ -368,8 +389,11 @@ void moveAnimationTowardsState(AnimationController animation, bool forward) {
 class SelfRemovalHost extends StatefulWidget {
   final List<Widget> initialChildren;
   final Widget Function(List<Widget>, BuildContext) builder;
-  const SelfRemovalHost(
-      {super.key, this.initialChildren = const [], required this.builder});
+  const SelfRemovalHost({
+    super.key,
+    this.initialChildren = const [],
+    required this.builder,
+  });
   @override
   State<SelfRemovalHost> createState() => SelfRemovalHostState();
 }
@@ -413,9 +437,12 @@ class SelfRemovalHostState extends State<SelfRemovalHost> {
 }
 
 // takes ownership of animation/dispose it on statusForRemoval
-void addEphemeralAnimation(GlobalKey<SelfRemovalHostState> hostKey,
-    Widget child, AnimationController animation,
-    {AnimationStatus statusForRemoval = AnimationStatus.completed}) {
+void addEphemeralAnimation(
+  GlobalKey<SelfRemovalHostState> hostKey,
+  Widget child,
+  AnimationController animation, {
+  AnimationStatus statusForRemoval = AnimationStatus.completed,
+}) {
   hostKey.currentState!.add(child);
   animation.addStatusListener((status) {
     if (status == statusForRemoval) {
@@ -428,8 +455,8 @@ void addEphemeralAnimation(GlobalKey<SelfRemovalHostState> hostKey,
 //produces a drag anchor strategy that captures the offset of the drag start so that we can animate from it.
 DragAnchorStrategy dragAnchorStrategy(ValueNotifier<Offset> dragStartOffset) =>
     (Draggable<Object> draggable, BuildContext context, Offset position) {
-      dragStartOffset.value =
-          (context.findRenderObject() as RenderBox).globalToLocal(position);
+      dragStartOffset.value = (context.findRenderObject() as RenderBox)
+          .globalToLocal(position);
       return Offset.zero;
     };
 
@@ -442,8 +469,10 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
   @override
   void initState() {
     super.initState();
-    popAnimation =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 100));
+    popAnimation = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 100),
+    );
   }
 
   @override
@@ -453,53 +482,57 @@ class _DraggableWidgetState<T extends Object> extends State<DraggableWidget<T>>
       valueListenable: dragStartOffset,
       builder: (context, offset, child) {
         return LongPressDraggable<T>(
-            delay: Duration(milliseconds: 180),
-            data: widget.data,
-            // this parameter isn't really supposed to do a mutation when called, but I don't know how else to get the touch point offset
-            dragAnchorStrategy: dragAnchorStrategy(dragStartOffset),
-            // the Material is a workaround for https://github.com/flutter/flutter/issues/39379
-            feedback: ValueListenableBuilder(
-                valueListenable: previousSize,
-                builder: (context, psize, child) {
-                  return Material(
-                    color: Colors.transparent,
-                    child: AnimatedBuilder(
-                      animation: popAnimation,
-                      builder: (context, child) {
-                        return Transform.translate(
-                          offset: lerpOffset(
-                                  -dragStartOffset.value,
-                                  -sizeToOffset(psize / 2),
-                                  popAnimation.value) +
-                              Offset(
-                                  0,
-                                  Curves.easeInOut
-                                          .transform(popAnimation.value) *
-                                      20),
-                          child: child,
-                        );
-                      },
-                      child: SizedBox(
-                          width: psize.width,
-                          height: psize.height,
-                          child: widget.child),
-                    ),
-                  );
-                }),
-            onDragStarted: () {
-              popAnimation.forward(from: 0);
-              widget.onDragStarted?.call();
+          delay: Duration(milliseconds: 180),
+          data: widget.data,
+          // this parameter isn't really supposed to do a mutation when called, but I don't know how else to get the touch point offset
+          dragAnchorStrategy: dragAnchorStrategy(dragStartOffset),
+          // the Material is a workaround for https://github.com/flutter/flutter/issues/39379
+          feedback: ValueListenableBuilder(
+            valueListenable: previousSize,
+            builder: (context, psize, child) {
+              return Material(
+                color: Colors.transparent,
+                child: AnimatedBuilder(
+                  animation: popAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset:
+                          lerpOffset(
+                            -dragStartOffset.value,
+                            -sizeToOffset(psize / 2),
+                            popAnimation.value,
+                          ) +
+                          Offset(
+                            0,
+                            Curves.easeInOut.transform(popAnimation.value) * 20,
+                          ),
+                      child: child,
+                    );
+                  },
+                  child: SizedBox(
+                    width: psize.width,
+                    height: psize.height,
+                    child: widget.child,
+                  ),
+                ),
+              );
             },
-            onDragEnd: (details) {
-              widget.onDragEnd?.call();
+          ),
+          onDragStarted: () {
+            popAnimation.forward(from: 0);
+            widget.onDragStarted?.call();
+          },
+          onDragEnd: (details) {
+            widget.onDragEnd?.call();
+          },
+          childWhenDragging: ValueListenableBuilder(
+            valueListenable: previousSize,
+            builder: (context, value, child) {
+              return SizedBox(width: value.width, height: value.height);
             },
-            childWhenDragging: ValueListenableBuilder(
-                valueListenable: previousSize,
-                builder: (context, value, child) {
-                  return SizedBox(width: value.width, height: value.height);
-                }),
-            child:
-                SizeReporter(previousSize: previousSize, child: widget.child));
+          ),
+          child: SizeReporter(previousSize: previousSize, child: widget.child),
+        );
       },
     );
   }
@@ -531,12 +564,7 @@ class EnspiralPainter extends CustomPainter {
     // Top half circle (full width)
     final Path topPath = Path()
       ..moveTo(0, size.height / 2)
-      ..arcTo(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        pi,
-        pi,
-        false,
-      )
+      ..arcTo(Rect.fromLTWH(0, 0, size.width, size.height), pi, pi, false)
       ..lineTo(size.width, size.height / 2)
       ..close();
 
@@ -597,7 +625,9 @@ double shortestAngleDistance(double from, double to) {
 
 Offset topLeftManhattanCenter(Rect r) {
   return Offset(
-      r.left + min(r.width, r.height) / 2, r.top + min(r.width, r.height) / 2);
+    r.left + min(r.width, r.height) / 2,
+    r.top + min(r.width, r.height) / 2,
+  );
 }
 
 // (double, double) bothAngleDifferences(double from, double to) {
@@ -612,6 +642,10 @@ double lerp(double a, double b, double t) {
 
 Offset lerpOffset(Offset a, Offset b, double t) {
   return Offset(lerp(a.dx, b.dx, t), lerp(a.dy, b.dy, t));
+}
+
+double softmax(double a, double b) {
+  return 1 - (1 - a) * (1 - b);
 }
 
 /// ceilab is better for interpollation but in most cases it doesn't matter and also the cielab library I tried seemed to have compilation errros in it
@@ -684,8 +718,9 @@ double moduloProperly(double t, double m) {
 
 double progressOverInterval(Duration interval, DateTime startTime) {
   return clampUnit(
-      DateTime.now().difference(startTime).inMicroseconds.toDouble() /
-          interval.inMicroseconds.toDouble());
+    DateTime.now().difference(startTime).inMicroseconds.toDouble() /
+        interval.inMicroseconds.toDouble(),
+  );
 }
 
 /// tracks two components, a rise time and a fall time. Sometimes you want an animation to look different on the way down. Use the second component (the falling one) of the animation value to smoothly overrule the rising component so that there's no stutter or interruption when the animation changes direction. However, when the animation goes from falling to rising, there will be a discontinuity.
@@ -733,26 +768,34 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   void forward({double? from, Duration? delay}) {
     Duration dd = delay ?? Duration.zero;
     if (from != null) {
-      _riseTime = DateTime.now().add(dd).subtract(
-          Duration(milliseconds: (from * riseDuration.inMilliseconds).toInt()));
+      _riseTime = DateTime.now()
+          .add(dd)
+          .subtract(
+            Duration(
+              milliseconds: (from * riseDuration.inMilliseconds).toInt(),
+            ),
+          );
     } else if (_riseTime == null) {
       _riseTime = DateTime.now().add(dd);
     } else if (_fallTime != null) {
       // tries to start from where it currently is (this may not work if you're using heterogenous easers on rise and fall)
-      double riseProgress =
-          durationToSeconds(DateTime.now().difference(_riseTime!));
+      double riseProgress = durationToSeconds(
+        DateTime.now().difference(_riseTime!),
+      );
       double fallProgress = _fallTime != null
           ? durationToSeconds(DateTime.now().difference(_fallTime!))
           : 0;
       double forwardPosition = max(
-          0,
-          min(
-                  riseProgress,
-                  durationToSeconds(riseDuration) -
-                      fallProgress /
-                          durationToSeconds(fallDuration) *
-                          durationToSeconds(riseDuration)) /
-              durationToSeconds(riseDuration));
+        0,
+        min(
+              riseProgress,
+              durationToSeconds(riseDuration) -
+                  fallProgress /
+                      durationToSeconds(fallDuration) *
+                      durationToSeconds(riseDuration),
+            ) /
+            durationToSeconds(riseDuration),
+      );
       if (forwardPosition > 0) {
         _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
       } else {
@@ -811,15 +854,19 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     double riseValue = 0.0;
     if (_riseTime != null) {
       final elapsed = now.difference(_riseTime!);
-      riseValue = clampUnit(elapsed.inMicroseconds.toDouble() /
-          riseDuration.inMicroseconds.toDouble());
+      riseValue = clampUnit(
+        elapsed.inMicroseconds.toDouble() /
+            riseDuration.inMicroseconds.toDouble(),
+      );
     }
 
     double fallValue = 0.0;
     if (_fallTime != null) {
       final elapsed = now.difference(_fallTime!);
-      fallValue = clampUnit(elapsed.inMicroseconds.toDouble() /
-          fallDuration.inMicroseconds.toDouble());
+      fallValue = clampUnit(
+        elapsed.inMicroseconds.toDouble() /
+            fallDuration.inMicroseconds.toDouble(),
+      );
     }
 
     return (riseValue, fallValue);
@@ -925,38 +972,54 @@ int padLevelFor(int digitLength) {
 /// if digits.length is greater than the number of given padLevel, eg, if it's 25 hours and place is 3 (which means show seconds, minutes and hours), it will still automatically show 1 day, 1 hour, and zero minutes and seconds. padLevel is for making sure enough places are shown in numbers that are too low.
 String formatTime(List<int> digits, {int padLevel = 0}) {
   String ret = "";
-  formatTimeFull(digits,
-      padLevel: padLevel,
-      onDigit: (d) => ret += d.toString(),
-      onSeparator: () => ret += ':');
+  formatTimeFull(
+    digits,
+    padLevel: padLevel,
+    onDigit: (d) => ret += d.toString(),
+    onSeparator: () => ret += ':',
+  );
   return ret;
 }
 
 /// displays the time with a "d" or "y" or "m" or "h" under the first section to make the meaning of the number easily felt. Doesn't show an "s", I think the seconds level is always clear enough..
-Text formatTimeWithTimeLevel(List<int> digits,
-    {int padLevel = 0, int? centiseconds}) {
+Text formatTimeWithTimeLevel(
+  List<int> digits, {
+  int padLevel = 0,
+  int? centiseconds,
+}) {
   List<String> parts = [""];
-  int highestLevel = formatTimeFull(digits,
-      padLevel: padLevel,
-      onDigit: (d) => parts.last += d.toString(),
-      onSeparator: () => parts.add(""));
+  int highestLevel = formatTimeFull(
+    digits,
+    padLevel: padLevel,
+    onDigit: (d) => parts.last += d.toString(),
+    onSeparator: () => parts.add(""),
+  );
   List<InlineSpan> spans = [];
   for (int i = 0; i < parts.length; i++) {
     spans.add(TextSpan(text: parts[i]));
     if (highestLevel > 0 && i == 0) {
-      spans.add(WidgetSpan(
+      spans.add(
+        WidgetSpan(
           // I don't know why this required a stack positioned, I tried Container(clipBehavior: Clip.none, alignment: Alignment.topRight), for some reason it was always 0 size.. and also seemingly positioned in the wrong place
           child: SizedBox(
-        width: 0,
-        height: 0,
-        child: Stack(clipBehavior: Clip.none, children: [
-          Positioned(
-              top: -4,
-              right: 0,
-              child: Text(datetimeMaximaInitial[highestLevel],
-                  style: TextStyle(fontSize: 7)))
-        ]),
-      )));
+            width: 0,
+            height: 0,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  top: -4,
+                  right: 0,
+                  child: Text(
+                    datetimeMaximaInitial[highestLevel],
+                    style: TextStyle(fontSize: 7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
     if (i < parts.length - 1) {
       spans.add(TextSpan(text: ":"));
@@ -970,20 +1033,27 @@ Text formatTimeWithTimeLevel(List<int> digits,
 }
 
 /// see the above formatTime to understand what this is used for
-int formatTimeFull(List<int> digits,
-    {int padLevel = 0,
-    required Function(int) onDigit,
-    required Function() onSeparator}) {
+int formatTimeFull(
+  List<int> digits, {
+  int padLevel = 0,
+  required Function(int) onDigit,
+  required Function() onSeparator,
+}) {
   // the index of the current time level (where time levels indicate seconds, minutes, hours, days, years)
   int initialUnderLevel = max(
-      0,
-      max(padLevel - 1,
-          datetimeSectionOffsets.lastIndexWhere((s) => s < digits.length)));
-  int di = max(
-          initialUnderLevel + 1 < datetimeSectionOffsets.length
-              ? datetimeSectionOffsets[initialUnderLevel + 1]
-              : digits.length,
-          digits.length) -
+    0,
+    max(
+      padLevel - 1,
+      datetimeSectionOffsets.lastIndexWhere((s) => s < digits.length),
+    ),
+  );
+  int di =
+      max(
+        initialUnderLevel + 1 < datetimeSectionOffsets.length
+            ? datetimeSectionOffsets[initialUnderLevel + 1]
+            : digits.length,
+        digits.length,
+      ) -
       1;
 
   int underLevel = max(padLevel, initialUnderLevel);
@@ -1003,10 +1073,13 @@ int formatTimeFull(List<int> digits,
 }
 
 ///returns the index of the angleRadius segment that angle intersects, otherwise, returns -1
-int radialDragResult(List<double> angleRadius, double angle,
+int radialDragResult(
+  List<double> angleRadius,
+  double angle, {
 
-    /// hitspan is the span of the radial drag targets, if a drag is within this span, it will be considered a hit.
-    {double hitSpan = double.infinity}) {
+  /// hitspan is the span of the radial drag targets, if a drag is within this span, it will be considered a hit.
+  double hitSpan = double.infinity,
+}) {
   int closestAngle = -1;
   double closestDistance = double.infinity;
   for (int i = 0; i < angleRadius.length; i++) {
@@ -1031,13 +1104,19 @@ T conditionallyApplyIf<T>(bool condition, T Function(T) function, T value) =>
     condition ? function(value) : value;
 
 // format is highest significance digit to lowest significance digit, the order in which they'd be typed or displayed
-void pushDigits(List<int> digitsOut, int number, int digitsInSection,
-    {int base = 10, bool indefinite = false}) {
+void pushDigits(
+  List<int> digitsOut,
+  int number,
+  int digitsInSection, {
+  int base = 10,
+  bool indefinite = false,
+}) {
   int digitsWritten;
   if (!indefinite) {
     if (number > pow(base, digitsInSection)) {
       throw ArgumentError(
-          "number exceeds the max number of digits assigned for this digit slot");
+        "number exceeds the max number of digits assigned for this digit slot",
+      );
     }
     digitsWritten = digitsInSection;
     for (int i = 0; i < digitsInSection; i++) {
@@ -1069,15 +1148,17 @@ void pushDigits(List<int> digitsOut, int number, int digitsInSection,
 
 Function() cancellableFutureThen<T>(Future<T> future, Function(T) then) {
   bool cancelled = false;
-  future.then((value) {
-    if (!cancelled) {
-      then(value);
-    }
-  }).catchError((error) {
-    if (!cancelled) {
-      throw error;
-    }
-  });
+  future
+      .then((value) {
+        if (!cancelled) {
+          then(value);
+        }
+      })
+      .catchError((error) {
+        if (!cancelled) {
+          throw error;
+        }
+      });
   return () {
     cancelled = true;
   };
@@ -1085,12 +1166,16 @@ Function() cancellableFutureThen<T>(Future<T> future, Function(T) then) {
 
 /// where padLevel is the number of figures to include as 0 values if the duration isn't really that long
 /// isNegative just adds a second. I can't exactly explain why countdowns feel better with an extra second added, so that they end at 0 instead of lingering at a 0 for a second before triggering. I think it has something to do with rounding. Rounding down properly generally means negative numbers go more negative, rather than going towards zero, and if we did this without the added second the second place would be as if it were rounding up. Indeed, if this supported centiseconds, you'd want to add an extra centisecond instead of a second. But we shouldn't show centiseconds in any countdowns in practice, so we'll keep it crude like this.
-List<int> durationToDigits(double d,
-    {int padLevel = 1, bool isNegative = false}) {
+List<int> durationToDigits(
+  double d, {
+  int padLevel = 1,
+  bool isNegative = false,
+}) {
   List<int> digits = [];
   bool started = false;
-  Duration dur =
-      Duration(microseconds: ((d + (isNegative ? 1 : 0)) * 1000000).toInt());
+  Duration dur = Duration(
+    microseconds: ((d + (isNegative ? 1 : 0)) * 1000000).toInt(),
+  );
   int days = dur.inDays;
   // Years
   if (days >= 365 || padLevel > 4) {
@@ -1209,8 +1294,12 @@ double lpixPerMM(BuildContext context) {
   return samsungS9PlusValue;
 }
 
-void considerUpdating<T, P>(T? prev, T next, P Function(T) property,
-    void Function({required T? from, required T to}) update) {
+void considerUpdating<T, P>(
+  T? prev,
+  T next,
+  P Function(T) property,
+  void Function({required T? from, required T to}) update,
+) {
   if (prev == null || property(prev) != property(next)) {
     update(from: prev, to: next);
   }
@@ -1234,8 +1323,10 @@ List<int> stripZeroes(List<int> digits) {
 void testTimeConversions() {
   final sd = Duration(days: 1 + 20173 * 365, hours: 2, minutes: 3, seconds: 4);
   final int padLevel = 3;
-  List<int> digits =
-      durationToDigits(durationToSeconds(sd), padLevel: padLevel);
+  List<int> digits = durationToDigits(
+    durationToSeconds(sd),
+    padLevel: padLevel,
+  );
   String formatted = formatTime(digits, padLevel: padLevel);
   assert(formatted == '20173:001:02:03:04');
 
@@ -1261,7 +1352,11 @@ class PulserAnimation extends StatefulWidget {
   final Duration duration;
   final Widget? child;
   final Widget Function(
-      BuildContext context, Widget? child, List<double> progresses) builder;
+    BuildContext context,
+    Widget? child,
+    List<double> progresses,
+  )
+  builder;
 
   const PulserAnimation({
     super.key,
@@ -1425,10 +1520,9 @@ class SweepGradientCirclePainter extends CustomPainter {
     // If holeRadius is greater than 0, create a hole in the center
     if (holeRadius > 0) {
       // Add inner circle (the hole)
-      path.addOval(Rect.fromCircle(
-        center: center,
-        radius: radius * holeRadius,
-      ));
+      path.addOval(
+        Rect.fromCircle(center: center, radius: radius * holeRadius),
+      );
 
       // Use even-odd fill type to create the hole effect
       path.fillType = PathFillType.evenOdd;
@@ -1488,10 +1582,7 @@ class Pie extends StatelessWidget {
             scale: innerRadp,
             child: CustomPaint(
               // size: Size(size, size),
-              painter: PiePainter(
-                value: value.clamp(0.0, 1.0),
-                color: color,
-              ),
+              painter: PiePainter(value: value.clamp(0.0, 1.0), color: color),
             ),
           ),
         ],
@@ -1504,10 +1595,7 @@ class DragIndicatorPainter extends CustomPainter {
   final Color color;
   final double radius;
 
-  DragIndicatorPainter({
-    required this.color,
-    required this.radius,
-  });
+  DragIndicatorPainter({required this.color, required this.radius});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1600,11 +1688,8 @@ class DelayedRectTween extends Tween<Rect?> {
 /// Uses MaterialRectArcTween internally for the same curved path as default Hero.
 /// Usage: `Hero(createRectTween: delayedHeroRectTween(0.1), ...)`
 CreateRectTween delayedHeroRectTween(double delay) {
-  return (Rect? begin, Rect? end) => DelayedRectTween(
-        begin: begin,
-        end: end,
-        delay: delay,
-      );
+  return (Rect? begin, Rect? end) =>
+      DelayedRectTween(begin: begin, end: end, delay: delay);
 }
 
 /// Circular reveal clipper adapted from circular_reveal_animation package
@@ -1628,20 +1713,20 @@ class CircularRevealClipper extends CustomClipper<Path> {
 
   @override
   Path getClip(Size size) {
-    final Offset center = centerAlignment?.alongSize(size) ??
+    final Offset center =
+        centerAlignment?.alongSize(size) ??
         centerOffset ??
         Offset(size.width / 2, size.height / 2);
     final minRadius = this.minRadius ?? 0;
     final maxRadius =
         this.maxRadius ?? calcMaxRadiusForPointWithinRectangle(size, center);
 
-    return Path()
-      ..addOval(
-        Rect.fromCircle(
-          center: center,
-          radius: lerp(minRadius, maxRadius, fraction),
-        ),
-      );
+    return Path()..addOval(
+      Rect.fromCircle(
+        center: center,
+        radius: lerp(minRadius, maxRadius, fraction),
+      ),
+    );
   }
 
   @override
@@ -1663,8 +1748,8 @@ class CircularRevealRoute<T> extends PageRoute<T>
     this.iconOriginKey,
     Duration transitionDuration = const Duration(milliseconds: 400),
     Duration reverseTransitionDuration = const Duration(milliseconds: 300),
-  })  : _transitionDuration = transitionDuration,
-        _reverseTransitionDuration = reverseTransitionDuration;
+  }) : _transitionDuration = transitionDuration,
+       _reverseTransitionDuration = reverseTransitionDuration;
 
   @override
   Widget buildContent(BuildContext context) => builder(context);
@@ -1686,8 +1771,12 @@ class CircularRevealRoute<T> extends PageRoute<T>
   bool canTransitionFrom(TransitionRoute<dynamic> previousRoute) => true;
 
   @override
-  Widget buildTransitions(BuildContext context, Animation<double> animation,
-      Animation<double> secondaryAnimation, Widget child) {
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
     // Incorporate screen corner scale-down with secondaryAnimation,
     // and primary animation is still circular reveal.
     final screenSize = MediaQuery.sizeOf(context);
@@ -1703,7 +1792,8 @@ class CircularRevealRoute<T> extends PageRoute<T>
               1.0 - Curves.easeIn.transform(secondaryAnimation.value) * 0.13;
         }
 
-        final revealOrigin = boxRect(iconOriginKey)?.center ??
+        final revealOrigin =
+            boxRect(iconOriginKey)?.center ??
             buttonCenter ??
             Offset(screenSize.width / 2, screenSize.height * 2.4);
 
@@ -1734,8 +1824,12 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
   ScreenCornerClippedRoute({required super.builder});
 
   @override
-  Widget buildTransitions(BuildContext context, Animation<double> animation,
-      Animation<double> secondaryAnimation, Widget child) {
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
     // First apply default MaterialPageRoute transition
     // final materialTransition =
     //     super.buildTransitions(context, animation, secondaryAnimation, child);
@@ -1784,21 +1878,28 @@ Shader createRadialRevealShader({
   bool invert = false,
 }) {
   final centerOffset = center.alongSize(bounds.size);
-  final calculatedMinRadius = minRadius ??
+  final calculatedMinRadius =
+      minRadius ??
       distanceToRectangle(bounds.width, bounds.height, centerOffset);
-  final calculatedMaxRadius = maxRadius ??
+  final calculatedMaxRadius =
+      maxRadius ??
       (calcMaxRadiusForPointWithinRectangle(bounds.size, centerOffset) +
           fuzzyEdgeWidth);
   final effectiveFraction = invert ? 1.0 - fraction : fraction;
-  final currentRadius =
-      lerp(calculatedMinRadius, calculatedMaxRadius, effectiveFraction);
+  final currentRadius = lerp(
+    calculatedMinRadius,
+    calculatedMaxRadius,
+    effectiveFraction,
+  );
 
   final colors = invert
       ? const [Colors.transparent, Colors.transparent, Colors.white]
       : const [Colors.white, Colors.white, Colors.transparent];
 
-  final transitionStop =
-      max(0.0, currentRadius / (currentRadius + fuzzyEdgeWidth));
+  final transitionStop = max(
+    0.0,
+    currentRadius / (currentRadius + fuzzyEdgeWidth),
+  );
   final stops = [0.0, transitionStop, 1.0];
 
   return RadialGradient(
@@ -1822,8 +1923,9 @@ Shader linearRevealShader({
 }) {
   // Calculate the diagonal length to ensure full coverage regardless of angle
   final boundsSize = bounds.size;
-  final diagonal = sqrt(boundsSize.width * boundsSize.width +
-      boundsSize.height * boundsSize.height);
+  final diagonal = sqrt(
+    boundsSize.width * boundsSize.width + boundsSize.height * boundsSize.height,
+  );
 
   Offset begin;
   Offset end;
@@ -1843,7 +1945,7 @@ Shader linearRevealShader({
       bounds.topLeft,
       bounds.topRight,
       bounds.bottomLeft,
-      bounds.bottomRight
+      bounds.bottomRight,
     ]) {
       final distance = dot(direction, (corner - center));
       if (distance < nearestBegin) {
@@ -1908,10 +2010,7 @@ class RelAlignment {
   });
 
   static RelAlignment fromOffset(Offset offset) {
-    return RelAlignment(
-      originLeft: offset.dx,
-      originTop: offset.dy,
-    );
+    return RelAlignment(originLeft: offset.dx, originTop: offset.dy);
   }
 
   void check() {
@@ -2027,7 +2126,11 @@ class FuzzyCircleReveal extends StatelessWidget {
 }
 
 double computeAlignmentAxis(
-    double size, double? fromLeft, double? fromRight, double? alignX) {
+  double size,
+  double? fromLeft,
+  double? fromRight,
+  double? alignX,
+) {
   if (fromLeft != null) {
     return (fromLeft / size) * 2 - 1;
   } else if (fromRight != null) {
@@ -2182,7 +2285,7 @@ class _CircularRevealRouteTransitionState
                       colors: [
                         fadedOfBackgroundColor,
                         fadedOfBackgroundColor,
-                        transparentOfBackgroundColor
+                        transparentOfBackgroundColor,
                       ],
                       stops: [0.0, progress, progress * 2],
                     ),
@@ -2237,8 +2340,12 @@ void multimapAdd<K, V>(Map<K, List<V>> map, K key, V value) {
 }
 
 /// calls removed first
-void diffListsets<T>(List<T> earlier, List<T> newer,
-    {void Function(T item)? added, void Function(T item)? removed}) {
+void diffListsets<T>(
+  List<T> earlier,
+  List<T> newer, {
+  void Function(T item)? added,
+  void Function(T item)? removed,
+}) {
   final earlierSet = earlier.toSet();
   final newerSet = newer.toSet();
   for (final et in earlier) {
@@ -2303,7 +2410,9 @@ class ScalingAspectRatio extends SingleChildRenderObjectWidget {
 
   @override
   void updateRenderObject(
-      BuildContext context, RenderScalingAspectRatio renderObject) {
+    BuildContext context,
+    RenderScalingAspectRatio renderObject,
+  ) {
     renderObject
       ..aspectRatio = aspectRatio
       ..alignment = alignment;
@@ -2314,8 +2423,8 @@ class RenderScalingAspectRatio extends RenderProxyBox {
   RenderScalingAspectRatio({
     required double aspectRatio,
     Alignment alignment = Alignment.center,
-  })  : _aspectRatio = aspectRatio,
-        _alignment = alignment;
+  }) : _aspectRatio = aspectRatio,
+       _alignment = alignment;
 
   double _aspectRatio;
   double get aspectRatio => _aspectRatio;
@@ -2368,8 +2477,10 @@ class RenderScalingAspectRatio extends RenderProxyBox {
       final Size scaledSize = childSize * scale;
 
       // Calculate the offset to align the scaled child
-      final Size remainingSpace =
-          Size(size.width - scaledSize.width, size.height - scaledSize.height);
+      final Size remainingSpace = Size(
+        size.width - scaledSize.width,
+        size.height - scaledSize.height,
+      );
       final Offset alignmentOffset = alignment.alongSize(remainingSpace);
 
       // Apply the transformation
@@ -2377,14 +2488,12 @@ class RenderScalingAspectRatio extends RenderProxyBox {
         ..translateByDouble(alignmentOffset.dx, alignmentOffset.dy, 0, 1)
         ..scaleByDouble(scale, scale, 1, 1);
 
-      context.pushTransform(
-        needsCompositing,
+      context.pushTransform(needsCompositing, offset, transform, (
+        context,
         offset,
-        transform,
-        (context, offset) {
-          context.paintChild(child!, offset);
-        },
-      );
+      ) {
+        context.paintChild(child!, offset);
+      });
     }
   }
 
@@ -2403,8 +2512,10 @@ class RenderScalingAspectRatio extends RenderProxyBox {
     }
 
     final Size scaledSize = childSize * scale;
-    final Size remainingSpace =
-        Size(size.width - scaledSize.width, size.height - scaledSize.height);
+    final Size remainingSpace = Size(
+      size.width - scaledSize.width,
+      size.height - scaledSize.height,
+    );
     final Offset alignmentOffset = alignment.alongSize(remainingSpace);
 
     // Transform the hit test position to child coordinates
@@ -2462,10 +2573,16 @@ class InkButton extends StatefulWidget {
   }) {
     if (builder != null && child != null) {
       throw ArgumentError.value(
-          child, 'child', 'Cannot provide both builder and child');
+        child,
+        'child',
+        'Cannot provide both builder and child',
+      );
     } else if (builder == null && child == null) {
       throw ArgumentError.value(
-          child, 'child', 'Must provide either builder or child');
+        child,
+        'child',
+        'Must provide either builder or child',
+      );
     }
   }
 
@@ -2480,31 +2597,35 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
     final touchPoint = RelAlignment.fromOffset(details.localPosition);
     final key = UniqueKey();
     setState(() {
-      _wells.add(InkWelling(
-        key: key,
-        origin: touchPoint,
-        fadeColor: widget.inkColorFaded ??
-            (Theme.of(context).colorScheme.primary.withAlpha(40)),
-        color: widget.inkColor ??
-            Theme.of(context).colorScheme.primary.withAlpha(40),
-        fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
-        borderRadius: widget.borderRadius,
-        onFinished: () {
-          setState(() {
-            _wells.removeWhere((e) => e.key == key);
-          });
-        },
-        bloomController: AnimationController(
-          vsync: this,
-          duration:
-              widget.wellDuration + widget.fadeDelay + widget.fadeDuration,
-        )..forward(),
-        fadeController: AnimationController(
-          vsync: this,
-          duration: widget.fadeDuration,
+      _wells.add(
+        InkWelling(
+          key: key,
+          origin: touchPoint,
+          fadeColor:
+              widget.inkColorFaded ??
+              (Theme.of(context).colorScheme.primary.withAlpha(40)),
+          color:
+              widget.inkColor ??
+              Theme.of(context).colorScheme.primary.withAlpha(40),
+          fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+          borderRadius: widget.borderRadius,
+          onFinished: () {
+            setState(() {
+              _wells.removeWhere((e) => e.key == key);
+            });
+          },
+          bloomController: AnimationController(
+            vsync: this,
+            duration:
+                widget.wellDuration + widget.fadeDelay + widget.fadeDuration,
+          )..forward(),
+          fadeController: AnimationController(
+            vsync: this,
+            duration: widget.fadeDuration,
+          ),
+          child: widget.builder?.call(context, true),
         ),
-        child: widget.builder?.call(context, true),
-      ));
+      );
     });
   }
 
@@ -2521,10 +2642,7 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     Widget clipIfNeeded(Widget child) {
       if (widget.borderRadius != null) {
-        return ClipRRect(
-          borderRadius: widget.borderRadius!,
-          child: child,
-        );
+        return ClipRRect(borderRadius: widget.borderRadius!, child: child);
       }
       return child;
     }
@@ -2537,17 +2655,19 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
       child: IgnorePointer(
         child: clipIfNeeded(
           ColoredBox(
-              color: widget.backgroundColor ??
-                  Theme.of(context).colorScheme.surfaceContainerLowest,
-              child: Stack(
-                fit: StackFit.passthrough,
-                children: [
-                  // if there's a builder, then child should be obscured by the inks, as it will also be rendered inverted within them. (maybe it should be obscured anyway, maybe this should just be a distinct setting)
-                  if (widget.builder != null) widget.builder!(context, false),
-                  for (final ink in _wells) ink,
-                  if (widget.builder == null) widget.child!,
-                ],
-              )),
+            color:
+                widget.backgroundColor ??
+                Theme.of(context).colorScheme.surfaceContainerLowest,
+            child: Stack(
+              fit: StackFit.passthrough,
+              children: [
+                // if there's a builder, then child should be obscured by the inks, as it will also be rendered inverted within them. (maybe it should be obscured anyway, maybe this should just be a distinct setting)
+                if (widget.builder != null) widget.builder!(context, false),
+                for (final ink in _wells) ink,
+                if (widget.builder == null) widget.child!,
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -2626,27 +2746,35 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Positioned.fill(
-        child: AnimatedBuilder(
-      animation:
-          Listenable.merge([widget.bloomController, widget.fadeController]),
-      builder: (context, child) {
-        final color = lerpColor(
-            widget.color, widget.fadeColor ?? widget.color, colorFadep());
-        return Opacity(
-          opacity: (1.0 -
-              (widget.fadeController.value *
-                  Curves.easeIn.transform(colorFadep()))),
-          child: FuzzyCircleClip(
-            progress: Curves.easeOutCubic
-                .transform(unlerpUnit(0, 0.5, widget.bloomController.value)),
-            origin: widget.origin,
-            fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
-            child: ColoredBox(color: color, child: child),
-          ),
-        );
-      },
-      child: widget.child,
-    ));
+      child: AnimatedBuilder(
+        animation: Listenable.merge([
+          widget.bloomController,
+          widget.fadeController,
+        ]),
+        builder: (context, child) {
+          final color = lerpColor(
+            widget.color,
+            widget.fadeColor ?? widget.color,
+            colorFadep(),
+          );
+          return Opacity(
+            opacity:
+                (1.0 -
+                (widget.fadeController.value *
+                    Curves.easeIn.transform(colorFadep()))),
+            child: FuzzyCircleClip(
+              progress: Curves.easeOutCubic.transform(
+                unlerpUnit(0, 0.5, widget.bloomController.value),
+              ),
+              origin: widget.origin,
+              fuzzyEdgeWidth: widget.fuzzyEdgeWidth,
+              child: ColoredBox(color: color, child: child),
+            ),
+          );
+        },
+        child: widget.child,
+      ),
+    );
   }
 }
 
@@ -2675,10 +2803,11 @@ class InvertToggleButton extends StatelessWidget {
       duration: duration,
       builder: (context, progress, child) {
         return FuzzyCircleClip(
-            fuzzyEdgeWidth: 6,
-            progress: Curves.easeOutCubic.transform(progress),
-            origin: epicenter ?? RelAlignment.center,
-            child: child!);
+          fuzzyEdgeWidth: 6,
+          progress: Curves.easeOutCubic.transform(progress),
+          origin: epicenter ?? RelAlignment.center,
+          child: child!,
+        );
       },
       child: builder(context, isOn),
     );
@@ -2726,26 +2855,30 @@ class _TweenAnimationReplacementStackState
   @override
   Widget build(BuildContext context) {
     return Stack(
-        children: stack
-            .map((e) => TweenAnimationBuilder(
-                tween: e.animation,
-                duration: e.duration,
-                builder: e.builder,
-                child: e.child,
-                onEnd: () {
-                  // remove all those prior to us when we complete
-                  int i = 0;
-                  for (final w in stack) {
-                    if (w == e) {
-                      break;
-                    }
-                    ++i;
+      children: stack
+          .map(
+            (e) => TweenAnimationBuilder(
+              tween: e.animation,
+              duration: e.duration,
+              builder: e.builder,
+              child: e.child,
+              onEnd: () {
+                // remove all those prior to us when we complete
+                int i = 0;
+                for (final w in stack) {
+                  if (w == e) {
+                    break;
                   }
-                  setState(() {
-                    stack.removeRange(0, i);
-                  });
-                }))
-            .toList());
+                  ++i;
+                }
+                setState(() {
+                  stack.removeRange(0, i);
+                });
+              },
+            ),
+          )
+          .toList(),
+    );
   }
 }
 
@@ -2783,7 +2916,7 @@ class _RadioItemState<T> extends State<RadioItem<T>> {
   Widget build(BuildContext context) {
     bool isOn =
         widget.equalityComparison?.call(widget.selection.peek(), widget.me) ??
-            (widget.selection.peek() == widget.me);
+        (widget.selection.peek() == widget.me);
     if (isOn) {
       subscription = widget.selection.subscribe((selection) {
         if (selection != widget.me) {
@@ -2793,21 +2926,23 @@ class _RadioItemState<T> extends State<RadioItem<T>> {
       });
     }
     return GestureDetector(
-        onTapUp: (details) => tapUpPosition = details.localPosition,
-        onTap: () {
-          widget.onTap?.call();
-          if (widget.selection.value != widget.me) {
-            widget.selection.value = widget.me;
-            setState(() {});
-          }
-        },
-        child: InvertToggleButton(
-            isOn: isOn,
-            duration: widget.duration,
-            epicenter: tapUpPosition != null
-                ? RelAlignment.fromOffset(tapUpPosition!)
-                : RelAlignment.center,
-            builder: widget.builder));
+      onTapUp: (details) => tapUpPosition = details.localPosition,
+      onTap: () {
+        widget.onTap?.call();
+        if (widget.selection.value != widget.me) {
+          widget.selection.value = widget.me;
+          setState(() {});
+        }
+      },
+      child: InvertToggleButton(
+        isOn: isOn,
+        duration: widget.duration,
+        epicenter: tapUpPosition != null
+            ? RelAlignment.fromOffset(tapUpPosition!)
+            : RelAlignment.center,
+        builder: widget.builder,
+      ),
+    );
   }
 }
 
@@ -2859,12 +2994,18 @@ class MakoThemeData {
             lowestBackColor: theme.colorScheme.surfaceContainerLowest,
             midBackColor: theme.colorScheme.surfaceContainerLow,
             foreBackColor: theme.colorScheme.surfaceContainerHighest,
-            lowestIndentColor:
-                lightenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
-            foreIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.07),
-            harderForeIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.35),
+            lowestIndentColor: lightenColor(
+              theme.colorScheme.surfaceContainerLowest,
+              0.03,
+            ),
+            foreIndentColor: darkenColor(
+              theme.colorScheme.surfaceContainerHighest,
+              0.07,
+            ),
+            harderForeIndentColor: darkenColor(
+              theme.colorScheme.surfaceContainerHighest,
+              0.35,
+            ),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: darkenColor(theme.colorScheme.onSurface, 0.4),
           )
@@ -2872,12 +3013,18 @@ class MakoThemeData {
             lowestBackColor: theme.colorScheme.surfaceContainerHighest,
             midBackColor: theme.colorScheme.surfaceContainerHigh,
             foreBackColor: theme.colorScheme.surfaceContainerLowest,
-            lowestIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerHighest, 0.05),
-            foreIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.03),
-            harderForeIndentColor:
-                darkenColor(theme.colorScheme.surfaceContainerLowest, 0.1),
+            lowestIndentColor: darkenColor(
+              theme.colorScheme.surfaceContainerHighest,
+              0.05,
+            ),
+            foreIndentColor: darkenColor(
+              theme.colorScheme.surfaceContainerLowest,
+              0.03,
+            ),
+            harderForeIndentColor: darkenColor(
+              theme.colorScheme.surfaceContainerLowest,
+              0.1,
+            ),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
           );
@@ -2894,18 +3041,14 @@ class MakoThemeData {
 }
 
 Positioned positionedAt(Offset offset, Widget child) {
-  return Positioned(
-    left: offset.dx,
-    top: offset.dy,
-    child: child,
-  );
+  return Positioned(left: offset.dx, top: offset.dy, child: child);
 }
 
 class BoolSignalTween extends StatelessWidget {
   final ReadonlySignal<bool> signal;
   final Duration duration;
   final Widget Function(BuildContext context, double value, Widget? child)
-      builder;
+  builder;
   final Widget? child;
   const BoolSignalTween({
     super.key,
@@ -2916,103 +3059,114 @@ class BoolSignalTween extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    return Watch((context) => TweenAnimationBuilder(
-          tween: Tween<double>(
-              begin: signal.value ? 1.0 : 0.0, end: signal.value ? 1.0 : 0.0),
-          duration: duration,
-          builder: builder,
-          child: child,
-        ));
+    return Watch(
+      (context) => TweenAnimationBuilder(
+        tween: Tween<double>(
+          begin: signal.value ? 1.0 : 0.0,
+          end: signal.value ? 1.0 : 0.0,
+        ),
+        duration: duration,
+        builder: builder,
+        child: child,
+      ),
+    );
   }
 }
 
 class PinAnimation extends StatelessWidget {
   final Widget child;
   final ReadonlySignal<bool> isPinned;
-  const PinAnimation({
-    super.key,
-    required this.child,
-    required this.isPinned,
-  });
+  const PinAnimation({super.key, required this.child, required this.isPinned});
   @override
   Widget build(BuildContext context) {
     return BoolSignalTween(
       signal: isPinned,
       builder: (context, progress, child) {
         // final distance = 50 + squareRad + gap;
-        return Stack(clipBehavior: Clip.none, children: [
-          Positioned.fill(child: LayoutBuilder(
-            builder: (context, constraints) {
-              final r = min(constraints.maxWidth, constraints.maxHeight) / 2;
-              final mt = MakoThemeData.fromContext(context);
-              final movementp =
-                  Curves.easeOutCubic.transform(unlerpUnit(0.4, 1, progress));
-              final revealp = unlerpUnit(0, 0.3, progress);
-              final squareRad = 7.0;
-              // it dawns on me that the pin is going to be kinda hard, since the easiest way to position it places it outside of the layout bounds of the parent, which means the pin will be outside of the linear clip.
-              // final pinThicknessr = 2.0;
-              // final pinLength = 15.0;
-              // final pinLengthTotal = pinThicknessr + pinLength;
-              final gap = 3;
-              final stabDistance = 20;
-              // final pinRetraction =
-              //     unlerpUnit((pinLength + gap) / pinLengthTotal, 1, movementp) *
-              //         pinLength;
-              final center = Offset(r, r);
-              final distance =
-                  (lerp(r + stabDistance, r, movementp) + squareRad + gap) /
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final r =
+                      min(constraints.maxWidth, constraints.maxHeight) / 2;
+                  final mt = MakoThemeData.fromContext(context);
+                  final movementp = Curves.easeOutCubic.transform(
+                    unlerpUnit(0.4, 1, progress),
+                  );
+                  final revealp = unlerpUnit(0, 0.3, progress);
+                  final squareRad = 7.0;
+                  // it dawns on me that the pin is going to be kinda hard, since the easiest way to position it places it outside of the layout bounds of the parent, which means the pin will be outside of the linear clip.
+                  // final pinThicknessr = 2.0;
+                  // final pinLength = 15.0;
+                  // final pinLengthTotal = pinThicknessr + pinLength;
+                  final gap = 3;
+                  final stabDistance = 20;
+                  // final pinRetraction =
+                  //     unlerpUnit((pinLength + gap) / pinLengthTotal, 1, movementp) *
+                  //         pinLength;
+                  final center = Offset(r, r);
+                  final distance =
+                      (lerp(r + stabDistance, r, movementp) + squareRad + gap) /
                       sqrt(2);
-              return SizedBox(
-                width: constraints.maxWidth,
-                height: constraints.maxHeight,
-                child: Stack(clipBehavior: Clip.none, children: [
-                  positionedAt(
-                      center + Offset(-distance, -distance),
-                      // I don't understand why the transforms need to be applied in this order
-                      Transform.translate(
-                        offset: Offset(-squareRad, -squareRad),
-                        child: Transform.rotate(
-                          origin: Offset(0, 0),
-                          angle: -pi / 4,
-                          child: FuzzyLinearClip(
-                            angle: pi / 2,
-                            fuzzyEdgeWidth: 3,
-                            progress: revealp,
-                            // the box
-                            child: Container(
-                              alignment: Alignment.bottomCenter,
-                              decoration: BoxDecoration(
-                                color: mt.foreBackColor,
-                                borderRadius: BorderRadius.circular(4),
+                  return SizedBox(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        positionedAt(
+                          center + Offset(-distance, -distance),
+                          // I don't understand why the transforms need to be applied in this order
+                          Transform.translate(
+                            offset: Offset(-squareRad, -squareRad),
+                            child: Transform.rotate(
+                              origin: Offset(0, 0),
+                              angle: -pi / 4,
+                              child: FuzzyLinearClip(
+                                angle: pi / 2,
+                                fuzzyEdgeWidth: 3,
+                                progress: revealp,
+                                // the box
+                                child: Container(
+                                  alignment: Alignment.bottomCenter,
+                                  decoration: BoxDecoration(
+                                    color: mt.foreBackColor,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  width: squareRad * 2,
+                                  height: squareRad * 2,
+                                  // the pin
+                                  // child: Transform.translate(
+                                  //   offset: Offset(
+                                  //       0,
+                                  //       pinLength -
+                                  //           pinThicknessr -
+                                  //           pinRetraction),
+                                  //   child: Container(
+                                  //       width: pinThicknessr * 2,
+                                  //       height: pinLengthTotal,
+                                  //       decoration: BoxDecoration(
+                                  //         borderRadius: BorderRadius.circular(
+                                  //             pinThicknessr),
+                                  //         color: mt.foreBackColor,
+                                  //       )),
+                                  // )
+                                ),
                               ),
-                              width: squareRad * 2,
-                              height: squareRad * 2,
-                              // the pin
-                              // child: Transform.translate(
-                              //   offset: Offset(
-                              //       0,
-                              //       pinLength -
-                              //           pinThicknessr -
-                              //           pinRetraction),
-                              //   child: Container(
-                              //       width: pinThicknessr * 2,
-                              //       height: pinLengthTotal,
-                              //       decoration: BoxDecoration(
-                              //         borderRadius: BorderRadius.circular(
-                              //             pinThicknessr),
-                              //         color: mt.foreBackColor,
-                              //       )),
-                              // )
                             ),
                           ),
                         ),
-                      ))
-                ]),
-              );
-            },
-          )),
-          child!
-        ]);
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            child!,
+          ],
+        );
       },
       child: child,
     );
@@ -3076,11 +3230,7 @@ class ContainerShrunk extends StatelessWidget {
 class SignedPadding extends SingleChildRenderObjectWidget {
   final EdgeInsets insets;
 
-  const SignedPadding({
-    super.key,
-    required this.insets,
-    super.child,
-  });
+  const SignedPadding({super.key, required this.insets, super.child});
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
@@ -3093,11 +3243,9 @@ class SignedPadding extends SingleChildRenderObjectWidget {
 }
 
 class _RenderSignedPadding extends RenderShiftedBox {
-  _RenderSignedPadding({
-    required EdgeInsets padding,
-    RenderBox? child,
-  })  : _padding = padding,
-        super(child);
+  _RenderSignedPadding({required EdgeInsets padding, RenderBox? child})
+    : _padding = padding,
+      super(child);
 
   EdgeInsets get padding => _padding;
   EdgeInsets _padding;
@@ -3140,8 +3288,9 @@ class _RenderSignedPadding extends RenderShiftedBox {
   @override
   double computeMinIntrinsicHeight(double width) {
     if (child != null) {
-      return child!
-              .getMinIntrinsicHeight(max(0.0, width - _padding.horizontal)) +
+      return child!.getMinIntrinsicHeight(
+            max(0.0, width - _padding.horizontal),
+          ) +
           _padding.vertical;
     }
     return _padding.vertical;
@@ -3150,8 +3299,9 @@ class _RenderSignedPadding extends RenderShiftedBox {
   @override
   double computeMaxIntrinsicHeight(double width) {
     if (child != null) {
-      return child!
-              .getMaxIntrinsicHeight(max(0.0, width - _padding.horizontal)) +
+      return child!.getMaxIntrinsicHeight(
+            max(0.0, width - _padding.horizontal),
+          ) +
           _padding.vertical;
     }
     return _padding.vertical;
@@ -3161,8 +3311,9 @@ class _RenderSignedPadding extends RenderShiftedBox {
   @protected
   Size computeDryLayout(covariant BoxConstraints constraints) {
     if (child == null) {
-      return constraints
-          .constrain(Size(_padding.horizontal, _padding.vertical));
+      return constraints.constrain(
+        Size(_padding.horizontal, _padding.vertical),
+      );
     }
     final inner = constraints.deflate(_padding);
     final childConstraints = _childConstraints(constraints, _padding);
@@ -3176,7 +3327,9 @@ class _RenderSignedPadding extends RenderShiftedBox {
 
   @override
   double? computeDryBaseline(
-      covariant BoxConstraints constraints, TextBaseline baseline) {
+    covariant BoxConstraints constraints,
+    TextBaseline baseline,
+  ) {
     if (child == null) {
       return null;
     }
@@ -3207,19 +3360,21 @@ class _RenderSignedPadding extends RenderShiftedBox {
       inset.left + (slotW - child!.size.width) / 2,
       inset.top + (slotH - child!.size.height) / 2,
     );
-    size = c.constrain(
-      Size(inset.horizontal + slotW, inset.vertical + slotH),
-    );
+    size = c.constrain(Size(inset.horizontal + slotW, inset.vertical + slotH));
   }
 }
 
 void vibrationSampleBoard() async {
   Future<void> pause() => Future.delayed(const Duration(milliseconds: 2000));
   await Vibration.vibrate(
-      pattern: [100, 100, 100, 100], intensities: [128, 64, 32, 16]);
+    pattern: [100, 100, 100, 100],
+    intensities: [128, 64, 32, 16],
+  );
   await pause();
   await Vibration.vibrate(
-      pattern: [60, 60, 60, 60], intensities: [128, 64, 32, 16]);
+    pattern: [60, 60, 60, 60],
+    intensities: [128, 64, 32, 16],
+  );
 
   for (final preset in presets.keys) {
     await pause();
@@ -3235,8 +3390,9 @@ void vibrateAlertOnce() async {
   // await Vibration.vibrate(preset: VibrationPreset.pulseWave);
   if (await platformHasVibrator) {
     await Vibration.vibrate(
-        pattern: [0, 120, 80, 50, 80, 120, 80, 120],
-        intensities: [0, 200, 0, 255, 0, 200, 0, 200]);
+      pattern: [0, 120, 80, 50, 80, 120, 80, 120],
+      intensities: [0, 200, 0, 255, 0, 200, 0, 200],
+    );
   }
 }
 
@@ -3266,9 +3422,10 @@ class _HintToastState extends State<HintToast>
   void initState() {
     super.initState();
 
-    animation =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 280))
-          ..value = 0;
+    animation = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 280),
+    )..value = 0;
     Timer(Duration(milliseconds: 520), () {
       if (widget.showCondition.peek()) {
         animation.forward();
@@ -3286,13 +3443,15 @@ class _HintToastState extends State<HintToast>
 
   Widget infoText(BuildContext context, String content) {
     final hintColor = MakoThemeData.fromContext(context).hintTextColor;
-    final hintTextStyle =
-        Theme.of(context).textTheme.bodyMedium!.copyWith(color: hintColor);
+    final hintTextStyle = Theme.of(
+      context,
+    ).textTheme.bodyMedium!.copyWith(color: hintColor);
     return RichText(
       text: TextSpan(
         children: [
           WidgetSpan(
-              child: Icon(Icons.info_rounded, size: 16, color: hintColor)),
+            child: Icon(Icons.info_rounded, size: 16, color: hintColor),
+          ),
           WidgetSpan(child: SizedBox(width: 4)),
           TextSpan(style: hintTextStyle, text: content),
         ],
@@ -3324,10 +3483,7 @@ class _HintToastState extends State<HintToast>
           child: Align(
             heightFactor: heightFraction,
             alignment: Alignment.bottomCenter,
-            child: Opacity(
-              opacity: opacity,
-              child: child,
-            ),
+            child: Opacity(opacity: opacity, child: child),
           ),
         );
       },
@@ -3380,7 +3536,10 @@ class SeparatorGradient extends StatelessWidget {
 
 // Returns the (circular radius, rectangle height) for a given progress, for animating a vertically-growing progress bar
 (double, double) fluidBarRadiusAndHeightForProgress(
-    double width, double height, double p) {
+  double width,
+  double height,
+  double p,
+) {
   // Compute geometric area allocations as above
   final circularArea = pi * width / 2 * width / 2;
   final rectangularArea = width * (height - width / 2);
@@ -3397,11 +3556,12 @@ class SeparatorGradient extends StatelessWidget {
 }
 
 /// alignment only really pays attention to the taller dimension, it's always centered on the other
-Positioned fluidBar(
-    {required Size size,
-    required double progress,
-    required Alignment alignment,
-    required Widget child}) {
+Positioned fluidBar({
+  required Size size,
+  required double progress,
+  required Alignment alignment,
+  required Widget child,
+}) {
   double smallerDim, largerDim;
   if (size.width < size.height) {
     smallerDim = size.width;
@@ -3410,11 +3570,17 @@ Positioned fluidBar(
     smallerDim = size.height;
     largerDim = size.width;
   }
-  final (radius, rectHeight) =
-      fluidBarRadiusAndHeightForProgress(smallerDim, largerDim, progress);
+  final (radius, rectHeight) = fluidBarRadiusAndHeightForProgress(
+    smallerDim,
+    largerDim,
+    progress,
+  );
   double left, top, width, height;
   double basePosition(
-      double childSpan, double containerSpan, double alignment) {
+    double childSpan,
+    double containerSpan,
+    double alignment,
+  ) {
     if (alignment == 0) {
       return containerSpan / 2 - childSpan / 2;
     } else if (alignment == -1) {
@@ -3444,16 +3610,14 @@ Positioned fluidBar(
   return Positioned(
     left: left,
     top: top,
-    child: SizedBox(
-      width: width,
-      height: height,
-      child: child,
-    ),
+    child: SizedBox(width: width, height: height, child: child),
   );
 }
 
-Positioned extrudedPositioned(
-    {required double extrusion, required Widget child}) {
+Positioned extrudedPositioned({
+  required double extrusion,
+  required Widget child,
+}) {
   return Positioned(
     left: -extrusion,
     top: -extrusion,
@@ -3506,19 +3670,29 @@ class TimerculeParallelPainter extends CustomPainter {
 
     timerculeIconScaling(canvas, size);
     canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-              -topWidth / 2, -contentH / 2, topWidth, timerculeRectHeight),
-          Radius.circular(timerculeCornerRadius),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          -topWidth / 2,
+          -contentH / 2,
+          topWidth,
+          timerculeRectHeight,
         ),
-        paint);
+        Radius.circular(timerculeCornerRadius),
+      ),
+      paint,
+    );
     canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-              bottomOffset, timerculeGap / 2, bottomWidth, timerculeRectHeight),
-          Radius.circular(timerculeCornerRadius),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          bottomOffset,
+          timerculeGap / 2,
+          bottomWidth,
+          timerculeRectHeight,
         ),
-        paint);
+        Radius.circular(timerculeCornerRadius),
+      ),
+      paint,
+    );
   }
 
   @override
@@ -3542,19 +3716,29 @@ class TimerculeSerialPainter extends CustomPainter {
     double w = timerculeRectHeight;
     timerculeIconScaling(canvas, size);
     canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(-w - timerculeGap / 2, -timerculeRectHeight / 2, w,
-              timerculeRectHeight),
-          Radius.circular(timerculeCornerRadius),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          -w - timerculeGap / 2,
+          -timerculeRectHeight / 2,
+          w,
+          timerculeRectHeight,
         ),
-        paint);
+        Radius.circular(timerculeCornerRadius),
+      ),
+      paint,
+    );
     canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(timerculeGap / 2, -timerculeRectHeight / 2, w,
-              timerculeRectHeight),
-          Radius.circular(timerculeCornerRadius),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          timerculeGap / 2,
+          -timerculeRectHeight / 2,
+          w,
+          timerculeRectHeight,
         ),
-        paint);
+        Radius.circular(timerculeCornerRadius),
+      ),
+      paint,
+    );
   }
 
   @override
@@ -3595,26 +3779,32 @@ class TimerculeCyclePainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
-Widget timerKindIcon(TimerKind kind,
-    {Color color = Colors.black, double size = 20}) {
+Widget timerKindIcon(
+  TimerKind kind, {
+  Color color = Colors.black,
+  double size = 20,
+}) {
   switch (kind) {
     case TimerKind.loop:
       return CustomPaint(
-          size: Size(size, size), painter: TimerculeCyclePainter(color: color));
+        size: Size(size, size),
+        painter: TimerculeCyclePainter(color: color),
+      );
     case TimerKind.series:
       return CustomPaint(
-          size: Size(size, size),
-          painter: TimerculeSerialPainter(color: color));
+        size: Size(size, size),
+        painter: TimerculeSerialPainter(color: color),
+      );
     case TimerKind.parallelStartJustified:
       return CustomPaint(
-          size: Size(size, size),
-          painter:
-              TimerculeParallelPainter(color: color, rightJustified: false));
+        size: Size(size, size),
+        painter: TimerculeParallelPainter(color: color, rightJustified: false),
+      );
     case TimerKind.parallelEndJustified:
       return CustomPaint(
-          size: Size(size, size),
-          painter:
-              TimerculeParallelPainter(color: color, rightJustified: true));
+        size: Size(size, size),
+        painter: TimerculeParallelPainter(color: color, rightJustified: true),
+      );
     case TimerKind.stopwatch:
       return Icon(Icons.square_rounded, color: color, size: size);
     case TimerKind.timer:
@@ -3623,11 +3813,7 @@ Widget timerKindIcon(TimerKind kind,
 }
 
 class SquishBoundaryPlane extends StatelessWidget {
-  SquishBoundaryPlane({
-    super.key,
-    required this.theme,
-    required this.mt,
-  });
+  SquishBoundaryPlane({super.key, required this.theme, required this.mt});
 
   final ThemeData theme;
   final MakoThemeData mt;
@@ -3653,9 +3839,7 @@ class SquishBoundaryPlane extends StatelessWidget {
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.clip,
-              style: theme.textTheme.labelSmall!.copyWith(
-                color: Colors.black,
-              ),
+              style: theme.textTheme.labelSmall!.copyWith(color: Colors.black),
             ),
           ),
         ),
@@ -3693,9 +3877,13 @@ class SpecialTimerShapesPainter extends CustomPainter {
     canvas.translate(sqC.dx, sqC.dy);
     canvas.rotate(squareRotation);
     canvas.drawRect(
-        Rect.fromCenter(
-            center: Offset.zero, width: squareSide, height: squareSide),
-        fill);
+      Rect.fromCenter(
+        center: Offset.zero,
+        width: squareSide,
+        height: squareSide,
+      ),
+      fill,
+    );
     canvas.restore();
 
     final pillC = polarSlot(1);
@@ -3703,11 +3891,16 @@ class SpecialTimerShapesPainter extends CustomPainter {
     canvas.translate(pillC.dx, pillC.dy);
     canvas.rotate(pillRotation);
     canvas.drawRRect(
-        RRect.fromRectAndRadius(
-            Rect.fromCenter(
-                center: Offset.zero, width: pillWidth, height: pillHeight),
-            Radius.circular(pillHeight / 2)),
-        fill);
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset.zero,
+          width: pillWidth,
+          height: pillHeight,
+        ),
+        Radius.circular(pillHeight / 2),
+      ),
+      fill,
+    );
     canvas.restore();
 
     final triC = polarSlot(2);
@@ -3740,11 +3933,12 @@ class SpecialTimerShapesLabel extends StatelessWidget {
     final color =
         IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
     return ScalingAspectRatio(
-        child: SizedBox(
-            width: 50,
-            height: 50,
-            child:
-                CustomPaint(painter: SpecialTimerShapesPainter(color: color))));
+      child: SizedBox(
+        width: 50,
+        height: 50,
+        child: CustomPaint(painter: SpecialTimerShapesPainter(color: color)),
+      ),
+    );
   }
 }
 

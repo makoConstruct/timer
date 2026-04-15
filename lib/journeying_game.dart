@@ -1,6 +1,6 @@
 import 'dart:collection';
 import 'dart:math';
-import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -11,6 +11,7 @@ import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/noise_generators.dart';
+import 'package:makos_timer/terrain_tiles.dart';
 import 'package:signals/signals_flutter.dart';
 
 // how generation works: you define a sequence of entity types, which have 'radius's, which are how far away they can affect the generation of other things, the lower it is the fewer need to be loaded at once. Each type is given all instances of the previous types, via the GenerationContext, within `radius` range of it, and it then generates its stuff using that.
@@ -78,8 +79,11 @@ void overSurroundingCoords(Coord coord, Function(Coord) callback) {
 }
 
 /// contains one type of thing, in a grid, where the cells of the grid correspond to the radius of effect of that type of thing.
-class GenerationLayer<T, GC extends GenerationContext,
-    GT extends GenerationThingType<GC>> {
+class GenerationLayer<
+  T,
+  GC extends GenerationContext,
+  GT extends GenerationThingType<GC>
+> {
   final double radius;
   final HashMap<Coord, List<T>> loadedCells = HashMap();
   final GT generator;
@@ -91,11 +95,7 @@ class GenerationLayer<T, GC extends GenerationContext,
 
     overSurroundingCoords(coord, (c) {
       // Compute cellSeed as a hash function of gc.seed, generator.name, and c
-      final cellSeed = Object.hash(
-        gc.seed,
-        generator,
-        c,
-      );
+      final cellSeed = Object.hash(gc.seed, generator, c);
       if (!loadedCells.containsKey(c)) {
         loadedCells[c] = generator.generate(gc, cellSeed, coord.toOffset());
       }
@@ -103,9 +103,12 @@ class GenerationLayer<T, GC extends GenerationContext,
     // deload any cell that's now further than loadingBorderSlop from p
     for (final c in loadedCells.keys) {
       if (rectPointDistance(
-              Rect.fromPoints(
-                  c.toOffset(), c.toOffset() + Offset(radius, radius)),
-              p) >
+            Rect.fromPoints(
+              c.toOffset(),
+              c.toOffset() + Offset(radius, radius),
+            ),
+            p,
+          ) >
           radius + loadingBorderSlop) {
         loadedCells.remove(c);
       }
@@ -176,141 +179,179 @@ class _JourneyingGameScreenState extends State<JourneyingGameScreen> {
     final thumbSpan = Thumbspan.of(context);
     final double movementControlThreshold = thumbSpan * 0.14;
     return Scaffold(
-      body: LayoutBuilder(builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final height = constraints.maxHeight;
-        final isWide = width > height;
-        final crossSpan = isWide ? height : width;
-        final mainSpan = isWide ? width : height;
-        const controlsMinExtent = 150.0;
-        final worldSpan = (mainSpan - controlsMinExtent).clamp(0.0, crossSpan);
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final height = constraints.maxHeight;
+          final isWide = width > height;
+          final crossSpan = isWide ? height : width;
+          final mainSpan = isWide ? width : height;
+          const controlsMinExtent = 150.0;
+          final worldSpan = (mainSpan - controlsMinExtent).clamp(
+            0.0,
+            crossSpan,
+          );
 
-        final worldWidget = SizedBox(
-          width: isWide ? worldSpan : worldSpan.clamp(0.0, width),
-          height: isWide ? worldSpan.clamp(0.0, height) : worldSpan,
-          child: WorldView(camera: camera),
-        );
+          final worldWidget = SizedBox(
+            width: isWide ? worldSpan : worldSpan.clamp(0.0, width),
+            height: isWide ? worldSpan.clamp(0.0, height) : worldSpan,
+            child: WorldView(camera: camera),
+          );
 
-        final controlsWidget = Expanded(
-          child: LayoutBuilder(builder: (context, cc) {
-            final cw = cc.maxWidth;
-            final ch = cc.maxHeight;
-            final rightWidth = min(ch, cw - width / 5).clamp(0.0, cw);
-            final inventoryWidth = cw - rightWidth;
-            final buttonSpan = watchSignal(
-                context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
-            final itemWidth = buttonSpan * 0.8;
-            final mt = MakoThemeData.fromContext(context);
+          final controlsWidget = Expanded(
+            child: LayoutBuilder(
+              builder: (context, cc) {
+                final cw = cc.maxWidth;
+                final ch = cc.maxHeight;
+                final rightWidth = min(ch, cw - width / 5).clamp(0.0, cw);
+                final inventoryWidth = cw - rightWidth;
+                final buttonSpan = watchSignal(
+                  context,
+                  Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
+                )!;
+                final itemWidth = buttonSpan * 0.8;
+                final mt = MakoThemeData.fromContext(context);
 
-            return Row(children: [
-              SizedBox(
-                width: inventoryWidth,
-                height: ch,
-                child: Stack(
+                return Row(
                   children: [
-                    Positioned.fill(
-                      child: SingleChildScrollView(
-                        child: Column(children: [
-                          for (var i = 0; i < 10; i++)
-                            SizedBox.square(
-                              dimension: itemWidth,
-                              child: const Placeholder(),
+                    SizedBox(
+                      width: inventoryWidth,
+                      height: ch,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                children: [
+                                  for (var i = 0; i < 10; i++)
+                                    SizedBox.square(
+                                      dimension: itemWidth,
+                                      child: const Placeholder(),
+                                    ),
+                                  SizedBox(height: itemWidth),
+                                ],
+                              ),
                             ),
-                          SizedBox(height: itemWidth),
-                        ]),
+                          ),
+                          Positioned(
+                            left: 0,
+                            bottom: 0,
+                            child: IconButton(
+                              constraints: BoxConstraints.loose(
+                                Size(itemWidth, itemWidth),
+                              ),
+                              icon: const Icon(Icons.settings),
+                              onPressed: () => Navigator.of(context).push(
+                                CircularRevealRoute(
+                                  builder: (_) => const JourneySettingsScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Positioned(
-                      left: 0,
-                      bottom: 0,
-                      child: IconButton(
-                        constraints:
-                            BoxConstraints.loose(Size(itemWidth, itemWidth)),
-                        icon: const Icon(Icons.settings),
-                        onPressed: () => Navigator.of(context).push(
-                          CircularRevealRoute(
-                            builder: (_) => const JourneySettingsScreen(),
+                    Expanded(
+                      child: GestureDetector(
+                        onPanUpdate: (details) {
+                          movementControlAccumulator += details.delta;
+                          // visualize it as a shallow v shape. The intention is to make it so that if the user has dragged to the left or right somewhat, they have to drag further to trigger. Accidental triggers are common when trying to change direction.
+                          // bool exceedsArrowInDirection(Coord direction) {
+                          //   double cross = dot(orthClockwise(direction.toOffset()),
+                          //       movementControlAccumulator);
+                          //   double main =
+                          //       dot(direction.toOffset(), movementControlAccumulator);
+                          //   return main >
+                          //       movementControlThreshold + cross.abs() * 0.2;
+                          // }
+
+                          // for (final direction in [
+                          //   Coord(1, 0),
+                          //   Coord(0, 1),
+                          //   Coord(-1, 0),
+                          //   Coord(0, -1)
+                          // ]) {
+                          //   if (exceedsArrowInDirection(direction)) {
+                          //     movePlayerBy(direction);
+                          //     movementControlAccumulator = Offset.zero;
+                          //     break;
+                          //   }
+                          // }
+
+                          if (offsetMax(offsetAbs(movementControlAccumulator)) >
+                              movementControlThreshold) {
+                            movePlayerBy(
+                              toCardinalCoord(movementControlAccumulator),
+                            );
+                            movementControlAccumulator = Offset.zero;
+                          }
+
+                          // this one felt surprisingly bad, very prone to going forward when the user's trying to turn.
+                          // if (movementControlAccumulator.distance >
+                          //     movementControlThreshold) {
+                          //   movePlayerBy(toCardinalCoord(movementControlAccumulator));
+                          //   movementControlAccumulator = Offset.zero;
+                          // }
+                        },
+                        onPanEnd: (details) {
+                          movementControlAccumulator = Offset.zero;
+                        },
+                        child: SizedBox.expand(
+                          child: Container(
+                            color: mt.midBackColor,
+                            child: Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(
+                                  "MOVE",
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: mt.hintTextColor),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ],
-                ),
-              ),
-              Expanded(
-                child: GestureDetector(
-                  onPanUpdate: (details) {
-                    movementControlAccumulator += details.delta;
-                    // visualize it as a shallow v shape. The intention is to make it so that if the user has dragged to the left or right somewhat, they have to drag further to trigger. Accidental triggers are common when trying to change direction.
-                    // bool exceedsArrowInDirection(Coord direction) {
-                    //   double cross = dot(orthClockwise(direction.toOffset()),
-                    //       movementControlAccumulator);
-                    //   double main =
-                    //       dot(direction.toOffset(), movementControlAccumulator);
-                    //   return main >
-                    //       movementControlThreshold + cross.abs() * 0.2;
-                    // }
+                );
+              },
+            ),
+          );
 
-                    // for (final direction in [
-                    //   Coord(1, 0),
-                    //   Coord(0, 1),
-                    //   Coord(-1, 0),
-                    //   Coord(0, -1)
-                    // ]) {
-                    //   if (exceedsArrowInDirection(direction)) {
-                    //     movePlayerBy(direction);
-                    //     movementControlAccumulator = Offset.zero;
-                    //     break;
-                    //   }
-                    // }
-
-                    if (offsetMax(offsetAbs(movementControlAccumulator)) >
-                        movementControlThreshold) {
-                      movePlayerBy(toCardinalCoord(movementControlAccumulator));
-                      movementControlAccumulator = Offset.zero;
-                    }
-
-                    // this one felt surprisingly bad, very prone to going forward when the user's trying to turn.
-                    // if (movementControlAccumulator.distance >
-                    //     movementControlThreshold) {
-                    //   movePlayerBy(toCardinalCoord(movementControlAccumulator));
-                    //   movementControlAccumulator = Offset.zero;
-                    // }
-                  },
-                  onPanEnd: (details) {
-                    movementControlAccumulator = Offset.zero;
-                  },
-                  child: SizedBox.expand(
-                    child: Container(
-                      color: mt.midBackColor,
-                      child: Align(
-                        alignment: Alignment.bottomLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Text(
-                            "MOVE",
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: mt.hintTextColor),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ]);
-          }),
-        );
-
-        if (isWide) {
-          return Row(children: [worldWidget, controlsWidget]);
-        } else {
-          return Column(children: [worldWidget, controlsWidget]);
-        }
-      }),
+          if (isWide) {
+            return Row(children: [worldWidget, controlsWidget]);
+          } else {
+            return Column(children: [worldWidget, controlsWidget]);
+          }
+        },
+      ),
     );
+  }
+}
+
+/// ordered in terms of "solidness", which just affects how inclined they are to be the diagonal rather than the antiDiagonal
+enum TerrainKind { tomb, grass, swamp, bush, woods, rock, water, hole }
+
+Color terrainColor(TerrainKind kind) {
+  switch (kind) {
+    case TerrainKind.hole:
+      return const Color.fromARGB(255, 0, 0, 0);
+    case TerrainKind.water:
+      return const ui.Color.fromARGB(255, 125, 152, 209);
+    case TerrainKind.rock:
+      return const Color.fromARGB(255, 151, 151, 151);
+    case TerrainKind.woods:
+      return const Color.fromARGB(255, 66, 114, 51);
+    case TerrainKind.bush:
+      return const Color.fromARGB(255, 107, 136, 87);
+    case TerrainKind.swamp:
+      return const Color.fromARGB(255, 161, 165, 106);
+    case TerrainKind.grass:
+      return const Color.fromARGB(255, 151, 223, 154);
+    case TerrainKind.tomb:
+      return const Color.fromARGB(255, 231, 231, 231);
   }
 }
 
@@ -323,8 +364,11 @@ class WorldView extends StatefulWidget {
 
 class _WorldViewState extends State<WorldView>
     with SingleTickerProviderStateMixin {
-  static const _spring =
-      SpringDescription(mass: 1, stiffness: 100, damping: 20);
+  static const _spring = SpringDescription(
+    mass: 1,
+    stiffness: 100,
+    damping: 20,
+  );
 
   late final Ticker _ticker;
   final ValueNotifier<Offset> _scrollOffset = ValueNotifier(Offset.zero);
@@ -338,24 +382,71 @@ class _WorldViewState extends State<WorldView>
   Coord? _lastCamera;
 
   late final BufferedGridImage _bgBuffer = BufferedGridImage(
-    paintTile: _paintBgTile,
+    paintTile: _paintBackgroundTile,
   );
 
   static final Paint _bgFill = Paint()..color = const Color(0xFF000000);
+  static const int _atlasTileSize = 64;
+  static final ui.Image _terrainAtlas = buildTerrainAtlas(_atlasTileSize);
 
-  static void _paintBgTile(Canvas canvas, Coord tile) {
-    canvas.drawRect(const Rect.fromLTWH(0, 0, 1, 1), _bgFill);
-    final tx = tile.x, ty = tile.y;
-    final p = weightedAverage([
-      (1, perlin(Offset(tx.toDouble(), ty.toDouble()) / 8, 0xDEADBEEF)),
-      (0.2, scalarFromHashInt(hashCorner(tx, ty, 6))),
-      (0.4, perlin(Offset(tx.toDouble(), ty.toDouble()) / 5, 85))
+  TerrainKind terrainAt(Coord c) {
+    final tombOrGrass = weightedAverage([
+      (1, perlin(Offset(c.x.toDouble(), c.y.toDouble()) / 8, 0xDEADBEEF)),
+      (0.2, scalarFromHashInt(hashCorner(c.x, c.y, 6))),
+      (0.4, perlin(Offset(c.x.toDouble(), c.y.toDouble()) / 5, 85)),
     ]);
-    canvas.drawCircle(
-      const Offset(0.5, 0.5),
-      0.15,
-      Paint()..color = p > 0.5 ? grey(0.2) : grey(0.12),
+
+    final waterActually = max(
+      perlin(c.toOffset() / 18, 0xff),
+      perlin(c.toOffset() / 18, 0x8889),
     );
+
+    return waterActually > 0.7
+        ? TerrainKind.water
+        : (tombOrGrass > 0.5 ? TerrainKind.tomb : TerrainKind.grass);
+  }
+
+  void _paintBackgroundTile(Canvas canvas, Coord tile) {
+    final layers = tilesForPlaces(
+      terrainAt(tile + Coord(1, 0)).index,
+      terrainAt(tile).index,
+      terrainAt(tile + Coord(0, 1)).index,
+      terrainAt(tile + Coord(1, 1)).index,
+    );
+    final ts = _atlasTileSize;
+    final dst = const Rect.fromLTWH(0, 0, 1, 1);
+    bool first = true;
+    for (final (visual, rotation, type) in layers) {
+      final paint = Paint()
+        ..filterQuality = FilterQuality.low
+        ..colorFilter = ColorFilter.mode(
+          terrainColor(TerrainKind.values[type]),
+          BlendMode.modulate,
+        );
+      if (first) {
+        // Base layer: always draw a full tile.
+        first = false;
+        canvas.drawImageRect(
+          _terrainAtlas,
+          terrainTileAtlasSrcRect(TerrainCornerVisualTile.full, ts),
+          dst,
+          paint,
+        );
+        if (visual == TerrainCornerVisualTile.full) continue;
+      } else {
+        final src = terrainTileAtlasSrcRect(visual, ts);
+        if (rotation == Cardinality.east) {
+          canvas.drawImageRect(_terrainAtlas, src, dst, paint);
+        } else {
+          canvas.save();
+          canvas.translate(0.5, 0.5);
+          canvas.rotate(rotation.index * pi / 2);
+          canvas.translate(-0.5, -0.5);
+          canvas.drawImageRect(_terrainAtlas, src, dst, paint);
+          canvas.restore();
+        }
+      }
+    }
   }
 
   @override
@@ -376,9 +467,17 @@ class _WorldViewState extends State<WorldView>
     final cur = _scrollOffset.value;
 
     _simX = SpringSimulation(
-        _spring, cur.dx, target.dx, _simX?.dx(_simTime) ?? 0.0);
+      _spring,
+      cur.dx,
+      target.dx,
+      _simX?.dx(_simTime) ?? 0.0,
+    );
     _simY = SpringSimulation(
-        _spring, cur.dy, target.dy, _simY?.dx(_simTime) ?? 0.0);
+      _spring,
+      cur.dy,
+      target.dy,
+      _simY?.dx(_simTime) ?? 0.0,
+    );
     _simTime = 0;
 
     if (_ticker.isActive) {
@@ -402,64 +501,67 @@ class _WorldViewState extends State<WorldView>
   Widget build(BuildContext context) {
     final cam = watchSignal(context, widget.camera);
 
-    return LayoutBuilder(builder: (context, constraints) {
-      final viewWidth = constraints.maxWidth;
-      final viewHeight = constraints.maxHeight;
-      final trueItemWidth = viewWidth / 32;
-      final scale = trueItemWidth;
-      final viewTilesW = viewWidth / scale;
-      final viewTilesH = viewHeight / scale;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewWidth = constraints.maxWidth;
+        final viewHeight = constraints.maxHeight;
+        final trueItemWidth = viewWidth / 32;
+        final scale = trueItemWidth;
+        final viewTilesW = viewWidth / scale;
+        final viewTilesH = viewHeight / scale;
 
-      final dpr = MediaQuery.devicePixelRatioOf(context);
-      _bgBuffer.resize(viewTilesW, viewTilesH, (scale * dpr).ceil());
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        _bgBuffer.resize(viewTilesW, viewTilesH, (scale * dpr).ceil());
 
-      if (cam != _lastCamera) {
-        _lastCamera = cam;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _retarget(cam.toOffset());
-        });
-      }
+        if (cam != _lastCamera) {
+          _lastCamera = cam;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _retarget(cam.toOffset());
+          });
+        }
 
-      return ClipRect(
+        return ClipRect(
           child: ListenableBuilder(
-        listenable: _scrollOffset,
-        builder: (context, _) {
-          final offset = _scrollOffset.value;
-          _bgBuffer.moveCamera(offset);
+            listenable: _scrollOffset,
+            builder: (context, _) {
+              final offset = _scrollOffset.value;
+              _bgBuffer.moveCamera(offset);
 
-          return Transform.translate(
-            offset: Offset(viewWidth / 2, viewHeight / 2),
-            child: Transform.scale(
-              scale: scale,
-              alignment: Alignment.topLeft,
-              child: Transform.translate(
-                offset: -offset,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    CustomPaint(
-                      painter: _BufferedWorldPainter(bgBuffer: _bgBuffer),
-                    ),
-                    Positioned(
-                      left: cam.x + 0.25,
-                      top: cam.y + 0.25,
-                      width: 0.5,
-                      height: 0.5,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.5),
-                          shape: BoxShape.circle,
+              return Transform.translate(
+                offset: Offset(viewWidth / 2, viewHeight / 2),
+                child: Transform.scale(
+                  scale: scale,
+                  alignment: Alignment.topLeft,
+                  child: Transform.translate(
+                    offset: -offset,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        CustomPaint(
+                          painter: _BufferedWorldPainter(bgBuffer: _bgBuffer),
                         ),
-                      ),
+                        Positioned(
+                          left: cam.x + 0.25,
+                          top: cam.y + 0.25,
+                          width: 0.5,
+                          height: 0.5,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.5),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
-      ));
-    });
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -502,10 +604,14 @@ class _JourneySettingsScreenState extends State<JourneySettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) =
-        maybeFlippedBackgroundColors(theme, false);
-    final listItemPadding =
-        const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      false,
+    );
+    final listItemPadding = const EdgeInsets.symmetric(
+      horizontal: 16.0,
+      vertical: 8.0,
+    );
 
     Widget trailing(Widget child) =>
         SizedBox(width: 32.0, child: Center(child: child));
@@ -560,43 +666,59 @@ class _JourneySettingsScreenState extends State<JourneySettingsScreen> {
           SliverList(
             delegate: SliverChildListDelegate([
               Watch((context) {
-                final isRightHandedMobj =
-                    Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
+                final isRightHandedMobj = Mobj.getAlreadyLoaded(
+                  isRightHandedID,
+                  BoolType(),
+                );
                 final isRightHanded = isRightHandedMobj.value ?? true;
                 return ListTile(
-                  title: Text('${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                      style: theme.textTheme.bodyLarge),
+                  title: Text(
+                    '${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                    style: theme.textTheme.bodyLarge,
+                  ),
                   subtitle: Text(
                     'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                  trailing: trailing(TweenAnimationBuilder<double>(
-                    tween: Tween(
-                      begin: isRightHanded ? -1.0 : 1.0,
-                      end: isRightHanded ? -1.0 : 1.0,
+                  trailing: trailing(
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(
+                        begin: isRightHanded ? -1.0 : 1.0,
+                        end: isRightHanded ? -1.0 : 1.0,
+                      ),
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      builder: (context, scaleX, child) =>
+                          Transform.scale(scaleX: scaleX, child: child),
+                      child: Transform.rotate(
+                        angle: 45 * pi / 180,
+                        child: Icon(
+                          Icons.back_hand_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
                     ),
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeInOut,
-                    builder: (context, scaleX, child) =>
-                        Transform.scale(scaleX: scaleX, child: child),
-                    child: Transform.rotate(
-                      angle: 45 * pi / 180,
-                      child: Icon(Icons.back_hand_rounded,
-                          color: theme.colorScheme.primary),
-                    ),
-                  )),
+                  ),
                   onTap: () => isRightHandedMobj.value = !isRightHanded,
                   contentPadding: listItemPadding,
                 );
               }),
               ListTile(
                 title: Text('Quit game', style: theme.textTheme.bodyLarge),
-                subtitle: Text('return to the timer screen',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                trailing: trailing(Icon(Icons.exit_to_app,
-                    color: theme.colorScheme.onSurfaceVariant)),
+                subtitle: Text(
+                  'return to the timer screen',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                trailing: trailing(
+                  Icon(
+                    Icons.exit_to_app,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 onTap: () {
                   final navigator = Navigator.of(context);
                   navigator.removeRouteBelow(ModalRoute.of(context)!);

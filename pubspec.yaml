@@ -20,7 +20,7 @@ license: 'BSL-1.1(Apache-2.0, non-compete)'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.6.2
+  sdk: ^3.11.4
 
 dependencies:
   flutter:

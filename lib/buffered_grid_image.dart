@@ -13,10 +13,10 @@ int _mod(int a, int b) => ((a % b) + b) % b;
 class BufferedGridImage {
   final void Function(Canvas canvas, Coord tileCoord) paintTile;
 
-  int _tilePixelSize = 0;
-  int _bufferW = 0;
-  int _bufferH = 0;
-  ui.Image? _composite;
+  int tilePixelSize = 0;
+  int bufferW = 0;
+  int bufferH = 0;
+  ui.Image? composite;
   int _visMinX = 0, _visMaxX = 0, _visMinY = 0, _visMaxY = 0;
 
   BufferedGridImage({required this.paintTile});
@@ -27,37 +27,37 @@ class BufferedGridImage {
   void resize(double viewWidth, double viewHeight, int tilePixelSize) {
     final newW = viewWidth.ceil() + 3;
     final newH = viewHeight.ceil() + 3;
-    if (newW != _bufferW ||
-        newH != _bufferH ||
-        tilePixelSize != _tilePixelSize) {
+    if (newW != bufferW ||
+        newH != bufferH ||
+        tilePixelSize != this.tilePixelSize) {
       _disposeAll();
-      _tilePixelSize = tilePixelSize;
-      _bufferW = newW;
-      _bufferH = newH;
+      this.tilePixelSize = tilePixelSize;
+      bufferW = newW;
+      bufferH = newH;
     }
   }
 
   /// Update camera position (world coords). Renders new tiles and
   /// incrementally composites them (source-overwrite) synchronously.
   void moveCamera(Offset center) {
-    if (_bufferW == 0) return;
+    if (bufferW == 0) return;
 
-    final minX = (center.dx - _bufferW / 2).floor();
-    final minY = (center.dy - _bufferH / 2).floor();
-    final maxX = minX + _bufferW - 1;
-    final maxY = minY + _bufferH - 1;
+    final minX = (center.dx - bufferW / 2).floor();
+    final minY = (center.dy - bufferH / 2).floor();
+    final maxX = minX + bufferW - 1;
+    final maxY = minY + bufferH - 1;
 
     if (minX == _visMinX && minY == _visMinY) return;
 
     final changed = <({int bx, int by, Coord tile})>[];
 
     void addTile(int wx, int wy) {
-      final bx = _mod(wx, _bufferW);
-      final by = _mod(wy, _bufferH);
+      final bx = _mod(wx, bufferW);
+      final by = _mod(wy, bufferH);
       changed.add((bx: bx, by: by, tile: Coord(wx, wy)));
     }
 
-    if (_composite == null) {
+    if (composite == null) {
       // First call — populate everything
       for (int wy = minY; wy <= maxY; wy++) {
         for (int wx = minX; wx <= maxX; wx++) {
@@ -102,30 +102,34 @@ class BufferedGridImage {
   /// Render the buffered image onto [canvas]. Assumes the canvas is in
   /// world-space coordinates (1 unit = 1 tile), with transforms already
   /// applied for camera centering and scaling.
+  static final Paint _renderPaint = Paint()
+    ..isAntiAlias = false
+    ..filterQuality = FilterQuality.low;
+
   void render(Canvas canvas) {
-    final img = _composite;
+    final img = composite;
     if (img == null) return;
 
-    final px = _tilePixelSize.toDouble();
-    final bMinX = _mod(_visMinX, _bufferW);
-    final bMaxX = _mod(_visMaxX, _bufferW);
-    final bMinY = _mod(_visMinY, _bufferH);
-    final bMaxY = _mod(_visMaxY, _bufferH);
+    final px = tilePixelSize.toDouble();
+    final bMinX = _mod(_visMinX, bufferW);
+    final bMaxX = _mod(_visMaxX, bufferW);
+    final bMinY = _mod(_visMinY, bufferH);
+    final bMaxY = _mod(_visMaxY, bufferH);
 
     final xSpans = <(int, int, int)>[];
     if (bMinX <= bMaxX) {
       xSpans.add((bMinX, bMaxX, _visMinX));
     } else {
-      xSpans.add((bMinX, _bufferW - 1, _visMinX));
-      xSpans.add((0, bMaxX, _visMinX + (_bufferW - bMinX)));
+      xSpans.add((bMinX, bufferW - 1, _visMinX));
+      xSpans.add((0, bMaxX, _visMinX + (bufferW - bMinX)));
     }
 
     final ySpans = <(int, int, int)>[];
     if (bMinY <= bMaxY) {
       ySpans.add((bMinY, bMaxY, _visMinY));
     } else {
-      ySpans.add((bMinY, _bufferH - 1, _visMinY));
-      ySpans.add((0, bMaxY, _visMinY + (_bufferH - bMinY)));
+      ySpans.add((bMinY, bufferH - 1, _visMinY));
+      ySpans.add((0, bMaxY, _visMinY + (bufferH - bMinY)));
     }
 
     for (final (bx0, bx1, wx0) in xSpans) {
@@ -133,42 +137,48 @@ class BufferedGridImage {
         canvas.drawImageRect(
           img,
           Rect.fromLTRB(bx0 * px, by0 * px, (bx1 + 1) * px, (by1 + 1) * px),
-          Rect.fromLTWH(wx0.toDouble(), wy0.toDouble(),
-              (bx1 - bx0 + 1).toDouble(), (by1 - by0 + 1).toDouble()),
-          Paint(),
+          Rect.fromLTWH(
+            wx0.toDouble(),
+            wy0.toDouble(),
+            (bx1 - bx0 + 1).toDouble(),
+            (by1 - by0 + 1).toDouble(),
+          ),
+          _renderPaint,
         );
       }
     }
   }
 
   void _updateComposite(List<({int bx, int by, Coord tile})> changedSlots) {
-    final px = _tilePixelSize.toDouble();
+    final px = tilePixelSize.toDouble();
     final rec = ui.PictureRecorder();
     final canvas = Canvas(rec);
-    if (_composite != null) {
-      canvas.drawImage(_composite!, Offset.zero, Paint());
+    if (composite != null) {
+      canvas.drawImage(composite!, Offset.zero, Paint());
     }
 
     for (final (:bx, :by, :tile) in changedSlots) {
       canvas.save();
       canvas.translate(bx * px, by * px);
-      canvas.clipRect(Rect.fromLTWH(0, 0, px, px));
+      canvas.clipRect(Rect.fromLTWH(0, 0, px, px), doAntiAlias: false);
       canvas.scale(px);
       paintTile(canvas, tile);
       canvas.restore();
     }
 
-    final old = _composite;
+    final old = composite;
     final full = rec.endRecording();
-    _composite =
-        full.toImageSync(_bufferW * _tilePixelSize, _bufferH * _tilePixelSize);
+    composite = full.toImageSync(
+      bufferW * tilePixelSize,
+      bufferH * tilePixelSize,
+    );
     full.dispose();
     old?.dispose();
   }
 
   void _disposeAll() {
-    _composite?.dispose();
-    _composite = null;
+    composite?.dispose();
+    composite = null;
   }
 
   void dispose() => _disposeAll();

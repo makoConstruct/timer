@@ -91,13 +91,13 @@ const backingDeflationProportion = 0.07;
 
 /// I meticulously fitted the actual core of the play icon to this box. You can scale it to get a play icon that has the dimensions you want.
 Widget fittedPlayIcon(color) => SizedBox(
-      height: 10,
-      width: 8.15,
-      child: Transform.translate(
-        offset: Offset(-6.3, -4.5),
-        child: Icon(Icons.play_arrow_rounded, size: 19, color: color),
-      ),
-    );
+  height: 10,
+  width: 8.15,
+  child: Transform.translate(
+    offset: Offset(-6.3, -4.5),
+    child: Icon(Icons.play_arrow_rounded, size: 19, color: color),
+  ),
+);
 
 /// Was supposed to be a custom Hero flight shuttle builder with 60ms delay, but I it looks like it does nothing, I can't see how the movement part of the animation would be affected by this, it would only affect an animation over the hero widget
 /// should have been a builder for createRectTween instead
@@ -132,69 +132,121 @@ Future<void> initializeDatabase() async {
   // the db will be accessed via this singleton from then on
   // initialize version one of the db
   await MobjRegistry.initialize(db);
-  final fversion = Mobj.getOrCreate(dbVersionID,
-      type: IntType(), initial: () => 0, debugLabel: "version");
+  final fversion = Mobj.getOrCreate(
+    dbVersionID,
+    type: IntType(),
+    initial: () => 0,
+    debugLabel: "version",
+  );
   await Future.wait(<Future>[
     // we know that the data required for the app is minimal enough that we should wait until it's loaded before showing anything... idk not sure I believe this
-    Mobj.getOrCreate(timerListID,
-        type: ListType(StringType()), initial: () => <MobjID>[]),
-    Mobj.getOrCreate(transientTimerListID,
-        type: ListType(StringType()), initial: () => <MobjID>[]),
+    Mobj.getOrCreate(
+      timerListID,
+      type: ListType(StringType()),
+      initial: () => <MobjID>[],
+    ),
+    Mobj.getOrCreate(
+      transientTimerListID,
+      type: ListType(StringType()),
+      initial: () => <MobjID>[],
+    ),
     Mobj.getOrCreate(nextHueID, type: DoubleType(), initial: () => 0.252),
-    Mobj.getOrCreate(isRightHandedID,
-        type: BoolType(), initial: () => true, debugLabel: "is right handed"),
-    Mobj.getOrCreate(padVerticallyAscendingID,
-        type: BoolType(),
-        initial: () => false,
-        debugLabel: "pad vertically ascending"),
-    Mobj.getOrCreate(selectedAudioID,
-        type: AudioInfoType(),
-        initial: () => PlatformAudio.assetSounds[0],
-        debugLabel: "selected audio"),
-    Mobj.getOrCreate(hasSelectedAudioID,
-        type: BoolType(),
-        initial: () => false,
-        debugLabel: "has selected audio"),
-    Mobj.getOrCreate(persistentAlarmModeID,
-        type: BoolType(),
-        initial: () => false,
-        debugLabel: "persistent alarm mode"),
-    Mobj.getOrCreate(timeFirstUsedApp,
-        type: DateTimeType(),
-        initial: () => DateTime.now(),
-        debugLabel: "first used app"),
-    Mobj.getOrCreate(hasCreatedTimerID,
-        type: BoolType(),
-        initial: () => false,
-        debugLabel: "has created timer"),
-    Mobj.getOrCreate(exitedSetupID,
-        type: BoolType(), initial: () => false, debugLabel: "left setup"),
-    Mobj.getOrCreate(completedSetupID,
-        type: BoolType(), initial: () => false, debugLabel: "completed setup"),
-    Mobj.getOrCreate(buttonSpanID,
-        type: DoubleType(), initial: () => 64.0, debugLabel: "button span"),
-    Mobj.getOrCreate(buttonScaleDialOnID,
-        type: BoolType(),
-        initial: () => false,
-        debugLabel: "button scale dial on"),
-    Mobj.getOrCreate(crankGameWinMessageIndexID,
-        type: IntType(),
-        initial: () => 0,
-        debugLabel: "crank game win message index"),
-    Mobj.getOrCreate(usedDragActionRecordID,
-        type: IntType(),
-        initial: () => 0,
-        debugLabel: "used drag action count"),
-    Mobj.getOrCreate(usedMenuCountID,
-        type: IntType(), initial: () => 0, debugLabel: "used menu count"),
-    Mobj.getOrCreate(hintGetsCompositeTimersID,
-        type: BoolType(),
-        initial: () => false,
-        debugLabel: "has created cycle timer"),
-    Mobj.getOrCreate(numberOfTimersCreatedID,
-        type: IntType(),
-        initial: () => 0,
-        debugLabel: "number of timers created"),
+    Mobj.getOrCreate(
+      isRightHandedID,
+      type: BoolType(),
+      initial: () => true,
+      debugLabel: "is right handed",
+    ),
+    Mobj.getOrCreate(
+      padVerticallyAscendingID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "pad vertically ascending",
+    ),
+    Mobj.getOrCreate(
+      selectedAudioID,
+      type: AudioInfoType(),
+      initial: () => PlatformAudio.assetSounds[0],
+      debugLabel: "selected audio",
+    ),
+    Mobj.getOrCreate(
+      hasSelectedAudioID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "has selected audio",
+    ),
+    Mobj.getOrCreate(
+      persistentAlarmModeID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "persistent alarm mode",
+    ),
+    Mobj.getOrCreate(
+      timeFirstUsedApp,
+      type: DateTimeType(),
+      initial: () => DateTime.now(),
+      debugLabel: "first used app",
+    ),
+    Mobj.getOrCreate(
+      hasCreatedTimerID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "has created timer",
+    ),
+    Mobj.getOrCreate(
+      exitedSetupID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "left setup",
+    ),
+    Mobj.getOrCreate(
+      completedSetupID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "completed setup",
+    ),
+    Mobj.getOrCreate(
+      buttonSpanID,
+      type: DoubleType(),
+      initial: () => 64.0,
+      debugLabel: "button span",
+    ),
+    Mobj.getOrCreate(
+      buttonScaleDialOnID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "button scale dial on",
+    ),
+    Mobj.getOrCreate(
+      crankGameWinMessageIndexID,
+      type: IntType(),
+      initial: () => 0,
+      debugLabel: "crank game win message index",
+    ),
+    Mobj.getOrCreate(
+      usedDragActionRecordID,
+      type: IntType(),
+      initial: () => 0,
+      debugLabel: "used drag action count",
+    ),
+    Mobj.getOrCreate(
+      usedMenuCountID,
+      type: IntType(),
+      initial: () => 0,
+      debugLabel: "used menu count",
+    ),
+    Mobj.getOrCreate(
+      hintGetsCompositeTimersID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "has created cycle timer",
+    ),
+    Mobj.getOrCreate(
+      numberOfTimersCreatedID,
+      type: IntType(),
+      initial: () => 0,
+      debugLabel: "number of timers created",
+    ),
     fversion,
   ]);
 }
@@ -222,7 +274,9 @@ void main() async {
       // tombstone: registerPortWithName doesn't work if there's already a port with that name, so when main died and then was reborn, this registration would fail. So you have to removePortWithMapping first.
       IsolateNameServer.removePortNameMapping(mainNotificationPortName);
       IsolateNameServer.registerPortWithName(
-          notificationResponseReceivePort!.sendPort, mainNotificationPortName);
+        notificationResponseReceivePort!.sendPort,
+        mainNotificationPortName,
+      );
       notificationResponseReceivePort!.listen((message) {
         if (message == 'dismissAlarms') {
           print("main message to dismissAlarms");
@@ -231,27 +285,29 @@ void main() async {
       });
       await AwesomeNotifications()
           .initialize('resource://drawable/res_notification_icon', [
-        NotificationChannel(
-          channelKey: 'main_notification',
-          channelName: 'Timer Completion',
-          channelDescription: 'Notifications when timers complete',
-          importance: NotificationImportance.High,
-        ),
-      ]);
+            NotificationChannel(
+              channelKey: 'main_notification',
+              channelName: 'Timer Completion',
+              channelDescription: 'Notifications when timers complete',
+              importance: NotificationImportance.High,
+            ),
+          ]);
       await AwesomeNotifications().setListeners(
         onActionReceivedMethod: onNotificationActionReceived,
         onDismissActionReceivedMethod: onNotificationDismissedReceived,
       );
-    })
+    }),
   ]);
   runApp(const TimersApp());
 }
 
 void _sendDismissAlarms() {
-  IsolateNameServer.lookupPortByName(mainNotificationPortName)
-      ?.send('dismissAlarms');
-  IsolateNameServer.lookupPortByName(foregroundServicePortName)
-      ?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(
+    mainNotificationPortName,
+  )?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(
+    foregroundServicePortName,
+  )?.send('dismissAlarms');
 }
 
 @pragma('vm:entry-point')
@@ -287,10 +343,11 @@ class TimerHolm {
   late EffectCleanup _backgroundedReaction;
   late StreamSubscription<Mobj<TimerData>> _newTimerReaction;
   late QuerySet<TimerData> allTimers;
-  TimerHolm(
-      {required this.list,
-      required this.jukeBox,
-      bool dismissOnForeground = true}) {
+  TimerHolm({
+    required this.list,
+    required this.jukeBox,
+    bool dismissOnForeground = true,
+  }) {
     allTimers = MobjRegistry.createQuerySet(TimerDataType());
     // runs every time a new timer is created or loaded
     _newTimerReaction = allTimers.forAll((mobj) {
@@ -368,8 +425,10 @@ class TimerHolm {
   void _timerStartAlarm(TimerTrack tt, Mobj<TimerData> mobj) {
     tt.startAlarmTimer = null;
     vibrateAlertOnce();
-    final audio =
-        Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value!;
+    final audio = Mobj.getAlreadyLoaded(
+      selectedAudioID,
+      AudioInfoType(),
+    ).value!;
     jukeBox.playAudio(audio);
   }
 
@@ -383,22 +442,24 @@ class TimerHolm {
       return;
     } else {
       vibrateAlertOnce();
-      final audio =
-          Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value!;
+      final audio = Mobj.getAlreadyLoaded(
+        selectedAudioID,
+        AudioInfoType(),
+      ).value!;
       final persistentAlarmMode =
           Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).value ??
-              false;
+          false;
       if (isBackgrounded.peek() && (d.persistentAlarm ?? persistentAlarmMode)) {
         // then it needs to send a notification and scream repeatedly until acknowledged
         jukeBox.playAudioLooping(audio);
         mobj.value = d
-            .withRunningState(
-              TimerData.completed,
-            )
+            .withRunningState(TimerData.completed)
             .withChanges(isGoingOff: true);
         tt.vibrationRepeatTimer?.cancel();
         tt.vibrationRepeatTimer = async.Timer.periodic(
-            const Duration(seconds: 8), (_) => vibrateAlertOnce());
+          const Duration(seconds: 8),
+          (_) => vibrateAlertOnce(),
+        );
         _sendCompletionNotification(tt);
       } else {
         jukeBox.playAudio(audio);
@@ -415,8 +476,10 @@ class TimerHolm {
     final child = childMobj.peek();
     if (child?.parentId == null) return;
 
-    final parentMobj =
-        Mobj.seekTypedAlreadyLoaded(child!.parentId!, TimerDataType());
+    final parentMobj = Mobj.seekTypedAlreadyLoaded(
+      child!.parentId!,
+      TimerDataType(),
+    );
     // if the parent isn't a timer, can't be actuated
     if (parentMobj == null) return;
     TimerData parent = parentMobj.peek()!;
@@ -429,16 +492,21 @@ class TimerHolm {
         if (parent.kind != TimerKind.loop && nextIdx == 0) {
           returnAndContinueParent(parentMobj);
         } else {
-          bool timerComplete =
-              startTimer(parentMobj, reset: false, suggestedStart: nextIdx);
+          bool timerComplete = startTimer(
+            parentMobj,
+            reset: false,
+            suggestedStart: nextIdx,
+          );
           if (timerComplete) {
             returnAndContinueParent(parentMobj);
           }
         }
       case TimerKind.parallelStartJustified:
-        final allCompleted = parent.children.every((id) =>
-            Mobj.getAlreadyLoaded(id, TimerDataType()).peek()?.isCompleted ??
-            false);
+        final allCompleted = parent.children.every(
+          (id) =>
+              Mobj.getAlreadyLoaded(id, TimerDataType()).peek()?.isCompleted ??
+              false,
+        );
         if (allCompleted) {
           parentMobj.value = parent.withChanges(
             runningState: TimerData.completed,
@@ -455,7 +523,10 @@ class TimerHolm {
   /// how each timer is subscribed to and responded to, imbued with spirit and voice
   /// I'm not sure how I really feel about this approach, where everything is reactions. There are many situations where we had to fully understand how this reaction converges with itself when it causes reactions in the process of doing its thing. Yet, there was always a way to make it converge.
   void Function() enlivenTimer(
-      TimerTrack tt, Mobj<TimerData> mobj, JukeBox jukeBox) {
+    TimerTrack tt,
+    Mobj<TimerData> mobj,
+    JukeBox jukeBox,
+  ) {
     // once null always null
     if (mobj.peek() == null) {
       return () {};
@@ -471,11 +542,15 @@ class TimerHolm {
           }
         }
         //remove it from its parent
-        final parent = Mobj.seekTypedsAlreadyLoaded(
-            prev!.parentId!, [TimerDataType(), ListType(StringType())]);
+        final parent = Mobj.seekTypedsAlreadyLoaded(prev!.parentId!, [
+          TimerDataType(),
+          ListType(StringType()),
+        ]);
         if (parent != null && parent.peek() != null) {
           writeBackChildren(
-              parent, childrenOf(parent).toList()..remove(mobj.id));
+            parent,
+            childrenOf(parent).toList()..remove(mobj.id),
+          );
         }
         stopTracking(mobj.id);
       } else {
@@ -487,21 +562,23 @@ class TimerHolm {
                 tt.startAlarmTimer?.cancel();
                 tt.completionTimer?.cancel();
                 final total = Duration(
-                    microseconds: (totalDuration(d) * 1000000).round());
+                  microseconds: (totalDuration(d) * 1000000).round(),
+                );
                 final elapsed = DateTime.now().difference(d.startTime);
                 if (d.soundsOnStart) {
                   // fire start alarm when startTime arrives (startTime is in the future by the delay)
                   final timeUntilStart = d.startTime.difference(DateTime.now());
                   tt.startAlarmTimer = async.Timer(
-                      timeUntilStart.isNegative
-                          ? Duration.zero
-                          : timeUntilStart,
-                      () => _timerStartAlarm(tt, mobj));
+                    timeUntilStart.isNegative ? Duration.zero : timeUntilStart,
+                    () => _timerStartAlarm(tt, mobj),
+                  );
                 }
                 tt.completionTimer = async.Timer(
-                    Duration(
-                        milliseconds: (total - elapsed).inMilliseconds.ceil()),
-                    () => _timerGoesOff(tt, mobj));
+                  Duration(
+                    milliseconds: (total - elapsed).inMilliseconds.ceil(),
+                  ),
+                  () => _timerGoesOff(tt, mobj),
+                );
               } else {
                 tt.startAlarmTimer?.cancel();
                 tt.startAlarmTimer = null;
@@ -512,12 +589,15 @@ class TimerHolm {
               if (d.isRunning) {
                 tt.completionTimer?.cancel();
                 final total = Duration(
-                    microseconds: (totalDuration(d) * 1000000).round());
+                  microseconds: (totalDuration(d) * 1000000).round(),
+                );
                 final elapsed = DateTime.now().difference(d.startTime);
                 tt.completionTimer = async.Timer(
-                    Duration(
-                        milliseconds: (total - elapsed).inMilliseconds.ceil()),
-                    () => _timerGoesOff(tt, mobj));
+                  Duration(
+                    milliseconds: (total - elapsed).inMilliseconds.ceil(),
+                  ),
+                  () => _timerGoesOff(tt, mobj),
+                );
               } else {
                 tt.completionTimer?.cancel();
                 tt.completionTimer = null;
@@ -554,10 +634,11 @@ class TimerHolm {
 void resetTimer(MobjID ki) {
   final mobj = Mobj.getAlreadyLoaded(ki, TimerDataType());
   mobj.value = mobj.peek()!.withChanges(
-      ranTime: Duration.zero,
-      runningState: TimerData.completed,
-      startTime: DateTime.now(),
-      completedRecently: false);
+    ranTime: Duration.zero,
+    runningState: TimerData.completed,
+    startTime: DateTime.now(),
+    completedRecently: false,
+  );
   // also reset children
   for (final childId in mobj.peek()!.children) {
     resetTimer(childId);
@@ -603,8 +684,12 @@ void pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
 
 /// important, if it returns true, that means it was synchronous and it's done, it wont leave an asynchronous timer or whatever running and then call back in through returnAndContinueParent, so you should continue to run the next one.
 /// the boolean return has the same meaning for all the methods below too
-bool startTimer(Mobj<TimerData> mobj,
-    {bool reset = false, Duration? delay, int suggestedStart = 0}) {
+bool startTimer(
+  Mobj<TimerData> mobj, {
+  bool reset = false,
+  Duration? delay,
+  int suggestedStart = 0,
+}) {
   if (reset) {
     resetTimer(mobj.id);
   }
@@ -612,8 +697,9 @@ bool startTimer(Mobj<TimerData> mobj,
   _startAncestors(d.parentId);
   if (d.isComposite) {
     bool ret = _startChildren(d, delay: delay, suggestedStart: suggestedStart);
-    mobj.value =
-        d.withRunningState(ret ? TimerData.completed : TimerData.running);
+    mobj.value = d.withRunningState(
+      ret ? TimerData.completed : TimerData.running,
+    );
     return ret;
   } else {
     mobj.value = d.toggleRunning(reset: reset);
@@ -659,7 +745,8 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
             continue;
           default:
             throw Exception(
-                'Invalid timer state: ${child.peek()!.runningState}');
+              'Invalid timer state: ${child.peek()!.runningState}',
+            );
         }
       }
 
@@ -704,8 +791,11 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
       // determine the max duration of the children, and start subtimers with delays to pad.
       if (host.isCompleted) {
         List<Duration?> childDurations = host.children
-            .map((childId) => remainingTimerDuration(
-                Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek()))
+            .map(
+              (childId) => remainingTimerDuration(
+                Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek(),
+              ),
+            )
             .toList();
         final Duration? md = maxRemainingDurationOfList(childDurations);
         if (md == null) {
@@ -718,9 +808,11 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
             final innerDelay = d == null
                 ? Duration.zero
                 : maxDuration(Duration.zero, md - d) + (delay ?? Duration.zero);
-            alreadyCompleted = _startSingle(
-                    Mobj.getAlreadyLoaded(host.children[i], TimerDataType()),
-                    delay: innerDelay) &&
+            alreadyCompleted =
+                _startSingle(
+                  Mobj.getAlreadyLoaded(host.children[i], TimerDataType()),
+                  delay: innerDelay,
+                ) &&
                 alreadyCompleted;
           }
           return alreadyCompleted;
@@ -741,7 +833,8 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
 
     default:
       throw Exception(
-          'Invalid timer kind: ${host.kind}, _startChildren should only be passed composite timers');
+        'Invalid timer kind: ${host.kind}, _startChildren should only be passed composite timers',
+      );
   }
 }
 
@@ -750,8 +843,9 @@ bool _startSingle(Mobj<TimerData> mobj, {Duration? delay}) {
   if (data.isRunning) return false;
   if (data.isComposite) {
     bool r = _startChildren(data, delay: delay);
-    mobj.value =
-        data.withRunningState(r ? TimerData.completed : TimerData.running);
+    mobj.value = data.withRunningState(
+      r ? TimerData.completed : TimerData.running,
+    );
     return r;
   } else {
     mobj.value = data.toggleRunning(delay: delay);
@@ -800,8 +894,9 @@ void _pauseAncestorsIfNeeded(MobjID? parentId) {
       parentMobj.value = pp.toggleRunning(reset: true);
       _pauseRunningChildren(pp, reset: true);
     case TimerKind.parallelStartJustified:
-      if (!pp.children.any((id) =>
-          Mobj.getAlreadyLoaded(id, TimerDataType()).peek()!.isRunning)) {
+      if (!pp.children.any(
+        (id) => Mobj.getAlreadyLoaded(id, TimerDataType()).peek()!.isRunning,
+      )) {
         parentMobj.value = pp.toggleRunning(reset: true);
       } else {
         return;
@@ -916,7 +1011,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     return MultiProvider(
       providers: [
         Provider<Thumbspan>(
-            create: (context) => Thumbspan(lpixPerThumbspan(context))),
+          create: (context) => Thumbspan(lpixPerThumbspan(context)),
+        ),
         Provider<JukeBox>(create: (_) => jukeBox),
       ],
       child: MaterialApp(
@@ -927,9 +1023,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         // darkTheme: makeTheme(Brightness.light),
         onGenerateRoute: (settings) {
           if (settings.name == '/') {
-            return CircularRevealRoute(
-              builder: (context) => TimerScreen(),
-            );
+            return CircularRevealRoute(builder: (context) => TimerScreen());
           }
           if (settings.name == '/onboard') {
             return CircularRevealRoute(
@@ -937,12 +1031,24 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
               iconOriginKey: configButtonKey,
             );
           }
+          if (settings.name == '/journeying') {
+            return CircularRevealRoute(
+              builder: (context) => const JourneyingGameScreen(),
+            );
+          }
           return null;
         },
         onGenerateInitialRoutes: (initialRouteName) {
+          if (initialRouteName == '/journeying') {
+            return <Route<dynamic>>[
+              CircularRevealRoute(
+                builder: (context) => const JourneyingGameScreen(),
+              ),
+            ];
+          }
           final completedSetup =
               Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
-                  false;
+              false;
           if (completedSetup) {
             return <Route<dynamic>>[
               CircularRevealRoute(builder: (context) => TimerScreen()),
@@ -953,14 +1059,15 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
             return <Route>[
               PageRouteBuilder(
                 pageBuilder: (context, __, ___) => ColoredBox(
-                    color:
-                        Theme.of(context).colorScheme.surfaceContainerLowest),
+                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                ),
                 transitionDuration: Duration.zero,
               ),
               CircularRevealRoute(
-                  builder: (context) => OnboardScreen(isRootal: true),
-                  reverseTransitionDuration: Duration(milliseconds: 350),
-                  iconOriginKey: configButtonKey),
+                builder: (context) => OnboardScreen(isRootal: true),
+                reverseTransitionDuration: Duration(milliseconds: 350),
+                iconOriginKey: configButtonKey,
+              ),
             ];
           }
         },
@@ -990,63 +1097,79 @@ class TimerMenu extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      const double margin = 12;
-      final theme = Theme.of(context);
-      final mt = MakoThemeData.fromTheme(theme);
-      final backgroundColor = this.backgroundColor ?? mt.foreBackColor;
-      final buttonSpan =
-          Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
-      Offset tentativeArrowCenter = topLeftManhattanCenter(centerOn);
-      // correct arrowCenter to make sure it's not too close to either side
-      final minDistanceFromSide =
-          margin + backingCornerRounding * buttonSpan + arrowHeight;
-      final arrowCenter = Offset(
-          clampDouble(tentativeArrowCenter.dx, minDistanceFromSide,
-              constraints.maxWidth - minDistanceFromSide),
-          tentativeArrowCenter.dy);
-      final width = min(estimatedWidth ?? buttonSpan * 3.8,
-          constraints.maxWidth - margin * 2);
-      final left = min(max(margin, arrowCenter.dx - width / 2),
-          constraints.maxWidth - margin - width);
-      final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
-      final top = centerOn.bottom - arrowHeight;
-      return AnimatedBuilder(
-        animation: animation,
-        builder: (context, child) {
-          final curve = animation.status == AnimationStatus.forward
-              ? Curves.easeOutQuart
-              : Curves.easeOut;
-          final p = animation.status == AnimationStatus.forward
-              ? animation.value
-              // so that it's effectively shorter on the reverse traversal
-              : unlerpUnit(0.5, 1, animation.value);
-          return Stack(children: [
-            Positioned(
-              left: left,
-              top: top,
-              width: width,
-              child: ClipPath(
-                clipper: _MenuRevealClipper(
-                  progress: curve.transform(unlerpUnit(0, 0.7, p)),
-                  // happens to make the origin be the center of the clockface
-                  origin: arrowCenter - Offset(left, top),
-                  cornerRounding: cornerRounding,
-                  arrowHeight: arrowHeight,
-                ),
-                child: Container(
-                  color: backgroundColor,
-                  child: Opacity(
-                    opacity: Curves.easeInOut.transform(unlerpUnit(0.37, 1, p)),
-                    child: Column(children: items.toList()),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const double margin = 12;
+        final theme = Theme.of(context);
+        final mt = MakoThemeData.fromTheme(theme);
+        final backgroundColor = this.backgroundColor ?? mt.foreBackColor;
+        final buttonSpan = Mobj.getAlreadyLoaded(
+          buttonSpanID,
+          DoubleType(),
+        ).value!;
+        Offset tentativeArrowCenter = topLeftManhattanCenter(centerOn);
+        // correct arrowCenter to make sure it's not too close to either side
+        final minDistanceFromSide =
+            margin + backingCornerRounding * buttonSpan + arrowHeight;
+        final arrowCenter = Offset(
+          clampDouble(
+            tentativeArrowCenter.dx,
+            minDistanceFromSide,
+            constraints.maxWidth - minDistanceFromSide,
+          ),
+          tentativeArrowCenter.dy,
+        );
+        final width = min(
+          estimatedWidth ?? buttonSpan * 3.8,
+          constraints.maxWidth - margin * 2,
+        );
+        final left = min(
+          max(margin, arrowCenter.dx - width / 2),
+          constraints.maxWidth - margin - width,
+        );
+        final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
+        final top = centerOn.bottom - arrowHeight;
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final curve = animation.status == AnimationStatus.forward
+                ? Curves.easeOutQuart
+                : Curves.easeOut;
+            final p = animation.status == AnimationStatus.forward
+                ? animation.value
+                // so that it's effectively shorter on the reverse traversal
+                : unlerpUnit(0.5, 1, animation.value);
+            return Stack(
+              children: [
+                Positioned(
+                  left: left,
+                  top: top,
+                  width: width,
+                  child: ClipPath(
+                    clipper: _MenuRevealClipper(
+                      progress: curve.transform(unlerpUnit(0, 0.7, p)),
+                      // happens to make the origin be the center of the clockface
+                      origin: arrowCenter - Offset(left, top),
+                      cornerRounding: cornerRounding,
+                      arrowHeight: arrowHeight,
+                    ),
+                    child: Container(
+                      color: backgroundColor,
+                      child: Opacity(
+                        opacity: Curves.easeInOut.transform(
+                          unlerpUnit(0.37, 1, p),
+                        ),
+                        child: Column(children: items.toList()),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ]);
-        },
-      );
-    });
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 }
 
@@ -1073,37 +1196,50 @@ class _MenuRevealClipper extends CustomClipper<Path> {
       Offset(0, arrowHeight) & targetRectSize,
       Radius.circular(cornerRounding),
     );
-    final intermediateTargetSpan =
-        min(targetRectSize.height, targetRectSize.width);
+    final intermediateTargetSpan = min(
+      targetRectSize.height,
+      targetRectSize.width,
+    );
     final earlyProgress = unlerpUnit(0, 0.5, progress);
     final distanceFromCenter = origin - sizeToOffset(targetRectSize / 2);
     final Offset earlyOrigin = Offset(origin.dx, targetRect.top);
     final intermediateOriginTarget =
         // Offset(0, arrowHeight) +
         (distanceFromCenter.dx > distanceFromCenter.dy
-            ? Offset(
-                origin.dx.clamp(intermediateTargetSpan / 2,
-                    targetRectSize.width - intermediateTargetSpan / 2),
-                targetRect.center.dy)
-            : Offset(
-                targetRect.center.dx,
-                origin.dy.clamp(intermediateTargetSpan / 2,
-                    targetRectSize.height - intermediateTargetSpan / 2)));
-    final arrowProgress =
-        Curves.easeOut.transform(unlerpUnit(0.15, 0.7, progress));
+        ? Offset(
+            origin.dx.clamp(
+              intermediateTargetSpan / 2,
+              targetRectSize.width - intermediateTargetSpan / 2,
+            ),
+            targetRect.center.dy,
+          )
+        : Offset(
+            targetRect.center.dx,
+            origin.dy.clamp(
+              intermediateTargetSpan / 2,
+              targetRectSize.height - intermediateTargetSpan / 2,
+            ),
+          ));
+    final arrowProgress = Curves.easeOut.transform(
+      unlerpUnit(0.15, 0.7, progress),
+    );
     var earlyCornerRounding = cornerRounding * earlyProgress;
     final earlySpan = arrowHeight * arrowProgress * 2 + 2 * earlyCornerRounding;
     final earlyRect = RRect.fromRectAndRadius(
-        rectFromAlign(
-            align: Alignment.topCenter,
-            anchor: earlyOrigin,
-            width: earlySpan,
-            height: lerp(0, earlySpan, earlyProgress)),
-        Radius.circular(earlyCornerRounding));
+      rectFromAlign(
+        align: Alignment.topCenter,
+        anchor: earlyOrigin,
+        width: earlySpan,
+        height: lerp(0, earlySpan, earlyProgress),
+      ),
+      Radius.circular(earlyCornerRounding),
+    );
     // intermediate rect target is square
     final intermediateRect = RRect.fromRectAndRadius(
       Rect.fromCircle(
-          center: intermediateOriginTarget, radius: intermediateTargetSpan / 2),
+        center: intermediateOriginTarget,
+        radius: intermediateTargetSpan / 2,
+      ),
       Radius.circular(cornerRounding),
     );
     // final lerpr = RRect.lerp(
@@ -1113,10 +1249,13 @@ class _MenuRevealClipper extends CustomClipper<Path> {
     //     unlerpUnit(0.2, 0.65, progress))!;
 
     final lerpr = RRect.lerp(
-        RRect.fromRectAndRadius(Rect.fromCircle(center: origin, radius: 0),
-            Radius.circular(lerp(size.width / 2, cornerRounding, progress))),
-        targetRect,
-        progress)!;
+      RRect.fromRectAndRadius(
+        Rect.fromCircle(center: origin, radius: 0),
+        Radius.circular(lerp(size.width / 2, cornerRounding, progress)),
+      ),
+      targetRect,
+      progress,
+    )!;
 
     Path arrowPath = Path();
     {
@@ -1128,19 +1267,34 @@ class _MenuRevealClipper extends CustomClipper<Path> {
       final minHeight = basew + stemw / 2;
       final double additionalHeight = max(h - minHeight, 0);
       arrowPath.moveTo(origin.dx - w / 2, arrowHeight);
-      arrowPath.relativeArcToPoint(Offset(basew, -basew),
-          radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
+      arrowPath.relativeArcToPoint(
+        Offset(basew, -basew),
+        radius: Radius.circular(basew),
+        rotation: pi / 2,
+        clockwise: false,
+      );
       arrowPath.relativeLineTo(0, additionalHeight);
-      arrowPath.relativeArcToPoint(Offset(stemw, 0),
-          radius: Radius.circular(stemw / 2), rotation: pi, clockwise: true);
+      arrowPath.relativeArcToPoint(
+        Offset(stemw, 0),
+        radius: Radius.circular(stemw / 2),
+        rotation: pi,
+        clockwise: true,
+      );
       arrowPath.relativeLineTo(0, -additionalHeight);
-      arrowPath.relativeArcToPoint(Offset(basew, basew),
-          radius: Radius.circular(basew), rotation: pi / 2, clockwise: false);
+      arrowPath.relativeArcToPoint(
+        Offset(basew, basew),
+        radius: Radius.circular(basew),
+        rotation: pi / 2,
+        clockwise: false,
+      );
       arrowPath.close();
     }
 
     return Path.combine(
-        PathOperation.union, Path()..addRRect(lerpr), arrowPath);
+      PathOperation.union,
+      Path()..addRRect(lerpr),
+      arrowPath,
+    );
   }
 
   @override
@@ -1173,8 +1327,9 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   final GlobalKey animatedToKey = GlobalKey();
   // used to prevent the deletion animation from being interfered with by animated to, which unfortunately only pays attention to paint position, so slows down even non-layout position transforms.
   late final Signal<bool> animatedToDisabled = Signal(false);
-  static const Duration _deletionAnimationDuration =
-      Duration(milliseconds: 270);
+  static const Duration _deletionAnimationDuration = Duration(
+    milliseconds: 270,
+  );
   bool _deleted = false;
   Rect? _deletionLayoutRect;
   AnimationController? _deletionAnimation;
@@ -1207,40 +1362,49 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       return trivialAndClearable(widget.mobj, previousValue);
     });
     _appearanceAnimation = AnimationController(
-        duration: const Duration(milliseconds: 180), vsync: this);
+      duration: const Duration(milliseconds: 180),
+      vsync: this,
+    );
     if (widget.animateIn) {
       _appearanceAnimation.forward();
     } else {
       _appearanceAnimation.value = 1;
     }
     _unpinnedIndicatorShowing = AnimationController(
-        duration: const Duration(milliseconds: 150), vsync: this);
+      duration: const Duration(milliseconds: 150),
+      vsync: this,
+    );
     _unpinnedIndicatorFullyShowing = AnimationController(
-        duration: const Duration(milliseconds: 150), vsync: this);
+      duration: const Duration(milliseconds: 150),
+      vsync: this,
+    );
     onInitState();
     createEffect(() {
       final TimerData? d = widget.mobj.value;
       if (d == null) {
         // move this widget into a transient overlay deletion animation, and trust timerHolm to remove this from its parent in time for the next render so that there wont be a globalkey collision.
         // but only do this if its parent was also not deleted, because if the parent was deleted, it will be animating the disappearance instead
-        final parent = Mobj.seekTypedsAlreadyLoaded(previousValue!.parentId!,
-            [TimerDataType(), ListType(StringType())]);
+        final parent = Mobj.seekTypedsAlreadyLoaded(previousValue!.parentId!, [
+          TimerDataType(),
+          ListType(StringType()),
+        ]);
         if (parent == null ||
             parent.peek() != null ||
             parent is Mobj<List<String>>) {
           if (mounted && !_deleted) {
             final renderBox = context.findRenderObject() as RenderBox?;
-            final timerScreen =
-                context.findAncestorStateOfType<TimerScreenState>();
+            final timerScreen = context
+                .findAncestorStateOfType<TimerScreenState>();
             timerScreen?.timerWidgetCache.remove(widget.mobj.id);
             if (renderBox != null && renderBox.hasSize) {
               final ephemeralAnimationLayer = context
                   .findAncestorStateOfType<TimerScreenState>()!
                   .ephemeralAnimationLayer;
               final tr = boxRectRelativeTo(
-                  boring.renderBox(widget.key as GlobalKey),
-                  ephemeralAnimationLayer.currentContext?.findRenderObject()
-                      as RenderBox?)!;
+                boring.renderBox(widget.key as GlobalKey),
+                ephemeralAnimationLayer.currentContext?.findRenderObject()
+                    as RenderBox?,
+              )!;
               animatedToDisabled.value = true;
               _deletionLayoutRect = tr;
               _deletionAnimation = AnimationController(
@@ -1251,11 +1415,12 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
                 if (status != AnimationStatus.completed) return;
                 _deletionAnimation?.dispose();
                 _deletionAnimation = null;
-                final timerScreen =
-                    context.findAncestorStateOfType<TimerScreenState>();
+                final timerScreen = context
+                    .findAncestorStateOfType<TimerScreenState>();
                 if (_deletionHostChild != null) {
-                  timerScreen?.ephemeralAnimationLayer.currentState
-                      ?.remove(_deletionHostChild!);
+                  timerScreen?.ephemeralAnimationLayer.currentState?.remove(
+                    _deletionHostChild!,
+                  );
                   _deletionHostChild = null;
                 }
               });
@@ -1308,8 +1473,9 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     final current = p.title ?? '';
     widget.mobj.value = p.withChanges(title: current);
     _titleController.text = current;
-    _titleController.selection =
-        TextSelection.collapsed(offset: current.length);
+    _titleController.selection = TextSelection.collapsed(
+      offset: current.length,
+    );
     void onFocusChange() {
       if (!_titleFocusNode.hasFocus) {
         _titleFocusNode.removeListener(onFocusChange);
@@ -1330,122 +1496,120 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   }
 
   int getIndexWithinParent() {
-    final pcs = childrenOf(Mobj.seekTypedsAlreadyLoaded(
-        widget.mobj.peek()!.parentId!,
-        [TimerDataType(), ListType(StringType())])!);
+    final pcs = childrenOf(
+      Mobj.seekTypedsAlreadyLoaded(widget.mobj.peek()!.parentId!, [
+        TimerDataType(),
+        ListType(StringType()),
+      ])!,
+    );
     return pcs.indexOf(widget.mobj.id);
   }
 
   Widget buildShell(BuildContext context, Widget content) {
-    return nesting(
-      [
-        (next) => DraggableWidget<GlobalKey<TimerBaseState>>(
-            data: widget.key as GlobalKey<TimerBaseState>,
-            onDragStarted: () {
-              // record current place within parent to later use to determine whether it's an operative drag or whether it's a menu opening longclick
-              parentBeforeDrag = widget.mobj.peek()!.parentId;
-              indexBeforeDrag = getIndexWithinParent();
-            },
-            onDragEnd: () {
-              if (parentBeforeDrag == widget.mobj.peek()!.parentId &&
-                  getIndexWithinParent() == indexBeforeDrag!) {
-                // it's a non-operative drag, open the menu
-                // delayed because menu needs its new position
-                context
-                    .findAncestorStateOfType<TimerScreenState>()
-                    ?.openTimerMenu(
-                        context,
-                        widget.key as GlobalKey<TimerBaseState>,
-                        widget.mobj.id);
-              }
-            },
-            child: next),
-        // (next) => AnimatedTo.spring(
-        //     globalKey: animatedToKey,
-        //     enabled: !watchSignal(context, animatedToDisabled)!,
-        //     // tighter than default. ios sets this to .55
-        //     description: const Spring.withDamping(durationSeconds: 0.2),
-        //     child: next),
-        // (next) => AnimoveFrame(child: next),
-        (next) => Animove(
-              key: animatedToKey,
-              child: next,
-            ),
-        (next) => AnimatedBuilder(
-            animation: _appearanceAnimation,
-            child: next,
-            builder: (context, child) => FractionalTranslation(
-                  translation: Offset(
-                      0,
-                      0.6 *
-                          (1.0 -
-                              Curves.easeOut
-                                  .transform(_appearanceAnimation.value))),
-                  child: FuzzyLinearClip(
-                    angle: pi / 2,
-                    progress: _appearanceAnimation.value,
-                    child: child!,
-                  ),
-                )),
-        (next) {
-          if (!_deleted ||
-              _deletionAnimation == null ||
-              _deletionLayoutRect == null) {
-            return next;
-          } else {
-            return IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _deletionAnimation!,
-                child: next,
-                builder: (context, child) {
-                  final progress =
-                      Curves.easeOut.transform(_deletionAnimation!.value);
-                  return Transform.translate(
-                    offset: Offset(0, -_deletionLayoutRect!.height * progress),
-                    child: FuzzyLinearClip(
-                      angle: -pi / 2,
-                      progress: 1.0 - progress,
-                      fuzzyEdgeWidth: 6,
-                      child: child!,
-                    ),
-                  );
-                },
-              ),
+    return nesting([
+      (next) => DraggableWidget<GlobalKey<TimerBaseState>>(
+        data: widget.key as GlobalKey<TimerBaseState>,
+        onDragStarted: () {
+          // record current place within parent to later use to determine whether it's an operative drag or whether it's a menu opening longclick
+          parentBeforeDrag = widget.mobj.peek()!.parentId;
+          indexBeforeDrag = getIndexWithinParent();
+        },
+        onDragEnd: () {
+          if (parentBeforeDrag == widget.mobj.peek()!.parentId &&
+              getIndexWithinParent() == indexBeforeDrag!) {
+            // it's a non-operative drag, open the menu
+            // delayed because menu needs its new position
+            context.findAncestorStateOfType<TimerScreenState>()?.openTimerMenu(
+              context,
+              widget.key as GlobalKey<TimerBaseState>,
+              widget.mobj.id,
             );
           }
         },
-        (next) => BoolSignalTween(
-            signal: _shouldFade,
-            duration: Duration(milliseconds: 90),
-            child: next,
-            builder: (context, progress, child) => Opacity(
-                // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
-                // opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
-                opacity: lerp(1, 0.4, progress),
-                child: child)),
-        (next) => GestureDetector(
-            onTap: () {
-              context
-                  .findAncestorStateOfType<TimerScreenState>()
-                  ?.takeActionOn(widget.mobj.id);
-            },
-            behavior: HitTestBehavior.opaque,
-            child: next),
-      ],
-      content,
-    );
+        child: next,
+      ),
+      // (next) => AnimatedTo.spring(
+      //     globalKey: animatedToKey,
+      //     enabled: !watchSignal(context, animatedToDisabled)!,
+      //     // tighter than default. ios sets this to .55
+      //     description: const Spring.withDamping(durationSeconds: 0.2),
+      //     child: next),
+      // (next) => AnimoveFrame(child: next),
+      (next) => Animove(key: animatedToKey, child: next),
+      (next) => AnimatedBuilder(
+        animation: _appearanceAnimation,
+        child: next,
+        builder: (context, child) => FractionalTranslation(
+          translation: Offset(
+            0,
+            0.6 * (1.0 - Curves.easeOut.transform(_appearanceAnimation.value)),
+          ),
+          child: FuzzyLinearClip(
+            angle: pi / 2,
+            progress: _appearanceAnimation.value,
+            child: child!,
+          ),
+        ),
+      ),
+      (next) {
+        if (!_deleted ||
+            _deletionAnimation == null ||
+            _deletionLayoutRect == null) {
+          return next;
+        } else {
+          return IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _deletionAnimation!,
+              child: next,
+              builder: (context, child) {
+                final progress = Curves.easeOut.transform(
+                  _deletionAnimation!.value,
+                );
+                return Transform.translate(
+                  offset: Offset(0, -_deletionLayoutRect!.height * progress),
+                  child: FuzzyLinearClip(
+                    angle: -pi / 2,
+                    progress: 1.0 - progress,
+                    fuzzyEdgeWidth: 6,
+                    child: child!,
+                  ),
+                );
+              },
+            ),
+          );
+        }
+      },
+      (next) => BoolSignalTween(
+        signal: _shouldFade,
+        duration: Duration(milliseconds: 90),
+        child: next,
+        builder: (context, progress, child) => Opacity(
+          // we delay it on the down swing, I guess because it allows the user to take in whatever caused this, or to perceive in the fact that this automatic scheduling for deletion is a separate event than the cause
+          // opacity: lerp(1, 0.54, unlerpUnit(0.65, 1, progress)),
+          opacity: lerp(1, 0.4, progress),
+          child: child,
+        ),
+      ),
+      (next) => GestureDetector(
+        onTap: () {
+          context.findAncestorStateOfType<TimerScreenState>()?.takeActionOn(
+            widget.mobj.id,
+          );
+        },
+        behavior: HitTestBehavior.opaque,
+        child: next,
+      ),
+    ], content);
   }
 }
 
 /// Timer widget, contrast with Timer row from the database orm
 class Timer extends TimerBase {
-  Timer({
-    super.key,
-    required super.mobj,
-    super.animateIn = true,
-  }) {
-    assert(!mobj.peek()!.isComposite,
-        "For composite timers, use a Timercule rather than a Timer");
+  Timer({super.key, required super.mobj, super.animateIn = true}) {
+    assert(
+      !mobj.peek()!.isComposite,
+      "For composite timers, use a Timercule rather than a Timer",
+    );
   }
 
   @override
@@ -1511,13 +1675,21 @@ class TimerState extends TimerBaseState<Timer> {
   @override
   void onInitState() {
     _runningAnimation = AnimationController(
-        duration: const Duration(milliseconds: 80), vsync: this);
+      duration: const Duration(milliseconds: 80),
+      vsync: this,
+    );
     _slideActivateBounceAnimation = AnimationController(
-        duration: const Duration(milliseconds: 180), vsync: this);
+      duration: const Duration(milliseconds: 180),
+      vsync: this,
+    );
     _selectedUnderlineAnimation = AnimationController(
-        duration: const Duration(milliseconds: 250), vsync: this);
+      duration: const Duration(milliseconds: 250),
+      vsync: this,
+    );
     _completedRecentlyAnimation = AnimationController(
-        duration: const Duration(milliseconds: 510), vsync: this);
+      duration: const Duration(milliseconds: 510),
+      vsync: this,
+    );
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
@@ -1595,9 +1767,11 @@ class TimerState extends TimerBaseState<Timer> {
     double pieCompletion = dt / totalDuration;
     final durationDigits = d.digits;
     bool timeIsNegative = dt < 0;
-    final timeDigits = durationToDigits(dt.abs(),
-        isNegative: timeIsNegative,
-        padLevel: padLevelFor(durationDigits.length));
+    final timeDigits = durationToDigits(
+      dt.abs(),
+      isNegative: timeIsNegative,
+      padLevel: padLevelFor(durationDigits.length),
+    );
 
     List<int> withDigitsReplacedWith(List<int> v, int d) =>
         List.filled(v.length, d);
@@ -1606,8 +1780,9 @@ class TimerState extends TimerBaseState<Timer> {
     Widget selectionUnderline = AnimatedBuilder(
       animation: _selectedUnderlineAnimation,
       builder: (context, child) {
-        final progress =
-            Curves.easeOut.transform(_selectedUnderlineAnimation.value);
+        final progress = Curves.easeOut.transform(
+          _selectedUnderlineAnimation.value,
+        );
         final underlineHeight = 9.0;
         final gap = 3.0;
 
@@ -1630,10 +1805,12 @@ class TimerState extends TimerBaseState<Timer> {
       },
     );
 
-    Widget timeText(List<int> digits,
-        {int? centiseconds,
-        bool withTimeLevel = false,
-        bool isNegative = false}) {
+    Widget timeText(
+      List<int> digits, {
+      int? centiseconds,
+      bool withTimeLevel = false,
+      bool isNegative = false,
+    }) {
       // adds a second invisible but laid-out copy of the text, underneath the top text, so that if the width of the numerals changes the width of the timer doesn't. We assume that 0 is the widest digit, because it was on mako's machine. If this fails to hold, we can precalculate which is the widest digit.
       Widget fmt(List<int> ds, int? cs, {bool maybeWithTimeLevel = false}) {
         if (maybeWithTimeLevel && withTimeLevel) {
@@ -1645,19 +1822,21 @@ class TimerState extends TimerBaseState<Timer> {
         }
         final base = boring.formatTime(ds);
         return Text(
-            overflow: TextOverflow.clip,
-            cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}');
+          overflow: TextOverflow.clip,
+          cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}',
+        );
       }
 
       return Stack(
         clipBehavior: Clip.none,
         children: [
           Opacity(
-              opacity: 0,
-              child: fmt(
-                withDigitsReplacedWith(digits, 0),
-                centiseconds != null ? 0 : null,
-              )),
+            opacity: 0,
+            child: fmt(
+              withDigitsReplacedWith(digits, 0),
+              centiseconds != null ? 0 : null,
+            ),
+          ),
           fmt(digits, centiseconds, maybeWithTimeLevel: true),
           if (isNegative)
             Positioned.fill(
@@ -1682,25 +1861,31 @@ class TimerState extends TimerBaseState<Timer> {
           builder: (context, child) {
             final v = Curves.easeInCubic.transform(_runningAnimation.value);
             return FractionalTranslation(
-                translation: Offset(0, lerp(-mover, mover, v)),
-                child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      Transform.scale(
-                          alignment: Alignment.bottomLeft,
-                          scale: lerp(0.6, 1, v),
-                          child:
-                              timeText(timeDigits, isNegative: timeIsNegative)),
-                      Transform.scale(
-                          alignment: Alignment.topLeft,
-                          scale: lerp(1, 0.6, v),
-                          child: Stack(clipBehavior: Clip.none, children: [
-                            timeText(durationDigits, withTimeLevel: true),
-                            selectionUnderline,
-                          ])),
-                    ]));
+              translation: Offset(0, lerp(-mover, mover, v)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  Transform.scale(
+                    alignment: Alignment.bottomLeft,
+                    scale: lerp(0.6, 1, v),
+                    child: timeText(timeDigits, isNegative: timeIsNegative),
+                  ),
+                  Transform.scale(
+                    alignment: Alignment.topLeft,
+                    scale: lerp(1, 0.6, v),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        timeText(durationDigits, withTimeLevel: true),
+                        selectionUnderline,
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
           },
         ),
       ],
@@ -1727,50 +1912,58 @@ class TimerState extends TimerBaseState<Timer> {
           titleWidget,
           switch (d.kind) {
             TimerKind.timer => Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  timeText(timeDigits, isNegative: timeIsNegative),
-                  Text(' / '),
-                  timeText(durationDigits, withTimeLevel: true),
-                ],
-              ),
-            TimerKind.stopwatch => timeText(timeDigits,
-                centiseconds: ((dt % 1) * 100).toInt(),
-                isNegative: timeIsNegative,
-                withTimeLevel: true),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                timeText(timeDigits, isNegative: timeIsNegative),
+                Text(' / '),
+                timeText(durationDigits, withTimeLevel: true),
+              ],
+            ),
+            TimerKind.stopwatch => timeText(
+              timeDigits,
+              centiseconds: ((dt % 1) * 100).toInt(),
+              isNegative: timeIsNegative,
+              withTimeLevel: true,
+            ),
             _ => throw wrongTimerVariantError(d.kind),
-          }
+          },
         ],
       );
     }
 
     final Widget textPart = DefaultTextStyle.merge(
-        style: TextStyle(color: theme.colorScheme.onSurface),
-        child: (d.title != null || _titleEditMode)
-            ? titledTextPart()
-            : switch (d.kind) {
-                TimerKind.timer => animatedTextPartForTimer,
-                TimerKind.stopwatch => timeText(timeDigits,
-                    centiseconds: ((dt % 1) * 100).toInt(),
-                    isNegative: timeIsNegative,
-                    withTimeLevel: true),
-                _ => throw wrongTimerVariantError(d.kind),
-              });
+      style: TextStyle(color: theme.colorScheme.onSurface),
+      child: (d.title != null || _titleEditMode)
+          ? titledTextPart()
+          : switch (d.kind) {
+              TimerKind.timer => animatedTextPartForTimer,
+              TimerKind.stopwatch => timeText(
+                timeDigits,
+                centiseconds: ((dt % 1) * 100).toInt(),
+                isNegative: timeIsNegative,
+                withTimeLevel: true,
+              ),
+              _ => throw wrongTimerVariantError(d.kind),
+            },
+    );
 
     final playIconRadius = 10;
-    Offset playIconPos = Offset(clockRadius, clockRadius) +
+    Offset playIconPos =
+        Offset(clockRadius, clockRadius) +
         Offset.fromDirection(-pi / 4, clockRadius + 8 + playIconRadius);
 
     final stopwatchPulse = d.transpired % 1;
-    final stopwatchPulseProgress = stopwatchPulse *
+    final stopwatchPulseProgress =
+        stopwatchPulse *
         (1 -
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
     final double innerTimerSpan = 2 * (clockRadius - timerOutline);
     final stopwatchPulseSize = lerp(
-        innerTimerSpan - timerOutline * 2,
-        (clockRadius - timerGap / 2) * 2 * 0.28,
-        // Curves.easeOutCubic.transform(stopwatchPulse) *
-        stopwatchPulseProgress);
+      innerTimerSpan - timerOutline * 2,
+      (clockRadius - timerGap / 2) * 2 * 0.28,
+      // Curves.easeOutCubic.transform(stopwatchPulse) *
+      stopwatchPulseProgress,
+    );
 
     Decoration containerShape(Color color) => d.kind == TimerKind.stopwatch
         ? ShapeDecoration(
@@ -1781,73 +1974,82 @@ class TimerState extends TimerBaseState<Timer> {
             ),
             color: color,
           )
-        : BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-          );
+        : BoxDecoration(shape: BoxShape.circle, color: color);
 
     Widget clockDial = nesting(
-        [
-          (next) {
-            return PinAnimation(
-                isPinned: whetherPinned,
-                child: Container(
-                    width: 2 * clockRadius,
-                    height: 2 * clockRadius,
-                    padding: EdgeInsets.all(timerOutline),
-                    decoration: containerShape(mt.foreBackColor),
-                    child: next));
-          },
-        ],
-        switch (d.kind) {
-          TimerKind.timer => AnimatedBuilder(
-              animation: _completedRecentlyAnimation,
-              builder: (context, child) {
-                var pie = Pie(
-                    innerRadp: (1 -
-                            Curves.easeOutCubic.transform(unlerpUnit(0.2, 0.46,
-                                    _completedRecentlyAnimation.value)) *
-                                ((timerOutline * 2) / innerTimerSpan)) *
-                        (1 -
+      [
+        (next) {
+          return PinAnimation(
+            isPinned: whetherPinned,
+            child: Container(
+              width: 2 * clockRadius,
+              height: 2 * clockRadius,
+              padding: EdgeInsets.all(timerOutline),
+              decoration: containerShape(mt.foreBackColor),
+              child: next,
+            ),
+          );
+        },
+      ],
+      switch (d.kind) {
+        TimerKind.timer => AnimatedBuilder(
+          animation: _completedRecentlyAnimation,
+          builder: (context, child) {
+            var pie = Pie(
+              innerRadp:
+                  (1 -
+                      Curves.easeOutCubic.transform(
                             unlerpUnit(
-                                0.5,
-                                1,
-                                Curves.easeInCubic.transform(
-                                    _completedRecentlyAnimation.value))),
-                    backgroundColor: TimerBaseState.backgroundColor(d.hue),
-                    color: TimerBaseState.primaryColor(d.hue),
-                    value: pieCompletion,
-                    size: innerTimerSpan);
-                return pie;
-              },
-            ),
-          TimerKind.stopwatch => Container(
-              width: innerTimerSpan,
-              height: innerTimerSpan,
-              decoration: containerShape(
-                TimerBaseState.backgroundColor(d.hue),
-              ),
-              child: Center(
-                child: Container(
-                  width: stopwatchPulseSize,
-                  height: stopwatchPulseSize,
-                  decoration: ShapeDecoration(
-                    shape: StarBorder.polygon(
-                      sides: 8,
-                      // it should linger in the full roundness for a moment
-                      pointRounding: lerp(
-                          0.5, 1, unlerpUnit(0.0, 0.8, stopwatchPulseProgress)),
-                      rotation: 45 / 2,
-                    ),
-                    color: TimerBaseState.primaryColor(d.hue),
+                              0.2,
+                              0.46,
+                              _completedRecentlyAnimation.value,
+                            ),
+                          ) *
+                          ((timerOutline * 2) / innerTimerSpan)) *
+                  (1 -
+                      unlerpUnit(
+                        0.5,
+                        1,
+                        Curves.easeInCubic.transform(
+                          _completedRecentlyAnimation.value,
+                        ),
+                      )),
+              backgroundColor: TimerBaseState.backgroundColor(d.hue),
+              color: TimerBaseState.primaryColor(d.hue),
+              value: pieCompletion,
+              size: innerTimerSpan,
+            );
+            return pie;
+          },
+        ),
+        TimerKind.stopwatch => Container(
+          width: innerTimerSpan,
+          height: innerTimerSpan,
+          decoration: containerShape(TimerBaseState.backgroundColor(d.hue)),
+          child: Center(
+            child: Container(
+              width: stopwatchPulseSize,
+              height: stopwatchPulseSize,
+              decoration: ShapeDecoration(
+                shape: StarBorder.polygon(
+                  sides: 8,
+                  // it should linger in the full roundness for a moment
+                  pointRounding: lerp(
+                    0.5,
+                    1,
+                    unlerpUnit(0.0, 0.8, stopwatchPulseProgress),
                   ),
+                  rotation: 45 / 2,
                 ),
+                color: TimerBaseState.primaryColor(d.hue),
               ),
             ),
-          _ => throw wrongTimerVariantError(d.kind),
-        }
-        // size: 90),
-        );
+          ),
+        ),
+        _ => throw wrongTimerVariantError(d.kind),
+      },
+      // size: 90),
+    );
 
     // do a bounce animation to respond to slide to start interactions
     double bounceDistance =
@@ -1856,31 +2058,30 @@ class TimerState extends TimerBaseState<Timer> {
     return buildShell(
       context,
       Padding(
-          padding: EdgeInsets.all(timerGap / 2),
-          child: AnimatedBuilder(
-            animation: _slideActivateBounceAnimation,
-            builder: (context, child) => Transform.translate(
-                offset: _slideBounceDirection * bounceDistance, child: child),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                clockDial,
-                SizedBox(width: timerGap * 0.4),
-                textPart,
-              ],
-            ),
-          )),
+        padding: EdgeInsets.all(timerGap / 2),
+        child: AnimatedBuilder(
+          animation: _slideActivateBounceAnimation,
+          builder: (context, child) => Transform.translate(
+            offset: _slideBounceDirection * bounceDistance,
+            child: child,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              clockDial,
+              SizedBox(width: timerGap * 0.4),
+              textPart,
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
 
 class Timercule extends TimerBase {
-  const Timercule({
-    super.key,
-    required super.mobj,
-    super.animateIn = true,
-  });
+  const Timercule({super.key, required super.mobj, super.animateIn = true});
 
   @override
   State<Timercule> createState() => TimerculeState();
@@ -1926,7 +2127,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
     final mt = MakoThemeData.fromContext(context);
     final backgroundColor = mt.timerculeHighlightBackground(depth);
     final buttonSpan = watchSignal(
-        context, Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()))!;
+      context,
+      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
+    )!;
     final cornerRadius = backingCornerRounding * buttonSpan;
     Widget? titleWidget;
     if (d.title != null || _titleEditMode) {
@@ -1940,8 +2143,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
                     focusNode: _titleFocusNode,
                     controller: _titleController,
                     style: DefaultTextStyle.of(context).style,
-                    decoration:
-                        InputDecoration.collapsed(hintText: 'description'),
+                    decoration: InputDecoration.collapsed(
+                      hintText: 'description',
+                    ),
                     onChanged: (text) {
                       widget.mobj.value = p.withChanges(title: text);
                     },
@@ -1953,23 +2157,29 @@ class TimerculeState extends TimerBaseState<Timercule> {
     }
 
     Widget handleContainer({required Widget child}) => Container(
-          constraints: BoxConstraints(
-              minWidth: timerHeight * 0.7,
-              minHeight: timerHeight + timerGap,
-              maxWidth: timerHeight * 2),
-          child: child,
-        );
+      constraints: BoxConstraints(
+        minWidth: timerHeight * 0.7,
+        minHeight: timerHeight + timerGap,
+        maxWidth: timerHeight * 2,
+      ),
+      child: child,
+    );
 
     Widget handle = handleContainer(
       child: Stack(
         children: [
           Positioned.fill(
-              child: Center(
-                  child: timerKindIcon(d.kind,
-                      color: mt.timerculeHighlightBackground(depth + 1)))),
+            child: Center(
+              child: timerKindIcon(
+                d.kind,
+                color: mt.timerculeHighlightBackground(depth + 1),
+              ),
+            ),
+          ),
           Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-              child: titleWidget ?? const SizedBox.shrink()),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+            child: titleWidget ?? const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -1977,66 +2187,74 @@ class TimerculeState extends TimerBaseState<Timercule> {
     Widget tail = Container(
       width: timerHeight * 0.333,
       height: timerHeight * 0.333,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(5),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(5)),
     );
 
     // apparently, sometimes Timers have to build in places where TimerScreenState is no longer in the ancestry (probably from the overlay, during dragging), so we have to retain the map and not assume we'll always be able to make the connection and fetch it.
-    timerWidgetCache ??=
-        context.findAncestorStateOfType<TimerScreenState>()?.timerWidgetCache;
+    timerWidgetCache ??= context
+        .findAncestorStateOfType<TimerScreenState>()
+        ?.timerWidgetCache;
 
     final content = buildShell(
-        context,
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: timerGap / 2),
-          child: PinAnimation(
-            isPinned: whetherPinned,
-            child: Stack(
-              children: [
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  top: timerGap / 2,
-                  bottom: timerGap / 2,
-                  child: AnisizedContainer(
-                    // todo: shrink background vertically by timerGap/2, if possible. If not possible, maybe build that.
-                    decoration: BoxDecoration(
-                      // color: TimerBaseState.backgroundColor(d.hue),
-                      color: backgroundColor,
-                      borderRadius: BorderRadius.circular(cornerRadius),
-                    ),
+      context,
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: timerGap / 2),
+        child: PinAnimation(
+          isPinned: whetherPinned,
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: timerGap / 2,
+                bottom: timerGap / 2,
+                child: AnisizedContainer(
+                  // todo: shrink background vertically by timerGap/2, if possible. If not possible, maybe build that.
+                  decoration: BoxDecoration(
+                    // color: TimerBaseState.backgroundColor(d.hue),
+                    color: backgroundColor,
+                    borderRadius: BorderRadius.circular(cornerRadius),
                   ),
                 ),
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: timerHeight,
-                    minWidth: timerHeight,
-                  ),
-                  child: AnimoveFrame(
-                    key: frameKey,
-                    child: IWrap(
-                        key: iWrapKey,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        alignment: WrapAlignment.end,
-                        children: [
-                          SizeFollower(sizeNotifier: _handleSizeNotifier),
-                          ...d.children.map<Widget>((id) =>
-                              getOrCreateTimerWidget(timerWidgetCache, id,
-                                  animateIn: true)),
-                          tail
-                        ]),
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: timerHeight,
+                  minWidth: timerHeight,
+                ),
+                child: AnimoveFrame(
+                  key: frameKey,
+                  child: IWrap(
+                    key: iWrapKey,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    alignment: WrapAlignment.end,
+                    children: [
+                      SizeFollower(sizeNotifier: _handleSizeNotifier),
+                      ...d.children.map<Widget>(
+                        (id) => getOrCreateTimerWidget(
+                          timerWidgetCache,
+                          id,
+                          animateIn: true,
+                        ),
+                      ),
+                      tail,
+                    ],
                   ),
                 ),
-                Positioned(
-                    top: 0,
-                    left: 0,
-                    child: SizeReporter(
-                        previousSize: _handleSizeNotifier, child: handle)),
-              ],
-            ),
+              ),
+              Positioned(
+                top: 0,
+                left: 0,
+                child: SizeReporter(
+                  previousSize: _handleSizeNotifier,
+                  child: handle,
+                ),
+              ),
+            ],
           ),
-        ));
+        ),
+      ),
+    );
 
     return DragTarget<GlobalKey<TimerBaseState>>(
       builder: (context, candidateData, rejectedData) => content,
@@ -2048,7 +2266,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
             return false;
           }
           final nextAncestor = Mobj.seekTypedAlreadyLoaded(
-              ancestor.peek()!.parentId!, TimerDataType());
+            ancestor.peek()!.parentId!,
+            TimerDataType(),
+          );
           if (nextAncestor == null) {
             return true;
           } else {
@@ -2065,33 +2285,45 @@ class TimerculeState extends TimerBaseState<Timercule> {
         final Mobj<TimerData> cm =
             (details.data.currentWidget! as TimerBase).mobj;
         // Convert IWrap-space insertion index to children-space (subtract 1 for handle)
-        final insertAt = (iWrapInsertion.midwayInsertionIndex() - 1)
-            .clamp(0, children.length);
+        final insertAt = (iWrapInsertion.midwayInsertionIndex() - 1).clamp(
+          0,
+          children.length,
+        );
         final childIndex = children.indexOf(timerId);
         if (childIndex != -1) {
           // Already a child - reorder
           final (operative, atIWrap) = iWrapInsertion.cleverInsertionIndexFor(
-              childIndex + 1, children.length + 2);
+            childIndex + 1,
+            children.length + 2,
+          );
           if (operative) {
             final at = (atIWrap - 1).clamp(0, children.length);
             widget.mobj.value = widget.mobj.peek()!.withChanges(
-                children: children.toList()
-                  ..insert(at, timerId)
-                  ..removeAt(childIndex > at ? childIndex + 1 : childIndex));
+              children: children.toList()
+                ..insert(at, timerId)
+                ..removeAt(childIndex > at ? childIndex + 1 : childIndex),
+            );
           }
         } else {
           if (cm.peek()!.parentId != null) {
-            final oldList = Mobj.seekTypedsAlreadyLoaded(cm.peek()!.parentId!,
-                [TimerDataType(), ListType(StringType())])!;
+            final oldList = Mobj.seekTypedsAlreadyLoaded(cm.peek()!.parentId!, [
+              TimerDataType(),
+              ListType(StringType()),
+            ])!;
             final oldChildren = childrenOf(oldList);
-            writeBackChildren(oldList,
-                oldChildren.toList()..removeAt(oldChildren.indexOf(timerId)));
+            writeBackChildren(
+              oldList,
+              oldChildren.toList()..removeAt(oldChildren.indexOf(timerId)),
+            );
           }
           widget.mobj.value = widget.mobj.peek()!.withChanges(
-              children: children.toList()..insert(insertAt, timerId));
+            children: children.toList()..insert(insertAt, timerId),
+          );
           // why selected false? because if a user drags a timer onto a composite timer, it indicates that they're done editing it
-          cm.value =
-              cm.peek()!.withChanges(parentId: widget.mobj.id, selected: false);
+          cm.value = cm.peek()!.withChanges(
+            parentId: widget.mobj.id,
+            selected: false,
+          );
         }
       },
     );
@@ -2126,20 +2358,27 @@ class FadingDial extends AnimatedWidget {
   Widget build(BuildContext context) {
     final vv = visibility.value;
     return FractionalTranslation(
-        translation: Offset(-0.5, -0.5),
-        child: Transform.rotate(
-            angle: angle,
-            child: Opacity(
-                opacity: vv,
-                child: AnimatedScale(
-                    scale: lerp(0.9, 1.0, vv),
-                    duration: Duration(milliseconds: 140),
-                    curve: Curves.easeOut,
-                    child: CustomPaint(
-                      size: Size.square(radius * 2),
-                      painter: SweepGradientCirclePainter(topColor, bottomColor,
-                          holeRadius: holeRadius),
-                    )))));
+      translation: Offset(-0.5, -0.5),
+      child: Transform.rotate(
+        angle: angle,
+        child: Opacity(
+          opacity: vv,
+          child: AnimatedScale(
+            scale: lerp(0.9, 1.0, vv),
+            duration: Duration(milliseconds: 140),
+            curve: Curves.easeOut,
+            child: CustomPaint(
+              size: Size.square(radius * 2),
+              painter: SweepGradientCirclePainter(
+                topColor,
+                bottomColor,
+                holeRadius: holeRadius,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2194,31 +2433,38 @@ class TimerTrayState extends State<TimerTray> with SignalsMixin {
 
   @override
   Widget build(BuildContext context) {
-    final result = Watch((context) {
-      final isRightHanded =
-          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value!;
-      return Align(
-          alignment: isRightHanded
-              ? FractionalOffset(0.8, 1)
-              : FractionalOffset(0.2, 1),
-          child: IWrap(
-            key: wrapKey,
-            textDirection:
-                isRightHanded ? TextDirection.ltr : TextDirection.rtl,
-            // TextDirection.rtl,
-            clipBehavior: Clip.none,
-            verticalDirection: VerticalDirection.down,
-            alignment: WrapAlignment.end,
-            crossAxisAlignment:
-                // isRightHanded ? WrapCrossAlignment.end : WrapCrossAlignment.start,
-                WrapCrossAlignment.start,
-            children: widget.mobj.value!
-                .map((ki) => widget.timerWidgets.value[ki]!)
-                .toList(),
-          ));
+    return Watch((context) {
+      final isRightHanded = Mobj.getAlreadyLoaded(
+        isRightHandedID,
+        BoolType(),
+      ).value!;
+      return nesting<Widget>(
+        [
+          (child) => Align(
+            alignment: isRightHanded
+                ? FractionalOffset(0.8, 1)
+                : FractionalOffset(0.2, 1),
+            child: child,
+          ),
+          // very minor bug: we can't have this yet, because resizes cause movement discontinuities. This will make scrolling the timertray feel sluggish. Fix animove.
+          // (child) => AnimoveFrame(child: child),
+        ],
+        IWrap(
+          key: wrapKey,
+          textDirection: isRightHanded ? TextDirection.ltr : TextDirection.rtl,
+          // TextDirection.rtl,
+          clipBehavior: Clip.none,
+          verticalDirection: VerticalDirection.down,
+          alignment: WrapAlignment.end,
+          crossAxisAlignment:
+              // isRightHanded ? WrapCrossAlignment.end : WrapCrossAlignment.start,
+              WrapCrossAlignment.start,
+          children: widget.mobj.value!
+              .map((ki) => widget.timerWidgets.value[ki]!)
+              .toList(),
+        ),
+      );
     });
-
-    return result;
   }
 }
 
@@ -2273,15 +2519,13 @@ HSLuvColor interpolateHuePoints(double hue, List<HSLuvColor> colorCircle) {
       : 360 - lower.hue + upper.hue;
   final t = (hue - lower.hue) / hueDiff;
   return HSLuvColor.fromHSL(
-      lerp(lower.hue, upper.hue, t),
-      lerp(lower.saturation, upper.saturation, t),
-      lerp(lower.lightness, upper.lightness, t));
+    lerp(lower.hue, upper.hue, t),
+    lerp(lower.saturation, upper.saturation, t),
+    lerp(lower.lightness, upper.lightness, t),
+  );
 }
 
-final List<double> numericRadialActivatorPositions = [
-  -pi / 2,
-  -pi,
-];
+final List<double> numericRadialActivatorPositions = [-pi / 2, -pi];
 void pausePlaySelected(TimerScreenState tss) {
   tss.pausePlaySelected();
 }
@@ -2314,16 +2558,17 @@ class DragActionRing extends StatefulWidget {
   final Offset visualPosition;
   final bool? shuntRight;
 
-  const DragActionRing(
-      {super.key,
-      required this.position,
-      required this.dragEvents,
-      this.suppressionBus,
-      required this.visualPosition,
-      this.shuntRight,
-      required this.radialActivatorIcons,
-      this.radialActivatorLabels,
-      required this.radialActivatorPositions});
+  const DragActionRing({
+    super.key,
+    required this.position,
+    required this.dragEvents,
+    this.suppressionBus,
+    required this.visualPosition,
+    this.shuntRight,
+    required this.radialActivatorIcons,
+    this.radialActivatorLabels,
+    required this.radialActivatorPositions,
+  });
 
   @override
   State<DragActionRing> createState() => DragActionRingState();
@@ -2338,20 +2583,14 @@ class DragActionRingState extends State<DragActionRing>
   late final List<AnimationController> labelAnimations;
   late final UpDownAnimationController upDownAnimation =
       UpDownAnimationController(
-    vsync: this,
-    riseDuration: Duration(milliseconds: 300),
-    fallDuration: Duration(milliseconds: 140),
-  );
+        vsync: this,
+        riseDuration: Duration(milliseconds: 300),
+        fallDuration: Duration(milliseconds: 140),
+      );
   late final AnimationController optionActivationAnimation =
-      AnimationController(
-    vsync: this,
-    duration: Duration(milliseconds: 200),
-  );
+      AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   late final AnimationController optionConsiderationAnimation =
-      AnimationController(
-    vsync: this,
-    duration: Duration(milliseconds: 200),
-  );
+      AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   Function()? dragEventsSubscription;
 
   void _onOtherRingOpens() {
@@ -2364,7 +2603,9 @@ class DragActionRingState extends State<DragActionRing>
     labelAnimations = List.generate(
       widget.radialActivatorPositions.length,
       (_) => AnimationController(
-          vsync: this, duration: Duration(milliseconds: 540)),
+        vsync: this,
+        duration: Duration(milliseconds: 540),
+      ),
     );
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     upDownAnimation.forward();
@@ -2430,27 +2671,38 @@ class DragActionRingState extends State<DragActionRing>
 
   double currentActionSize() {
     // disables fade down if action selected
-    return Curves.easeIn.transform(unlerpUnit(
+    return Curves.easeIn.transform(
+      unlerpUnit(
         0.4,
         0.65,
         upDownAnimation.value.$1 *
-            (1 - (numberSelected != -1 ? 0 : upDownAnimation.value.$2))));
+            (1 - (numberSelected != -1 ? 0 : upDownAnimation.value.$2)),
+      ),
+    );
   }
 
   Widget buildWithGivenAnimationParameters(
-      double risep, double fallp, double swipep, double releasep) {
+    double risep,
+    double fallp,
+    double swipep,
+    double releasep,
+  ) {
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded = watchSignal(
-        context, Mobj.getAlreadyLoaded(isRightHandedID, BoolType()))!;
+      context,
+      Mobj.getAlreadyLoaded(isRightHandedID, BoolType()),
+    )!;
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
     // disable fade down if a number is selected
     final double fallpIfNotSelected = numberSelected != -1 ? 0 : fallp;
-    final radius = radialRadiusMax *
-        Curves.easeOut
-            .transform(unlerpUnit(0, 0.6, risep * (1 - fallpIfNotSelected)));
+    final radius =
+        radialRadiusMax *
+        Curves.easeOut.transform(
+          unlerpUnit(0, 0.6, risep * (1 - fallpIfNotSelected)),
+        );
     final Widget radialActivationRing = Positioned(
       left: 0,
       top: 0,
@@ -2469,8 +2721,9 @@ class DragActionRingState extends State<DragActionRing>
     final actionRadiusMax = thumbSpan * 0.6;
     Widget dragChoiceWidget(Widget child) {
       return Container(
-        constraints:
-            BoxConstraints.tight(Size(actionRadiusMax, actionRadiusMax)),
+        constraints: BoxConstraints.tight(
+          Size(actionRadiusMax, actionRadiusMax),
+        ),
         decoration: BoxDecoration(
           color: theme.colorScheme.primary,
           shape: BoxShape.circle,
@@ -2479,12 +2732,11 @@ class DragActionRingState extends State<DragActionRing>
         child: Opacity(
           opacity: unlerpUnit(0.6, 1, risep),
           child: IconTheme(
-            data: IconThemeData(
-              color: theme.colorScheme.onPrimary,
-            ),
+            data: IconThemeData(color: theme.colorScheme.onPrimary),
             child: DefaultTextStyle(
-              style: controlPadTextStyle
-                  .merge(TextStyle(color: theme.colorScheme.onPrimary)),
+              style: controlPadTextStyle.merge(
+                TextStyle(color: theme.colorScheme.onPrimary),
+              ),
               child: FittedBox(fit: BoxFit.scaleDown, child: child),
             ),
           ),
@@ -2497,34 +2749,49 @@ class DragActionRingState extends State<DragActionRing>
         .toList();
 
     Offset positionFor(int actionIndex, {double? overrideRisep}) {
-      final angle = conditionallyApplyIf<double>(!isRightHanded,
-          flipAngleHorizontally, widget.radialActivatorPositions[actionIndex]);
+      final angle = conditionallyApplyIf<double>(
+        !isRightHanded,
+        flipAngleHorizontally,
+        widget.radialActivatorPositions[actionIndex],
+      );
       return Offset.fromDirection(
-          angle,
-          lerp(
-              radius - actionRadiusMax,
-              radius,
-              Curves.easeInOut.transform(unlerpUnit(0.6, 1,
-                  (overrideRisep ?? risep) * (1 - fallpIfNotSelected)))));
+        angle,
+        lerp(
+          radius - actionRadiusMax,
+          radius,
+          Curves.easeInOut.transform(
+            unlerpUnit(
+              0.6,
+              1,
+              (overrideRisep ?? risep) * (1 - fallpIfNotSelected),
+            ),
+          ),
+        ),
+      );
     }
 
-    final List<Widget> unselectedNumeralDragRadialActivators =
-        List.generate(widget.radialActivatorPositions.length, (i) {
-      Offset o = positionFor(i);
-      return Positioned(
-        left: o.dx,
-        top: o.dy,
-        child: FractionalTranslation(
+    final List<Widget> unselectedNumeralDragRadialActivators = List.generate(
+      widget.radialActivatorPositions.length,
+      (i) {
+        Offset o = positionFor(i);
+        return Positioned(
+          left: o.dx,
+          top: o.dy,
+          child: FractionalTranslation(
             translation: Offset(-0.5, -0.5),
             child: Transform.scale(
-                scale: currentActionSize(), child: radialActivatorWidgets[i])),
-      );
-    });
+              scale: currentActionSize(),
+              child: radialActivatorWidgets[i],
+            ),
+          ),
+        );
+      },
+    );
 
     Widget? selectedNumeralDragRadialActivator;
     if (centeredNumber != -1) {
-      selectedNumeralDragRadialActivator =
-          unselectedNumeralDragRadialActivators.removeAt(centeredNumber);
+      selectedNumeralDragRadialActivator = unselectedNumeralDragRadialActivators
+          .removeAt(centeredNumber);
     }
 
     double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
@@ -2556,20 +2823,22 @@ class DragActionRingState extends State<DragActionRing>
           height: totalSpan,
           child: Transform.translate(
             offset: Offset(totalSpan / 2, totalSpan / 2),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: stackChildren,
-            ),
+            child: Stack(clipBehavior: Clip.none, children: stackChildren),
           ),
         ),
       );
     }
 
     Widget labelWidgetAt(int index, double progress) {
-      final angle = conditionallyApplyIf<double>(!isRightHanded,
-          flipAngleHorizontally, widget.radialActivatorPositions[index]);
-      final labelPos =
-          Offset.fromDirection(angle, radius + actionRadiusMax * 0.8);
+      final angle = conditionallyApplyIf<double>(
+        !isRightHanded,
+        flipAngleHorizontally,
+        widget.radialActivatorPositions[index],
+      );
+      final labelPos = Offset.fromDirection(
+        angle,
+        radius + actionRadiusMax * 0.8,
+      );
       // alignment parameters are projected to the manhattan unit square
 
       var rawTx = cos(angle);
@@ -2587,21 +2856,25 @@ class DragActionRingState extends State<DragActionRing>
         [
           (w) => Positioned(left: labelPos.dx, top: labelPos.dy, child: w),
           (w) => FractionalTranslation(
-              translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
-              child: w),
+            translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
+            child: w,
+          ),
           (w) => FuzzyCircleClip(
-              origin: RelAlignment(
-                originAlignX: -labelPos.dx,
-                originAlignY: -labelPos.dy,
-              ),
-              progress: progress,
-              fuzzyEdgeWidth: 20.0,
-              child: w),
+            origin: RelAlignment(
+              originAlignX: -labelPos.dx,
+              originAlignY: -labelPos.dy,
+            ),
+            progress: progress,
+            fuzzyEdgeWidth: 20.0,
+            child: w,
+          ),
           (w) => Transform.translate(
-              offset: angleToOffset(angle) *
-                  (actionRadiusMax * 0.2) *
-                  easeIn(1 - progress),
-              child: w),
+            offset:
+                angleToOffset(angle) *
+                (actionRadiusMax * 0.2) *
+                easeIn(1 - progress),
+            child: w,
+          ),
           // tombstone: it seems as if you can't nest these inside the FuzzyCircleClip, they get their boundaries clipped and messed up. I really don't understand why!
           // (w) => ShadowWidget(
           //       color: mt.lowestBackColor.withValues(alpha: 1),
@@ -2623,105 +2896,116 @@ class DragActionRingState extends State<DragActionRing>
           //     ),
           //     child: child),
           (w) => DefaultTextStyle(
-              style: controlPadTextStyle.copyWith(
-                color: theme.colorScheme.primary,
-                fontSize: fontSize,
-                shadows: [
-                  Shadow(
-                    color: mt.lowestBackColor.withValues(alpha: 0.8),
-                    offset: Offset.zero,
-                    blurRadius: 5,
-                  ),
-                ],
-              ),
-              child: w)
+            style: controlPadTextStyle.copyWith(
+              color: theme.colorScheme.primary,
+              fontSize: fontSize,
+              shadows: [
+                Shadow(
+                  color: mt.lowestBackColor.withValues(alpha: 0.8),
+                  offset: Offset.zero,
+                  blurRadius: 5,
+                ),
+              ],
+            ),
+            child: w,
+          ),
         ],
         SignedPadding(
-            insets: EdgeInsets.symmetric(vertical: -fontSize * 0.57),
-            child: widget.radialActivatorLabels![index]),
+          insets: EdgeInsets.symmetric(vertical: -fontSize * 0.57),
+          child: widget.radialActivatorLabels![index],
+        ),
       );
     }
 
     return IgnorePointer(
-        child: FractionalTranslation(
-            translation: Offset(-0.5, -0.5),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                // disappearing on swipe
-                radialRevealShaderMask(
-                  fraction: revealFraction,
-                  maxRadius: revealMaxRadius,
-                  stackChildren: [
-                    radialActivationRing,
-                    ...unselectedNumeralDragRadialActivators,
-                  ],
-                ),
-                // disappearing on release
-                radialRevealShaderMask(
-                  fraction: 1 - Curves.easeOut.transform(releasep),
-                  maxRadius: revealMaxRadius * 0.8,
-                  stackChildren: [
-                    if (selectedNumeralDragRadialActivator != null)
-                      selectedNumeralDragRadialActivator,
-                  ],
-                ),
-                if (widget.radialActivatorLabels != null)
-                  SizedBox(
-                    width: totalSpan,
-                    height: totalSpan,
-                    child: Transform.translate(
-                      offset: Offset(totalSpan / 2, totalSpan / 2),
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          for (int i = 0; i < labelAnimations.length; i++)
-                            if (labelAnimations[i].value > 0)
-                              labelWidgetAt(
-                                  i,
-                                  unlerpUnit(
-                                      0.66, 1, labelAnimations[i].value)),
-                        ],
-                      ),
-                    ),
-                  ),
+      child: FractionalTranslation(
+        translation: Offset(-0.5, -0.5),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // disappearing on swipe
+            radialRevealShaderMask(
+              fraction: revealFraction,
+              maxRadius: revealMaxRadius,
+              stackChildren: [
+                radialActivationRing,
+                ...unselectedNumeralDragRadialActivators,
               ],
-            )));
+            ),
+            // disappearing on release
+            radialRevealShaderMask(
+              fraction: 1 - Curves.easeOut.transform(releasep),
+              maxRadius: revealMaxRadius * 0.8,
+              stackChildren: [
+                if (selectedNumeralDragRadialActivator != null)
+                  selectedNumeralDragRadialActivator,
+              ],
+            ),
+            if (widget.radialActivatorLabels != null)
+              SizedBox(
+                width: totalSpan,
+                height: totalSpan,
+                child: Transform.translate(
+                  offset: Offset(totalSpan / 2, totalSpan / 2),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      for (int i = 0; i < labelAnimations.length; i++)
+                        if (labelAnimations[i].value > 0)
+                          labelWidgetAt(
+                            i,
+                            unlerpUnit(0.66, 1, labelAnimations[i].value),
+                          ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Positioned(
-        left: widget.visualPosition.dx,
-        top: widget.visualPosition.dy,
-        child: AnimatedBuilder(
-          animation: Listenable.merge([
-            upDownAnimation,
-            optionConsiderationAnimation,
-            optionActivationAnimation,
-            ...labelAnimations,
-          ]),
-          builder: (context, child) {
-            return buildWithGivenAnimationParameters(
-                upDownAnimation.value.$1,
-                upDownAnimation.value.$2,
-                optionConsiderationAnimation.value,
-                optionActivationAnimation.value);
-          },
-        ));
+      left: widget.visualPosition.dx,
+      top: widget.visualPosition.dy,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([
+          upDownAnimation,
+          optionConsiderationAnimation,
+          optionActivationAnimation,
+          ...labelAnimations,
+        ]),
+        builder: (context, child) {
+          return buildWithGivenAnimationParameters(
+            upDownAnimation.value.$1,
+            upDownAnimation.value.$2,
+            optionConsiderationAnimation.value,
+            optionActivationAnimation.value,
+          );
+        },
+      ),
+    );
   }
 }
 
 TimerBase getOrCreateTimerWidget(
-    Map<MobjID<TimerData>, TimerBase>? timerWidgetCache, MobjID<TimerData> id,
-    {bool animateIn = false}) {
+  Map<MobjID<TimerData>, TimerBase>? timerWidgetCache,
+  MobjID<TimerData> id, {
+  bool animateIn = false,
+}) {
   if (timerWidgetCache != null && timerWidgetCache.containsKey(id)) {
     return timerWidgetCache[id]!;
   }
   final mobj = Mobj.getAlreadyLoaded(id, TimerDataType());
   final widget = mobj.peek()!.isComposite
       ? Timercule(
-          key: GlobalKey<TimerculeState>(), mobj: mobj, animateIn: animateIn)
+          key: GlobalKey<TimerculeState>(),
+          mobj: mobj,
+          animateIn: animateIn,
+        )
       : Timer(key: GlobalKey<TimerState>(), mobj: mobj, animateIn: animateIn);
   if (timerWidgetCache != null) {
     timerWidgetCache[id] = widget;
@@ -2736,13 +3020,17 @@ class TimerScreenState extends State<TimerScreen>
   late final Computed<TimerWidgets> timerWidgets;
   final Map<MobjID<TimerData>, TimerBase> timerWidgetCache = {};
 
-  TimerBase timerScreenGetOrCreateTimerWidget(MobjID<TimerData> id,
-      {bool animateIn = false}) {
+  TimerBase timerScreenGetOrCreateTimerWidget(
+    MobjID<TimerData> id, {
+    bool animateIn = false,
+  }) {
     return getOrCreateTimerWidget(timerWidgetCache, id, animateIn: animateIn);
   }
 
-  late final Mobj<bool> isRightHandedMobj =
-      Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
+  late final Mobj<bool> isRightHandedMobj = Mobj.getAlreadyLoaded(
+    isRightHandedID,
+    BoolType(),
+  );
   late final Signal<Rect> numPadBounds = Signal(Rect.zero);
   late final JukeBox jukeBox = JukeBox.create();
   late final TimerHolm timerHolm;
@@ -2754,22 +3042,32 @@ class TimerScreenState extends State<TimerScreen>
   GlobalKey pinButtonKey = GlobalKey();
   GlobalKey deleteButtonKey = GlobalKey();
   GlobalKey<SelfRemovalHostState> ephemeralAnimationLayer = GlobalKey();
-  final Mobj<List<MobjID<TimerData>>> timerListMobj =
-      Mobj.getAlreadyLoaded(timerListID, timerListType);
+  final Mobj<List<MobjID<TimerData>>> timerListMobj = Mobj.getAlreadyLoaded(
+    timerListID,
+    timerListType,
+  );
   // final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
   //     Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
-  late final Mobj<double> nextHueMobj =
-      Mobj.getAlreadyLoaded(nextHueID, DoubleType());
-  late final Mobj<bool> buttonScaleDialOn =
-      Mobj.getAlreadyLoaded(buttonScaleDialOnID, BoolType());
-  late final Mobj<double> buttonSpanMobj =
-      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType());
+  late final Mobj<double> nextHueMobj = Mobj.getAlreadyLoaded(
+    nextHueID,
+    DoubleType(),
+  );
+  late final Mobj<bool> buttonScaleDialOn = Mobj.getAlreadyLoaded(
+    buttonScaleDialOnID,
+    BoolType(),
+  );
+  late final Mobj<double> buttonSpanMobj = Mobj.getAlreadyLoaded(
+    buttonSpanID,
+    DoubleType(),
+  );
   final List<GlobalKey<TimersButtonState>> numeralKeys =
       List<GlobalKey<TimersButtonState>>.generate(10, (i) => GlobalKey());
   final GlobalKey modeHighlightAnimoveKey = GlobalKey();
   final Signal<Offset> modeHighlightAnchor = Signal(Offset.zero);
-  late AnimationController modeLivenessAnimation =
-      AnimationController(vsync: this, duration: Duration(milliseconds: 200));
+  late AnimationController modeLivenessAnimation = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 200),
+  );
   // emits whenever a drag action ring is created, so that older ones can disable themselves
   late final ChangeNotifier onNewNumeralDragActionRing = ChangeNotifier();
   late final Computed<bool> userDragActionHintCondition = Computed(() {
@@ -2781,23 +3079,25 @@ class TimerScreenState extends State<TimerScreen>
     return dagc.value! < 2;
   }, autoDispose: true);
   late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
-      () =>
-          // also goes away if the user just uses timers and ignores the timercule feature
-          (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
-              10) &&
-          // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
-          // (DateTime.now()
-          //         .difference(
-          //             Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
-          //                 .value!)
-          //         .inDays <
-          //     7) &&
-          !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType())
-                  .value ??
-              false),
-      autoDispose: true);
-  late final AnimationController buttonScaleDialAnimation =
-      AnimationController(vsync: this, duration: Duration(milliseconds: 200));
+    () =>
+        // also goes away if the user just uses timers and ignores the timercule feature
+        (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
+            10) &&
+        // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
+        // (DateTime.now()
+        //         .difference(
+        //             Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
+        //                 .value!)
+        //         .inDays <
+        //     7) &&
+        !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value ??
+            false),
+    autoDispose: true,
+  );
+  late final AnimationController buttonScaleDialAnimation = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 200),
+  );
   late final AnimationController buttonScaleFlashAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 1600));
   late final Signal<Offset?> buttonScaleDialCenter = Signal(Offset.zero);
@@ -2809,12 +3109,15 @@ class TimerScreenState extends State<TimerScreen>
   Rect editPopoverControls = Rect.zero;
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
-          vsync: this,
-          riseDuration: Duration(milliseconds: 400),
-          fallDuration: Duration(milliseconds: 200));
+        vsync: this,
+        riseDuration: Duration(milliseconds: 400),
+        fallDuration: Duration(milliseconds: 200),
+      );
   late final ScrollController timersScroller = ScrollController();
   late final AnimationController squishPanelController = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 16000));
+    vsync: this,
+    duration: const Duration(milliseconds: 16000),
+  );
   late final Signal<bool> isFirstPressForSelectedTimer = Signal(true);
 
   /// which mode is currently selected. Can be 'pin', 'delete', or 'play', any other value will be treated as 'play'
@@ -2858,27 +3161,39 @@ class TimerScreenState extends State<TimerScreen>
     radialActivatorIcons: [
       Icon(Icons.square_rounded),
       Builder(
-          builder: (context) => CustomPaint(
-              size: dragActionRingIconSize,
-              painter: TimerculeCyclePainter(
-                  color: Theme.of(context).colorScheme.onPrimary))),
+        builder: (context) => CustomPaint(
+          size: dragActionRingIconSize,
+          painter: TimerculeCyclePainter(
+            color: Theme.of(context).colorScheme.onPrimary,
+          ),
+        ),
+      ),
       Builder(
-          builder: (context) => CustomPaint(
-              size: dragActionRingIconSize,
-              painter: TimerculeSerialPainter(
-                  color: Theme.of(context).colorScheme.onPrimary))),
+        builder: (context) => CustomPaint(
+          size: dragActionRingIconSize,
+          painter: TimerculeSerialPainter(
+            color: Theme.of(context).colorScheme.onPrimary,
+          ),
+        ),
+      ),
       Builder(
-          builder: (context) => CustomPaint(
-              size: dragActionRingIconSize,
-              painter: TimerculeParallelPainter(
-                  color: Theme.of(context).colorScheme.onPrimary,
-                  rightJustified: false))),
+        builder: (context) => CustomPaint(
+          size: dragActionRingIconSize,
+          painter: TimerculeParallelPainter(
+            color: Theme.of(context).colorScheme.onPrimary,
+            rightJustified: false,
+          ),
+        ),
+      ),
       Builder(
-          builder: (context) => CustomPaint(
-              size: dragActionRingIconSize,
-              painter: TimerculeParallelPainter(
-                  color: Theme.of(context).colorScheme.onPrimary,
-                  rightJustified: true))),
+        builder: (context) => CustomPaint(
+          size: dragActionRingIconSize,
+          painter: TimerculeParallelPainter(
+            color: Theme.of(context).colorScheme.onPrimary,
+            rightJustified: true,
+          ),
+        ),
+      ),
     ],
     radialActivatorLabels: const [
       Text('stopwatch'),
@@ -2895,8 +3210,10 @@ class TimerScreenState extends State<TimerScreen>
   void initState() {
     super.initState();
 
-    timerHolm =
-        globalTimerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox);
+    timerHolm = globalTimerHolm = TimerHolm(
+      list: timerListMobj,
+      jukeBox: jukeBox,
+    );
 
     FlutterForegroundTask.addTaskDataCallback(onDataReceived);
     // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
@@ -2951,12 +3268,15 @@ class TimerScreenState extends State<TimerScreen>
       // control editPopoverAnimation
       // edit popover doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
       // this is null excepting, understandably, you can't peek it, it was just deleted
-      final timerData =
-          sv != null ? Mobj.getAlreadyLoaded(sv, TimerDataType()).peek() : null;
-      editPopoverAnimation.towards(timerData != null &&
-          timerData.kind == TimerKind.timer &&
-          (!isFirstPressForSelectedTimer.value ||
-              currentlyPressingKey.value == 0));
+      final timerData = sv != null
+          ? Mobj.getAlreadyLoaded(sv, TimerDataType()).peek()
+          : null;
+      editPopoverAnimation.towards(
+        timerData != null &&
+            timerData.kind == TimerKind.timer &&
+            (!isFirstPressForSelectedTimer.value ||
+                currentlyPressingKey.value == 0),
+      );
     });
   }
 
@@ -3016,109 +3336,134 @@ class TimerScreenState extends State<TimerScreen>
     Color inkColor = td.isComposite
         ? foregroundColor
         : TimerBaseState.backgroundColor(td.hue);
-    Widget menuItem(BuildContext context, bool isRightHanded, Widget icon,
-        String label, Function() action,
-        {bool isFirst = false, bool isLast = false}) {
+    Widget menuItem(
+      BuildContext context,
+      bool isRightHanded,
+      Widget icon,
+      String label,
+      Function() action, {
+      bool isFirst = false,
+      bool isLast = false,
+    }) {
       return InkButton(
-          backgroundColor: backgroundColor,
-          inkColor: inkColor.withValues(alpha: 0.6),
-          inkColorFaded: inkColor.withValues(alpha: 0.3),
-          onTap: () {
-            action();
-            Navigator.of(context).pop();
-          },
-          child: Padding(
-              padding: EdgeInsets.only(
-                  top: isFirst ? (menuItemPadding + arrowHeight) : 0,
-                  bottom: isLast ? menuItemPadding : 0,
-                  left: menuItemPadding,
-                  right: menuItemPadding),
-              child: Row(
-                mainAxisSize: MainAxisSize.max,
-                mainAxisAlignment: isRightHanded
-                    ? MainAxisAlignment.start
-                    : MainAxisAlignment.end,
-                children: reverseIfNot(isRightHanded, [
-                  SizedBox(
-                      width: TimerMenu.buttonHeight,
-                      height: TimerMenu.buttonHeight,
-                      child: Center(child: icon)),
-                  Expanded(
-                      child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3),
-                    child: Text(
-                      label,
-                      style: theme.textTheme.bodyMedium!
-                          .copyWith(color: foregroundColor),
+        backgroundColor: backgroundColor,
+        inkColor: inkColor.withValues(alpha: 0.6),
+        inkColorFaded: inkColor.withValues(alpha: 0.3),
+        onTap: () {
+          action();
+          Navigator.of(context).pop();
+        },
+        child: Padding(
+          padding: EdgeInsets.only(
+            top: isFirst ? (menuItemPadding + arrowHeight) : 0,
+            bottom: isLast ? menuItemPadding : 0,
+            left: menuItemPadding,
+            right: menuItemPadding,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: isRightHanded
+                ? MainAxisAlignment.start
+                : MainAxisAlignment.end,
+            children: reverseIfNot(isRightHanded, [
+              SizedBox(
+                width: TimerMenu.buttonHeight,
+                height: TimerMenu.buttonHeight,
+                child: Center(child: icon),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodyMedium!.copyWith(
+                      color: foregroundColor,
                     ),
-                  )),
-                  SizedBox(width: TimerMenu.buttonHeight * 0.2),
-                ]),
-              )));
+                  ),
+                ),
+              ),
+              SizedBox(width: TimerMenu.buttonHeight * 0.2),
+            ]),
+          ),
+        ),
+      );
     }
 
     double totalVisibleMenuItemHeight =
         TimerMenu.buttonHeight * 4 + 14 + menuItemPadding * 2;
 
     showGeneralDialog(
-        context: context,
-        barrierDismissible: true,
-        barrierLabel: 'Timer menu',
-        barrierColor: mt.lowestBackColor.withAlpha(0),
-        transitionDuration: Duration(milliseconds: 370),
-        transitionBuilder: (context, animation, secondaryAnimation, child) =>
-            child,
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return Watch(
-            (context) {
-              bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
-              return TimerMenu(
-                  timerID: timerID,
-                  arrowHeight: arrowHeight,
-                  centerOn: p,
-                  // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
-                  estimatedWidth: totalVisibleMenuItemHeight,
-                  backgroundColor: backgroundColor,
-                  animation: animation,
-                  items: [
-                    menuItem(
-                        context,
-                        isRightHanded,
-                        Icon(Icons.delete, color: foregroundColor),
-                        'Delete', () {
-                      deleteTimer(timerID);
-                    }, isFirst: true),
-                    SeparatorGradient(color: indentColor),
-                    menuItem(
-                        context,
-                        isRightHanded,
-                        Transform.rotate(
-                            angle: -pi / 2,
-                            child: Icon(Icons.rotate_90_degrees_cw_rounded,
-                                color: foregroundColor)),
-                        'Reset', () {
-                      resetTimer(timerID);
-                    }),
-                    menuItem(
-                        context,
-                        isRightHanded,
-                        Icon(Icons.push_pin, color: foregroundColor),
-                        'Pin', () {
-                      togglePin(timerID);
-                    }),
-                    menuItem(
-                        context,
-                        isRightHanded,
-                        Icon(Icons.label_outline, color: foregroundColor),
-                        'Title', () {
-                      final wk = timerWidgets[timerID]?.key
-                          as GlobalKey<TimerBaseState>?;
-                      wk?.currentState?.enterTitleEditMode();
-                    }, isLast: true),
-                  ]);
-            },
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Timer menu',
+      barrierColor: mt.lowestBackColor.withAlpha(0),
+      transitionDuration: Duration(milliseconds: 370),
+      transitionBuilder: (context, animation, secondaryAnimation, child) =>
+          child,
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return Watch((context) {
+          bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
+          return TimerMenu(
+            timerID: timerID,
+            arrowHeight: arrowHeight,
+            centerOn: p,
+            // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
+            estimatedWidth: totalVisibleMenuItemHeight,
+            backgroundColor: backgroundColor,
+            animation: animation,
+            items: [
+              menuItem(
+                context,
+                isRightHanded,
+                Icon(Icons.delete, color: foregroundColor),
+                'Delete',
+                () {
+                  deleteTimer(timerID);
+                },
+                isFirst: true,
+              ),
+              SeparatorGradient(color: indentColor),
+              menuItem(
+                context,
+                isRightHanded,
+                Transform.rotate(
+                  angle: -pi / 2,
+                  child: Icon(
+                    Icons.rotate_90_degrees_cw_rounded,
+                    color: foregroundColor,
+                  ),
+                ),
+                'Reset',
+                () {
+                  resetTimer(timerID);
+                },
+              ),
+              menuItem(
+                context,
+                isRightHanded,
+                Icon(Icons.push_pin, color: foregroundColor),
+                'Pin',
+                () {
+                  togglePin(timerID);
+                },
+              ),
+              menuItem(
+                context,
+                isRightHanded,
+                Icon(Icons.label_outline, color: foregroundColor),
+                'Title',
+                () {
+                  final wk =
+                      timerWidgets[timerID]?.key as GlobalKey<TimerBaseState>?;
+                  wk?.currentState?.enterTitleEditMode();
+                },
+                isLast: true,
+              ),
+            ],
           );
         });
+      },
+    );
   }
 
   void takeActionOn(MobjID<TimerData> timerID) {
@@ -3129,8 +3474,10 @@ class TimerScreenState extends State<TimerScreen>
       deleteTimer(timerID);
     } else {
       mode = 'play';
-      toggleRunning(Mobj.getAlreadyLoaded(timerID, TimerDataType()),
-          reset: false);
+      toggleRunning(
+        Mobj.getAlreadyLoaded(timerID, TimerDataType()),
+        reset: false,
+      );
     }
     modeActivationPulse.add(null);
     _selectTimer(null);
@@ -3146,10 +3493,7 @@ class TimerScreenState extends State<TimerScreen>
   void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
     if (selectedTimer.peek() == null) {
       isFirstPressForSelectedTimer.value = true;
-      addNewTimer(
-        selected: true,
-        digits: stripZeroes(number),
-      );
+      addNewTimer(selected: true, digits: stripZeroes(number));
     } else {
       isFirstPressForSelectedTimer.value = false;
       final mt = Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
@@ -3215,8 +3559,10 @@ class TimerScreenState extends State<TimerScreen>
     final thumbSpan = Thumbspan.of(context);
 
     final buttonSpan = watchSignal(context, buttonSpanMobj)!;
-    final bottomGutter =
-        max(thumbSpan * 0.3, MediaQuery.of(context).padding.bottom);
+    final bottomGutter = max(
+      thumbSpan * 0.3,
+      MediaQuery.of(context).padding.bottom,
+    );
     final controlsh = bottomGutter + 4 * buttonSpan;
     // Calculate the vertical space generally taken by Timer widgets (tallest, including padding).
     final timerHeight = Timer.usualHeight();
@@ -3224,50 +3570,61 @@ class TimerScreenState extends State<TimerScreen>
 
     Widget proportionedIcon(IconData icon, {double size = 22}) {
       return ScalingAspectRatio(
-          child: SizedBox(
-              width: 50,
-              height: 50,
-              child: Center(child: Icon(size: size, icon))));
+        child: SizedBox(
+          width: 50,
+          height: 50,
+          child: Center(child: Icon(size: size, icon)),
+        ),
+      );
     }
 
     var selectButton = Builder(
       builder: (context) => TimersButton(
-          // label: Icon(Icons.select_all),
-          // label: Icon(Icons.border_outer_rounded),
-          key: selectButtonKey,
-          label: const SpecialTimerShapesLabel(),
-          onPanDown: (Offset p) {
-            specialTimerCreateDragRingController.onPanDown(
-                context, p, boxRect(selectButtonKey as GlobalKey)!.center);
-          },
-          onPanUpdate: (Offset p) {
-            specialTimerCreateDragRingController.onPanUpdate(context, p);
-          },
-          onPanEnd: () {
-            specialTimerCreateDragRingController.onPanEnd(context);
-          }),
+        // label: Icon(Icons.select_all),
+        // label: Icon(Icons.border_outer_rounded),
+        key: selectButtonKey,
+        label: const SpecialTimerShapesLabel(),
+        onPanDown: (Offset p) {
+          specialTimerCreateDragRingController.onPanDown(
+            context,
+            p,
+            boxRect(selectButtonKey as GlobalKey)!.center,
+          );
+        },
+        onPanUpdate: (Offset p) {
+          specialTimerCreateDragRingController.onPanUpdate(context, p);
+        },
+        onPanEnd: () {
+          specialTimerCreateDragRingController.onPanEnd(context);
+        },
+      ),
     );
 
     var backspaceButton = TimersButton(
-        key: deleteButtonKey,
-        label: proportionedIcon(Icons.backspace),
-        onPanDown: (_) {
-          _backspace();
-        });
+      key: deleteButtonKey,
+      label: proportionedIcon(Icons.backspace),
+      onPanDown: (_) {
+        _backspace();
+      },
+    );
 
     var pinButton = TimersButton(
-        key: pinButtonKey,
-        label: Transform.rotate(
-            angle: pi / 4, child: proportionedIcon(Icons.push_pin)),
-        onPanEnd: () {
-          _selectAction('pin');
-        });
+      key: pinButtonKey,
+      label: Transform.rotate(
+        angle: pi / 4,
+        child: proportionedIcon(Icons.push_pin),
+      ),
+      onPanEnd: () {
+        _selectAction('pin');
+      },
+    );
 
     final addButton = TimersButton(
-        label: proportionedIcon(Icons.add_circle),
-        onPanDown: (_) {
-          addNewTimer(selected: true);
-        });
+      label: proportionedIcon(Icons.add_circle),
+      onPanDown: (_) {
+        addNewTimer(selected: true);
+      },
+    );
 
     // stopwatches probably shouldn't be timers, but need to go in the timer list
     // final createStopwatchButton = TimersButton(
@@ -3284,14 +3641,21 @@ class TimerScreenState extends State<TimerScreen>
     Widget playIcon(Icon otherIcon) {
       // todo: measure the width of the icons to make this precise
       double dispf = 0.3;
-      return Stack(children: [
-        FractionalTranslation(translation: Offset(-dispf, 0), child: otherIcon),
-        Transform.scale(
+      return Stack(
+        children: [
+          FractionalTranslation(
+            translation: Offset(-dispf, 0),
+            child: otherIcon,
+          ),
+          Transform.scale(
             scale: 0.8,
             child: FractionalTranslation(
-                translation: Offset(dispf, 0),
-                child: Icon(Icons.play_arrow_rounded)))
-      ]);
+              translation: Offset(dispf, 0),
+              child: Icon(Icons.play_arrow_rounded),
+            ),
+          ),
+        ],
+      );
     }
 
     // final pausePlayButton = TimersButton(
@@ -3300,99 +3664,114 @@ class TimerScreenState extends State<TimerScreen>
     //       pausePlaySelected();
     //     });
     final stopPlayButton = TimersButton(
-        label: playIcon(Icon(Icons.restart_alt_rounded)),
-        onPanDown: (_) {
-          pausePlaySelected(reset: true);
-        });
+      label: playIcon(Icon(Icons.restart_alt_rounded)),
+      onPanDown: (_) {
+        pausePlaySelected(reset: true);
+      },
+    );
 
-    final buttonScaleDial = Watch(
-      (context) {
-        if (buttonScaleDialCenter.value == null) {
-          // Offset p = Offset(screenSize.width * 0.23, screenSize.height / 2);
-          // if (!isRightHanded) {
-          //   p = Offset(screenSize.width - p.dx, p.dy);
-          // }
-          buttonScaleDialCenter.value = sizeToOffset(screenSize / 2);
-        }
-        return positionedAt(
-          buttonScaleDialCenter.value!,
-          FractionalTranslation(
-              translation: Offset(-0.5, -0.5),
-              child: AnimatedBuilder(
-                animation: Listenable.merge(
-                    [buttonScaleDialAnimation, buttonScaleFlashAnimation]),
-                builder: (context, child) {
-                  final fa = buttonScaleFlashAnimation.value;
-                  double flashu =
-                      fa == 1.0 ? 0 : moduloProperly(-fa, 1.0 / 5.0);
-                  return Transform.scale(
-                      scale: Curves.easeOutCubic
-                          .transform(buttonScaleDialAnimation.value),
-                      child: GestureDetector(
-                        onPanDown: (details) {
-                          buttonScaleDialLeavingTimer?.cancel();
-                        },
-                        onPanUpdate: (details) {
-                          final aa = angleFrom(buttonScaleDialCenter.peek()!,
-                              details.globalPosition - details.delta);
-                          final ab = angleFrom(buttonScaleDialCenter.peek()!,
-                              details.globalPosition);
-                          final a = shortestAngleDistance(aa, ab);
-                          buttonScaleDialAngle.value += a;
-                          buttonSpanMobj.value = clampDouble(
-                              buttonSpanMobj.value! + a * 1.2,
-                              12,
-                              screenSize.width / 5);
-                        },
-                        onPanEnd: (details) {
-                          buttonScaleDialLeavingTimer =
-                              async.Timer(Duration(milliseconds: 470), () {
-                            buttonScaleDialOn.value = false;
-                          });
-                        },
-                        child: Transform.rotate(
-                          transformHitTests: false,
-                          angle: buttonScaleDialAngle.value,
+    final buttonScaleDial = Watch((context) {
+      if (buttonScaleDialCenter.value == null) {
+        // Offset p = Offset(screenSize.width * 0.23, screenSize.height / 2);
+        // if (!isRightHanded) {
+        //   p = Offset(screenSize.width - p.dx, p.dy);
+        // }
+        buttonScaleDialCenter.value = sizeToOffset(screenSize / 2);
+      }
+      return positionedAt(
+        buttonScaleDialCenter.value!,
+        FractionalTranslation(
+          translation: Offset(-0.5, -0.5),
+          child: AnimatedBuilder(
+            animation: Listenable.merge([
+              buttonScaleDialAnimation,
+              buttonScaleFlashAnimation,
+            ]),
+            builder: (context, child) {
+              final fa = buttonScaleFlashAnimation.value;
+              double flashu = fa == 1.0 ? 0 : moduloProperly(-fa, 1.0 / 5.0);
+              return Transform.scale(
+                scale: Curves.easeOutCubic.transform(
+                  buttonScaleDialAnimation.value,
+                ),
+                child: GestureDetector(
+                  onPanDown: (details) {
+                    buttonScaleDialLeavingTimer?.cancel();
+                  },
+                  onPanUpdate: (details) {
+                    final aa = angleFrom(
+                      buttonScaleDialCenter.peek()!,
+                      details.globalPosition - details.delta,
+                    );
+                    final ab = angleFrom(
+                      buttonScaleDialCenter.peek()!,
+                      details.globalPosition,
+                    );
+                    final a = shortestAngleDistance(aa, ab);
+                    buttonScaleDialAngle.value += a;
+                    buttonSpanMobj.value = clampDouble(
+                      buttonSpanMobj.value! + a * 1.2,
+                      12,
+                      screenSize.width / 5,
+                    );
+                  },
+                  onPanEnd: (details) {
+                    buttonScaleDialLeavingTimer = async.Timer(
+                      Duration(milliseconds: 470),
+                      () {
+                        buttonScaleDialOn.value = false;
+                      },
+                    );
+                  },
+                  child: Transform.rotate(
+                    transformHitTests: false,
+                    angle: buttonScaleDialAngle.value,
+                    child: Container(
+                      width: 140,
+                      height: 140,
+                      decoration: BoxDecoration(
+                        color: lerpColor(
+                          mt.midBackColor,
+                          theme.colorScheme.primary,
+                          flashu,
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanDown: (details) {},
+                          onPanUpdate: (details) {
+                            buttonScaleDialCenter.value =
+                                buttonScaleDialCenter.value! + details.delta;
+                          },
                           child: Container(
-                            width: 140,
-                            height: 140,
+                            width: 60,
+                            height: 60,
                             decoration: BoxDecoration(
-                              color: lerpColor(mt.midBackColor,
-                                  theme.colorScheme.primary, flashu),
+                              color: mt.foreBackColor,
                               shape: BoxShape.circle,
                             ),
-                            child: Center(
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onPanDown: (details) {},
-                                onPanUpdate: (details) {
-                                  buttonScaleDialCenter.value =
-                                      buttonScaleDialCenter.value! +
-                                          details.delta;
-                                },
-                                child: Container(
-                                  width: 60,
-                                  height: 60,
-                                  decoration: BoxDecoration(
-                                    color: mt.foreBackColor,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Padding(
-                                      padding: EdgeInsets.all(6),
-                                      child: Text("turn me",
-                                          textAlign: TextAlign.center)),
-                                ),
+                            alignment: Alignment.center,
+                            child: Padding(
+                              padding: EdgeInsets.all(6),
+                              child: Text(
+                                "turn me",
+                                textAlign: TextAlign.center,
                               ),
                             ),
                           ),
                         ),
-                      ));
-                },
-              )),
-        );
-      },
-    );
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    });
 
     // the lower part of the screen
     final buttonSize = Size(buttonSpan, buttonSpan);
@@ -3406,12 +3785,14 @@ class TimerScreenState extends State<TimerScreen>
     // double tentativeRightPos = screenSize.width - buttonSpan / 2;
     final imperfection =
         ((tentativeRightPos - 2 * buttonSpan) - screenSize.width / 2) /
-            screenSize.width;
+        screenSize.width;
     if (imperfection < 0.055) {
       tentativeRightPos = screenSize.width / 2 + 2 * buttonSpan;
     }
     final topRightControlAnchor = Offset(
-        tentativeRightPos, screenSize.height - controlsh + buttonSpan / 2);
+      tentativeRightPos,
+      screenSize.height - controlsh + buttonSpan / 2,
+    );
 
     // final topLeftPos = topRightPos + Offset(-buttonSpan * 5, 0);
     /// pi and spani are in buttonSpan units
@@ -3419,46 +3800,53 @@ class TimerScreenState extends State<TimerScreen>
       Offset point = (topRightControlAnchor + pi * buttonSpan);
       if (!isRightHanded) {
         point = Offset(
-            screenSize.width - point.dx - (spani.width - 1) * buttonSpan,
-            point.dy);
+          screenSize.width - point.dx - (spani.width - 1) * buttonSpan,
+          point.dy,
+        );
       }
       return ((point - sizeToOffset(buttonSize / 2)) & (spani * buttonSpan));
     }
 
     final configButton = TimersButton(
-        key: configButtonKey,
-        label: SizedBox(
-          width: buttonSpan * 0.54,
-          height: buttonSpan * 0.54,
-          child: Hero(
-              tag: 'configButton',
-              child: ScalingAspectRatio(
-                  child: Icon(
-                size: 10,
-                Icons.settings_rounded,
-              ))),
+      key: configButtonKey,
+      label: SizedBox(
+        width: buttonSpan * 0.54,
+        height: buttonSpan * 0.54,
+        child: Hero(
+          tag: 'configButton',
+          child: ScalingAspectRatio(
+            child: Icon(size: 10, Icons.settings_rounded),
+          ),
         ),
-        // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
-        // onPanDown: (_) {
-        onPanEnd: () {
-          Navigator.push(
-            context,
-            CircularRevealRoute(
-              builder: (context) => SettingsScreen(flipBackgroundColors: false),
-              iconOriginKey: configButtonKey,
-            ),
-          );
-        });
+      ),
+      // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
+      // onPanDown: (_) {
+      onPanEnd: () {
+        Navigator.push(
+          context,
+          CircularRevealRoute(
+            builder: (context) => SettingsScreen(flipBackgroundColors: false),
+            iconOriginKey: configButtonKey,
+          ),
+        );
+      },
+    );
 
     Widget numeralBacking = Positioned.fromRect(
-        rect: controlGridBound(Offset(-3, 0), Size(3, 4))
-            .deflate(backingDeflation),
-        child: Container(
-            constraints: BoxConstraints.expand(),
-            decoration: BoxDecoration(
-                color: mt.foreBackColor,
-                borderRadius: BorderRadius.circular(
-                    backingCornerRounding * buttonSpan))));
+      rect: controlGridBound(
+        Offset(-3, 0),
+        Size(3, 4),
+      ).deflate(backingDeflation),
+      child: Container(
+        constraints: BoxConstraints.expand(),
+        decoration: BoxDecoration(
+          color: mt.foreBackColor,
+          borderRadius: BorderRadius.circular(
+            backingCornerRounding * buttonSpan,
+          ),
+        ),
+      ),
+    );
 
     final double modalHighlightSpan = buttonSpan - 2 * backingDeflation;
     Widget modalHighlightBacking = Watch((context) {
@@ -3467,41 +3855,46 @@ class TimerScreenState extends State<TimerScreen>
         animation: modeLivenessAnimation,
         builder: (context, child) {
           return positionedAt(
-              anchor,
-              Animove(
-                key: modeHighlightAnimoveKey,
-                enabled: modeLivenessAnimation.value > 0,
-                simulationFactory: (c, t, v) => TimelyParabolicSimulation(
-                  c,
-                  t,
-                  v,
-                  duration: 0.2,
-                ),
-                child: FractionalTranslation(
-                  translation: Offset(-0.5, -0.5),
-                  child: SizedBox(
-                    width: modalHighlightSpan * modeLivenessAnimation.value,
-                    height: modalHighlightSpan * modeLivenessAnimation.value,
-                    child: PulserAnimation(
-                        pulses: modeActivationPulse.stream,
-                        duration: Duration(milliseconds: 440),
-                        builder: (context, child, progresses) {
-                          final p = min(
-                              1.0,
-                              progresses.fold(
-                                  0.0,
-                                  (a, b) =>
-                                      a + 0.55 * defaultPulserFunction(b)));
-                          return Container(
-                              decoration: BoxDecoration(
-                                  color: lerpColor(mt.foreBackColor,
-                                      theme.colorScheme.primary, p),
-                                  borderRadius: BorderRadius.circular(
-                                      backingCornerRounding * buttonSpan)));
-                        }),
+            anchor,
+            Animove(
+              key: modeHighlightAnimoveKey,
+              enabled: modeLivenessAnimation.value > 0,
+              simulationFactory: (c, t, v) =>
+                  TimelyParabolicSimulation(c, t, v, duration: 0.2),
+              child: FractionalTranslation(
+                translation: Offset(-0.5, -0.5),
+                child: SizedBox(
+                  width: modalHighlightSpan * modeLivenessAnimation.value,
+                  height: modalHighlightSpan * modeLivenessAnimation.value,
+                  child: PulserAnimation(
+                    pulses: modeActivationPulse.stream,
+                    duration: Duration(milliseconds: 440),
+                    builder: (context, child, progresses) {
+                      final p = min(
+                        1.0,
+                        progresses.fold(
+                          0.0,
+                          (a, b) => a + 0.55 * defaultPulserFunction(b),
+                        ),
+                      );
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: lerpColor(
+                            mt.foreBackColor,
+                            theme.colorScheme.primary,
+                            p,
+                          ),
+                          borderRadius: BorderRadius.circular(
+                            backingCornerRounding * buttonSpan,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
-              ));
+              ),
+            ),
+          );
         },
       );
     });
@@ -3520,29 +3913,37 @@ class TimerScreenState extends State<TimerScreen>
         if (!isRightHanded) {
           ix = 2 - ix;
         }
-        if (watchSignal(context,
-            Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType()))!) {
+        if (watchSignal(
+          context,
+          Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType()),
+        )!) {
           iy = 2 - iy;
         }
         final ii = i + 1;
         return Positioned.fromRect(
-            rect: controlGridBound(
-                numeralPartAnchor + Offset(ix.toDouble(), iy.toDouble()),
-                Size(1, 1)),
-            child: NumeralButton(
-                digits: [ii],
-                timerButtonKey: numeralKeys[ii],
-                otherDragActionRingStarted: onNewNumeralDragActionRing));
+          rect: controlGridBound(
+            numeralPartAnchor + Offset(ix.toDouble(), iy.toDouble()),
+            Size(1, 1),
+          ),
+          child: NumeralButton(
+            digits: [ii],
+            timerButtonKey: numeralKeys[ii],
+            otherDragActionRingStarted: onNewNumeralDragActionRing,
+          ),
+        );
       }),
       Positioned.fromRect(
-          rect: controlGridBound(numeralPartAnchor + Offset(0, 3), Size(1, 1)),
-          child: NumeralButton(
-              digits: [0],
-              timerButtonKey: numeralKeys[0],
-              otherDragActionRingStarted: onNewNumeralDragActionRing)),
+        rect: controlGridBound(numeralPartAnchor + Offset(0, 3), Size(1, 1)),
+        child: NumeralButton(
+          digits: [0],
+          timerButtonKey: numeralKeys[0],
+          otherDragActionRingStarted: onNewNumeralDragActionRing,
+        ),
+      ),
       Positioned.fromRect(
-          rect: controlGridBound(innerPaletteAnchor + Offset(0, 0), Size(1, 1)),
-          child: configButton),
+        rect: controlGridBound(innerPaletteAnchor + Offset(0, 0), Size(1, 1)),
+        child: configButton,
+      ),
       // Positioned.fromRect(
       //     rect: positionAt(outerPaletteAnchor, Size(1, 1)),
       //     child: backspaceButton),
@@ -3553,31 +3954,40 @@ class TimerScreenState extends State<TimerScreen>
       //     rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
       //     child: createStopwatchButton),
       Positioned.fromRect(
-          rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
-          child: selectButton),
+        rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
+        child: selectButton,
+      ),
       Positioned.fromRect(
         rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
         child: TimersButton(
           label: proportionedIcon(Icons.view_sidebar_outlined),
           onPanEnd: () {
-            if (squishPanelController.status == AnimationStatus.forward ||
-                squishPanelController.status == AnimationStatus.completed) {
-              squishPanelController.reverse();
-            } else {
-              squishPanelController.forward();
-            }
+            
+            // if (squishPanelController.status == AnimationStatus.forward ||
+            //     squishPanelController.status == AnimationStatus.completed) {
+            //   squishPanelController.reverse();
+            // } else {
+            //   squishPanelController.forward();
+            // }
           },
         ),
       ),
     ];
 
     Widget editPopoverIcon(
-        Offset gridPos, IconData icon, Function() onTap, double size) {
+      Offset gridPos,
+      IconData icon,
+      Function() onTap,
+      double size,
+    ) {
       return AnimatedBuilder(
         animation: editPopoverAnimation,
         builder: (context, child) {
-          final opacity =
-              unlerpUnit(0.5, 1.0, editPopoverAnimation.scalarValue);
+          final opacity = unlerpUnit(
+            0.5,
+            1.0,
+            editPopoverAnimation.scalarValue,
+          );
           return Positioned.fromRect(
             rect: controlGridBound(gridPos, Size(1, 1)),
             child: IgnorePointer(
@@ -3607,44 +4017,62 @@ class TimerScreenState extends State<TimerScreen>
     final editPopoverBacking = AnimatedBuilder(
       animation: editPopoverAnimation,
       builder: (context, child) {
-        final fromRect = controlGridBound(editPopoverOrigin, Size(1, 1))
-            .deflate(backingDeflation)
-            .shift(Offset(buttonSpan * 0.4, 0));
-        final toRect = controlGridBound(editPopoverOrigin, Size(1, 2))
-            .deflate(backingDeflation);
-        final backingRectProgress =
-            unlerpUnit(0, 0.7, editPopoverAnimation.scalarValue);
+        final fromRect = controlGridBound(
+          editPopoverOrigin,
+          Size(1, 1),
+        ).deflate(backingDeflation).shift(Offset(buttonSpan * 0.4, 0));
+        final toRect = controlGridBound(
+          editPopoverOrigin,
+          Size(1, 2),
+        ).deflate(backingDeflation);
+        final backingRectProgress = unlerpUnit(
+          0,
+          0.7,
+          editPopoverAnimation.scalarValue,
+        );
         // deflated to nothing by targetRad at first
         final targetRad = buttonSpan - backingDeflation * 2;
-        final backingRect = Rect.lerp(
-                fromRect,
-                toRect,
-                Curves.easeInOutCubic
-                    .transform(unlerpUnit(0.3, 1, backingRectProgress)))!
-            .deflate((1 - Curves.easeOut.transform(backingRectProgress)) *
-                targetRad);
+        final backingRect =
+            Rect.lerp(
+              fromRect,
+              toRect,
+              Curves.easeInOutCubic.transform(
+                unlerpUnit(0.3, 1, backingRectProgress),
+              ),
+            )!.deflate(
+              (1 - Curves.easeOut.transform(backingRectProgress)) * targetRad,
+            );
         return Positioned.fromRect(
           rect: backingRect,
           child: Container(
             constraints: BoxConstraints.expand(),
             decoration: BoxDecoration(
               color: mt.foreBackColor,
-              borderRadius:
-                  BorderRadius.circular(backingCornerRounding * buttonSpan),
+              borderRadius: BorderRadius.circular(
+                backingCornerRounding * buttonSpan,
+              ),
             ),
           ),
         );
       },
     );
 
-    final editPopoverBackspaceButton =
-        editPopoverIcon(editPopoverOrigin, Icons.backspace_rounded, () {
-      _backspace();
-    }, 0.4);
+    final editPopoverBackspaceButton = editPopoverIcon(
+      editPopoverOrigin,
+      Icons.backspace_rounded,
+      () {
+        _backspace();
+      },
+      0.4,
+    );
     final editPopoverPlayButton = editPopoverIcon(
-        editPopoverOrigin + Offset(0, 1), Icons.play_arrow_rounded, () {
-      pausePlaySelected();
-    }, 0.6);
+      editPopoverOrigin + Offset(0, 1),
+      Icons.play_arrow_rounded,
+      () {
+        pausePlaySelected();
+      },
+      0.6,
+    );
 
     // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
 
@@ -3657,22 +4085,26 @@ class TimerScreenState extends State<TimerScreen>
       child: Column(
         spacing: 8,
         children: [
-          Builder(builder: (context) {
-            final dir = isRightHanded ? "left" : "right";
-            return HintToast(
+          Builder(
+            builder: (context) {
+              final dir = isRightHanded ? "left" : "right";
+              return HintToast(
                 showCondition: userDragActionHintCondition,
                 message:
-                    """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)""");
-          }),
+                    """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)""",
+              );
+            },
+          ),
           HintToast(
             showCondition: hasUsedMenuTwice,
             message:
                 "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
           ),
           HintToast(
-              showCondition: hintGetsCompositeTimersCondition,
-              message:
-                  "'timercules' like 'cycle' and 'series' allow you to drag other timers into them, to build structures. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings. Play around with them.")
+            showCondition: hintGetsCompositeTimersCondition,
+            message:
+                "'timercules' like 'cycle' and 'series' allow you to drag other timers into them, to build structures. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings. Play around with them.",
+          ),
         ],
       ),
     );
@@ -3687,172 +4119,183 @@ class TimerScreenState extends State<TimerScreen>
     );
 
     return nesting(
-        [
-          (child) => AnimoveFrame(child: child),
-          (child) => AnnotatedRegion<SystemUiOverlayStyle>(
-              value: SystemUiOverlayStyle(
-                systemNavigationBarContrastEnforced: false,
-                systemNavigationBarDividerColor:
-                    mt.lowestBackColor.withAlpha(0),
-                systemNavigationBarColor: mt.lowestBackColor.withAlpha(0),
-                systemNavigationBarIconBrightness:
-                    theme.brightness == Brightness.dark
-                        ? Brightness.light
-                        : Brightness.dark,
-              ),
-              child: child),
-          (child) => Scaffold(
-              backgroundColor: mt.lowestBackColor,
-              resizeToAvoidBottomInset: false,
-              body: child),
-          (child) => Focus(
-              autofocus: true,
-              onKeyEvent: (node, event) {
-                if (FocusManager.instance.primaryFocus != node) {
-                  return KeyEventResult.ignored;
-                }
-                _handleKeyPress(event);
-                return KeyEventResult.handled;
-              },
-              child: child),
-          // the dragtarget for the timer tray encompasses the entire TimerScreen so that you can drop above or below the widget to get above or below the top or bottom row. Otherwise, this can be difficult or impossible, which is a problem when you consider timercules, which unlike timers, can't be dragged after by dragging onto the second half
-          (child) => DragTarget<GlobalKey<TimerBaseState>>(
-              builder: (context, candidateData, rejectedData) => child,
-              onMove: (DragTargetDetails<GlobalKey<TimerBaseState>> details) {},
-              onAcceptWithDetails: (details) {
-                final wrapKey = timerTrayKey.currentState!.wrapKey;
-                final p = timerListMobj.peek()!;
-                final insertion = insertionOf(wrapKey, details.offset);
-                final timerId =
-                    (details.data.currentWidget! as TimerBase).mobj.id;
-                final currentIndex = p.indexWhere((t) => t == timerId);
-                final Mobj<TimerData> cm =
-                    (details.data.currentWidget! as TimerBase).mobj;
-                doInsertion(int at) {
-                  writeBackChildren(
-                      timerListMobj, p.toList()..insert(at, timerId));
-                }
+      [
+        (child) => AnimoveFrame(child: child),
+        (child) => AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle(
+            systemNavigationBarContrastEnforced: false,
+            systemNavigationBarDividerColor: mt.lowestBackColor.withAlpha(0),
+            systemNavigationBarColor: mt.lowestBackColor.withAlpha(0),
+            systemNavigationBarIconBrightness:
+                theme.brightness == Brightness.dark
+                ? Brightness.light
+                : Brightness.dark,
+          ),
+          child: child,
+        ),
+        (child) => Scaffold(
+          backgroundColor: mt.lowestBackColor,
+          resizeToAvoidBottomInset: false,
+          body: child,
+        ),
+        (child) => Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (FocusManager.instance.primaryFocus != node) {
+              return KeyEventResult.ignored;
+            }
+            _handleKeyPress(event);
+            return KeyEventResult.handled;
+          },
+          child: child,
+        ),
+        // the dragtarget for the timer tray encompasses the entire TimerScreen so that you can drop above or below the widget to get above or below the top or bottom row. Otherwise, this can be difficult or impossible, which is a problem when you consider timercules, which unlike timers, can't be dragged after by dragging onto the second half
+        (child) => DragTarget<GlobalKey<TimerBaseState>>(
+          builder: (context, candidateData, rejectedData) => child,
+          onMove: (DragTargetDetails<GlobalKey<TimerBaseState>> details) {},
+          onAcceptWithDetails: (details) {
+            final wrapKey = timerTrayKey.currentState!.wrapKey;
+            final p = timerListMobj.peek()!;
+            final insertion = insertionOf(wrapKey, details.offset);
+            final timerId = (details.data.currentWidget! as TimerBase).mobj.id;
+            final currentIndex = p.indexWhere((t) => t == timerId);
+            final Mobj<TimerData> cm =
+                (details.data.currentWidget! as TimerBase).mobj;
+            doInsertion(int at) {
+              writeBackChildren(timerListMobj, p.toList()..insert(at, timerId));
+            }
 
-                //transaction start
-                if (cm.peek()!.parentId == null) {
-                  doInsertion(insertion.midwayInsertionIndex());
-                } else {
-                  final oldList = Mobj.seekTypedsAlreadyLoaded(
-                      cm.peek()!.parentId!,
-                      [TimerDataType(), ListType(StringType())])!;
-                  final oldChildren = childrenOf(oldList);
-                  final oldIndex = oldChildren.indexOf(timerId);
-                  simpleRemove() {
-                    writeBackChildren(
-                        oldList, oldChildren.toList()..removeAt(oldIndex));
+            //transaction start
+            if (cm.peek()!.parentId == null) {
+              doInsertion(insertion.midwayInsertionIndex());
+            } else {
+              final oldList = Mobj.seekTypedsAlreadyLoaded(
+                cm.peek()!.parentId!,
+                [TimerDataType(), ListType(StringType())],
+              )!;
+              final oldChildren = childrenOf(oldList);
+              final oldIndex = oldChildren.indexOf(timerId);
+              simpleRemove() {
+                writeBackChildren(
+                  oldList,
+                  oldChildren.toList()..removeAt(oldIndex),
+                );
+              }
+
+              if (cm.peek()!.parentId == timerListMobj.id) {
+                assert(
+                  currentIndex != -1,
+                  "item wasn't found inside of its owningList",
+                );
+                if (insertion.index != currentIndex) {
+                  final (operative, at) = insertion.cleverInsertionIndexFor(
+                    currentIndex,
+                    p.length,
+                  );
+                  if (operative) {
+                    timerListMobj.value = p.toList()
+                      ..insert(at, timerId)
+                      ..removeAt(
+                        currentIndex > at ? currentIndex + 1 : currentIndex,
+                      );
                   }
-
-                  if (cm.peek()!.parentId == timerListMobj.id) {
-                    assert(currentIndex != -1,
-                        "item wasn't found inside of its owningList");
-                    if (insertion.index != currentIndex) {
-                      final (operative, at) = insertion.cleverInsertionIndexFor(
-                          currentIndex, p.length);
-                      if (operative) {
-                        timerListMobj.value = p.toList()
-                          ..insert(at, timerId)
-                          ..removeAt(currentIndex > at
-                              ? currentIndex + 1
-                              : currentIndex);
-                      }
-                    }
-                  } else {
-                    doInsertion(insertion.midwayInsertionIndex());
-                    simpleRemove();
-                  }
                 }
-                cm.value = cm.peek()!.withChanges(parentId: timerListMobj.id);
+              } else {
+                doInsertion(insertion.midwayInsertionIndex());
+                simpleRemove();
+              }
+            }
+            cm.value = cm.peek()!.withChanges(parentId: timerListMobj.id);
 
-                bool noDuplicates<T>(List<T> v) {
-                  for (int i = 0; i < v.length; ++i) {
-                    for (int j = i + 1; j < v.length; ++j) {
-                      if (v[i] == v[j]) return false;
-                    }
-                  }
-                  return true;
+            bool noDuplicates<T>(List<T> v) {
+              for (int i = 0; i < v.length; ++i) {
+                for (int j = i + 1; j < v.length; ++j) {
+                  if (v[i] == v[j]) return false;
                 }
+              }
+              return true;
+            }
 
-                assert(noDuplicates(p));
-                //transaction end
-              }),
-        ],
-        SelfRemovalHost(
-          key: ephemeralAnimationLayer,
-          builder: (children, context) => ConstrainedBox(
-              constraints: BoxConstraints.expand(),
-              child: Stack(
-                  children: [
-                        hintTray,
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          top: 0,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              AnimatedBuilder(
-                                animation: squishPanelController,
-                                builder: (context, child) {
-                                  final w = screenSize.width *
-                                      0.7 *
-                                      squishPanelController.value;
-                                  return SizedBox(
-                                    width: w,
-                                    child: w <= 0
-                                        ? null
-                                        : SquishBoundaryPlane(
-                                            theme: theme, mt: mt),
-                                  );
-                                },
-                              ),
-                              Expanded(
-                                child: SingleChildScrollView(
-                                    controller: timersScroller,
-                                    reverse: true,
-                                    child: Column(children: [
-                                      SizedBox(
-                                          height: screenSize.height -
-                                              controlsh -
-                                              timerHeight),
-                                      timersWidget,
-                                      SizedBox(height: controlsh),
-                                    ])),
-                              ),
-                            ],
+            assert(noDuplicates(p));
+            //transaction end
+          },
+        ),
+      ],
+      SelfRemovalHost(
+        key: ephemeralAnimationLayer,
+        builder: (children, context) => ConstrainedBox(
+          constraints: BoxConstraints.expand(),
+          child: Stack(
+            children:
+                [
+                  hintTray,
+                  Positioned.fill(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        AnimatedBuilder(
+                          animation: squishPanelController,
+                          builder: (context, child) {
+                            final w =
+                                screenSize.width *
+                                0.7 *
+                                squishPanelController.value;
+                            return SizedBox(
+                              width: w,
+                              child: w <= 0
+                                  ? null
+                                  : SquishBoundaryPlane(theme: theme, mt: mt),
+                            );
+                          },
+                        ),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: timersScroller,
+                            reverse: true,
+                            child: Column(
+                              children: [
+                                SizedBox(
+                                  height:
+                                      screenSize.height -
+                                      controlsh -
+                                      timerHeight,
+                                ),
+                                timersWidget,
+                                SizedBox(height: controlsh),
+                              ],
+                            ),
                           ),
                         ),
-                        ...controls,
-                        editPopoverBacking,
-                        editPopoverBackspaceButton,
-                        editPopoverPlayButton,
-                        buttonScaleDial,
-                      ] +
-                      children)),
-          // we stack a bunch of stuff here that's not ephemeral because that's allowed
-        ));
+                      ],
+                    ),
+                  ),
+                  ...controls,
+                  editPopoverBacking,
+                  editPopoverBackspaceButton,
+                  editPopoverPlayButton,
+                  buttonScaleDial,
+                ] +
+                children,
+          ),
+        ),
+        // we stack a bunch of stuff here that's not ephemeral because that's allowed
+      ),
+    );
   }
 
   void pausePlaySelected({bool reset = false}) {
     final id = selectedTimer.peek();
     if (id != null) {
-      if (toggleRunning(Mobj.getAlreadyLoaded(id, TimerDataType()),
-          reset: reset)) {
+      if (toggleRunning(
+        Mobj.getAlreadyLoaded(id, TimerDataType()),
+        reset: reset,
+      )) {
         _selectTimer(null);
       }
     }
   }
 
-  void addNewTimer({
-    int? runningState,
-    bool? selected,
-    List<int>? digits,
-  }) {
+  void addNewTimer({int? runningState, bool? selected, List<int>? digits}) {
     final ntid = UuidV4().generate();
 
     bool selecting = selected ?? false;
@@ -3883,8 +4326,11 @@ class TimerScreenState extends State<TimerScreen>
 
     cleanOldTimers(except: ntid);
 
-    timersScroller.animateTo(0,
-        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
+    timersScroller.animateTo(
+      0,
+      duration: Duration(milliseconds: 180),
+      curve: Curves.easeInOutCubic,
+    );
   }
 
   void addNewStopwatch() {
@@ -3914,8 +4360,11 @@ class TimerScreenState extends State<TimerScreen>
 
     cleanOldTimers(except: ntid);
 
-    timersScroller.animateTo(0,
-        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
+    timersScroller.animateTo(
+      0,
+      duration: Duration(milliseconds: 180),
+      curve: Curves.easeInOutCubic,
+    );
   }
 
   void addNewCompositeTimer(TimerKind kind) {
@@ -3925,18 +4374,22 @@ class TimerScreenState extends State<TimerScreen>
       type: TimerDataType(),
       // pinned starts true for composite timers because they're not so often faster to recreate than to reuse, so it's going to be very rare that the user wants them autodeleted
       initial: TimerData(
-          kind: kind,
-          hue: nextRandomHue(),
-          selected: false,
-          parentId: timerListMobj.id),
+        kind: kind,
+        hue: nextRandomHue(),
+        selected: false,
+        parentId: timerListMobj.id,
+      ),
     );
     timerListMobj.value = peekTimers().toList()..add(ntid);
     final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
     n.value = n.peek()! + 1;
 
     cleanOldTimers(except: ntid);
-    timersScroller.animateTo(0,
-        duration: Duration(milliseconds: 180), curve: Curves.easeInOutCubic);
+    timersScroller.animateTo(
+      0,
+      duration: Duration(milliseconds: 180),
+      curve: Curves.easeInOutCubic,
+    );
   }
 
   void cleanOldTimers({MobjID<TimerData>? except}) {
@@ -3953,8 +4406,10 @@ class TimerScreenState extends State<TimerScreen>
 
   void _selectTimer(MobjID<TimerData>? timerID) {
     if (selectedTimer.peek() != null) {
-      final oldMobj =
-          Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
+      final oldMobj = Mobj.getAlreadyLoaded(
+        selectedTimer.peek()!,
+        TimerDataType(),
+      );
       oldMobj.value = oldMobj.peek()!.withChanges(selected: false);
     }
     selectedTimer.value = timerID;
@@ -3966,8 +4421,10 @@ class TimerScreenState extends State<TimerScreen>
 
   void _backspace() {
     if (selectedTimer.peek() != null) {
-      final mobj =
-          Mobj.getAlreadyLoaded(selectedTimer.peek()!, TimerDataType());
+      final mobj = Mobj.getAlreadyLoaded(
+        selectedTimer.peek()!,
+        TimerDataType(),
+      );
       List<int> digits = List.from(mobj.peek()!.digits);
 
       if (digits.isEmpty) {
@@ -4052,17 +4509,22 @@ class DragActionRingController {
   /// whether to shunt text to the right or to the left, when the angle is close to a vertical position. Important for radial menus that're closer to the side of the screen. It's with respect to handedness, the meaning flips when the handedness flips.
   final bool? shuntRight;
 
-  DragActionRingController(
-      {this.suppressingNotifier,
-      required this.radialActivatorFunctions,
-      required this.radialActivatorPositions,
-      this.radialActivatorLabels,
-      required this.radialActivatorIcons,
-      this.shuntRight}) {
-    assert(radialActivatorIcons.length == radialActivatorPositions.length,
-        'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length');
-    assert(radialActivatorFunctions.length == radialActivatorIcons.length,
-        'DragActionRingController: radialActivatorFunctions and radialActivatorIcons should have the same length');
+  DragActionRingController({
+    this.suppressingNotifier,
+    required this.radialActivatorFunctions,
+    required this.radialActivatorPositions,
+    this.radialActivatorLabels,
+    required this.radialActivatorIcons,
+    this.shuntRight,
+  }) {
+    assert(
+      radialActivatorIcons.length == radialActivatorPositions.length,
+      'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length',
+    );
+    assert(
+      radialActivatorFunctions.length == radialActivatorIcons.length,
+      'DragActionRingController: radialActivatorFunctions and radialActivatorIcons should have the same length',
+    );
   }
 
   void disable() {
@@ -4078,13 +4540,17 @@ class DragActionRingController {
     final srh = context.findAncestorStateOfType<SelfRemovalHostState>();
     if (srh == null) {
       throw Exception(
-          'DragActionRingController: We require a SelfRemovalHostState as an ancestor of the context given to onPanDown, so that the DragActionRing we create can live in.');
+        'DragActionRingController: We require a SelfRemovalHostState as an ancestor of the context given to onPanDown, so that the DragActionRing we create can live in.',
+      );
     }
     return srh;
   }
 
   void onPanDown(
-      BuildContext context, Offset touchOrigin, Offset visualCenter) {
+    BuildContext context,
+    Offset touchOrigin,
+    Offset visualCenter,
+  ) {
     dragActionRingDisabled = false;
     _startDrag = touchOrigin;
 
@@ -4109,14 +4575,18 @@ class DragActionRingController {
     Offset dp = p - _startDrag;
     if (!dragActionRingDisabled) {
       if (dp.distance > Thumbspan.of(context) * 0.3) {
-        bool isRightHanded =
-            Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).peek()!;
+        bool isRightHanded = Mobj.getAlreadyLoaded(
+          isRightHandedID,
+          BoolType(),
+        ).peek()!;
         final rectifiedActivatorPositions = isRightHanded
             ? radialActivatorPositions
             : radialActivatorPositions.map(flipAngleHorizontally).toList();
         _dragEvents.value = radialDragResult(
-            rectifiedActivatorPositions, offsetAngle(dp),
-            hitSpan: pi);
+          rectifiedActivatorPositions,
+          offsetAngle(dp),
+          hitSpan: pi,
+        );
       } else {
         _dragEvents.value = -1;
       }
@@ -4136,11 +4606,12 @@ class NumeralButton extends StatefulWidget {
   final List<int> digits;
   final GlobalKey<TimersButtonState>? timerButtonKey;
   final ChangeNotifier otherDragActionRingStarted;
-  const NumeralButton(
-      {super.key,
-      required this.digits,
-      this.timerButtonKey,
-      required this.otherDragActionRingStarted});
+  const NumeralButton({
+    super.key,
+    required this.digits,
+    this.timerButtonKey,
+    required this.otherDragActionRingStarted,
+  });
   @override
   State<NumeralButton> createState() => _NumeralButtonState();
 }
@@ -4166,8 +4637,8 @@ class _NumeralButtonState extends State<NumeralButton> {
           final rectifiedActivatorPositions = isRightHanded
               ? numericRadialActivatorPositions
               : numericRadialActivatorPositions
-                  .map(flipAngleHorizontally)
-                  .toList();
+                    .map(flipAngleHorizontally)
+                    .toList();
           final lti = tss.timerListMobj.peek()!.lastOrNull;
           if (lti != null) {
             final sts = tss.selectedTimer.peek();
@@ -4176,8 +4647,10 @@ class _NumeralButtonState extends State<NumeralButton> {
                   (tss.timerWidgetCache[sts]?.key as GlobalKey<TimerState>?)
                       ?.currentState;
               ts?._slideActivateBounceAnimation.forward(from: 0);
-              ts?._slideBounceDirection =
-                  Offset.fromDirection(rectifiedActivatorPositions[i], 1);
+              ts?._slideBounceDirection = Offset.fromDirection(
+                rectifiedActivatorPositions[i],
+                1,
+              );
             }
           }
         },
@@ -4186,10 +4659,11 @@ class _NumeralButtonState extends State<NumeralButton> {
       radialActivatorIcons: [
         Icon(Icons.play_arrow_rounded),
         Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 0,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [Icon(Icons.play_arrow_rounded), Text('+00')]),
+          mainAxisSize: MainAxisSize.min,
+          spacing: 0,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [Icon(Icons.play_arrow_rounded), Text('+00')],
+        ),
       ],
     );
   }
@@ -4210,10 +4684,14 @@ class _NumeralButtonState extends State<NumeralButton> {
         tss.numeralPressed(widget.digits);
         // ignore: invalid_use_of_protected_member
         widget.otherDragActionRingStarted.notifyListeners();
-        widget.otherDragActionRingStarted
-            .addListener(dragActionRingController.disable);
+        widget.otherDragActionRingStarted.addListener(
+          dragActionRingController.disable,
+        );
         dragActionRingController.onPanDown(
-            context, p, boxRect(widget.timerButtonKey! as GlobalKey)!.center);
+          context,
+          p,
+          boxRect(widget.timerButtonKey! as GlobalKey)!.center,
+        );
       },
       onPanUpdate: (Offset p) {
         dragActionRingController.onPanUpdate(context, p);
@@ -4243,16 +4721,17 @@ class TimersButton extends StatefulWidget {
   final bool solidColor;
   final Animation<double>? dialBloomAnimation;
 
-  const TimersButton(
-      {super.key,
-      required this.label,
-      this.onTap,
-      this.solidColor = false,
-      this.accented = false,
-      this.onPanDown,
-      this.onPanUpdate,
-      this.onPanEnd,
-      this.dialBloomAnimation});
+  const TimersButton({
+    super.key,
+    required this.label,
+    this.onTap,
+    this.solidColor = false,
+    this.accented = false,
+    this.onPanDown,
+    this.onPanUpdate,
+    this.onPanEnd,
+    this.dialBloomAnimation,
+  });
 
   @override
   State<TimersButton> createState() => TimersButtonState();
@@ -4265,12 +4744,14 @@ class TimersButtonState extends State<TimersButton>
   @override
   initState() {
     super.initState();
-    shortFlash =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 450))
-          ..value = 1;
-    longFlash =
-        AnimationController(vsync: this, duration: Duration(milliseconds: 800))
-          ..value = 1;
+    shortFlash = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 450),
+    )..value = 1;
+    longFlash = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 800),
+    )..value = 1;
   }
 
   @override
@@ -4289,87 +4770,99 @@ class TimersButtonState extends State<TimersButton>
       [
         // we make sure to pass null if they're null because having a non-null value massively lowers the slopping radius
         (child) => GestureDetector(
-              onPanDown: (details) {
-                final tss = context.findAncestorStateOfType<TimerScreenState>();
-                tss?.currentlyPressingKey.value += 1;
-                widget.onPanDown?.call(details.globalPosition);
-              },
-              onPanUpdate: widget.onPanUpdate != null
-                  ? (details) =>
-                      widget.onPanUpdate?.call(details.globalPosition)
-                  : null,
-              onPanCancel: () {
-                final tss = context.findAncestorStateOfType<TimerScreenState>();
-                tss?.currentlyPressingKey.value -= 1;
-                widget.onPanEnd?.call();
-              },
-              onPanEnd: (details) {
-                final tss = context.findAncestorStateOfType<TimerScreenState>();
-                tss?.currentlyPressingKey.value -= 1;
-                widget.onPanEnd?.call();
-              },
-              child: child,
-            ),
+          onPanDown: (details) {
+            final tss = context.findAncestorStateOfType<TimerScreenState>();
+            tss?.currentlyPressingKey.value += 1;
+            widget.onPanDown?.call(details.globalPosition);
+          },
+          onPanUpdate: widget.onPanUpdate != null
+              ? (details) => widget.onPanUpdate?.call(details.globalPosition)
+              : null,
+          onPanCancel: () {
+            final tss = context.findAncestorStateOfType<TimerScreenState>();
+            tss?.currentlyPressingKey.value -= 1;
+            widget.onPanEnd?.call();
+          },
+          onPanEnd: (details) {
+            final tss = context.findAncestorStateOfType<TimerScreenState>();
+            tss?.currentlyPressingKey.value -= 1;
+            widget.onPanEnd?.call();
+          },
+          child: child,
+        ),
         // todo: this is wrong, we shouldn't be setting the size here, unfortunately there's a layout overflow behavior with rows that I don't understand
         (child) => Container(
-              constraints:
-                  BoxConstraints(maxWidth: buttonSpan, maxHeight: buttonSpan),
-              child: child,
-            ),
+          constraints: BoxConstraints(
+            maxWidth: buttonSpan,
+            maxHeight: buttonSpan,
+          ),
+          child: child,
+        ),
         // most of this is junk, you can just cut it down to the label widget if you ever need to
         (child) => InkWell(
-              onTap: widget.onTap,
-              splashColor: widget.accented ? Colors.transparent : null,
-              highlightColor: widget.accented ? Colors.transparent : null,
-              hoverColor: widget.accented ? Colors.transparent : null,
-              focusColor: widget.accented ? Colors.transparent : null,
-              // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
-              child: child,
-            ),
+          onTap: widget.onTap,
+          splashColor: widget.accented ? Colors.transparent : null,
+          highlightColor: widget.accented ? Colors.transparent : null,
+          hoverColor: widget.accented ? Colors.transparent : null,
+          focusColor: widget.accented ? Colors.transparent : null,
+          // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
+          child: child,
+        ),
       ],
       AnimatedBuilder(
         animation: Listenable.merge([shortFlash, longFlash]),
         builder: (context, child) {
-          double flash = max((1 - Curves.easeIn.transform(shortFlash.value)),
-              (1 - Curves.easeInOutCubic.transform(longFlash.value)));
+          double flash = max(
+            (1 - Curves.easeIn.transform(shortFlash.value)),
+            (1 - Curves.easeInOutCubic.transform(longFlash.value)),
+          );
           Color? textColor = widget.accented ? theme.colorScheme.primary : null;
           final backingColor = lerpColor(
-              widget.accented
-                  ? theme.colorScheme.primary
-                  : widget.solidColor
-                      ? theme.colorScheme.surfaceContainerLowest
-                      : Colors.white.withAlpha(0),
-              Colors.white,
-              flash);
+            widget.accented
+                ? theme.colorScheme.primary
+                : widget.solidColor
+                ? theme.colorScheme.surfaceContainerLowest
+                : Colors.white.withAlpha(0),
+            Colors.white,
+            flash,
+          );
           final backing = Container(
-              decoration: BoxDecoration(
-            color: backingColor,
-            border: Border.all(
-              width: standardLineWidth,
-              color: widget.accented
-                  ? theme.colorScheme.primary
-                  : Colors.transparent,
+            decoration: BoxDecoration(
+              color: backingColor,
+              border: Border.all(
+                width: standardLineWidth,
+                color: widget.accented
+                    ? theme.colorScheme.primary
+                    : Colors.transparent,
+              ),
+              // borderRadius: BorderRadius.circular(9)
             ),
-            // borderRadius: BorderRadius.circular(9)
-          ));
+          );
           final Widget labelWidget;
           if (widget.label is String) {
             labelWidget = ScalingAspectRatio(
-                child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Center(
-                        child: Text(widget.label as String,
-                            style: controlPadTextStyle
-                                .merge(TextStyle(color: textColor))))));
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Center(
+                  child: Text(
+                    widget.label as String,
+                    style: controlPadTextStyle.merge(
+                      TextStyle(color: textColor),
+                    ),
+                  ),
+                ),
+              ),
+            );
           } else {
             labelWidget = widget.label as Widget;
           }
           return Center(
             child: Stack(
-                alignment: Alignment.center,
-                clipBehavior: Clip.none,
-                children: [backing, labelWidget]),
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [backing, labelWidget],
+            ),
           );
         },
       ),
@@ -4382,8 +4875,11 @@ class _NumpadTypeIndicator extends StatelessWidget {
   final Color? color;
   final double width;
 
-  const _NumpadTypeIndicator(
-      {required this.isAscending, this.color, this.width = 100.0});
+  const _NumpadTypeIndicator({
+    required this.isAscending,
+    this.color,
+    this.width = 100.0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4398,12 +4894,15 @@ class _NumpadTypeIndicator extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: List.generate(9, (index) {
-          final widg = Text((index + 1).toString(),
-              style: TextStyle(
-                  fontSize: fontSize,
-                  color: color,
-                  fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
-                  fontFamily: 'Dongle'));
+          final widg = Text(
+            (index + 1).toString(),
+            style: TextStyle(
+              fontSize: fontSize,
+              color: color,
+              fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
+              fontFamily: 'Dongle',
+            ),
+          );
           // : Icon(Icons.circle, size: 3.0, color: theme.colorScheme.primary);
           final x = index % 3;
           int y = index ~/ 3;
@@ -4415,8 +4914,9 @@ class _NumpadTypeIndicator extends StatelessWidget {
             left: cellSpan / 2 + x * cellSpan,
             top: cellSpan / 2 + py * cellSpan + fontSize * 0.25,
             child: FractionalTranslation(
-                translation: Offset(-0.5, -0.5),
-                child: Transform.scale(scale: fontScale, child: widg)),
+              translation: Offset(-0.5, -0.5),
+              child: Transform.scale(scale: fontScale, child: widg),
+            ),
           );
         }),
       ),
@@ -4437,16 +4937,18 @@ double halfScreenHeight(BuildContext context) {
 // }
 
 (Color, Color) maybeFlippedBackgroundColors(
-    ThemeData theme, bool flipBackgroundColors) {
+  ThemeData theme,
+  bool flipBackgroundColors,
+) {
   if (flipBackgroundColors) {
     return (
       theme.colorScheme.surfaceContainerLow,
-      theme.colorScheme.surfaceContainerLowest
+      theme.colorScheme.surfaceContainerLowest,
     );
   } else {
     return (
       theme.colorScheme.surfaceContainerLowest,
-      theme.colorScheme.surfaceContainerLow
+      theme.colorScheme.surfaceContainerLow,
     );
   }
 }
@@ -4465,9 +4967,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _scrollController = ScrollController(
-      initialScrollOffset: 0,
-    );
+    _scrollController = ScrollController(initialScrollOffset: 0);
   }
 
   @override
@@ -4479,25 +4979,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) =
-        maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
-    final listItemPadding =
-        const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      widget.flipBackgroundColors,
+    );
+    final listItemPadding = const EdgeInsets.symmetric(
+      horizontal: 16.0,
+      vertical: 8.0,
+    );
 
     Widget trailing(Widget child) =>
         SizedBox(width: 32.0, child: Center(child: child));
 
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
-      subtitle: Text('Resume setup',
-          style: theme.textTheme.bodySmall!
-              .copyWith(color: theme.colorScheme.onSurfaceVariant)),
+      subtitle: Text(
+        'Resume setup',
+        style: theme.textTheme.bodySmall!.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
       onTap: () {
         Navigator.push(
-            context,
-            CircularRevealRoute(
-                builder: (context) => OnboardScreen(),
-                iconOriginKey: configButtonKey));
+          context,
+          CircularRevealRoute(
+            builder: (context) => OnboardScreen(),
+            iconOriginKey: configButtonKey,
+          ),
+        );
       },
     );
 
@@ -4520,25 +5029,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Hero(
-                        tag: 'configButton',
-                        createRectTween: (begin, end) => DelayedRectTween(
-                            begin: begin, end: end, delay: 0.14),
-                        child: ScalingAspectRatio(
-                            child: Icon(
+                    width: 40,
+                    height: 40,
+                    child: Hero(
+                      tag: 'configButton',
+                      createRectTween: (begin, end) =>
+                          DelayedRectTween(begin: begin, end: end, delay: 0.14),
+                      child: ScalingAspectRatio(
+                        child: Icon(
                           Icons.settings_rounded,
                           color: theme.colorScheme.onSurface,
                           size: 10,
-                        )),
-                      )),
+                        ),
+                      ),
+                    ),
+                  ),
                   SizedBox(width: 5),
-                  Text('Settings',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w500,
-                      )),
+                  Text(
+                    'Settings',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
               titlePadding: EdgeInsetsDirectional.only(
@@ -4555,17 +5068,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             delegate: SliverChildListDelegate([
               // Right-handed mode setting
               Watch((context) {
-                final isRightHandedMobj =
-                    Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
+                final isRightHandedMobj = Mobj.getAlreadyLoaded(
+                  isRightHandedID,
+                  BoolType(),
+                );
                 final isRightHanded = isRightHandedMobj.value ?? true;
                 return ListTile(
-                  title: Text('${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                      style: theme.textTheme.bodyLarge),
+                  title: Text(
+                    '${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                    style: theme.textTheme.bodyLarge,
+                  ),
                   subtitle: Text(
                     'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
+
                   // splashColor: Colors.black,
 
                   // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
@@ -4576,28 +5095,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   // textColor: Colors.red,
                   // hoverColor: Colors.red,
                   // splashColor: Colors.black,
-
-                  trailing: trailing(TweenAnimationBuilder<double>(
-                    tween: Tween(
-                      begin: isRightHanded ? -1.0 : 1.0,
-                      end: isRightHanded ? -1.0 : 1.0,
-                    ),
-                    duration: Duration(milliseconds: 300),
-                    curve: Curves.easeInOut,
-                    builder: (context, scaleX, child) {
-                      return Transform.scale(
-                        scaleX: scaleX,
-                        child: child,
-                      );
-                    },
-                    child: Transform.rotate(
-                      angle: 45 * pi / 180, // 45 degrees clockwise
-                      child: Icon(
-                        Icons.back_hand_rounded,
-                        color: theme.colorScheme.primary,
+                  trailing: trailing(
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(
+                        begin: isRightHanded ? -1.0 : 1.0,
+                        end: isRightHanded ? -1.0 : 1.0,
+                      ),
+                      duration: Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      builder: (context, scaleX, child) {
+                        return Transform.scale(scaleX: scaleX, child: child);
+                      },
+                      child: Transform.rotate(
+                        angle: 45 * pi / 180, // 45 degrees clockwise
+                        child: Icon(
+                          Icons.back_hand_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
                       ),
                     ),
-                  )),
+                  ),
                   onTap: () {
                     isRightHandedMobj.value = !isRightHanded;
                   },
@@ -4605,8 +5122,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               Watch((context) {
-                final padVerticallyAscendingMobj =
-                    Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType());
+                final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
+                  padVerticallyAscendingID,
+                  BoolType(),
+                );
                 final padVerticallyAscending =
                     padVerticallyAscendingMobj.value ?? false;
                 return ListTile(
@@ -4615,13 +5134,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padVerticallyAscending
                         ? 'calculator/keyboard style'
                         : 'phone style',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                  trailing: trailing(_NumpadTypeIndicator(
-                    isAscending: padVerticallyAscending,
-                    width: 36,
-                  )),
+                  trailing: trailing(
+                    _NumpadTypeIndicator(
+                      isAscending: padVerticallyAscending,
+                      width: 36,
+                    ),
+                  ),
                   onTap: () {
                     padVerticallyAscendingMobj.value = !padVerticallyAscending;
                   },
@@ -4629,60 +5151,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               // Alarm sound setting
-              Builder(builder: (context) {
-                final GlobalKey iconKey = GlobalKey();
-                final hereIconKey = GlobalKey();
-                return ListTile(
-                  title: Text('Alarm sound', style: theme.textTheme.bodyLarge),
-                  subtitle: Watch((context) {
-                    return Text(
-                      Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType())
-                          .value!
-                          .name,
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    );
-                  }),
-                  trailing: trailing(SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: Hero(
-                        tag: 'alarm-sound-icon',
-                        child: ScalingAspectRatio(
-                            child: Icon(Icons.music_note,
-                                key: hereIconKey,
-                                color: theme.colorScheme.primary)),
-                      ))),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      CircularRevealRoute(
-                        builder: (context) => AlarmSoundPickerScreen(
-                            iconKey: iconKey,
-                            flipBackgroundColors: !widget.flipBackgroundColors),
-                        buttonCenter: widgetCenter(hereIconKey),
-                        iconOriginKey: iconKey,
+              Builder(
+                builder: (context) {
+                  final GlobalKey iconKey = GlobalKey();
+                  final hereIconKey = GlobalKey();
+                  return ListTile(
+                    title: Text(
+                      'Alarm sound',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    subtitle: Watch((context) {
+                      return Text(
+                        Mobj.getAlreadyLoaded(
+                          selectedAudioID,
+                          AudioInfoType(),
+                        ).value!.name,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      );
+                    }),
+                    trailing: trailing(
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: Hero(
+                          tag: 'alarm-sound-icon',
+                          child: ScalingAspectRatio(
+                            child: Icon(
+                              Icons.music_note,
+                              key: hereIconKey,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                        ),
                       ),
-                    );
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        CircularRevealRoute(
+                          builder: (context) => AlarmSoundPickerScreen(
+                            iconKey: iconKey,
+                            flipBackgroundColors: !widget.flipBackgroundColors,
+                          ),
+                          buttonCenter: widgetCenter(hereIconKey),
+                          iconOriginKey: iconKey,
+                        ),
+                      );
+                    },
+                    contentPadding: listItemPadding,
+                  );
+                },
+              ),
               // Persistent alarm mode setting
               Watch((context) {
-                final persistentAlarmModeMobj =
-                    Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType());
+                final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
+                  persistentAlarmModeID,
+                  BoolType(),
+                );
                 final persistentAlarmMode =
                     persistentAlarmModeMobj.value ?? false;
                 return SwitchListTile(
-                  title: Text('Persistent alarm',
-                      style: theme.textTheme.bodyLarge),
+                  title: Text(
+                    'Persistent alarm',
+                    style: theme.textTheme.bodyLarge,
+                  ),
                   subtitle: Text(
                     persistentAlarmMode
                         ? 'Alarm loops until you open the app'
                         : 'Alarm plays once',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   value: persistentAlarmMode,
                   onChanged: (value) {
@@ -4692,16 +5233,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }),
               Watch((context) {
-                final buttonScaleDialOnOn =
-                    Mobj.getAlreadyLoaded(buttonScaleDialOnID, BoolType());
+                final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
+                  buttonScaleDialOnID,
+                  BoolType(),
+                );
                 return ListTile(
                   title: Text('Button size', style: theme.textTheme.bodyLarge),
                   subtitle: Text(
-                      buttonScaleDialOnOn.value!
-                          ? "Button scale dial is currently deployed, tap here to turn it off"
-                          : 'Introduce a dial by which you can adjust UI scale',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant)),
+                    buttonScaleDialOnOn.value!
+                        ? "Button scale dial is currently deployed, tap here to turn it off"
+                        : 'Introduce a dial by which you can adjust UI scale',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                   onTap: () {
                     buttonScaleDialOnOn.value = !buttonScaleDialOnOn.value!;
                     if (buttonScaleDialOnOn.value!) {
@@ -4710,161 +5255,197 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 );
               }),
-              Builder(builder: (context) {
-                // Need a Builder to get the correct context for finding the icon's position
-                final GlobalKey iconKey = GlobalKey();
-                final hereIconKey = GlobalKey();
-                return ListTile(
-                  title:
-                      Text('About this app', style: theme.textTheme.bodyLarge),
-                  trailing: trailing(SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: Hero(
-                        tag: 'about-icon',
-                        child: ScalingAspectRatio(
-                            child: Icon(Icons.info_outline,
-                                key: hereIconKey,
-                                size: 10,
-                                color: theme.colorScheme.primary))),
-                  )),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      CircularRevealRoute(
-                        builder: (context) => AboutScreen(
-                            iconKey: iconKey,
-                            flipBackgroundColors: !widget.flipBackgroundColors),
-                        buttonCenter: widgetCenter(hereIconKey),
-                        iconOriginKey: iconKey,
-                      ),
-                    );
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
-              Builder(builder: (context) {
-                final GlobalKey iconKey = GlobalKey();
-                final hereIconKey = GlobalKey();
-                return ListTile(
-                  title: Text('Thank the author',
-                      style: theme.textTheme.bodyLarge),
-                  trailing: trailing(SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: Hero(
-                        tag: 'thank-author-icon',
-                        child: ScalingAspectRatio(
-                          child: Icon(
-                            Icons.heart_broken,
-                            key: hereIconKey,
-                            color: theme.colorScheme.primary,
-                          ),
-                        )),
-                  )),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      CircularRevealRoute(
-                        builder: (context) => ThankAuthorScreen(
-                            iconKey: iconKey,
-                            flipBackgroundColors: !widget.flipBackgroundColors),
-                        buttonCenter: widgetCenter(hereIconKey),
-                        iconOriginKey: iconKey,
-                      ),
-                    );
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
-              // ---------------
-              // Divider(indent: 22, endIndent: 22, height: 34),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: SeparatorGradient(
-                    color:
-                        MakoThemeData.fromContext(context).lowestIndentColor),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
-                child: Text('Extra',
-                    style: theme.textTheme.bodyMedium!
-                        .copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    textAlign: TextAlign.center),
-              ),
-              Builder(builder: (context) {
-                final GlobalKey iconKey = GlobalKey();
-                Offset? tapPosition;
-                return GestureDetector(
-                  onTapDown: (details) {
-                    tapPosition = details.globalPosition;
-                  },
-                  child: ListTile(
-                    title: Text('Crank game', style: theme.textTheme.bodyLarge),
-                    subtitle: Text(
-                      "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              Builder(
+                builder: (context) {
+                  // Need a Builder to get the correct context for finding the icon's position
+                  final GlobalKey iconKey = GlobalKey();
+                  final hereIconKey = GlobalKey();
+                  return ListTile(
+                    title: Text(
+                      'About this app',
+                      style: theme.textTheme.bodyLarge,
                     ),
-                    trailing: trailing(SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: Hero(
-                        tag: 'crank-game-icon',
-                        child: ScalingAspectRatio(
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Icon(
-                                Icons.rotate_right_rounded,
-                                color: theme.colorScheme.primary,
-                                size: 24,
-                              ),
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: Icon(
-                                  Icons.sports_esports,
-                                  color: theme.colorScheme.primary,
-                                  size: 12,
-                                ),
-                              ),
-                            ],
+                    trailing: trailing(
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: Hero(
+                          tag: 'about-icon',
+                          child: ScalingAspectRatio(
+                            child: Icon(
+                              Icons.info_outline,
+                              key: hereIconKey,
+                              size: 10,
+                              color: theme.colorScheme.primary,
+                            ),
                           ),
                         ),
                       ),
-                    )),
+                    ),
                     onTap: () {
                       Navigator.push(
                         context,
                         CircularRevealRoute(
-                          builder: (context) => CrankGameScreen(
-                              iconKey: iconKey,
-                              flipBackgroundColors:
-                                  !widget.flipBackgroundColors),
-                          buttonCenter: tapPosition ?? Offset.zero,
+                          builder: (context) => AboutScreen(
+                            iconKey: iconKey,
+                            flipBackgroundColors: !widget.flipBackgroundColors,
+                          ),
+                          buttonCenter: widgetCenter(hereIconKey),
                           iconOriginKey: iconKey,
                         ),
                       );
                     },
                     contentPadding: listItemPadding,
+                  );
+                },
+              ),
+              Builder(
+                builder: (context) {
+                  final GlobalKey iconKey = GlobalKey();
+                  final hereIconKey = GlobalKey();
+                  return ListTile(
+                    title: Text(
+                      'Thank the author',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    trailing: trailing(
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: Hero(
+                          tag: 'thank-author-icon',
+                          child: ScalingAspectRatio(
+                            child: Icon(
+                              Icons.heart_broken,
+                              key: hereIconKey,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        CircularRevealRoute(
+                          builder: (context) => ThankAuthorScreen(
+                            iconKey: iconKey,
+                            flipBackgroundColors: !widget.flipBackgroundColors,
+                          ),
+                          buttonCenter: widgetCenter(hereIconKey),
+                          iconOriginKey: iconKey,
+                        ),
+                      );
+                    },
+                    contentPadding: listItemPadding,
+                  );
+                },
+              ),
+              // ---------------
+              // Divider(indent: 22, endIndent: 22, height: 34),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: SeparatorGradient(
+                  color: MakoThemeData.fromContext(context).lowestIndentColor,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
+                child: Text(
+                  'Extra',
+                  style: theme.textTheme.bodyMedium!.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                );
-              }),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              Builder(
+                builder: (context) {
+                  final GlobalKey iconKey = GlobalKey();
+                  Offset? tapPosition;
+                  return GestureDetector(
+                    onTapDown: (details) {
+                      tapPosition = details.globalPosition;
+                    },
+                    child: ListTile(
+                      title: Text(
+                        'Crank game',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      subtitle: Text(
+                        "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      trailing: trailing(
+                        SizedBox(
+                          width: 26,
+                          height: 26,
+                          child: Hero(
+                            tag: 'crank-game-icon',
+                            child: ScalingAspectRatio(
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.rotate_right_rounded,
+                                    color: theme.colorScheme.primary,
+                                    size: 24,
+                                  ),
+                                  Positioned(
+                                    right: 0,
+                                    bottom: 0,
+                                    child: Icon(
+                                      Icons.sports_esports,
+                                      color: theme.colorScheme.primary,
+                                      size: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          CircularRevealRoute(
+                            builder: (context) => CrankGameScreen(
+                              iconKey: iconKey,
+                              flipBackgroundColors:
+                                  !widget.flipBackgroundColors,
+                            ),
+                            buttonCenter: tapPosition ?? Offset.zero,
+                            iconOriginKey: iconKey,
+                          ),
+                        );
+                      },
+                      contentPadding: listItemPadding,
+                    ),
+                  );
+                },
+              ),
 
               ListTile(
-                title:
-                    Text('Journeying game', style: theme.textTheme.bodyLarge),
+                title: Text(
+                  'Journeying game',
+                  style: theme.textTheme.bodyLarge,
+                ),
                 subtitle: Text(
                   "A world to wander.",
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
-                trailing: trailing(Icon(
-                  Icons.explore_rounded,
-                  color: theme.colorScheme.primary,
-                  size: 24,
-                )),
+                trailing: trailing(
+                  Icon(
+                    Icons.explore_rounded,
+                    color: theme.colorScheme.primary,
+                    size: 24,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pushReplacement(
                     context,
@@ -4877,9 +5458,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
 
               // if (!completedSetup) ...[
-              if (true) ...[
-                setupTile,
-              ],
+              if (true) ...[setupTile],
               SizedBox(height: MediaQuery.of(context).padding.bottom),
             ]),
           ),
@@ -4891,15 +5470,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 class ThankAuthorScreen extends StatelessWidget {
   final bool flipBackgroundColors;
-  const ThankAuthorScreen(
-      {super.key, this.iconKey, this.flipBackgroundColors = false});
+  const ThankAuthorScreen({
+    super.key,
+    this.iconKey,
+    this.flipBackgroundColors = false,
+  });
   final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) =
-        maybeFlippedBackgroundColors(theme, flipBackgroundColors);
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      flipBackgroundColors,
+    );
     return Scaffold(
       backgroundColor: backgroundColorA,
       body: CustomScrollView(
@@ -4912,22 +5496,26 @@ class ThankAuthorScreen extends StatelessWidget {
               title: Row(
                 children: [
                   SizedBox(
-                      width: 32,
-                      height: 32,
-                      child: Hero(
-                        tag: 'thank-author-icon',
-                        child: ScalingAspectRatio(
-                            child: Icon(
+                    width: 32,
+                    height: 32,
+                    child: Hero(
+                      tag: 'thank-author-icon',
+                      child: ScalingAspectRatio(
+                        child: Icon(
                           Icons.heart_broken,
                           color: theme.colorScheme.primary,
-                        )),
-                      )),
+                        ),
+                      ),
+                    ),
+                  ),
                   SizedBox(width: 16),
-                  Text('Thank the author',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w500,
-                      )),
+                  Text(
+                    'Thank the author',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
               titlePadding: EdgeInsetsDirectional.only(
@@ -4941,17 +5529,16 @@ class ThankAuthorScreen extends StatelessWidget {
             scrolledUnderElevation: 0,
           ),
           SliverList(
-            delegate: SliverChildListDelegate(
-              [
-                Padding(
-                    padding: EdgeInsets.all(24.0),
-                    child: Text(
-                      'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
-                      style: theme.textTheme.bodyLarge,
-                    )),
-                SizedBox(height: 24),
-              ],
-            ),
+            delegate: SliverChildListDelegate([
+              Padding(
+                padding: EdgeInsets.all(24.0),
+                child: Text(
+                  'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
+                  style: theme.textTheme.bodyLarge,
+                ),
+              ),
+              SizedBox(height: 24),
+            ]),
           ),
         ],
       ),
@@ -4961,15 +5548,20 @@ class ThankAuthorScreen extends StatelessWidget {
 
 class AboutScreen extends StatelessWidget {
   final bool flipBackgroundColors;
-  const AboutScreen(
-      {super.key, this.iconKey, this.flipBackgroundColors = false});
+  const AboutScreen({
+    super.key,
+    this.iconKey,
+    this.flipBackgroundColors = false,
+  });
   final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) =
-        maybeFlippedBackgroundColors(theme, flipBackgroundColors);
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      flipBackgroundColors,
+    );
     return Scaffold(
       backgroundColor: backgroundColorA,
       body: CustomScrollView(
@@ -4985,19 +5577,23 @@ class AboutScreen extends StatelessWidget {
                     width: 35,
                     height: 35,
                     child: Hero(
-                        tag: 'about-icon',
-                        child: ScalingAspectRatio(
-                            child: Icon(
+                      tag: 'about-icon',
+                      child: ScalingAspectRatio(
+                        child: Icon(
                           Icons.info_outline,
                           color: theme.colorScheme.primary,
-                        ))),
+                        ),
+                      ),
+                    ),
                   ),
                   SizedBox(width: 9),
-                  Text("About Mako's Timer",
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w500,
-                      )),
+                  Text(
+                    "About Mako's Timer",
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
               titlePadding: EdgeInsetsDirectional.only(
@@ -5030,8 +5626,11 @@ class AboutScreen extends StatelessWidget {
 
 class AlarmSoundPickerScreen extends StatefulWidget {
   final bool flipBackgroundColors;
-  const AlarmSoundPickerScreen(
-      {super.key, this.iconKey, this.flipBackgroundColors = false});
+  const AlarmSoundPickerScreen({
+    super.key,
+    this.iconKey,
+    this.flipBackgroundColors = false,
+  });
   final GlobalKey? iconKey;
 
   @override
@@ -5052,10 +5651,11 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     super.initState();
     _loadSounds();
     listeningAudioEffectChange =
-        Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType())
-            .subscribe((event) {
-      Mobj.getAlreadyLoaded(hasSelectedAudioID, BoolType()).value = true;
-    });
+        Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).subscribe((
+          event,
+        ) {
+          Mobj.getAlreadyLoaded(hasSelectedAudioID, BoolType()).value = true;
+        });
   }
 
   @override
@@ -5072,12 +5672,15 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         });
         return;
       } else {
-        final alarmsFuture =
-            PlatformAudio.getPlatformAudio(PlatformAudioType.alarm);
-        final notificationsFuture =
-            PlatformAudio.getPlatformAudio(PlatformAudioType.notification);
-        final ringtonesFuture =
-            PlatformAudio.getPlatformAudio(PlatformAudioType.ringtone);
+        final alarmsFuture = PlatformAudio.getPlatformAudio(
+          PlatformAudioType.alarm,
+        );
+        final notificationsFuture = PlatformAudio.getPlatformAudio(
+          PlatformAudioType.notification,
+        );
+        final ringtonesFuture = PlatformAudio.getPlatformAudio(
+          PlatformAudioType.ringtone,
+        );
         final [alarms, notifications, ringtones] = await Future.wait([
           alarmsFuture,
           notificationsFuture,
@@ -5101,20 +5704,28 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) =
-        maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      widget.flipBackgroundColors,
+    );
 
-    Widget section(String title, List<AudioInfo> sounds,
-        {Duration? fadeDelay}) {
+    Widget section(
+      String title,
+      List<AudioInfo> sounds, {
+      Duration? fadeDelay,
+    }) {
       final animDuration = Duration(milliseconds: 100);
-      final totalDuration =
-          fadeDelay != null ? fadeDelay + animDuration : animDuration;
+      final totalDuration = fadeDelay != null
+          ? fadeDelay + animDuration
+          : animDuration;
       final delayFraction = fadeDelay != null
           ? fadeDelay.inMicroseconds / totalDuration.inMicroseconds
           : 0.0;
 
-      final selectedAudio =
-          Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType());
+      final selectedAudio = Mobj.getAlreadyLoaded(
+        selectedAudioID,
+        AudioInfoType(),
+      );
       final jukeBox = Provider.of<JukeBox>(context, listen: false);
 
       Widget radioSelector(AudioInfo audio) {
@@ -5135,19 +5746,21 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           },
           builder: (context, isOn) {
             final textTheme = isOn
-                ? theme.textTheme.bodyMedium!
-                    .copyWith(color: theme.colorScheme.onPrimary)
+                ? theme.textTheme.bodyMedium!.copyWith(
+                    color: theme.colorScheme.onPrimary,
+                  )
                 : theme.textTheme.bodyMedium!;
             final backgroundColor = isOn
                 ? theme.colorScheme.primary
                 : theme.colorScheme.surfaceContainerLowest;
             return Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: backgroundColor,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(audio.name, style: textTheme));
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(audio.name, style: textTheme),
+            );
           },
         );
       }
@@ -5160,22 +5773,29 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           builder: (context, value, child) =>
               Opacity(opacity: value, child: child!),
           child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                        padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
-                        child: Text(title,
-                            style: theme.textTheme.titleMedium
-                                ?.copyWith(color: theme.colorScheme.primary))),
-                    Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: sounds
-                            .map((audio) => radioSelector(audio))
-                            .toList()),
-                  ])),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: sounds
+                      .map((audio) => radioSelector(audio))
+                      .toList(),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -5199,18 +5819,21 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                       createRectTween: (begin, end) =>
                           DelayedRectTween(begin: begin, end: end, delay: 0.14),
                       child: ScalingAspectRatio(
-                          child: Icon(
-                        Icons.music_note,
-                        color: theme.colorScheme.primary,
-                      )),
+                        child: Icon(
+                          Icons.music_note,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
                     ),
                   ),
                   SizedBox(width: 16),
-                  Text('Alarm sound',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w500,
-                      )),
+                  Text(
+                    'Alarm sound',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
               titlePadding: EdgeInsetsDirectional.only(
@@ -5225,20 +5848,33 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           ),
           if (!_loading) ...[
             if (_assetSounds.isNotEmpty)
-              section("Our Sounds", _assetSounds,
-                  fadeDelay: Duration(milliseconds: 0)),
+              section(
+                "Our Sounds",
+                _assetSounds,
+                fadeDelay: Duration(milliseconds: 0),
+              ),
             if (_notificationSounds != null && _notificationSounds!.isNotEmpty)
-              section('Phone Notification Sounds', _notificationSounds!,
-                  fadeDelay: Duration(milliseconds: 200)),
+              section(
+                'Phone Notification Sounds',
+                _notificationSounds!,
+                fadeDelay: Duration(milliseconds: 200),
+              ),
             if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-              section('Phone Alarm Sounds (long duration)', _alarmSounds!,
-                  fadeDelay: Duration(milliseconds: 100)),
+              section(
+                'Phone Alarm Sounds (long duration)',
+                _alarmSounds!,
+                fadeDelay: Duration(milliseconds: 100),
+              ),
             if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
-              section('Your Ringtones', _ringtoneSounds!,
-                  fadeDelay: Duration(milliseconds: 300)),
+              section(
+                'Your Ringtones',
+                _ringtoneSounds!,
+                fadeDelay: Duration(milliseconds: 300),
+              ),
             SliverToBoxAdapter(
-              child:
-                  SizedBox(height: 16 + MediaQuery.of(context).padding.bottom),
+              child: SizedBox(
+                height: 16 + MediaQuery.of(context).padding.bottom,
+              ),
             ),
           ],
         ],
@@ -5286,7 +5922,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     ringModeKey,
     if (Platform.isAndroid) notifKey,
     if (Platform.isAndroid) batteryOptimKey,
-    skipKey
+    skipKey,
   ];
   late Signal<bool?> numpadOrientation = Signal(null);
   late Signal<bool?> ringMode = Signal(null);
@@ -5295,7 +5931,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     numpadOrientation,
     ringMode,
     if (Platform.isAndroid) notifGranted,
-    if (Platform.isAndroid) batteryOptimGranted
+    if (Platform.isAndroid) batteryOptimGranted,
   ];
   late Signal<bool> allChoicesCompleted = Signal(false);
   async.Timer? autoMoveOn;
@@ -5429,9 +6065,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
         // we're now ready to create timerscreen, replace the blank placeholder below us with it
         navigator.replaceRouteBelow(
           anchorRoute: currentRoute,
-          newRoute: CircularRevealRoute(
-            builder: (context) => TimerScreen(),
-          ),
+          newRoute: CircularRevealRoute(builder: (context) => TimerScreen()),
         );
       }
       navigator.pop();
@@ -5446,9 +6080,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     final isRightHanded = Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
     const buttonAnimationDuration = Duration(milliseconds: 270);
 
-    Widget handButton({
-      required bool isRight,
-    }) {
+    Widget handButton({required bool isRight}) {
       return Expanded(
         child: RadioItem<bool?>(
           selection: setIsRightHanded,
@@ -5458,13 +6090,13 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
           builder: (context, isOn) {
             final leftHand = Transform.rotate(
               angle: 1 / 8 * tau,
-              child: Icon(Icons.back_hand_rounded,
-                  size: 36, color: foregroundColorFor(theme, isOn)),
+              child: Icon(
+                Icons.back_hand_rounded,
+                size: 36,
+                color: foregroundColorFor(theme, isOn),
+              ),
             );
-            final rightHand = Transform.scale(
-              scaleX: -1,
-              child: leftHand,
-            );
+            final rightHand = Transform.scale(scaleX: -1, child: leftHand);
             return Container(
               height: standardButtonHeight,
               decoration: BoxDecoration(
@@ -5475,18 +6107,24 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: isRight
                     ? [
-                        Text('right',
-                            style: theme.textTheme.titleMedium!.copyWith(
-                                color: foregroundColorFor(theme, isOn))),
+                        Text(
+                          'right',
+                          style: theme.textTheme.titleMedium!.copyWith(
+                            color: foregroundColorFor(theme, isOn),
+                          ),
+                        ),
                         spacer,
                         rightHand,
                       ]
                     : [
                         leftHand,
                         spacer,
-                        Text('left',
-                            style: theme.textTheme.titleMedium!.copyWith(
-                                color: foregroundColorFor(theme, isOn))),
+                        Text(
+                          'left',
+                          style: theme.textTheme.titleMedium!.copyWith(
+                            color: foregroundColorFor(theme, isOn),
+                          ),
+                        ),
                       ],
               ),
             );
@@ -5530,317 +6168,351 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
         slivers: [
           // Handedness selection - full screen
           SliverToBoxAdapter(
-              key: handednessKey,
-              child: Container(
-                  height: screenHeight,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHigh,
+            key: handednessKey,
+            child: Container(
+              height: screenHeight,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(standardSpacing),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHigh,
+                    ),
+                    child: Text("Setup", style: theme.textTheme.titleLarge),
                   ),
-                  child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Container(
-                            padding: EdgeInsets.all(standardSpacing),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainerHigh,
-                            ),
-                            child: Text("Setup",
-                                style: theme.textTheme.titleLarge)),
-                        Container(
-                            padding: EdgeInsets.all(standardSpacing),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainerLow,
-                            ),
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Are you left or right-handed?',
-                                      style: theme.textTheme.bodyMedium!),
-                                  SizedBox(height: standardSpacing),
-                                  Row(
-                                    children: [
-                                      handButton(
-                                        isRight: false,
-                                      ),
-                                      spacer,
-                                      handButton(
-                                        isRight: true,
-                                      ),
-                                    ],
-                                  )
-                                ]))
-                      ]))),
-          SliverToBoxAdapter(
-              key: padKey,
-              child: Container(
-                  padding: EdgeInsets.all(
-                    standardSpacing,
-                  ),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text("Which kind of numpad is more familiar to you?",
-                            style: theme.textTheme.bodyMedium!),
-                        spacer,
-                        Watch((context) {
-                          return AnimatedAlign(
-                            duration: Duration(milliseconds: 340),
-                            curve: Curves.easeInOutCubic,
-                            alignment: isRightHanded.value == true
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child:
-                                Row(mainAxisSize: MainAxisSize.min, children: [
-                              Column(
-                                children: [
-                                  Text(
-                                    "phone style",
-                                    style: theme.textTheme.bodyMedium!,
-                                  ),
-                                  spacer,
-                                  numpadForSetup(
-                                    false,
-                                  ),
-                                ],
-                              ),
-                              spacer,
-                              Column(
-                                children: [
-                                  Text(
-                                    "calculator style",
-                                    style: theme.textTheme.bodyMedium!,
-                                  ),
-                                  spacer,
-                                  numpadForSetup(
-                                    true,
-                                  ),
-                                ],
-                              ),
-                            ]),
-                          );
-                        })
-                      ]))),
-          SliverToBoxAdapter(
-              key: ringModeKey,
-              child: Padding(
-                  padding: EdgeInsets.all(standardSpacing),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                  Container(
+                    padding: EdgeInsets.all(standardSpacing),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerLow,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                            """Are you forgetful or absentminded? You may want to set this to "require acknowledgement", to make it so that alarms keep ringing until you interact with them to confirm that you heard them.
-Otherwise, if you generally pay close attention to your phone, it's much more convenient to have it set to "ring once".""",
-                            style: theme.textTheme.bodyMedium!),
+                          'Are you left or right-handed?',
+                          style: theme.textTheme.bodyMedium!,
+                        ),
                         SizedBox(height: standardSpacing),
                         Row(
                           children: [
-                            Flexible(flex: 20, child: Container()),
-                            Flexible(
-                              flex: 50,
-                              child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    RadioItem<bool?>(
-                                      selection: ringMode,
-                                      duration: buttonAnimationDuration,
-                                      me: true,
-                                      onTap: () => inputCompleted(ringModeKey),
-                                      builder: (context, isOn) => Container(
-                                        height: standardButtonHeight,
-                                        decoration: BoxDecoration(
-                                          color:
-                                              backgroundColorFor(theme, isOn),
-                                          borderRadius: BorderRadius.circular(
-                                              buttonCornerRadius),
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 22.0),
-                                          child: Center(
-                                            child: Text(
-                                                textAlign: TextAlign.center,
-                                                'require acknowledgement',
-                                                style: theme
-                                                    .textTheme.titleMedium!
-                                                    .copyWith(
-                                                        color:
-                                                            foregroundColorFor(
-                                                                theme, isOn))),
+                            handButton(isRight: false),
+                            spacer,
+                            handButton(isRight: true),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            key: padKey,
+            child: Container(
+              padding: EdgeInsets.all(standardSpacing),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    "Which kind of numpad is more familiar to you?",
+                    style: theme.textTheme.bodyMedium!,
+                  ),
+                  spacer,
+                  Watch((context) {
+                    return AnimatedAlign(
+                      duration: Duration(milliseconds: 340),
+                      curve: Curves.easeInOutCubic,
+                      alignment: isRightHanded.value == true
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Column(
+                            children: [
+                              Text(
+                                "phone style",
+                                style: theme.textTheme.bodyMedium!,
+                              ),
+                              spacer,
+                              numpadForSetup(false),
+                            ],
+                          ),
+                          spacer,
+                          Column(
+                            children: [
+                              Text(
+                                "calculator style",
+                                style: theme.textTheme.bodyMedium!,
+                              ),
+                              spacer,
+                              numpadForSetup(true),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            key: ringModeKey,
+            child: Padding(
+              padding: EdgeInsets.all(standardSpacing),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    """Are you forgetful or absentminded? You may want to set this to "require acknowledgement", to make it so that alarms keep ringing until you interact with them to confirm that you heard them.
+Otherwise, if you generally pay close attention to your phone, it's much more convenient to have it set to "ring once".""",
+                    style: theme.textTheme.bodyMedium!,
+                  ),
+                  SizedBox(height: standardSpacing),
+                  Row(
+                    children: [
+                      Flexible(flex: 20, child: Container()),
+                      Flexible(
+                        flex: 50,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            RadioItem<bool?>(
+                              selection: ringMode,
+                              duration: buttonAnimationDuration,
+                              me: true,
+                              onTap: () => inputCompleted(ringModeKey),
+                              builder: (context, isOn) => Container(
+                                height: standardButtonHeight,
+                                decoration: BoxDecoration(
+                                  color: backgroundColorFor(theme, isOn),
+                                  borderRadius: BorderRadius.circular(
+                                    buttonCornerRadius,
+                                  ),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 22.0,
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      textAlign: TextAlign.center,
+                                      'require acknowledgement',
+                                      style: theme.textTheme.titleMedium!
+                                          .copyWith(
+                                            color: foregroundColorFor(
+                                              theme,
+                                              isOn,
+                                            ),
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            spacer,
+                            RadioItem<bool?>(
+                              selection: ringMode,
+                              duration: buttonAnimationDuration,
+                              me: false,
+                              onTap: () => inputCompleted(ringModeKey),
+                              builder: (context, isOn) => Container(
+                                height: standardButtonHeight,
+                                decoration: BoxDecoration(
+                                  color: backgroundColorFor(theme, isOn),
+                                  borderRadius: BorderRadius.circular(
+                                    buttonCornerRadius,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'ring once',
+                                    style: theme.textTheme.titleMedium!
+                                        .copyWith(
+                                          color: foregroundColorFor(
+                                            theme,
+                                            isOn,
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                    spacer,
-                                    RadioItem<bool?>(
-                                      selection: ringMode,
-                                      duration: buttonAnimationDuration,
-                                      me: false,
-                                      onTap: () => inputCompleted(ringModeKey),
-                                      builder: (context, isOn) => Container(
-                                        height: standardButtonHeight,
-                                        decoration: BoxDecoration(
-                                          color:
-                                              backgroundColorFor(theme, isOn),
-                                          borderRadius: BorderRadius.circular(
-                                              buttonCornerRadius),
-                                        ),
-                                        child: Center(
-                                          child: Text('ring once',
-                                              style: theme
-                                                  .textTheme.titleMedium!
-                                                  .copyWith(
-                                                      color: foregroundColorFor(
-                                                          theme, isOn))),
-                                        ),
-                                      ),
-                                    ),
-                                  ]),
+                                  ),
+                                ),
+                              ),
                             ),
                           ],
                         ),
-                      ]))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
           if (Platform.isAndroid)
             SliverToBoxAdapter(
-                key: notifKey,
-                child: Padding(
-                    padding: EdgeInsets.all(standardSpacing),
-                    child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: reverseIfNot(isRightHanded.value ?? true, [
-                          Flexible(
-                              child: Text('Enable notifications permission',
-                                  style: theme.textTheme.bodyMedium!)),
-                          spacer,
-                          Flexible(
-                            child: Watch((context) {
-                              final granted = notifGranted.value;
-                              final isOn = granted == true;
-                              final label = granted == null
-                                  ? 'request'
-                                  : granted
-                                      ? (_notifWasAlreadyGranted
-                                          ? 'already granted'
-                                          : 'granted')
-                                      : 'request';
-                              return InkButton(
-                                backgroundColor:
-                                    backgroundColorFor(theme, isOn),
-                                onTap: granted == true
-                                    ? null
-                                    : _requestNotificationPermission,
-                                borderRadius:
-                                    BorderRadius.circular(buttonCornerRadius),
-                                child: SizedBox(
-                                  height: standardButtonHeight,
-                                  child: Center(
-                                      child: Text(label,
-                                          style: theme.textTheme.titleMedium!
-                                              .copyWith(
-                                                  color: foregroundColorFor(
-                                                      theme, isOn)))),
-                                ),
-                              );
-                            }),
-                          ),
-                        ])))),
-          if (Platform.isAndroid)
-            SliverToBoxAdapter(
-                key: batteryOptimKey,
-                child: Padding(
-                    padding: EdgeInsets.all(standardSpacing),
-                    child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: reverseIfNot(isRightHanded.value ?? true, [
-                          Flexible(
-                              child: Text(
-                                  'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
-                                  style: theme.textTheme.bodyMedium!)),
-                          spacer,
-                          Flexible(
-                            child: Watch((context) {
-                              final granted = batteryOptimGranted.value;
-                              final isOn = granted == true;
-                              final label = granted == null
-                                  ? 'request'
-                                  : granted
-                                      ? (_batteryOptimWasAlreadyGranted
-                                          ? 'already granted'
-                                          : 'granted')
-                                      : 'request';
-                              return InkButton(
-                                backgroundColor:
-                                    backgroundColorFor(theme, isOn),
-                                onTap: granted == true
-                                    ? null
-                                    : _requestBatteryOptimization,
-                                borderRadius:
-                                    BorderRadius.circular(buttonCornerRadius),
-                                child: SizedBox(
-                                  height: standardButtonHeight,
-                                  child: Center(
-                                      child: Text(label,
-                                          style: theme.textTheme.titleMedium!
-                                              .copyWith(
-                                                  color: foregroundColorFor(
-                                                      theme, isOn)))),
-                                ),
-                              );
-                            }),
-                          ),
-                        ])))),
-          // Skip button - full screen
-          SliverToBoxAdapter(
-              key: skipKey,
+              key: notifKey,
               child: Padding(
                 padding: EdgeInsets.all(standardSpacing),
                 child: Row(
-                  mainAxisSize: MainAxisSize.max,
-                  children: [
-                    // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
-                    // if (allChoicesCompleted.value) ...[
-                    //   Text('done'),
-                    //   spacer
-                    // ],
-                    Expanded(
-                      child: InkButton(
-                          onTap: () {
-                            moveOn();
-                          },
-                          borderRadius:
-                              BorderRadius.circular(buttonCornerRadius),
-                          builder: (context, isOn) => Container(
-                                color:
-                                    backgroundColorFor(Theme.of(context), isOn),
-                                child: SizedBox(
-                                  height: standardButtonHeight,
-                                  child: Center(
-                                      child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                        Watch(
-                                          (context) => Text(
-                                              allChoicesCompleted.value
-                                                  ? 'setup complete, click to continue'
-                                                  : 'skip setup',
-                                              style: theme
-                                                  .textTheme.titleMedium!
-                                                  .copyWith(
-                                                      color: foregroundColorFor(
-                                                          Theme.of(context),
-                                                          isOn))),
-                                        ),
-                                      ])),
-                                ),
-                              )),
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: reverseIfNot(isRightHanded.value ?? true, [
+                    Flexible(
+                      child: Text(
+                        'Enable notifications permission',
+                        style: theme.textTheme.bodyMedium!,
+                      ),
                     ),
-                  ],
+                    spacer,
+                    Flexible(
+                      child: Watch((context) {
+                        final granted = notifGranted.value;
+                        final isOn = granted == true;
+                        final label = granted == null
+                            ? 'request'
+                            : granted
+                            ? (_notifWasAlreadyGranted
+                                  ? 'already granted'
+                                  : 'granted')
+                            : 'request';
+                        return InkButton(
+                          backgroundColor: backgroundColorFor(theme, isOn),
+                          onTap: granted == true
+                              ? null
+                              : _requestNotificationPermission,
+                          borderRadius: BorderRadius.circular(
+                            buttonCornerRadius,
+                          ),
+                          child: SizedBox(
+                            height: standardButtonHeight,
+                            child: Center(
+                              child: Text(
+                                label,
+                                style: theme.textTheme.titleMedium!.copyWith(
+                                  color: foregroundColorFor(theme, isOn),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ]),
                 ),
-              )),
+              ),
+            ),
+          if (Platform.isAndroid)
+            SliverToBoxAdapter(
+              key: batteryOptimKey,
+              child: Padding(
+                padding: EdgeInsets.all(standardSpacing),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: reverseIfNot(isRightHanded.value ?? true, [
+                    Flexible(
+                      child: Text(
+                        'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
+                        style: theme.textTheme.bodyMedium!,
+                      ),
+                    ),
+                    spacer,
+                    Flexible(
+                      child: Watch((context) {
+                        final granted = batteryOptimGranted.value;
+                        final isOn = granted == true;
+                        final label = granted == null
+                            ? 'request'
+                            : granted
+                            ? (_batteryOptimWasAlreadyGranted
+                                  ? 'already granted'
+                                  : 'granted')
+                            : 'request';
+                        return InkButton(
+                          backgroundColor: backgroundColorFor(theme, isOn),
+                          onTap: granted == true
+                              ? null
+                              : _requestBatteryOptimization,
+                          borderRadius: BorderRadius.circular(
+                            buttonCornerRadius,
+                          ),
+                          child: SizedBox(
+                            height: standardButtonHeight,
+                            child: Center(
+                              child: Text(
+                                label,
+                                style: theme.textTheme.titleMedium!.copyWith(
+                                  color: foregroundColorFor(theme, isOn),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          // Skip button - full screen
           SliverToBoxAdapter(
-              child: SizedBox(height: MediaQuery.of(context).padding.bottom)),
+            key: skipKey,
+            child: Padding(
+              padding: EdgeInsets.all(standardSpacing),
+              child: Row(
+                mainAxisSize: MainAxisSize.max,
+                children: [
+                  // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
+                  // if (allChoicesCompleted.value) ...[
+                  //   Text('done'),
+                  //   spacer
+                  // ],
+                  Expanded(
+                    child: InkButton(
+                      onTap: () {
+                        moveOn();
+                      },
+                      borderRadius: BorderRadius.circular(buttonCornerRadius),
+                      builder: (context, isOn) => Container(
+                        color: backgroundColorFor(Theme.of(context), isOn),
+                        child: SizedBox(
+                          height: standardButtonHeight,
+                          child: Center(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Watch(
+                                  (context) => Text(
+                                    allChoicesCompleted.value
+                                        ? 'setup complete, click to continue'
+                                        : 'skip setup',
+                                    style: theme.textTheme.titleMedium!
+                                        .copyWith(
+                                          color: foregroundColorFor(
+                                            Theme.of(context),
+                                            isOn,
+                                          ),
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: SizedBox(height: MediaQuery.of(context).padding.bottom),
+          ),
         ],
       ),
     );
