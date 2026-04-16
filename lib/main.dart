@@ -29,7 +29,7 @@ import 'package:makos_timer/background_service_stuff.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/crank_game.dart';
-import 'package:makos_timer/journeying_game.dart';
+// import 'package:makos_timer/journeying_game.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/size_reporter.dart';
 import 'package:makos_timer/mobj.dart';
@@ -422,14 +422,14 @@ class TimerHolm {
     tracking.remove(id);
   }
 
+  AudioInfo _audioForTimer(TimerData d) =>
+      d.soundEffect ??
+      Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value!;
+
   void _timerStartAlarm(TimerTrack tt, Mobj<TimerData> mobj) {
     tt.startAlarmTimer = null;
     vibrateAlertOnce();
-    final audio = Mobj.getAlreadyLoaded(
-      selectedAudioID,
-      AudioInfoType(),
-    ).value!;
-    jukeBox.playAudio(audio);
+    jukeBox.playAudio(_audioForTimer(mobj.peek()!));
   }
 
   void _timerGoesOff(TimerTrack tt, Mobj<TimerData> mobj) {
@@ -442,10 +442,7 @@ class TimerHolm {
       return;
     } else {
       vibrateAlertOnce();
-      final audio = Mobj.getAlreadyLoaded(
-        selectedAudioID,
-        AudioInfoType(),
-      ).value!;
+      final audio = _audioForTimer(d);
       final persistentAlarmMode =
           Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).value ??
           false;
@@ -1031,21 +1028,22 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
               iconOriginKey: configButtonKey,
             );
           }
-          if (settings.name == '/journeying') {
-            return CircularRevealRoute(
-              builder: (context) => const JourneyingGameScreen(),
-            );
-          }
+          // abandoned on journey_game branch
+          // if (settings.name == '/journeying') {
+          //   return CircularRevealRoute(
+          //     builder: (context) => const JourneyingGameScreen(),
+          //   );
+          // }
           return null;
         },
         onGenerateInitialRoutes: (initialRouteName) {
-          if (initialRouteName == '/journeying') {
-            return <Route<dynamic>>[
-              CircularRevealRoute(
-                builder: (context) => const JourneyingGameScreen(),
-              ),
-            ];
-          }
+          // if (initialRouteName == '/journeying') {
+          //   return <Route<dynamic>>[
+          //     CircularRevealRoute(
+          //       builder: (context) => const JourneyingGameScreen(),
+          //     ),
+          //   ];
+          // }
           final completedSetup =
               Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
               false;
@@ -3341,16 +3339,17 @@ class TimerScreenState extends State<TimerScreen>
       bool isRightHanded,
       Widget icon,
       String label,
-      Function() action, {
+      Function(Offset?) action, {
       bool isFirst = false,
       bool isLast = false,
+      TextStyle? labelStyle,
     }) {
       return InkButton(
         backgroundColor: backgroundColor,
         inkColor: inkColor.withValues(alpha: 0.6),
         inkColorFaded: inkColor.withValues(alpha: 0.3),
+        onTapUpGlobalPosition: action,
         onTap: () {
-          action();
           Navigator.of(context).pop();
         },
         child: Padding(
@@ -3376,9 +3375,11 @@ class TimerScreenState extends State<TimerScreen>
                   padding: const EdgeInsets.symmetric(horizontal: 3),
                   child: Text(
                     label,
-                    style: theme.textTheme.bodyMedium!.copyWith(
-                      color: foregroundColor,
-                    ),
+                    style:
+                        labelStyle ??
+                        theme.textTheme.bodyMedium!.copyWith(
+                          color: foregroundColor,
+                        ),
                   ),
                 ),
               ),
@@ -3390,7 +3391,7 @@ class TimerScreenState extends State<TimerScreen>
     }
 
     double totalVisibleMenuItemHeight =
-        TimerMenu.buttonHeight * 4 + 14 + menuItemPadding * 2;
+        TimerMenu.buttonHeight * 5 + 14 + menuItemPadding * 2;
 
     showGeneralDialog(
       context: context,
@@ -3417,7 +3418,7 @@ class TimerScreenState extends State<TimerScreen>
                 isRightHanded,
                 Icon(Icons.delete, color: foregroundColor),
                 'Delete',
-                () {
+                (_) {
                   deleteTimer(timerID);
                 },
                 isFirst: true,
@@ -3434,7 +3435,7 @@ class TimerScreenState extends State<TimerScreen>
                   ),
                 ),
                 'Reset',
-                () {
+                (_) {
                   resetTimer(timerID);
                 },
               ),
@@ -3443,8 +3444,45 @@ class TimerScreenState extends State<TimerScreen>
                 isRightHanded,
                 Icon(Icons.push_pin, color: foregroundColor),
                 'Pin',
-                () {
+                (_) {
                   togglePin(timerID);
+                },
+              ),
+              Builder(
+                builder: (context) {
+                  return menuItem(
+                    context,
+                    isRightHanded,
+                    Icon(Icons.music_note, color: foregroundColor),
+                    td.soundEffect?.name ?? 'default',
+                    (tapPoint) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                        final result = await Navigator.push<AudioInfo?>(
+                          this.context,
+                          CircularRevealRoute(
+                            builder: (context) => AlarmSoundPickerScreen(
+                              perTimerMode: true,
+                              initialPerTimerSelection: td.soundEffect,
+                            ),
+                            buttonCenter: tapPoint,
+                          ),
+                        );
+                        final mobj = Mobj.getAlreadyLoaded(
+                          timerID,
+                          TimerDataType(),
+                        );
+                        mobj.value = mobj.peek()!.withChanges(
+                          soundEffect: result,
+                          soundEffectNull: result == null,
+                        );
+                      });
+                    },
+                    labelStyle: td.soundEffect == null
+                        ? theme.textTheme.bodyMedium!.copyWith(
+                            color: foregroundColor.withValues(alpha: 0.5),
+                          )
+                        : null,
+                  );
                 },
               ),
               menuItem(
@@ -3452,7 +3490,7 @@ class TimerScreenState extends State<TimerScreen>
                 isRightHanded,
                 Icon(Icons.label_outline, color: foregroundColor),
                 'Title',
-                () {
+                (_) {
                   final wk =
                       timerWidgets[timerID]?.key as GlobalKey<TimerBaseState>?;
                   wk?.currentState?.enterTitleEditMode();
@@ -3957,21 +3995,22 @@ class TimerScreenState extends State<TimerScreen>
         rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
         child: selectButton,
       ),
-      Positioned.fromRect(
-        rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
-        child: TimersButton(
-          label: proportionedIcon(Icons.view_sidebar_outlined),
-          onPanEnd: () {
-            
-            // if (squishPanelController.status == AnimationStatus.forward ||
-            //     squishPanelController.status == AnimationStatus.completed) {
-            //   squishPanelController.reverse();
-            // } else {
-            //   squishPanelController.forward();
-            // }
-          },
-        ),
-      ),
+      // // squish button
+      // Positioned.fromRect(
+      //   rect: controlGridBound(innerPaletteAnchor + Offset(0, 2), Size(1, 1)),
+      //   child: TimersButton(
+      //     label: proportionedIcon(Icons.view_sidebar_outlined),
+      //     onPanEnd: () {
+
+      //       // if (squishPanelController.status == AnimationStatus.forward ||
+      //       //     squishPanelController.status == AnimationStatus.completed) {
+      //       //   squishPanelController.reverse();
+      //       // } else {
+      //       //   squishPanelController.forward();
+      //       // }
+      //     },
+      //   ),
+      // ),
     ];
 
     Widget editPopoverIcon(
@@ -5428,34 +5467,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
 
-              ListTile(
-                title: Text(
-                  'Journeying game',
-                  style: theme.textTheme.bodyLarge,
-                ),
-                subtitle: Text(
-                  "A world to wander.",
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                trailing: trailing(
-                  Icon(
-                    Icons.explore_rounded,
-                    color: theme.colorScheme.primary,
-                    size: 24,
-                  ),
-                ),
-                onTap: () {
-                  Navigator.pushReplacement(
-                    context,
-                    CircularRevealRoute(
-                      builder: (context) => const JourneyingGameScreen(),
-                    ),
-                  );
-                },
-                contentPadding: listItemPadding,
-              ),
+              // abandoned on journey_game branch
+              // ListTile(
+              //   title: Text(
+              //     'Journeying game',
+              //     style: theme.textTheme.bodyLarge,
+              //   ),
+              //   subtitle: Text(
+              //     "A world to wander.",
+              //     style: theme.textTheme.bodyMedium?.copyWith(
+              //       color: theme.colorScheme.onSurfaceVariant,
+              //     ),
+              //   ),
+              //   trailing: trailing(
+              //     Icon(
+              //       Icons.explore_rounded,
+              //       color: theme.colorScheme.primary,
+              //       size: 24,
+              //     ),
+              //   ),
+              //   onTap: () {
+              //     Navigator.pushReplacement(
+              //       context,
+              //       CircularRevealRoute(
+              //         builder: (context) => const JourneyingGameScreen(),
+              //       ),
+              //     );
+              //   },
+              //   contentPadding: listItemPadding,
+              // ),
 
               // if (!completedSetup) ...[
               if (true) ...[setupTile],
@@ -5626,10 +5666,18 @@ class AboutScreen extends StatelessWidget {
 
 class AlarmSoundPickerScreen extends StatefulWidget {
   final bool flipBackgroundColors;
+
+  /// When true, the picker is choosing a per-timer sound override.
+  /// It adds a "Default" entry and pops with the selected AudioInfo?
+  /// (null = default). When false, it edits the global selectedAudioID Mobj.
+  final bool perTimerMode;
+  final AudioInfo? initialPerTimerSelection;
   const AlarmSoundPickerScreen({
     super.key,
     this.iconKey,
     this.flipBackgroundColors = false,
+    this.perTimerMode = false,
+    this.initialPerTimerSelection,
   });
   final GlobalKey? iconKey;
 
@@ -5645,22 +5693,31 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   final List<AudioInfo> _assetSounds = PlatformAudio.assetSounds;
   late Function() listeningAudioEffectChange;
   bool _loading = true;
+  late final Signal<AudioInfo?> _localSelection;
+  bool _hasInteracted = false;
 
   @override
   void initState() {
     super.initState();
     _loadSounds();
-    listeningAudioEffectChange =
-        Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).subscribe((
-          event,
-        ) {
-          Mobj.getAlreadyLoaded(hasSelectedAudioID, BoolType()).value = true;
-        });
+    if (widget.perTimerMode) {
+      _localSelection = Signal(widget.initialPerTimerSelection);
+      listeningAudioEffectChange = () {};
+    } else {
+      _localSelection = Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType());
+      listeningAudioEffectChange =
+          Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).subscribe((
+            event,
+          ) {
+            Mobj.getAlreadyLoaded(hasSelectedAudioID, BoolType()).value = true;
+          });
+    }
   }
 
   @override
   void dispose() {
     listeningAudioEffectChange();
+    if (widget.perTimerMode) _localSelection.dispose();
     super.dispose();
   }
 
@@ -5701,6 +5758,10 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     }
   }
 
+  void _popWithResult() {
+    Navigator.of(context).pop(_localSelection.value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -5711,7 +5772,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
 
     Widget section(
       String title,
-      List<AudioInfo> sounds, {
+      List<AudioInfo?> sounds, {
       Duration? fadeDelay,
     }) {
       final animDuration = Duration(milliseconds: 100);
@@ -5722,24 +5783,23 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           ? fadeDelay.inMicroseconds / totalDuration.inMicroseconds
           : 0.0;
 
-      final selectedAudio = Mobj.getAlreadyLoaded(
-        selectedAudioID,
-        AudioInfoType(),
-      );
       final jukeBox = Provider.of<JukeBox>(context, listen: false);
 
-      Widget radioSelector(AudioInfo audio) {
+      Widget radioSelector(AudioInfo? audio) {
         bool hasPlayed = false;
         return RadioItem<AudioInfo?>(
           equalityComparison: (AudioInfo? a, AudioInfo? b) => a?.url == b?.url,
           me: audio,
-          selection: selectedAudio,
+          selection: _localSelection,
           onTap: () {
+            if (widget.perTimerMode && !_hasInteracted) {
+              setState(() => _hasInteracted = true);
+            }
             jukeBox.pauseAudio();
-            if (selectedAudio.value?.url != audio.url) {
+            if (_localSelection.value?.url != audio?.url) {
               hasPlayed = false;
             }
-            if (!hasPlayed) {
+            if (!hasPlayed && audio != null) {
               jukeBox.playAudio(audio);
             }
             hasPlayed = !hasPlayed;
@@ -5759,7 +5819,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                 color: backgroundColor,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(audio.name, style: textTheme),
+              child: Text(audio?.name ?? 'Default', style: textTheme),
             );
           },
         );
@@ -5800,84 +5860,158 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
       );
     }
 
-    return Scaffold(
-      backgroundColor: backgroundColorA,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            pinned: true,
-            expandedHeight: halfScreenHeight(context),
-            flexibleSpace: FlexibleSpaceBar(
-              expandedTitleScale: 1.0,
-              title: Row(
-                children: [
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: Hero(
-                      tag: 'alarm-sound-icon',
-                      createRectTween: (begin, end) =>
-                          DelayedRectTween(begin: begin, end: end, delay: 0.14),
-                      child: ScalingAspectRatio(
-                        child: Icon(
-                          Icons.music_note,
-                          color: theme.colorScheme.primary,
+    const bottomBarHeight = 64.0;
+
+    return PopScope(
+      canPop: !widget.perTimerMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && widget.perTimerMode) {
+          _popWithResult();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: backgroundColorA,
+        body: Stack(
+          children: [
+            CustomScrollView(
+              slivers: [
+                SliverAppBar(
+                  pinned: true,
+                  expandedHeight: halfScreenHeight(context),
+                  automaticallyImplyLeading: !widget.perTimerMode,
+                  flexibleSpace: FlexibleSpaceBar(
+                    expandedTitleScale: 1.0,
+                    title: Row(
+                      children: [
+                        if (!widget.perTimerMode)
+                          SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: Hero(
+                              tag: 'alarm-sound-icon',
+                              createRectTween: (begin, end) => DelayedRectTween(
+                                begin: begin,
+                                end: end,
+                                delay: 0.14,
+                              ),
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.music_note,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (!widget.perTimerMode) SizedBox(width: 16),
+                        Text(
+                          widget.perTimerMode ? 'Timer sound' : 'Alarm sound',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    titlePadding: EdgeInsetsDirectional.only(
+                      start: widget.perTimerMode ? 16.0 : 72.0,
+                      bottom: 16.0,
+                    ),
+                  ),
+                  backgroundColor: backgroundColorB,
+                  surfaceTintColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  scrolledUnderElevation: 0,
+                ),
+                if (!_loading) ...[
+                  if (widget.perTimerMode)
+                    section('', [null], fadeDelay: Duration(milliseconds: 0)),
+                  if (_assetSounds.isNotEmpty)
+                    section(
+                      "Our Sounds",
+                      _assetSounds,
+                      fadeDelay: Duration(milliseconds: 0),
+                    ),
+                  if (_notificationSounds != null &&
+                      _notificationSounds!.isNotEmpty)
+                    section(
+                      'Phone Notification Sounds',
+                      _notificationSounds!,
+                      fadeDelay: Duration(milliseconds: 200),
+                    ),
+                  if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+                    section(
+                      'Phone Alarm Sounds (long duration)',
+                      _alarmSounds!,
+                      fadeDelay: Duration(milliseconds: 100),
+                    ),
+                  if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
+                    section(
+                      'Your Ringtones',
+                      _ringtoneSounds!,
+                      fadeDelay: Duration(milliseconds: 300),
+                    ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      height:
+                          (widget.perTimerMode ? bottomBarHeight : 0) +
+                          16 +
+                          MediaQuery.of(context).padding.bottom,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (widget.perTimerMode)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height:
+                      bottomBarHeight + MediaQuery.of(context).padding.bottom,
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).padding.bottom,
+                  ),
+                  decoration: BoxDecoration(
+                    color: backgroundColorB,
+                    border: Border(
+                      top: BorderSide(
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.3,
                         ),
                       ),
                     ),
                   ),
-                  SizedBox(width: 16),
-                  Text(
-                    'Alarm sound',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface,
-                      fontWeight: FontWeight.w500,
+                  child: Center(
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: bottomBarHeight,
+                      child: TextButton(
+                        onPressed: _popWithResult,
+                        style: TextButton.styleFrom(
+                          shape: RoundedRectangleBorder(),
+                          backgroundColor: _hasInteracted
+                              ? theme.colorScheme.primaryContainer
+                              : null,
+                          foregroundColor: _hasInteracted
+                              ? theme.colorScheme.onPrimaryContainer
+                              : theme.colorScheme.onSurface,
+                        ),
+                        child: Text(
+                          _hasInteracted ? 'Done' : 'Cancel',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: _hasInteracted
+                                ? theme.colorScheme.onPrimaryContainer
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ],
+                ),
               ),
-              titlePadding: EdgeInsetsDirectional.only(
-                start: 72.0,
-                bottom: 16.0,
-              ),
-            ),
-            backgroundColor: backgroundColorB,
-            surfaceTintColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            scrolledUnderElevation: 0,
-          ),
-          if (!_loading) ...[
-            if (_assetSounds.isNotEmpty)
-              section(
-                "Our Sounds",
-                _assetSounds,
-                fadeDelay: Duration(milliseconds: 0),
-              ),
-            if (_notificationSounds != null && _notificationSounds!.isNotEmpty)
-              section(
-                'Phone Notification Sounds',
-                _notificationSounds!,
-                fadeDelay: Duration(milliseconds: 200),
-              ),
-            if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-              section(
-                'Phone Alarm Sounds (long duration)',
-                _alarmSounds!,
-                fadeDelay: Duration(milliseconds: 100),
-              ),
-            if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
-              section(
-                'Your Ringtones',
-                _ringtoneSounds!,
-                fadeDelay: Duration(milliseconds: 300),
-              ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 16 + MediaQuery.of(context).padding.bottom,
-              ),
-            ),
           ],
-        ],
+        ),
       ),
     );
   }

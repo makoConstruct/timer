@@ -1,7 +1,9 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter/painting.dart';
-import 'package:makos_timer/journeying_game.dart' show Coord;
+import 'package:flutter/rendering.dart';
+import 'package:makos_timer/type_help.dart' show Coord;
+
+// this was only needed for the journeying game, which was abandoned on the journey_game branch, but it's beautiful so I'm going to commit it to main anyway lol
 
 int _mod(int a, int b) => ((a % b) + b) % b;
 
@@ -10,7 +12,7 @@ int _mod(int a, int b) => ((a % b) + b) % b;
 /// boundary, only the newly visible tiles are painted over the existing
 /// composite (using BlendMode.src to fully replace). The buffer wraps in both
 /// axes, so rendering to screen requires up to 4 drawImageRect calls.
-class BufferedGridImage {
+class BufferedGridImage extends CustomPainter {
   final void Function(Canvas canvas, Coord tileCoord) paintTile;
 
   int tilePixelSize = 0;
@@ -106,7 +108,8 @@ class BufferedGridImage {
     ..isAntiAlias = false
     ..filterQuality = FilterQuality.low;
 
-  void render(Canvas canvas) {
+  @override
+  void paint(Canvas canvas, Size size) {
     final img = composite;
     if (img == null) return;
 
@@ -175,6 +178,9 @@ class BufferedGridImage {
     full.dispose();
     old?.dispose();
   }
+
+  @override
+  bool shouldRepaint(covariant BufferedGridImage old) => true;
 
   void _disposeAll() {
     composite?.dispose();

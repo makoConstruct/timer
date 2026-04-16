@@ -1,5 +1,8 @@
+import 'dart:ui';
+
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/platform_audio.dart';
+import 'package:signals/signals.dart';
 
 import 'mobj.dart';
 
@@ -11,7 +14,7 @@ enum TimerKind {
   loop,
   series,
   parallelStartJustified,
-  parallelEndJustified
+  parallelEndJustified,
 }
 
 class TimerData {
@@ -69,13 +72,16 @@ class TimerData {
   /// not at startTime + duration. Set when started with a delay (right-justified parallel children).
   final bool soundsOnStart;
 
+  /// per-timer sound override. null means use the global default.
+  final AudioInfo? soundEffect;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
   double get transpired =>
       runningState == TimerData.paused || runningState == TimerData.completed
-          ? durationToSeconds(ranTime)
-          : timeSinceLastStartTime;
+      ? durationToSeconds(ranTime)
+      : timeSinceLastStartTime;
   double get timeSinceLastStartTime =>
       durationToSeconds(DateTime.now().difference(startTime));
 
@@ -95,6 +101,7 @@ class TimerData {
     this.title,
     this.parentId,
     this.soundsOnStart = false,
+    this.soundEffect,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -119,6 +126,8 @@ class TimerData {
     String? parentId,
     bool parentIdNull = false,
     bool? soundsOnStart,
+    AudioInfo? soundEffect,
+    bool soundEffectNull = false,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -138,46 +147,56 @@ class TimerData {
       title: titleNull ? null : (title ?? this.title),
       parentId: parentIdNull ? null : (parentId ?? this.parentId),
       soundsOnStart: soundsOnStart ?? this.soundsOnStart,
+      soundEffect: soundEffectNull ? null : (soundEffect ?? this.soundEffect),
     );
   }
 
   /// also affects ranTime, startTime, completedRecently
-  TimerData withRunningState(int runningState,
-      {bool reset = false, Duration? delay}) {
+  TimerData withRunningState(
+    int runningState, {
+    bool reset = false,
+    Duration? delay,
+  }) {
     switch (runningState) {
       case TimerData.paused:
         return withChanges(
-            runningState: TimerData.paused,
-            soundsOnStart: false,
-            ranTime:
-                reset ? Duration.zero : DateTime.now().difference(startTime));
+          runningState: TimerData.paused,
+          soundsOnStart: false,
+          ranTime: reset ? Duration.zero : DateTime.now().difference(startTime),
+        );
       case TimerData.running:
         // ranTime is just meant to be ignored while it's running though
         return withChanges(
-            runningState: TimerData.running,
-            ranTime: Duration.zero,
-            startTime: ((reset || this.runningState == TimerData.completed)
-                    ? DateTime.now()
-                    : this.runningState == running
-                        ? startTime
-                        : (DateTime.now().subtract(ranTime)))
-                .add(delay ?? Duration.zero),
-            completedRecently: false,
-            soundsOnStart: delay != null && delay > Duration.zero);
+          runningState: TimerData.running,
+          ranTime: Duration.zero,
+          startTime:
+              ((reset || this.runningState == TimerData.completed)
+                      ? DateTime.now()
+                      : this.runningState == running
+                      ? startTime
+                      : (DateTime.now().subtract(ranTime)))
+                  .add(delay ?? Duration.zero),
+          completedRecently: false,
+          soundsOnStart: delay != null && delay > Duration.zero,
+        );
       case TimerData.completed:
         return withChanges(
-            runningState: TimerData.completed,
-            ranTime: duration,
-            soundsOnStart: false,
-            completedRecently: true);
+          runningState: TimerData.completed,
+          ranTime: duration,
+          soundsOnStart: false,
+          completedRecently: true,
+        );
       default:
         throw Exception('Invalid running state: $runningState');
     }
   }
 
   TimerData toggleRunning({Duration? delay, bool reset = false}) =>
-      withRunningState(isRunning ? TimerData.paused : TimerData.running,
-          reset: reset, delay: delay);
+      withRunningState(
+        isRunning ? TimerData.paused : TimerData.running,
+        reset: reset,
+        delay: delay,
+      );
 
   // [todo] confirm that the above reimplementation works and delete this
   // TimerData toggleRunning({Duration? delay, required bool reset}) => isRunning
@@ -217,16 +236,20 @@ Duration? remainingTimerDuration(TimerData? d) {
       return d.duration -
           (d.runningState == TimerData.running
               ? maxDuration(
-                  Duration.zero, DateTime.now().difference(d.startTime))
+                  Duration.zero,
+                  DateTime.now().difference(d.startTime),
+                )
               : d.runningState == TimerData.paused
-                  ? d.ranTime
-                  : Duration.zero);
+              ? d.ranTime
+              : Duration.zero);
     case TimerKind.loop:
     case TimerKind.series:
       Duration total = Duration.zero;
       for (final childId in d.children) {
-        final child =
-            Mobj.seekAlreadyLoaded<TimerData>(childId, TimerDataType())?.peek();
+        final child = Mobj.seekAlreadyLoaded<TimerData>(
+          childId,
+          TimerDataType(),
+        )?.peek();
         if (child == null) return null;
         final childDur = remainingTimerDuration(child);
         if (childDur == null) return null;
@@ -238,8 +261,10 @@ Duration? remainingTimerDuration(TimerData? d) {
       if (d.children.isEmpty) return null;
       Duration maxDur = Duration.zero;
       for (final childId in d.children) {
-        final child =
-            Mobj.seekAlreadyLoaded<TimerData>(childId, TimerDataType())?.peek();
+        final child = Mobj.seekAlreadyLoaded<TimerData>(
+          childId,
+          TimerDataType(),
+        )?.peek();
         if (child == null) return null;
         final childDur = remainingTimerDuration(child);
         if (childDur == null) return null;
@@ -266,16 +291,20 @@ class TimerDataType extends TypeHelp<TimerData> {
         pinned: BoolType().fromJson(json['pinned']),
         persistentAlarm: Nullable(BoolType()).fromJson(json['persistentAlarm']),
         ranTime: Duration(
-            milliseconds:
-                (DoubleType().fromJson(json['ranTime']) * 1000).toInt()),
+          milliseconds: (DoubleType().fromJson(json['ranTime']) * 1000).toInt(),
+        ),
         isGoingOff: BoolType().fromJson(json['isGoingOff']),
-        completedRecently:
-            BoolType().fromJson(json['completedRecently'] ?? false),
+        completedRecently: BoolType().fromJson(
+          json['completedRecently'] ?? false,
+        ),
         kind: TimerKind.values[IntType().fromJson(json['kind'])],
         children: ListType(StringType()).fromJson(json['children'] ?? []),
         title: Nullable(StringType()).fromJson(json['title']),
         parentId: Nullable(StringType()).fromJson(json['parentId']),
         soundsOnStart: BoolType().fromJson(json['soundsOnStart'] ?? false),
+        soundEffect: json['soundEffect'] != null
+            ? AudioInfoType().fromJson(json['soundEffect'])
+            : null,
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -291,8 +320,9 @@ class TimerDataType extends TypeHelp<TimerData> {
       'digits': ListType(IntType()).toJson(object.digits),
       'pinned': BoolType().toJson(object.pinned),
       'persistentAlarm': Nullable(BoolType()).toJson(object.persistentAlarm),
-      'ranTime':
-          DoubleType().toJson(object.ranTime.inMilliseconds.toDouble() / 1000),
+      'ranTime': DoubleType().toJson(
+        object.ranTime.inMilliseconds.toDouble() / 1000,
+      ),
       'isGoingOff': BoolType().toJson(object.isGoingOff),
       'completedRecently': BoolType().toJson(object.completedRecently),
       'kind': IntType().toJson(object.kind.index),
@@ -300,6 +330,9 @@ class TimerDataType extends TypeHelp<TimerData> {
       'title': Nullable(StringType()).toJson(object.title),
       'parentId': Nullable(StringType()).toJson(object.parentId),
       'soundsOnStart': BoolType().toJson(object.soundsOnStart),
+      'soundEffect': object.soundEffect != null
+          ? AudioInfoType().toJsonValue(object.soundEffect!)
+          : null,
     };
   }
 }
@@ -322,6 +355,8 @@ TimerData cloneTimerDataWithChanges(
   bool titleNull = false,
   String? parentId,
   bool parentIdNull = false,
+  AudioInfo? soundEffect,
+  bool soundEffectNull = false,
 }) {
   return TimerData(
     startTime: startTime ?? old.startTime,
@@ -333,11 +368,13 @@ TimerData cloneTimerDataWithChanges(
     isGoingOff: isGoingOff ?? old.isGoingOff,
     pinned: pinned ?? old.pinned,
     completedRecently: completedRecently ?? old.completedRecently,
-    persistentAlarm:
-        persistentAlarmNull ? null : (persistentAlarm ?? old.persistentAlarm),
+    persistentAlarm: persistentAlarmNull
+        ? null
+        : (persistentAlarm ?? old.persistentAlarm),
     children: children ?? old.children,
     title: titleNull ? null : (title ?? old.title),
     parentId: parentIdNull ? null : (parentId ?? old.parentId),
+    soundEffect: soundEffectNull ? null : (soundEffect ?? old.soundEffect),
   );
 }
 
@@ -346,6 +383,20 @@ class Coord {
   final int y;
   const Coord(this.x, this.y);
   Coord withChanges({int? x, int? y}) => Coord(x ?? this.x, y ?? this.y);
+  @override
+  String toString() => 'Coord(x: $x, y: $y)';
+  @override
+  bool operator ==(Object other) =>
+      other is Coord && other.x == x && other.y == y;
+  @override
+  int get hashCode => x.hashCode ^ y.hashCode;
+  Coord operator +(Coord other) => Coord(x + other.x, y + other.y);
+  Coord operator -(Coord other) => Coord(x - other.x, y - other.y);
+  Coord operator *(int other) => Coord(x * other, y * other);
+  Coord operator /(int other) => Coord(x ~/ other, y ~/ other);
+  Coord operator %(int other) => Coord(x % other, y % other);
+  Coord operator ~/(int other) => Coord(x ~/ other, y ~/ other);
+  Offset toOffset() => Offset(x.toDouble(), y.toDouble());
 }
 
 class CoordType extends TypeHelp<Coord> {
@@ -354,16 +405,19 @@ class CoordType extends TypeHelp<Coord> {
   @override
   Coord fromJsonValue(Object? json) {
     if (json is Map<String, dynamic>) {
-      return Coord(IntType().fromJson(json['x']), IntType().fromJson(json['y']));
+      return Coord(
+        IntType().fromJson(json['x']),
+        IntType().fromJson(json['y']),
+      );
     }
     throw ArgumentError('Cannot convert $json to Coord');
   }
 
   @override
   Object? toJsonValue(Coord object) => {
-        'x': IntType().toJson(object.x),
-        'y': IntType().toJson(object.y),
-      };
+    'x': IntType().toJson(object.x),
+    'y': IntType().toJson(object.y),
+  };
 }
 
 class JourneyPlayer {
@@ -371,7 +425,10 @@ class JourneyPlayer {
   final List<MobjID?> inventory;
   const JourneyPlayer({required this.pos, required this.inventory});
   JourneyPlayer withChanges({Coord? pos, List<MobjID?>? inventory}) =>
-      JourneyPlayer(pos: pos ?? this.pos, inventory: inventory ?? this.inventory);
+      JourneyPlayer(
+        pos: pos ?? this.pos,
+        inventory: inventory ?? this.inventory,
+      );
 }
 
 class JourneyPlayerType extends TypeHelp<JourneyPlayer> {
@@ -390,38 +447,9 @@ class JourneyPlayerType extends TypeHelp<JourneyPlayer> {
 
   @override
   Object? toJsonValue(JourneyPlayer object) => {
-        'pos': CoordType().toJson(object.pos),
-        'inventory': ListType(Nullable(StringType())).toJson(object.inventory),
-      };
-}
-
-class JourneyState {
-  final String seed;
-  final MobjID player;
-  const JourneyState({required this.seed, required this.player});
-  JourneyState withChanges({String? seed, MobjID? player}) =>
-      JourneyState(seed: seed ?? this.seed, player: player ?? this.player);
-}
-
-class JourneyStateType extends TypeHelp<JourneyState> {
-  JourneyStateType() : super('JourneyState');
-
-  @override
-  JourneyState fromJsonValue(Object? json) {
-    if (json is Map<String, dynamic>) {
-      return JourneyState(
-        seed: StringType().fromJson(json['seed']),
-        player: StringType().fromJson(json['player']),
-      );
-    }
-    throw ArgumentError('Cannot convert $json to JourneyState');
-  }
-
-  @override
-  Object? toJsonValue(JourneyState object) => {
-        'seed': StringType().toJson(object.seed),
-        'player': StringType().toJson(object.player),
-      };
+    'pos': CoordType().toJson(object.pos),
+    'inventory': ListType(Nullable(StringType())).toJson(object.inventory),
+  };
 }
 
 class AudioInfoType extends TypeHelp<AudioInfo> {
