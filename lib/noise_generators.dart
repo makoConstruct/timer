@@ -13,7 +13,7 @@ int _fmix32(int k) {
   return k;
 }
 
-int hashCorner(int x, int y, int seed) {
+int hashThree(int x, int y, int seed) {
   var h = _fmix32(seed ^ 0x185FA56D);
   h = _fmix32(h ^ _u32(x * 0xCC9E2D51));
   h = _fmix32(h ^ _u32(y * 0x1B873593));
@@ -45,7 +45,11 @@ double smoothstep(double edge0, double edge1, double x) {
 ///
 /// Parameter order intentionally keeps [strength] before [x].
 double smoothstepStrength(
-    double edge0, double edge1, double strength, double x) {
+  double edge0,
+  double edge1,
+  double strength,
+  double x,
+) {
   final s = smoothstep(edge0, edge1, x);
   if (strength == 1.0) return s;
   if (s < 0.5) return 0.5 * math.pow(2.0 * s, strength).toDouble();
@@ -91,13 +95,13 @@ double perlin(Offset o, int seed) {
   final v = _fade(yf);
 
   final g = List<double>.filled(2, 0);
-  _unitGrad2(hashCorner(xi, yi, seed), g);
+  _unitGrad2(hashThree(xi, yi, seed), g);
   final gx00 = g[0], gy00 = g[1];
-  _unitGrad2(hashCorner(xi + 1, yi, seed), g);
+  _unitGrad2(hashThree(xi + 1, yi, seed), g);
   final gx10 = g[0], gy10 = g[1];
-  _unitGrad2(hashCorner(xi, yi + 1, seed), g);
+  _unitGrad2(hashThree(xi, yi + 1, seed), g);
   final gx01 = g[0], gy01 = g[1];
-  _unitGrad2(hashCorner(xi + 1, yi + 1, seed), g);
+  _unitGrad2(hashThree(xi + 1, yi + 1, seed), g);
   final gx11 = g[0], gy11 = g[1];
 
   final n00 = gx00 * xf + gy00 * yf;
@@ -153,11 +157,12 @@ double gradientNoise(Offset o, int seed) {
   final x2 = x0 - 1.0 + 2.0 * g2;
   final y2 = y0 - 1.0 + 2.0 * g2;
 
-  final h0 = hashCorner(i, j, seed);
-  final h1 = hashCorner(i + i1, j + j1, seed);
-  final h2 = hashCorner(i + 1, j + 1, seed);
+  final h0 = hashThree(i, j, seed);
+  final h1 = hashThree(i + i1, j + j1, seed);
+  final h2 = hashThree(i + 1, j + 1, seed);
 
-  final n = 70.0 *
+  final n =
+      70.0 *
       (_simplexCorner(x0, y0, h0) +
           _simplexCorner(x1, y1, h1) +
           _simplexCorner(x2, y2, h2));

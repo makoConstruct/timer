@@ -1,10 +1,9 @@
 import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
-import 'package:makos_timer/boring.dart' show clampSignedUnit;
 
 /// Rounding parameters for terrain tile shapes.
-double rounding = 0.5;
-double elbowRounding = 0.5;
+double rounding = 0.44;
+double elbowRounding = rounding;
 
 // ──────────────────────────────────────────────
 // Cardinality
@@ -166,11 +165,18 @@ void _roundedCorner(Path path, Offset start, Offset c, Offset end, double r) {
     path.lineTo(end.dx, end.dy);
     return;
   }
-  final p1 = c - (c - start) / (c - start).distance * r;
-  final p2 = c - (c - end) / (c - end).distance * r;
-
+  final dir1 = (start - c) / (start - c).distance;
+  final dir2 = (end - c) / (end - c).distance;
+  final p1 = c + dir1 * r;
+  final p2 = c + dir2 * r;
   path.lineTo(p1.dx, p1.dy);
-  path.quadraticBezierTo(c.dx, c.dy, p2.dx, p2.dy);
+  final cross = dir1.dx * dir2.dy - dir1.dy * dir2.dx;
+  path.arcToPoint(
+    p2,
+    radius: Radius.circular(r),
+    largeArc: false,
+    clockwise: cross < 0,
+  );
   path.lineTo(end.dx, end.dy);
 }
 

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="100cm"
+   height="100cm"
+   viewBox="0 0 999.99995 1000"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   sodipodi:docname="tree c2.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.12292655"
+     inkscape:cx="1167.3637"
+     inkscape:cy="2424.2118"
+     inkscape:window-width="1880"
+     inkscape:window-height="1052"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       id="path106"
+       style="baseline-shift:baseline;display:inline;overflow:visible;vector-effect:none;fill:#ffffff;fill-opacity:1;stroke-width:1.60792;stroke-linecap:round;stroke-linejoin:round;enable-background:accumulate;stop-color:#000000"
+       d="m 497.45811,212.64627 a 112.56567,112.56567 0 0 0 -14.93612,1.3317 112.56567,112.56567 0 0 0 -61.54378,31.00261 L 137.5604,524.13999 c -22.06727,21.7357 -44.800353,62.16461 -42.807827,105.33775 1.992526,43.17294 23.611297,74.17707 41.821697,92.90754 36.42047,37.46119 70.47655,49.63262 108.29277,63.04174 64.11308,22.73423 139.16868,36.90745 214.51603,40.69716 l 14.56852,-191.64371 c 0.5518,-7.25993 -5.41579,-18.04152 -13.70173,-22.83439 l -156.6027,-90.58686 c -5.67342,-3.28191 -9.21355,-11.1529 -5.39848,-17.90373 2.52075,-4.46022 6.48264,-6.85019 11.29953,-6.74573 2.18919,0.0486 4.55649,0.6102 7.04394,1.72725 l 168.01516,75.44654 c 8.00195,3.5932 17.25525,5.94816 24.36062,5.94816 7.10537,0 16.35868,-2.35496 24.3606,-5.94816 L 701.3437,498.13701 c 7.96001,-3.57442 14.67693,-1.46898 18.34348,5.01848 3.81507,6.75083 0.27469,14.62182 -5.3986,17.90373 l -156.60259,90.58686 c -8.28592,4.79287 -14.2539,15.57446 -13.7019,22.83439 l 14.4965,190.66716 c 71.92518,-4.9329 141.2058,-18.84964 200.39333,-40.40205 37.56073,-13.67729 71.50331,-26.21342 107.19371,-64.77214 17.84511,-19.27931 38.30348,-51.10374 39.27148,-93.38497 0.968,-42.28125 -21.30324,-81.09996 -42.97735,-102.44848 L 578.94378,244.98058 a 112.56567,112.56567 0 0 0 -81.48567,-32.33431 z" />
+  </g>
+</svg>

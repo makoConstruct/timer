@@ -1,3 +1,27 @@
+/*
+I stopped working on this right before getting the trees to become active and render. I realized the work was making me hate myself. I did not set out to make a video game with this project. I think this video game never would have been particularly fun. Games need some immersion or dexterity challenge to be fun. The UI here is too minimalistic, even if the strategy layer is quite good, it wont immerse people. But even if it did, I don't remember why I felt this needed to be made. It's certainly not the thing I should be doing.
+
+Just so that you know where it was at, this was the final prompt that I decided not to run.
+```
+Move reactive game state into a GameState mobj that's passed to the widgets that need it. Includes:
+
+GameStateType help.
+prepare a new static uuid for a single global Mobj<GameState>.
+
+Signal<List<Signal<JWorldEntity>>> seatedEntities (for entities that haven't been interacted with since generation, or are in their default state, so need to be loaded and deloaded as the camera moves),
+Mobj<List<MobjID>> unseatedEntities (for the others, which are always live)
+Mobj<Coord> playerPos, which replaces the camera signal.
+terrainAt should be moved into GameState
+are we able to generate UUIDs from hashes?
+
+Computed<Set<Signal<JWorldEntity>>>> liveEntityLookup, which is computed from the above two
+
+Whenever a new tile is loaded or deloaded, (in response to camera movement)
+
+Then make EntityPainter real.
+```
+ */
+
 import 'dart:collection';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -10,58 +34,15 @@ import 'package:makos_timer/buffered_grid_image.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart';
 import 'package:makos_timer/mobj.dart';
+import 'package:makos_timer/type_help.dart';
 import 'package:makos_timer/noise_generators.dart';
 import 'package:makos_timer/terrain_tiles.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:signals/signals_flutter.dart';
 
 // how generation works: you define a sequence of entity types, which have 'radius's, which are how far away they can affect the generation of other things, the lower it is the fewer need to be loaded at once. Each type is given all instances of the previous types, via the GenerationContext, within `radius` range of it, and it then generates its stuff using that.
 // a core insight is that many generation stages are only useful during generation and aren't shown in the final output, they're used as skeletons or outlines by later stages to coordinate and allow things to avoid colliding and such.
 // each generation type generates into the GenerationContext, which can have any structure.
-
-class Coord {
-  final int x;
-  final int y;
-  Coord(this.x, this.y);
-  @override
-  String toString() {
-    return 'Coord(x: $x, y: $y)';
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is Coord && other.x == x && other.y == y;
-  }
-
-  @override
-  int get hashCode => x.hashCode ^ y.hashCode;
-  Coord operator +(Coord other) {
-    return Coord(x + other.x, y + other.y);
-  }
-
-  Offset toOffset() {
-    return Offset(x.toDouble(), y.toDouble());
-  }
-
-  Coord operator -(Coord other) {
-    return Coord(x - other.x, y - other.y);
-  }
-
-  Coord operator *(int other) {
-    return Coord(x * other, y * other);
-  }
-
-  Coord operator /(int other) {
-    return Coord(x ~/ other, y ~/ other);
-  }
-
-  Coord operator %(int other) {
-    return Coord(x % other, y % other);
-  }
-
-  Coord operator ~/(int other) {
-    return Coord(x ~/ other, y ~/ other);
-  }
-}
 
 /// how far can the player pace back and forth without causing a bunch of stuff to load and unload each time. Delays layer deloading until a certain range, basically.
 const double loadingBorderSlop = 2;
@@ -158,6 +139,172 @@ class GenerationThingType<GC extends GenerationContext> {
 // we then choose our final tile variant as choose(base_set(x,y) - base_set(x-1,y) - base_set(x,y-1))
 // able to guarantee that this will at least contain lcg(x,y).
 
+// ──────────────────────────────────────────────
+// Assets & loading
+// ──────────────────────────────────────────────
+
+const int atlasTileSize = 64;
+
+const _treeAssets = [
+  'assets/journey/tree p1.svg',
+  'assets/journey/tree c2.svg',
+  'assets/journey/tree r3.svg',
+  'assets/journey/tree o4.svg',
+];
+
+late ui.Image terrainAtlas;
+late ui.Image treeAtlas;
+
+Future<void> loadJourneyAssets() async {
+  terrainAtlas = buildTerrainAtlas(atlasTileSize);
+  treeAtlas = await _buildTreeAtlas(atlasTileSize);
+}
+
+Future<ui.Image> _buildTreeAtlas(int tileSize) async {
+  final rec = ui.PictureRecorder();
+  final w = tileSize * _treeAssets.length;
+  final canvas = Canvas(
+    rec,
+    Rect.fromLTWH(0, 0, w.toDouble(), tileSize.toDouble()),
+  );
+
+  for (var i = 0; i < _treeAssets.length; i++) {
+    final loader = SvgAssetLoader(_treeAssets[i]);
+    final info = await vg.loadPicture(loader, null, clipViewbox: false);
+    canvas.save();
+    canvas.translate(i * tileSize.toDouble(), 0);
+    canvas.scale(tileSize / info.size.width, tileSize / info.size.height);
+    canvas.drawPicture(info.picture);
+    info.picture.dispose();
+    canvas.restore();
+  }
+
+  final picture = rec.endRecording();
+  final image = picture.toImageSync(w, tileSize);
+  picture.dispose();
+  return image;
+}
+
+Rect _treeSrcRect(int kind) {
+  final ts = atlasTileSize.toDouble();
+  return Rect.fromLTWH(kind * ts, 0, ts, ts);
+}
+
+// ──────────────────────────────────────────────
+// Entities
+// ──────────────────────────────────────────────
+
+abstract class JWorldEntity {
+  Coord? get position;
+  JKind get kind;
+  void paint(Canvas canvas);
+}
+
+abstract class JCarryable extends JWorldEntity {
+  bool get inventoried => position == null;
+  List<JKind> get liftRequirements;
+  int get carriageDistance;
+}
+
+class JTree extends JCarryable {
+  final int seed;
+  Coord? _position;
+
+  JTree({required this.seed, required Coord position}) : _position = position;
+
+  @override
+  Coord? get position => _position;
+
+  set position(Coord? value) => _position = value;
+
+  @override
+  JKind get kind => JKind.tree;
+
+  @override
+  List<JKind> get liftRequirements => [];
+
+  @override
+  int get carriageDistance => 13;
+
+  int get treeKind => hashThree(seed, 0, 0xA) % 4;
+
+  Offset get jitter {
+    final h1 = hashThree(seed, 0, 0x7A91);
+    final h2 = hashThree(seed, 0, 0x7A92);
+    final angle = scalarFromHashInt(h1) * 2 * pi;
+    final length = scalarFromHashInt(h2);
+    return angleToOffset(angle) * length;
+  }
+
+  @override
+  void paint(Canvas canvas) {
+    if (_position == null) return;
+    final p = _position!.toOffset() + jitter * 0.2;
+    canvas.drawImageRect(
+      treeAtlas,
+      _treeSrcRect(treeKind),
+      Rect.fromLTWH(p.dx, p.dy, 1, 1),
+      Paint()..filterQuality = FilterQuality.low,
+    );
+  }
+}
+
+class JWorldEntityType extends TypeHelp<JWorldEntity> {
+  JWorldEntityType() : super('JWorldEntity');
+
+  @override
+  JWorldEntity fromJsonValue(Object? json) {
+    if (json is Map<String, dynamic>) {
+      final kind = JKind.values[IntType().fromJson(json['kind'])];
+      switch (kind) {
+        case JKind.tree:
+          return JTree(
+            seed: IntType().fromJson(json['seed']),
+            position: CoordType().fromJson(json['position']),
+          );
+      }
+    }
+    throw ArgumentError('Cannot convert $json to JWorldEntity');
+  }
+
+  @override
+  Object? toJsonValue(JWorldEntity object) {
+    final base = {
+      'kind': IntType().toJson(object.kind.index),
+      'position': object.position != null
+          ? CoordType().toJson(object.position!)
+          : null,
+    };
+    if (object is JTree) {
+      base['seed'] = IntType().toJson(object.seed);
+    }
+    return base;
+  }
+}
+
+List<JTree> spawnTrees(
+  int cellSeed,
+  Coord cellOrigin,
+  int cellSize,
+  TerrainKind Function(Coord) terrainAt,
+) {
+  final trees = <JTree>[];
+  for (var dy = 0; dy < cellSize; dy++) {
+    for (var dx = 0; dx < cellSize; dx++) {
+      final coord = cellOrigin + Coord(dx, dy);
+      final h = hashThree(coord.x, coord.y, cellSeed);
+      if (terrainAt(coord) == TerrainKind.grass && h % 10 == 0) {
+        trees.add(JTree(seed: h, position: coord));
+      }
+    }
+  }
+  return trees;
+}
+
+// ──────────────────────────────────────────────
+// Game UI
+// ──────────────────────────────────────────────
+
 class JourneyingGameScreen extends StatefulWidget {
   const JourneyingGameScreen({super.key});
 
@@ -167,8 +314,15 @@ class JourneyingGameScreen extends StatefulWidget {
 
 class _JourneyingGameScreenState extends State<JourneyingGameScreen> {
   Offset movementControlAccumulator = Offset.zero;
+  late final Future<void> _assetsFuture;
 
   final Signal<Coord> camera = signal(Coord(0, 0));
+
+  @override
+  void initState() {
+    super.initState();
+    _assetsFuture = loadJourneyAssets();
+  }
 
   void movePlayerBy(Coord coord) {
     camera.value = camera.value + coord;
@@ -177,154 +331,172 @@ class _JourneyingGameScreenState extends State<JourneyingGameScreen> {
   @override
   Widget build(BuildContext context) {
     final thumbSpan = Thumbspan.of(context);
-    final double movementControlThreshold = thumbSpan * 0.14;
+    final double movementControlThreshold = thumbSpan * 0.27;
     return Scaffold(
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          final height = constraints.maxHeight;
-          final isWide = width > height;
-          final crossSpan = isWide ? height : width;
-          final mainSpan = isWide ? width : height;
-          const controlsMinExtent = 150.0;
-          final worldSpan = (mainSpan - controlsMinExtent).clamp(
-            0.0,
-            crossSpan,
-          );
+      body: FutureBuilder<void>(
+        future: _assetsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(
+              child: Text('Error loading assets: ${snapshot.error}'),
+            );
+          }
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              final height = constraints.maxHeight;
+              final isWide = width > height;
+              final crossSpan = isWide ? height : width;
+              final mainSpan = isWide ? width : height;
+              const controlsMinExtent = 150.0;
+              final worldSpan = (mainSpan - controlsMinExtent).clamp(
+                0.0,
+                crossSpan,
+              );
 
-          final worldWidget = SizedBox(
-            width: isWide ? worldSpan : worldSpan.clamp(0.0, width),
-            height: isWide ? worldSpan.clamp(0.0, height) : worldSpan,
-            child: WorldView(camera: camera),
-          );
+              final worldWidget = SizedBox(
+                width: isWide ? worldSpan : worldSpan.clamp(0.0, width),
+                height: isWide ? worldSpan.clamp(0.0, height) : worldSpan,
+                child: WorldView(camera: camera),
+              );
 
-          final controlsWidget = Expanded(
-            child: LayoutBuilder(
-              builder: (context, cc) {
-                final cw = cc.maxWidth;
-                final ch = cc.maxHeight;
-                final rightWidth = min(ch, cw - width / 5).clamp(0.0, cw);
-                final inventoryWidth = cw - rightWidth;
-                final buttonSpan = watchSignal(
-                  context,
-                  Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
-                )!;
-                final itemWidth = buttonSpan * 0.8;
-                final mt = MakoThemeData.fromContext(context);
+              final controlsWidget = Expanded(
+                child: LayoutBuilder(
+                  builder: (context, cc) {
+                    final cw = cc.maxWidth;
+                    final ch = cc.maxHeight;
+                    final rightWidth = min(ch, cw - width / 5).clamp(0.0, cw);
+                    final inventoryWidth = cw - rightWidth;
+                    final buttonSpan = watchSignal(
+                      context,
+                      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
+                    )!;
+                    final itemWidth = buttonSpan * 0.8;
+                    final mt = MakoThemeData.fromContext(context);
 
-                return Row(
-                  children: [
-                    SizedBox(
-                      width: inventoryWidth,
-                      height: ch,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: SingleChildScrollView(
-                              child: Column(
-                                children: [
-                                  for (var i = 0; i < 10; i++)
-                                    SizedBox.square(
-                                      dimension: itemWidth,
-                                      child: const Placeholder(),
-                                    ),
-                                  SizedBox(height: itemWidth),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 0,
-                            bottom: 0,
-                            child: IconButton(
-                              constraints: BoxConstraints.loose(
-                                Size(itemWidth, itemWidth),
-                              ),
-                              icon: const Icon(Icons.settings),
-                              onPressed: () => Navigator.of(context).push(
-                                CircularRevealRoute(
-                                  builder: (_) => const JourneySettingsScreen(),
+                    return Row(
+                      children: [
+                        SizedBox(
+                          width: inventoryWidth,
+                          height: ch,
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    children: [
+                                      for (var i = 0; i < 10; i++)
+                                        SizedBox.square(
+                                          dimension: itemWidth,
+                                          child: const Placeholder(),
+                                        ),
+                                      SizedBox(height: itemWidth),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
+                              Positioned(
+                                left: 0,
+                                bottom: 0,
+                                child: IconButton(
+                                  constraints: BoxConstraints.loose(
+                                    Size(itemWidth, itemWidth),
+                                  ),
+                                  icon: const Icon(Icons.settings),
+                                  onPressed: () => Navigator.of(context).push(
+                                    CircularRevealRoute(
+                                      builder: (_) =>
+                                          const JourneySettingsScreen(),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        onPanUpdate: (details) {
-                          movementControlAccumulator += details.delta;
-                          // visualize it as a shallow v shape. The intention is to make it so that if the user has dragged to the left or right somewhat, they have to drag further to trigger. Accidental triggers are common when trying to change direction.
-                          // bool exceedsArrowInDirection(Coord direction) {
-                          //   double cross = dot(orthClockwise(direction.toOffset()),
-                          //       movementControlAccumulator);
-                          //   double main =
-                          //       dot(direction.toOffset(), movementControlAccumulator);
-                          //   return main >
-                          //       movementControlThreshold + cross.abs() * 0.2;
-                          // }
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onPanUpdate: (details) {
+                              movementControlAccumulator += details.delta;
+                              // visualize it as a shallow v shape. The intention is to make it so that if the user has dragged to the left or right somewhat, they have to drag further to trigger. Accidental triggers are common when trying to change direction.
+                              // bool exceedsArrowInDirection(Coord direction) {
+                              //   double cross = dot(orthClockwise(direction.toOffset()),
+                              //       movementControlAccumulator);
+                              //   double main =
+                              //       dot(direction.toOffset(), movementControlAccumulator);
+                              //   return main >
+                              //       movementControlThreshold + cross.abs() * 0.2;
+                              // }
 
-                          // for (final direction in [
-                          //   Coord(1, 0),
-                          //   Coord(0, 1),
-                          //   Coord(-1, 0),
-                          //   Coord(0, -1)
-                          // ]) {
-                          //   if (exceedsArrowInDirection(direction)) {
-                          //     movePlayerBy(direction);
-                          //     movementControlAccumulator = Offset.zero;
-                          //     break;
-                          //   }
-                          // }
+                              // for (final direction in [
+                              //   Coord(1, 0),
+                              //   Coord(0, 1),
+                              //   Coord(-1, 0),
+                              //   Coord(0, -1)
+                              // ]) {
+                              //   if (exceedsArrowInDirection(direction)) {
+                              //     movePlayerBy(direction);
+                              //     movementControlAccumulator = Offset.zero;
+                              //     break;
+                              //   }
+                              // }
 
-                          if (offsetMax(offsetAbs(movementControlAccumulator)) >
-                              movementControlThreshold) {
-                            movePlayerBy(
-                              toCardinalCoord(movementControlAccumulator),
-                            );
-                            movementControlAccumulator = Offset.zero;
-                          }
+                              if (offsetMax(
+                                    offsetAbs(movementControlAccumulator),
+                                  ) >
+                                  movementControlThreshold) {
+                                movePlayerBy(
+                                  toCardinalCoord(movementControlAccumulator),
+                                );
+                                movementControlAccumulator = Offset.zero;
+                              }
 
-                          // this one felt surprisingly bad, very prone to going forward when the user's trying to turn.
-                          // if (movementControlAccumulator.distance >
-                          //     movementControlThreshold) {
-                          //   movePlayerBy(toCardinalCoord(movementControlAccumulator));
-                          //   movementControlAccumulator = Offset.zero;
-                          // }
-                        },
-                        onPanEnd: (details) {
-                          movementControlAccumulator = Offset.zero;
-                        },
-                        child: SizedBox.expand(
-                          child: Container(
-                            color: mt.midBackColor,
-                            child: Align(
-                              alignment: Alignment.bottomLeft,
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Text(
-                                  "MOVE",
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: mt.hintTextColor),
+                              // this one felt surprisingly bad, very prone to going forward when the user's trying to turn.
+                              // if (movementControlAccumulator.distance >
+                              //     movementControlThreshold) {
+                              //   movePlayerBy(toCardinalCoord(movementControlAccumulator));
+                              //   movementControlAccumulator = Offset.zero;
+                              // }
+                            },
+                            onPanEnd: (details) {
+                              movementControlAccumulator = Offset.zero;
+                            },
+                            child: SizedBox.expand(
+                              child: Container(
+                                color: mt.midBackColor,
+                                child: Align(
+                                  alignment: Alignment.bottomLeft,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Text(
+                                      "MOVE",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(color: mt.hintTextColor),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          );
+                      ],
+                    );
+                  },
+                ),
+              );
 
-          if (isWide) {
-            return Row(children: [worldWidget, controlsWidget]);
-          } else {
-            return Column(children: [worldWidget, controlsWidget]);
-          }
+              if (isWide) {
+                return Row(children: [worldWidget, controlsWidget]);
+              } else {
+                return Column(children: [worldWidget, controlsWidget]);
+              }
+            },
+          );
         },
       ),
     );
@@ -363,7 +535,7 @@ class WorldView extends StatefulWidget {
 }
 
 class _WorldViewState extends State<WorldView>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, SignalsMixin {
   static const _spring = SpringDescription(
     mass: 1,
     stiffness: 100,
@@ -376,6 +548,7 @@ class _WorldViewState extends State<WorldView>
   SpringSimulation? _simX;
   SpringSimulation? _simY;
   double _simTime = 0;
+  static const int cellsInView = 46;
   Duration _tickerBase = Duration.zero;
   Duration _lastElapsed = Duration.zero;
 
@@ -385,14 +558,19 @@ class _WorldViewState extends State<WorldView>
     paintTile: _paintBackgroundTile,
   );
 
-  static final Paint _bgFill = Paint()..color = const Color(0xFF000000);
-  static const int _atlasTileSize = 64;
-  static final ui.Image _terrainAtlas = buildTerrainAtlas(_atlasTileSize);
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick);
+    createEffect(() {
+      _retarget(widget.camera.value.toOffset());
+    });
+  }
 
   TerrainKind terrainAt(Coord c) {
     final tombOrGrass = weightedAverage([
       (1, perlin(Offset(c.x.toDouble(), c.y.toDouble()) / 8, 0xDEADBEEF)),
-      (0.2, scalarFromHashInt(hashCorner(c.x, c.y, 6))),
+      (0.2, scalarFromHashInt(hashThree(c.x, c.y, 6))),
       (0.4, perlin(Offset(c.x.toDouble(), c.y.toDouble()) / 5, 85)),
     ]);
 
@@ -406,6 +584,7 @@ class _WorldViewState extends State<WorldView>
         : (tombOrGrass > 0.5 ? TerrainKind.tomb : TerrainKind.grass);
   }
 
+  /// paints to 0,0 at 1,1 span
   void _paintBackgroundTile(Canvas canvas, Coord tile) {
     final layers = tilesForPlaces(
       terrainAt(tile + Coord(1, 0)).index,
@@ -413,7 +592,7 @@ class _WorldViewState extends State<WorldView>
       terrainAt(tile + Coord(0, 1)).index,
       terrainAt(tile + Coord(1, 1)).index,
     );
-    final ts = _atlasTileSize;
+    final ts = atlasTileSize;
     final dst = const Rect.fromLTWH(0, 0, 1, 1);
     bool first = true;
     for (final (visual, rotation, type) in layers) {
@@ -427,7 +606,7 @@ class _WorldViewState extends State<WorldView>
         // Base layer: always draw a full tile.
         first = false;
         canvas.drawImageRect(
-          _terrainAtlas,
+          terrainAtlas,
           terrainTileAtlasSrcRect(TerrainCornerVisualTile.full, ts),
           dst,
           paint,
@@ -436,23 +615,17 @@ class _WorldViewState extends State<WorldView>
       } else {
         final src = terrainTileAtlasSrcRect(visual, ts);
         if (rotation == Cardinality.east) {
-          canvas.drawImageRect(_terrainAtlas, src, dst, paint);
+          canvas.drawImageRect(terrainAtlas, src, dst, paint);
         } else {
           canvas.save();
           canvas.translate(0.5, 0.5);
           canvas.rotate(rotation.index * pi / 2);
           canvas.translate(-0.5, -0.5);
-          canvas.drawImageRect(_terrainAtlas, src, dst, paint);
+          canvas.drawImageRect(terrainAtlas, src, dst, paint);
           canvas.restore();
         }
       }
     }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = createTicker(_onTick);
   }
 
   @override
@@ -495,30 +668,23 @@ class _WorldViewState extends State<WorldView>
     if (_simX!.isDone(_simTime) && _simY!.isDone(_simTime)) {
       _ticker.stop();
     }
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final cam = watchSignal(context, widget.camera);
-
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewWidth = constraints.maxWidth;
         final viewHeight = constraints.maxHeight;
-        final trueItemWidth = viewWidth / 32;
+        final trueItemWidth = viewWidth / cellsInView;
         final scale = trueItemWidth;
         final viewTilesW = viewWidth / scale;
         final viewTilesH = viewHeight / scale;
 
         final dpr = MediaQuery.devicePixelRatioOf(context);
         _bgBuffer.resize(viewTilesW, viewTilesH, (scale * dpr).ceil());
-
-        if (cam != _lastCamera) {
-          _lastCamera = cam;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _retarget(cam.toOffset());
-          });
-        }
 
         return ClipRect(
           child: ListenableBuilder(
@@ -537,17 +703,41 @@ class _WorldViewState extends State<WorldView>
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        CustomPaint(
-                          painter: _BufferedWorldPainter(bgBuffer: _bgBuffer),
+                        // this widget is infinitely large I guess, but it's given size bounds in the resize call above, and it only draws four quads at most
+                        CustomPaint(painter: _bgBuffer),
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          child: Watch((context) {
+                            final liveEntities = watchSignal(
+                              context,
+                              widget.game.liveEntities,
+                            );
+                            return Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                for (final e in liveEntities)
+                                  Positioned(
+                                    left: e.position.x - 0.5,
+                                    top: e.position.y - 0.5,
+                                    width: 1,
+                                    height: 1,
+                                    child: CustomPaint(
+                                      painter: EntityPainter(entity: e),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          }),
                         ),
                         Positioned(
-                          left: cam.x + 0.25,
-                          top: cam.y + 0.25,
+                          left: cam.x - 0.25,
+                          top: cam.y - 0.25,
                           width: 0.5,
                           height: 0.5,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: Colors.amber.withValues(alpha: 0.5),
+                              color: grey(0.3),
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -563,20 +753,6 @@ class _WorldViewState extends State<WorldView>
       },
     );
   }
-}
-
-class _BufferedWorldPainter extends CustomPainter {
-  final BufferedGridImage bgBuffer;
-
-  _BufferedWorldPainter({required this.bgBuffer});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    bgBuffer.render(canvas);
-  }
-
-  @override
-  bool shouldRepaint(_BufferedWorldPainter old) => true;
 }
 
 class JourneySettingsScreen extends StatefulWidget {

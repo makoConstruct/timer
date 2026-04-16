@@ -1,5 +1,8 @@
+import 'dart:ui';
+
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/platform_audio.dart';
+import 'package:signals/signals.dart';
 
 import 'mobj.dart';
 
@@ -69,6 +72,9 @@ class TimerData {
   /// not at startTime + duration. Set when started with a delay (right-justified parallel children).
   final bool soundsOnStart;
 
+  /// per-timer sound override. null means use the global default.
+  final AudioInfo? soundEffect;
+
   Duration get duration => digitsToDuration(digits);
 
   /// in seconds
@@ -95,6 +101,7 @@ class TimerData {
     this.title,
     this.parentId,
     this.soundsOnStart = false,
+    this.soundEffect,
   }) {
     this.startTime = startTime ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
@@ -119,6 +126,8 @@ class TimerData {
     String? parentId,
     bool parentIdNull = false,
     bool? soundsOnStart,
+    AudioInfo? soundEffect,
+    bool soundEffectNull = false,
   }) {
     return TimerData(
       startTime: startTime ?? this.startTime,
@@ -138,6 +147,7 @@ class TimerData {
       title: titleNull ? null : (title ?? this.title),
       parentId: parentIdNull ? null : (parentId ?? this.parentId),
       soundsOnStart: soundsOnStart ?? this.soundsOnStart,
+      soundEffect: soundEffectNull ? null : (soundEffect ?? this.soundEffect),
     );
   }
 
@@ -276,6 +286,9 @@ class TimerDataType extends TypeHelp<TimerData> {
         title: Nullable(StringType()).fromJson(json['title']),
         parentId: Nullable(StringType()).fromJson(json['parentId']),
         soundsOnStart: BoolType().fromJson(json['soundsOnStart'] ?? false),
+        soundEffect: json['soundEffect'] != null
+            ? AudioInfoType().fromJson(json['soundEffect'])
+            : null,
       );
     }
     throw ArgumentError('Cannot convert $json to TimerData');
@@ -300,6 +313,9 @@ class TimerDataType extends TypeHelp<TimerData> {
       'title': Nullable(StringType()).toJson(object.title),
       'parentId': Nullable(StringType()).toJson(object.parentId),
       'soundsOnStart': BoolType().toJson(object.soundsOnStart),
+      'soundEffect': object.soundEffect != null
+          ? AudioInfoType().toJsonValue(object.soundEffect!)
+          : null,
     };
   }
 }
@@ -322,6 +338,8 @@ TimerData cloneTimerDataWithChanges(
   bool titleNull = false,
   String? parentId,
   bool parentIdNull = false,
+  AudioInfo? soundEffect,
+  bool soundEffectNull = false,
 }) {
   return TimerData(
     startTime: startTime ?? old.startTime,
@@ -338,6 +356,8 @@ TimerData cloneTimerDataWithChanges(
     children: children ?? old.children,
     title: titleNull ? null : (title ?? old.title),
     parentId: parentIdNull ? null : (parentId ?? old.parentId),
+    soundEffect:
+        soundEffectNull ? null : (soundEffect ?? old.soundEffect),
   );
 }
 
@@ -346,6 +366,20 @@ class Coord {
   final int y;
   const Coord(this.x, this.y);
   Coord withChanges({int? x, int? y}) => Coord(x ?? this.x, y ?? this.y);
+  @override
+  String toString() => 'Coord(x: $x, y: $y)';
+  @override
+  bool operator ==(Object other) =>
+      other is Coord && other.x == x && other.y == y;
+  @override
+  int get hashCode => x.hashCode ^ y.hashCode;
+  Coord operator +(Coord other) => Coord(x + other.x, y + other.y);
+  Coord operator -(Coord other) => Coord(x - other.x, y - other.y);
+  Coord operator *(int other) => Coord(x * other, y * other);
+  Coord operator /(int other) => Coord(x ~/ other, y ~/ other);
+  Coord operator %(int other) => Coord(x % other, y % other);
+  Coord operator ~/(int other) => Coord(x ~/ other, y ~/ other);
+  Offset toOffset() => Offset(x.toDouble(), y.toDouble());
 }
 
 class CoordType extends TypeHelp<Coord> {
@@ -398,9 +432,22 @@ class JourneyPlayerType extends TypeHelp<JourneyPlayer> {
 class JourneyState {
   final String seed;
   final MobjID player;
-  const JourneyState({required this.seed, required this.player});
+  final Map<MobjID, Mobj> liveEntities;
+  final Signal<List<MobjID>> inventory;
+  JourneyState({
+    required this.seed,
+    required this.player,
+    Map<MobjID, Mobj>? liveEntities,
+    Signal<List<MobjID>>? inventory,
+  })  : liveEntities = liveEntities ?? {},
+        inventory = inventory ?? signal([]);
   JourneyState withChanges({String? seed, MobjID? player}) =>
-      JourneyState(seed: seed ?? this.seed, player: player ?? this.player);
+      JourneyState(
+        seed: seed ?? this.seed,
+        player: player ?? this.player,
+        liveEntities: liveEntities,
+        inventory: inventory,
+      );
 }
 
 class JourneyStateType extends TypeHelp<JourneyState> {
@@ -423,6 +470,8 @@ class JourneyStateType extends TypeHelp<JourneyState> {
         'player': StringType().toJson(object.player),
       };
 }
+
+enum JKind { tree }
 
 class AudioInfoType extends TypeHelp<AudioInfo> {
   AudioInfoType() : super('AudioInfo');

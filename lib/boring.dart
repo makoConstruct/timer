@@ -2549,6 +2549,7 @@ class InkButton extends StatefulWidget {
   final Widget? child;
   final Widget Function(BuildContext context, bool isOn)? builder;
   final VoidCallback? onTap;
+  final ValueChanged<Offset>? onTapUpGlobalPosition;
   final Duration wellDuration;
   final Duration fadeDuration;
   final double fuzzyEdgeWidth;
@@ -2560,6 +2561,7 @@ class InkButton extends StatefulWidget {
   InkButton({
     super.key,
     this.onTap,
+    this.onTapUpGlobalPosition,
     this.wellDuration = const Duration(milliseconds: 290),
     this.fadeDuration = const Duration(milliseconds: 170),
     this.fadeDelay = const Duration(milliseconds: 50),
@@ -2631,6 +2633,7 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
 
   void _handleTapUp(TapUpDetails details) {
     _wells.lastOrNull?.confirm();
+    widget.onTapUpGlobalPosition?.call(details.globalPosition);
     widget.onTap?.call();
   }
 

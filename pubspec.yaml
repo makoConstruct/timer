@@ -61,6 +61,7 @@ dependencies:
   # liquid_glass_renderer: ^0.2.0-dev.4
   vibration: ^3.1.8
   shadow_widget: ^0.1.1
+  flutter_svg: ^2.0.9
   two_dimensional_scrollables: ^0.4.2
 
 
@@ -101,6 +102,7 @@ flutter:
     - assets/sounds/jingles_STEEL15.ogg
     - assets/sounds/jingles_STEEL16.ogg
     - assets/sounds/june_russel_mako_timer_e-piano_1.ogg
+    - assets/journey/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
