@@ -5837,15 +5837,16 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
-                  child: Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.primary,
+                if (title != null && title.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                    child: Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
                     ),
                   ),
-                ),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -5904,7 +5905,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                           ),
                         if (!widget.perTimerMode) SizedBox(width: 16),
                         Text(
-                          widget.perTimerMode ? 'Timer sound' : 'Alarm sound',
+                          widget.perTimerMode ? 'Pick a sound' : 'Alarm sound',
                           style: TextStyle(
                             color: theme.colorScheme.onSurface,
                             fontWeight: FontWeight.w500,
