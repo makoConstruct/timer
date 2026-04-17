@@ -25,7 +25,8 @@ bool _typeHelpDescriptionDeepEquals(Object a, Object b) {
 int _typeHelpDescriptionDeepHash(Object o) {
   if (o is List) {
     return Object.hashAll(
-        o.map((e) => _typeHelpDescriptionDeepHash(e as Object)));
+      o.map((e) => _typeHelpDescriptionDeepHash(e as Object)),
+    );
   }
   return o.hashCode;
 }
@@ -46,7 +47,9 @@ abstract class TypeHelp<T> {
       (other is TypeHelp &&
           runtimeType == other.runtimeType &&
           _typeHelpDescriptionDeepEquals(
-              typeDescription, other.typeDescription));
+            typeDescription,
+            other.typeDescription,
+          ));
 
   @override
   int get hashCode => _hashCode;
@@ -192,29 +195,31 @@ class MapType<K, V> extends TypeHelp<Map<K, V>> {
   final TypeHelp<V> valueConverter;
 
   MapType(this.keyConverter, this.valueConverter)
-      : super([
-          'map',
-          keyConverter.typeDescription,
-          valueConverter.typeDescription
-        ]);
+    : super([
+        'map',
+        keyConverter.typeDescription,
+        valueConverter.typeDescription,
+      ]);
 
   @override
   Map<K, V> fromJsonValue(Object? json) {
     if (json is Map<String, dynamic>) {
-      return json.map((key, value) => MapEntry(
-            keyConverter.fromJson(key),
-            valueConverter.fromJson(value),
-          ));
+      return json.map(
+        (key, value) => MapEntry(
+          keyConverter.fromJson(key),
+          valueConverter.fromJson(value),
+        ),
+      );
     }
     throw ArgumentError('Cannot convert $json to Map');
   }
 
   @override
   Object? toJsonValue(Map<K, V> object) {
-    return object.map((key, value) => MapEntry(
-          keyConverter.toJson(key),
-          valueConverter.toJson(value),
-        ));
+    return object.map(
+      (key, value) =>
+          MapEntry(keyConverter.toJson(key), valueConverter.toJson(value)),
+    );
   }
 }
 
@@ -292,8 +297,10 @@ class MobjRegistry {
     _preloadedMobjEncodings.remove(id);
   }
 
-  static QuerySet<T> createQuerySet<T>(TypeHelp<T> type,
-      {bool Function(T)? predicate}) {
+  static QuerySet<T> createQuerySet<T>(
+    TypeHelp<T> type, {
+    bool Function(T)? predicate,
+  }) {
     predicate = predicate ?? alwaysTrue;
     final qs = QuerySet<T>(type, predicate);
     multimapAdd(_querySets, type, qs);
@@ -389,11 +396,14 @@ class QuerySet<T> {
 
   void add(Mobj<T> mobj) {
     if (!inSet.containsKey(mobj.id)) {
-      inSet[mobj.id] = QueryTrack(mobj, mobj.subscribe((v) {
-        if (v == null || !predicate(v)) {
-          remove(mobj);
-        }
-      }));
+      inSet[mobj.id] = QueryTrack(
+        mobj,
+        mobj.subscribe((v) {
+          if (v == null || !predicate(v)) {
+            remove(mobj);
+          }
+        }),
+      );
       _onAdded.add(mobj);
     }
   }
@@ -491,10 +501,13 @@ class Mobj<T> extends Signal<T?> {
       jsonEncode({'type': type.typeDescription, 'value': type.toJson(v)});
   static T deserialize<T>(String s, TypeHelp<T> type) {
     var dec = jsonDecode(s);
-    if (!const DeepCollectionEquality()
-        .equals(dec['type'], type.typeDescription)) {
+    if (!const DeepCollectionEquality().equals(
+      dec['type'],
+      type.typeDescription,
+    )) {
       throw MobjTypeMismatchError(
-          'Mobj.deserialize: type mismatch, expected ${type.typeDescription} but got ${dec['type']}');
+        'Mobj.deserialize: type mismatch, expected ${type.typeDescription} but got ${dec['type']}',
+      );
     }
     return type.fromJson(dec['value']);
   }
@@ -511,11 +524,12 @@ class Mobj<T> extends Signal<T?> {
     required bool initialWriteBack,
     // on reflection I'm not sure we can support autodispose, because of the refcounting stuff
     // bool autoDispose = false,
-  })  : _isActive = isActive ?? true,
-        super(initial, debugLabel: debugLabel, autoDispose: false) {
+  }) : _isActive = isActive ?? true,
+       super(initial, debugLabel: debugLabel, autoDispose: false) {
     if (T == dynamic) {
       throw StateError(
-          "dynamic mobj type. It's very unlikely that this is what you intended, we're not sure how it could be. In most cases, this is an accident that will prevent you from being able to cast your Mobjs to the actual intended type.");
+        "dynamic mobj type. It's very unlikely that this is what you intended, we're not sure how it could be. In most cases, this is an accident that will prevent you from being able to cast your Mobjs to the actual intended type.",
+      );
     }
     MobjRegistry.loadedMobjs[_id] = this;
     _blockInitialWriteBack = !initialWriteBack;
@@ -564,16 +578,20 @@ class Mobj<T> extends Signal<T?> {
     if (loaded != null) {
       if (loaded.type != type) {
         throw MobjTypeMismatchError(
-            'Mobj.seekAlreadyLoaded: type mismatch, expected ${type.typeDescription} but got ${loaded.type.typeDescription}');
+          'Mobj.seekAlreadyLoaded: type mismatch, expected ${type.typeDescription} but got ${loaded.type.typeDescription}',
+        );
       }
       return loaded as Mobj<T>;
     }
     final pr = MobjRegistry._preloadedMobjEncodings[id];
     if (pr != null) {
-      final p = Mobj<T>._createAndRegister(id, type,
-          initial: Mobj.deserialize(pr, type),
-          debugLabel: id,
-          initialWriteBack: false);
+      final p = Mobj<T>._createAndRegister(
+        id,
+        type,
+        initial: Mobj.deserialize(pr, type),
+        debugLabel: id,
+        initialWriteBack: false,
+      );
       MobjRegistry._preloadedMobjEncodings.remove(id);
       return p;
     }
@@ -586,7 +604,8 @@ class Mobj<T> extends Signal<T?> {
     final m = seekAlreadyLoaded(id, type);
     if (m == null) {
       throw StateError(
-          "Mobj.get(id) was called for an id that isn't loaded, id=$id");
+        "Mobj.get(id) was called for an id that isn't loaded, id=$id",
+      );
     }
     return m;
   }
@@ -635,38 +654,37 @@ class Mobj<T> extends Signal<T?> {
     final valueEncoding = Mobj.serialize(iv, type);
     final ret = MobjRegistry.db
         .insertIfNotExistsAndReturn(
-            id: id,
-            value: valueEncoding,
-            timestamp: DateTime.now(),
-            sequenceNumber: 0,
-            isActive: true)
-        .then(
-      (v) {
-        MobjRegistry._loadingMobjs.remove(id);
-        assert(v.length == 1);
-        final vv = v.first;
-        if (vv.wasInserted == 0) {
-          return Mobj._createAndRegister(
-            id,
-            type,
-            initial: iv,
-            debugLabel: debugLabel,
-            initialWriteBack: true,
-          );
-        } else {
-          return Mobj._createAndRegister(
-            id,
-            type,
-            initial: Mobj.deserialize(vv.value!, type),
-            debugLabel: debugLabel,
-            initialWriteBack: false,
-            isActive: vv.isActive!,
-            timestamp: vv.timestamp!,
-            sequenceNumber: vv.sequenceNumber!,
-          );
-        }
-      },
-    );
+          id: id,
+          value: valueEncoding,
+          timestamp: DateTime.now(),
+          sequenceNumber: 0,
+          isActive: true,
+        )
+        .then((v) {
+          MobjRegistry._loadingMobjs.remove(id);
+          assert(v.length == 1);
+          final vv = v.first;
+          if (vv.wasInserted == 0) {
+            return Mobj._createAndRegister(
+              id,
+              type,
+              initial: iv,
+              debugLabel: debugLabel,
+              initialWriteBack: true,
+            );
+          } else {
+            return Mobj._createAndRegister(
+              id,
+              type,
+              initial: Mobj.deserialize(vv.value!, type),
+              debugLabel: debugLabel,
+              initialWriteBack: false,
+              isActive: vv.isActive!,
+              timestamp: vv.timestamp!,
+              sequenceNumber: vv.sequenceNumber!,
+            );
+          }
+        });
     MobjRegistry._loadingMobjs[id] = ret;
     return ret;
   }
@@ -676,9 +694,9 @@ class Mobj<T> extends Signal<T?> {
     MobjID id, {
     required TypeHelp<T> type,
   }) async {
-    final kv = await (MobjRegistry.db.kVs.select()
-          ..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
+    final kv =
+        await (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(id)))
+            .getSingleOrNull();
 
     if (kv == null) {
       throw StateError("Mobj $id does not exist in the database");
@@ -697,25 +715,26 @@ class Mobj<T> extends Signal<T?> {
     if (s != null) {
       return s;
     } else {
-      final Future<Mobj<T>> r = (MobjRegistry.db.kVs.select()
-            ..where((t) => t.id.equals(id)))
-          .getSingleOrNull()
-          .then((s) {
-        if (s != null) {
-          MobjRegistry._loadingMobjs.remove(id);
-          return Mobj<T>._createAndRegister(
-            id,
-            type,
-            initial: Mobj.deserialize(s.value, type),
-            debugLabel: debugLabel,
-            initialWriteBack: false,
-          );
-        } else {
-          // hmm why not just initialize as null
-          throw StateError(
-              "requested Mobj $id, no such Mobj resides in the database");
-        }
-      });
+      final Future<Mobj<T>> r =
+          (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(id)))
+              .getSingleOrNull()
+              .then((s) {
+                if (s != null) {
+                  MobjRegistry._loadingMobjs.remove(id);
+                  return Mobj<T>._createAndRegister(
+                    id,
+                    type,
+                    initial: Mobj.deserialize(s.value, type),
+                    debugLabel: debugLabel,
+                    initialWriteBack: false,
+                  );
+                } else {
+                  // hmm why not just initialize as null
+                  throw StateError(
+                    "requested Mobj $id, no such Mobj resides in the database",
+                  );
+                }
+              });
       MobjRegistry._loadingMobjs[id] = r;
       return r;
     }

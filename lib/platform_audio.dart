@@ -115,6 +115,19 @@ class PlatformAudio {
     }
   }
 
+  /// Android-only. Launches the system file picker so the user can choose an
+  /// arbitrary audio file. Returns null if they cancel.
+  static Future<AudioInfo?> pickAudioFile() async {
+    try {
+      final Map<dynamic, dynamic>? result =
+          await _channel.invokeMethod('pickAudioFile');
+      if (result == null) return null;
+      return AudioInfo.fromMap(result);
+    } on PlatformException catch (e) {
+      throw Exception('Failed to pick audio file: ${e.message}');
+    }
+  }
+
   static const List<AudioInfo> assetSounds = [
     AudioInfo(
         url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',

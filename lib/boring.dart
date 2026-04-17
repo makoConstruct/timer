@@ -3003,7 +3003,7 @@ class MakoThemeData {
             ),
             foreIndentColor: darkenColor(
               theme.colorScheme.surfaceContainerHighest,
-              0.07,
+              0.03,
             ),
             harderForeIndentColor: darkenColor(
               theme.colorScheme.surfaceContainerHighest,

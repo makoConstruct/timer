@@ -164,6 +164,12 @@ Future<void> initializeDatabase() async {
       debugLabel: "pad vertically ascending",
     ),
     Mobj.getOrCreate(
+      padLandscapeID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "pad landscape",
+    ),
+    Mobj.getOrCreate(
       selectedAudioID,
       type: AudioInfoType(),
       initial: () => PlatformAudio.assetSounds[0],
@@ -845,6 +851,11 @@ bool _startSingle(Mobj<TimerData> mobj, {Duration? delay}) {
     );
     return r;
   } else {
+    if ((delay == null || delay == Duration.zero) &&
+        data.duration <= Duration.zero) {
+      mobj.value = data.withRunningState(TimerData.completed);
+      return true;
+    }
     mobj.value = data.toggleRunning(delay: delay);
     return false;
   }
@@ -1794,7 +1805,7 @@ class TimerState extends TimerBaseState<Timer> {
             child: Container(
               height: underlineHeight,
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHigh,
+                color: mt.foreBackColor,
                 borderRadius: BorderRadius.circular(underlineHeight / 2),
               ),
             ),
@@ -3601,6 +3612,13 @@ class TimerScreenState extends State<TimerScreen>
       thumbSpan * 0.3,
       MediaQuery.of(context).padding.bottom,
     );
+    final bool padLandscape =
+        watchSignal(
+          context,
+          Mobj.getAlreadyLoaded(padLandscapeID, BoolType()),
+        ) ??
+        false;
+    final int padWidth = padLandscape ? 4 : 3;
     final controlsh = bottomGutter + 4 * buttonSpan;
     // Calculate the vertical space generally taken by Timer widgets (tallest, including padding).
     final timerHeight = Timer.usualHeight();
@@ -3821,11 +3839,13 @@ class TimerScreenState extends State<TimerScreen>
     double tentativeRightPos =
         screenSize.width - buttonSpan / 2 - backingDeflation;
     // double tentativeRightPos = screenSize.width - buttonSpan / 2;
+    // distance from the anchor (inner-palette column) to the horizontal center of the numeral pad
+    final double padCenterOffset = (padWidth + 1) / 2.0 * buttonSpan;
     final imperfection =
-        ((tentativeRightPos - 2 * buttonSpan) - screenSize.width / 2) /
+        ((tentativeRightPos - padCenterOffset) - screenSize.width / 2) /
         screenSize.width;
-    if (imperfection < 0.055) {
-      tentativeRightPos = screenSize.width / 2 + 2 * buttonSpan;
+    if (imperfection.abs() < 0.034) {
+      tentativeRightPos = screenSize.width / 2 + padCenterOffset;
     }
     final topRightControlAnchor = Offset(
       tentativeRightPos,
@@ -3872,8 +3892,8 @@ class TimerScreenState extends State<TimerScreen>
 
     Widget numeralBacking = Positioned.fromRect(
       rect: controlGridBound(
-        Offset(-3, 0),
-        Size(3, 4),
+        padLandscape ? Offset(-4, 0) : Offset(-3, 0),
+        padLandscape ? Size(4, 3) : Size(3, 4),
       ).deflate(backingDeflation),
       child: Container(
         constraints: BoxConstraints.expand(),
@@ -3947,15 +3967,14 @@ class TimerScreenState extends State<TimerScreen>
       ...List.generate(9, (i) {
         int ix = i % 3;
         int iy = i ~/ 3;
-        // double invert
-        if (!isRightHanded) {
-          ix = 2 - ix;
-        }
         if (watchSignal(
           context,
           Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType()),
         )!) {
           iy = 2 - iy;
+        }
+        if (!isRightHanded) {
+          ix = 2 - ix;
         }
         final ii = i + 1;
         return Positioned.fromRect(
@@ -3971,7 +3990,10 @@ class TimerScreenState extends State<TimerScreen>
         );
       }),
       Positioned.fromRect(
-        rect: controlGridBound(numeralPartAnchor + Offset(0, 3), Size(1, 1)),
+        rect: controlGridBound(
+          numeralPartAnchor + (padLandscape ? Offset(-1, 0) : Offset(0, 3)),
+          Size(1, 1),
+        ),
         child: NumeralButton(
           digits: [0],
           timerButtonKey: numeralKeys[0],
@@ -4056,6 +4078,10 @@ class TimerScreenState extends State<TimerScreen>
     final editPopoverBacking = AnimatedBuilder(
       animation: editPopoverAnimation,
       builder: (context, child) {
+        if (padLandscape) {
+          // the popover cells are already covered by the numpad backing
+          return SizedBox.shrink();
+        }
         final fromRect = controlGridBound(
           editPopoverOrigin,
           Size(1, 1),
@@ -5002,7 +5028,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late ScrollController _scrollController;
-
   @override
   void initState() {
     super.initState();
@@ -5018,17 +5043,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+    final (contentBackground, headingBackground) = maybeFlippedBackgroundColors(
       theme,
       widget.flipBackgroundColors,
     );
+    // it was too confusing to figure out which mt.indentColor to use here since there isn't even a correspondence between mt colors and the results of the maybeFlippedBackgroundColors function
+    final indentColor = theme.brightness == Brightness.light
+        ? darkenColor(contentBackground, 0.03)
+        : lightenColor(contentBackground, 0.03);
     final listItemPadding = const EdgeInsets.symmetric(
       horizontal: 16.0,
       vertical: 8.0,
     );
 
     Widget trailing(Widget child) =>
-        SizedBox(width: 32.0, child: Center(child: child));
+        SizedBox(width: 40.0, child: Center(child: child));
 
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
@@ -5050,7 +5079,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     return Scaffold(
-      backgroundColor: backgroundColorA,
+      backgroundColor: contentBackground,
       resizeToAvoidBottomInset: false,
       body: CustomScrollView(
         controller: _scrollController,
@@ -5098,8 +5127,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 bottom: 16.0,
               ),
             ),
-            backgroundColor: backgroundColorB,
-            surfaceTintColor: backgroundColorB,
+            backgroundColor: headingBackground,
+            surfaceTintColor: headingBackground,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
@@ -5189,6 +5218,87 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
+              Builder(
+                builder: (context) {
+                  final padLandscapeMobj = Mobj.getAlreadyLoaded(
+                    padLandscapeID,
+                    BoolType(),
+                  );
+                  final padLandscapeNonNull = computed(
+                    () => padLandscapeMobj.value ?? false,
+                    autoDispose: true,
+                  );
+                  return ListTile(
+                    title: Text(
+                      'Numpad orientation',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    subtitle: Watch(
+                      (context) => Text(
+                        padLandscapeNonNull.value ? 'landscape' : 'portrait',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    trailing: trailing(
+                      BoolSignalTween(
+                        signal: padLandscapeNonNull,
+                        duration: Duration(milliseconds: 600),
+                        builder: (context, progress, _) {
+                          final longDimension = 22 / 4 * 3;
+                          final shortDimension = 22.0;
+                          final hpu = 0.37;
+                          final h = lerp(
+                            shortDimension,
+                            longDimension,
+                            Curves.easeInOutCubic.transform(
+                              unlerpUnit(0, hpu, progress),
+                            ),
+                          );
+                          final w = lerp(
+                            longDimension,
+                            shortDimension,
+                            Curves.easeInOutCubic.transform(
+                              unlerpUnit(1 - hpu, 1, progress),
+                            ),
+                          );
+                          final movementp = Curves.easeInOutCubic.transform(
+                            1 - progress,
+                          );
+                          final centeredInset =
+                              (longDimension - shortDimension) / 2;
+                          return SizedBox(
+                            width: longDimension,
+                            height: longDimension,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned(
+                                  width: w,
+                                  height: h,
+                                  top: lerp(0, centeredInset, movementp),
+                                  right: lerp(centeredInset, 0, movementp),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primary,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    onTap: () {
+                      padLandscapeMobj.value = !padLandscapeMobj.value!;
+                    },
+                    contentPadding: listItemPadding,
+                  );
+                },
+              ),
               // Alarm sound setting
               Builder(
                 builder: (context) {
@@ -5251,7 +5361,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
                 final persistentAlarmMode =
                     persistentAlarmModeMobj.value ?? false;
-                return SwitchListTile(
+                return CheckboxListTile(
                   title: Text(
                     'Persistent alarm',
                     style: theme.textTheme.bodyLarge,
@@ -5384,9 +5494,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // Divider(indent: 22, endIndent: 22, height: 34),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: SeparatorGradient(
-                  color: MakoThemeData.fromContext(context).lowestIndentColor,
-                ),
+                child: SeparatorGradient(color: indentColor),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
@@ -5691,6 +5799,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
   final List<AudioInfo> _assetSounds = PlatformAudio.assetSounds;
+  final List<AudioInfo> _pickedFiles = [];
   late Function() listeningAudioEffectChange;
   bool _loading = true;
   late final Signal<AudioInfo?> _localSelection;
@@ -5748,6 +5857,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           _notificationSounds = notifications;
           _ringtoneSounds = ringtones;
           _loading = false;
+          _seedPickedFilesFromSelection();
         });
       }
     } catch (e) {
@@ -5758,8 +5868,75 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     }
   }
 
+  /// If the persisted selection's URL isn't in any loaded section, it must be
+  /// a previously picked custom file — show it in the "From Device" section so
+  /// the user sees what's currently selected.
+  void _seedPickedFilesFromSelection() {
+    final current = _localSelection.value;
+    if (current?.url == null) return;
+    bool existsIn(List<AudioInfo>? list) =>
+        list != null && list.any((a) => a.url == current!.url);
+    if (existsIn(_assetSounds) ||
+        existsIn(_alarmSounds) ||
+        existsIn(_notificationSounds) ||
+        existsIn(_ringtoneSounds)) {
+      return;
+    }
+    if (_pickedFiles.any((a) => a.url == current!.url)) return;
+    _pickedFiles.add(current!);
+  }
+
   void _popWithResult() {
     Navigator.of(context).pop(_localSelection.value);
+  }
+
+  Widget _buildPickFileChip(ThemeData theme) {
+    final jukeBox = Provider.of<JukeBox>(context, listen: false);
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () async {
+        jukeBox.pauseAudio();
+        final AudioInfo? picked;
+        try {
+          picked = await PlatformAudio.pickAudioFile();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Could not pick file: $e')));
+          }
+          return;
+        }
+        if (picked == null || !mounted) return;
+        final chosen = picked;
+        setState(() {
+          if (widget.perTimerMode && !_hasInteracted) _hasInteracted = true;
+          if (!_pickedFiles.any((a) => a.url == chosen.url)) {
+            _pickedFiles.add(chosen);
+          }
+          _localSelection.value = chosen;
+        });
+        jukeBox.playAudio(chosen);
+      },
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add, size: 16, color: theme.colorScheme.primary),
+            SizedBox(width: 4),
+            Text('Pick file…', style: theme.textTheme.bodyMedium),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -5774,6 +5951,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
       String title,
       List<AudioInfo?> sounds, {
       Duration? fadeDelay,
+      List<Widget> extraChildren = const [],
     }) {
       final animDuration = Duration(milliseconds: 100);
       final totalDuration = fadeDelay != null
@@ -5850,9 +6028,10 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: sounds
-                      .map((audio) => radioSelector(audio))
-                      .toList(),
+                  children: [
+                    ...sounds.map((audio) => radioSelector(audio)),
+                    ...extraChildren,
+                  ],
                 ),
               ],
             ),
@@ -5941,15 +6120,22 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                     ),
                   if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
                     section(
-                      'Phone Alarm Sounds (long duration)',
+                      'Device alarm sounds (long duration)',
                       _alarmSounds!,
                       fadeDelay: Duration(milliseconds: 100),
                     ),
                   if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
                     section(
-                      'Your Ringtones',
+                      'Device ringtones',
                       _ringtoneSounds!,
                       fadeDelay: Duration(milliseconds: 300),
+                    ),
+                  if (Platform.isAndroid)
+                    section(
+                      'From files',
+                      _pickedFiles,
+                      fadeDelay: Duration(milliseconds: 400),
+                      extraChildren: [_buildPickFileChip(theme)],
                     ),
                   SliverToBoxAdapter(
                     child: SizedBox(

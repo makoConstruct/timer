@@ -2,7 +2,9 @@
 
 package org.dreamshrine.makos_timer
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -16,14 +18,18 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry
 import java.util.concurrent.Executors
 
-class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
+class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry.ActivityResultListener {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var audioManager: AudioManager
@@ -31,6 +37,14 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
     private var audioFocusRequest: AudioFocusRequest? = null
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
+    private var pendingPickResult: Result? = null
+
+    companion object {
+        private const val PICK_AUDIO_REQUEST_CODE = 0x4A17
+    }
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "platform_audio")
@@ -85,6 +99,9 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
                 stopAudio()
                 result.success(null)
             }
+            "pickAudioFile" -> {
+                pickAudioFile(result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -94,6 +111,101 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         executor.shutdown()
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        activityBinding = binding
+        binding.addActivityResultListener(this)
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activityBinding?.removeActivityResultListener(this)
+        activity = null
+        activityBinding = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        onAttachedToActivity(binding)
+    }
+
+    override fun onDetachedFromActivity() {
+        activityBinding?.removeActivityResultListener(this)
+        activity = null
+        activityBinding = null
+    }
+
+    private fun pickAudioFile(result: Result) {
+        val act = activity
+        if (act == null) {
+            result.error("NO_ACTIVITY", "Activity not attached", null)
+            return
+        }
+        if (pendingPickResult != null) {
+            result.error("PICK_IN_PROGRESS", "A pick is already in progress", null)
+            return
+        }
+        pendingPickResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            act.startActivityForResult(intent, PICK_AUDIO_REQUEST_CODE)
+        } catch (e: Exception) {
+            pendingPickResult = null
+            result.error("PICK_FAILED", "Failed to launch picker: ${e.message}", null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != PICK_AUDIO_REQUEST_CODE) return false
+        val result = pendingPickResult ?: return true
+        pendingPickResult = null
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            result.success(null)
+            return true
+        }
+        val uri = data.data
+        if (uri == null) {
+            result.success(null)
+            return true
+        }
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // URI isn't persistable — the file will still play this session but
+            // may not survive app restart.
+        }
+        val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "Picked audio"
+        result.success(
+            mapOf(
+                "uri" to uri.toString(),
+                "name" to name,
+                "isLong" to true
+            )
+        )
+        return true
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun stringToRingtoneType(typeString: String): Int? {
