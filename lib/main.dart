@@ -17,6 +17,8 @@ import 'package:improved_wrap/improved_wrap.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/physics.dart' as physics;
 import 'package:flutter/scheduler.dart' hide Priority;
 import 'package:flutter/services.dart';
@@ -5361,15 +5363,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
                 final persistentAlarmMode =
                     persistentAlarmModeMobj.value ?? false;
-                return CheckboxListTile(
+                return RoundedCheckboxListTile(
                   title: Text(
                     'Persistent alarm',
                     style: theme.textTheme.bodyLarge,
                   ),
                   subtitle: Text(
                     persistentAlarmMode
-                        ? 'Alarm loops until you open the app'
-                        : 'Alarm plays once',
+                        ? 'On. Alarm loops until you open the app'
+                        : 'Off. Alarm plays once',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -5694,22 +5696,38 @@ class ThankAuthorScreen extends StatelessWidget {
   }
 }
 
-class AboutScreen extends StatelessWidget {
+class AboutScreen extends StatefulWidget {
   final bool flipBackgroundColors;
+  final GlobalKey? iconKey;
   const AboutScreen({
     super.key,
     this.iconKey,
     this.flipBackgroundColors = false,
   });
-  final GlobalKey? iconKey;
+
+  @override
+  State<AboutScreen> createState() => _AboutScreenState();
+}
+
+class _AboutScreenState extends State<AboutScreen> {
+  String? _md;
+
+  @override
+  void initState() {
+    super.initState();
+    rootBundle.loadString('assets/about.md').then((md) {
+      if (mounted) setState(() => _md = md);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
       theme,
-      flipBackgroundColors,
+      widget.flipBackgroundColors,
     );
+    final md = _md;
     return Scaffold(
       backgroundColor: backgroundColorA,
       body: CustomScrollView(
@@ -5755,15 +5773,42 @@ class AboutScreen extends StatelessWidget {
             scrolledUnderElevation: 0,
           ),
           SliverPadding(
-            padding: EdgeInsets.all(24.0),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                SizedBox(height: 24),
-                Text(
-                  "This was made over the span of many months of work and through much experimentation.",
-                  style: theme.textTheme.bodyMedium,
-                ),
-              ]),
+            padding: EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 24.0),
+            sliver: SliverToBoxAdapter(
+              child: md == null
+                  ? SizedBox.shrink()
+                  : TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0.0, end: 1.0),
+                      duration: Duration(milliseconds: 200),
+                      builder: (context, value, child) =>
+                          Opacity(opacity: value, child: child),
+                      child: MarkdownBody(
+                        data: md,
+                        selectable: true,
+                        onTapLink: (text, href, title) {
+                          if (href != null) launchUrl(Uri.parse(href));
+                        },
+                        styleSheet: MarkdownStyleSheet.fromTheme(theme)
+                            .copyWith(
+                              h1: theme.textTheme.titleLarge,
+                              h1Padding: EdgeInsets.only(
+                                top: 24.0,
+                                bottom: 4.0,
+                              ),
+                              h2: theme.textTheme.titleMedium,
+                              h2Padding: EdgeInsets.only(
+                                top: 16.0,
+                                bottom: 4.0,
+                              ),
+                              p: theme.textTheme.bodyMedium,
+                              pPadding: EdgeInsets.only(bottom: 12.0),
+                              a: TextStyle(
+                                color: theme.colorScheme.primary,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                      ),
+                    ),
             ),
           ),
         ],
@@ -6592,8 +6637,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    """Are you forgetful or absentminded? You may want to set this to "require acknowledgement", to make it so that alarms keep ringing until you interact with them to confirm that you heard them.
-Otherwise, if you generally pay close attention to your phone, it's much more convenient to have it set to "ring once".""",
+                    """Are you generally attentive and responsive to your phone notifications? If so, set this to "ring once," which is far more convenient, as it doesn't require you to interact with your phone every time an alarm goes off. Otherwise, you may need a more insistent notification to make absolutely sure that you're aware of timer completions, select "require acknowledgement." """,
                     style: theme.textTheme.bodyMedium!,
                   ),
                   SizedBox(height: standardSpacing),

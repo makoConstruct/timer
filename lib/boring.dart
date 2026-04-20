@@ -3953,3 +3953,181 @@ class Thumbspan {
     return Provider.of<Thumbspan>(context, listen: listen).thumbspan;
   }
 }
+
+/// We use a checkbox other than the native one, because the native one will feel dated due to the slider fad, but we're sure as shit not using sliders
+class RoundedCheckbox extends StatelessWidget {
+  const RoundedCheckbox({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.size = 20.0,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    final outlineColor = Theme.of(context).colorScheme.outline;
+    final radius = Radius.circular(size * 0.3);
+    final innerInset = size * 0.22;
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.0, end: value ? 1.0 : 0.0),
+        duration: const Duration(milliseconds: 130),
+        builder: (context, t, _) {
+          final tt = Curves.easeOutExpo.transform(t);
+          final borderColor = Color.lerp(outlineColor, color, tt)!;
+          return SizedBox(
+            width: size,
+            height: size,
+            child: CustomPaint(
+              painter: _RoundedCheckboxPainter(
+                innerScale: tt,
+                color: color,
+                borderColor: borderColor,
+                radius: radius,
+                innerInset: innerInset,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RoundedCheckboxPainter extends CustomPainter {
+  const _RoundedCheckboxPainter({
+    required this.innerScale,
+    required this.color,
+    required this.borderColor,
+    required this.radius,
+    required this.innerInset,
+  });
+
+  final double innerScale;
+  final Color color;
+  final Color borderColor;
+  final Radius radius;
+  final double innerInset;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = size.width * 0.1;
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+    final outerRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        strokeWidth / 2,
+        strokeWidth / 2,
+        size.width - strokeWidth,
+        size.height - strokeWidth,
+      ),
+      radius,
+    );
+    canvas.drawRRect(outerRect, borderPaint);
+    if (innerScale > 0) {
+      final fillPaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.fill;
+      final maxW = size.width - innerInset * 2;
+      final maxH = size.height - innerInset * 2;
+      final w = maxW * innerScale;
+      final h = maxH * innerScale;
+      final innerRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH((size.width - w) / 2, (size.height - h) / 2, w, h),
+        Radius.circular(radius.x * 0.6 * innerScale),
+      );
+      canvas.drawRRect(innerRect, fillPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RoundedCheckboxPainter old) =>
+      old.innerScale != innerScale ||
+      old.color != color ||
+      old.borderColor != borderColor;
+}
+
+class RoundedCheckboxListTile extends StatelessWidget {
+  const RoundedCheckboxListTile({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.title,
+    this.subtitle,
+    this.contentPadding,
+  });
+
+  final bool value;
+  final ValueChanged<bool?> onChanged;
+  final Widget? title;
+  final Widget? subtitle;
+  final EdgeInsetsGeometry? contentPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: title,
+      subtitle: subtitle,
+      contentPadding: contentPadding,
+      trailing: SizedBox(
+        width: 40.0,
+        child: Center(
+          child: RoundedCheckbox(
+            value: value,
+            onChanged: (v) => onChanged(v),
+            size: 24,
+          ),
+        ),
+      ),
+      onTap: () => onChanged(!value),
+    );
+  }
+}
+
+class FutureSliver<T> extends StatefulWidget {
+  final Future<T> future;
+  final Widget Function(BuildContext, T) builder;
+  final Widget loading;
+  const FutureSliver({
+    super.key,
+    required this.future,
+    required this.builder,
+    this.loading = const SliverToBoxAdapter(
+      child: Padding(
+        padding: EdgeInsets.all(24.0),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+    ),
+  });
+
+  @override
+  State<FutureSliver<T>> createState() => _FutureSliverState<T>();
+}
+
+class _FutureSliverState<T> extends State<FutureSliver<T>> {
+  T? _value;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.future.then((v) {
+      if (mounted) setState(() => _value = v);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final value = _value;
+    if (value == null) return widget.loading;
+    return widget.builder(context, value);
+  }
+}

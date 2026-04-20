@@ -50,7 +50,7 @@ third digit [+ start timer]
 
 Special features:
 
-- Chained timers [this isn't in yet], which are often useful for, say, executing multi-stage cooking processes, and looping timers [also isn't in yet], which can be used in combination with chaining to make pomodoro timers.
+- Chained timers, which are often useful for, say, executing multi-stage cooking processes, and looping timers, which can be used in combination with chaining to make pomodoro timers.
 
 - Has games. [only one so far (it's small and horrible, but also unique)] (*No other timer app has games.*)
 
