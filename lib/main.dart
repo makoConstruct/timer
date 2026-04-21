@@ -3505,7 +3505,7 @@ class TimerScreenState extends State<TimerScreen>
                 'Title',
                 (_) {
                   final wk =
-                      timerWidgets[timerID]?.key as GlobalKey<TimerBaseState>?;
+                      timerWidgetCache[timerID]?.key as GlobalKey<TimerBaseState>?;
                   wk?.currentState?.enterTitleEditMode();
                 },
                 isLast: true,
