@@ -1359,6 +1359,32 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   static Color primaryColor(double hue) =>
       hpluvToRGBColor([hue * 360, 100, 30]);
 
+  late final Signal<double> depth = Signal(0.0);
+  void Function()? _parentDepthDispose;
+
+  /// added to the parent Timercule's depth to derive this widget's depth.
+  /// Timercule nests (1.0); Timer mirrors its parent (0.0).
+  double get depthOffset => 0.0;
+
+  void _subscribeToParentDepth() {
+    _parentDepthDispose?.call();
+    final parent = context.findAncestorStateOfType<TimerculeState>();
+    if (parent != null) {
+      _parentDepthDispose = effect(() {
+        depth.value = parent.depth.value + depthOffset;
+      });
+    } else {
+      depth.value = 0;
+      _parentDepthDispose = null;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _subscribeToParentDepth();
+  }
+
   /// called after base animations are initialized, before the reactive effect is created
   void onInitState() {}
 
@@ -1462,6 +1488,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   @override
   void dispose() {
     disable();
+    _parentDepthDispose?.call();
     _deletionAnimation?.dispose();
     _deletionAnimation = null;
     _appearanceAnimation.dispose();
@@ -1770,6 +1797,8 @@ class TimerState extends TimerBaseState<Timer> {
     final mt = MakoThemeData.fromTheme(theme);
     final mover = 0.1;
     final clockRadius = watchSignal(context, timerWidgetRadius);
+    final depth = watchSignal(context, this.depth);
+    final outerBackground = mt.timerculeHighlightBackground(depth);
 
     // final thumbSpan = Thumbspan.of(context);
 
@@ -1996,7 +2025,7 @@ class TimerState extends TimerBaseState<Timer> {
               width: 2 * clockRadius,
               height: 2 * clockRadius,
               padding: EdgeInsets.all(timerOutline),
-              decoration: containerShape(mt.foreBackColor),
+              decoration: containerShape(outerBackground),
               child: next,
             ),
           );
@@ -2107,27 +2136,8 @@ class TimerculeState extends TimerBaseState<Timercule> {
   @override
   TimerData get p => widget.mobj.peek()!;
 
-  late final Signal<double> depth = Signal(0.0);
-  void Function()? _parentDepthDispose;
-
-  void _subscribeToParentDepth() {
-    _parentDepthDispose?.call();
-    final parent = context.findAncestorStateOfType<TimerculeState>();
-    if (parent != null) {
-      _parentDepthDispose = effect(() {
-        depth.value = parent.depth.value + 1;
-      });
-    } else {
-      depth.value = 0;
-      _parentDepthDispose = null;
-    }
-  }
-
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _subscribeToParentDepth();
-  }
+  double get depthOffset => 1.0;
 
   @override
   Widget build(BuildContext context) {
@@ -2342,7 +2352,6 @@ class TimerculeState extends TimerBaseState<Timercule> {
 
   @override
   void dispose() {
-    _parentDepthDispose?.call();
     _handleSizeNotifier.dispose();
     super.dispose();
   }
@@ -3505,7 +3514,8 @@ class TimerScreenState extends State<TimerScreen>
                 'Title',
                 (_) {
                   final wk =
-                      timerWidgetCache[timerID]?.key as GlobalKey<TimerBaseState>?;
+                      timerWidgetCache[timerID]?.key
+                          as GlobalKey<TimerBaseState>?;
                   wk?.currentState?.enterTitleEditMode();
                 },
                 isLast: true,
@@ -5136,90 +5146,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SliverList(
             delegate: SliverChildListDelegate([
-              // Right-handed mode setting
-              Watch((context) {
-                final isRightHandedMobj = Mobj.getAlreadyLoaded(
-                  isRightHandedID,
-                  BoolType(),
-                );
-                final isRightHanded = isRightHandedMobj.value ?? true;
-                return ListTile(
-                  title: Text(
-                    '${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                  subtitle: Text(
-                    'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-
-                  // splashColor: Colors.black,
-
-                  // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
-                  // focusColor: Colors.red,
-                  // selectedColor: Colors.red,
-                  // // tileColor: Colors.red,
-                  // selectedTileColor: Colors.red,
-                  // textColor: Colors.red,
-                  // hoverColor: Colors.red,
-                  // splashColor: Colors.black,
-                  trailing: trailing(
-                    TweenAnimationBuilder<double>(
-                      tween: Tween(
-                        begin: isRightHanded ? -1.0 : 1.0,
-                        end: isRightHanded ? -1.0 : 1.0,
-                      ),
-                      duration: Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      builder: (context, scaleX, child) {
-                        return Transform.scale(scaleX: scaleX, child: child);
-                      },
-                      child: Transform.rotate(
-                        angle: 45 * pi / 180, // 45 degrees clockwise
-                        child: Icon(
-                          Icons.back_hand_rounded,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  onTap: () {
-                    isRightHandedMobj.value = !isRightHanded;
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
-              Watch((context) {
-                final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
-                  padVerticallyAscendingID,
-                  BoolType(),
-                );
-                final padVerticallyAscending =
-                    padVerticallyAscendingMobj.value ?? false;
-                return ListTile(
-                  title: Text('Numpad type', style: theme.textTheme.bodyLarge),
-                  subtitle: Text(
-                    padVerticallyAscending
-                        ? 'calculator/keyboard style'
-                        : 'phone style',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  trailing: trailing(
-                    _NumpadTypeIndicator(
-                      isAscending: padVerticallyAscending,
-                      width: 36,
-                    ),
-                  ),
-                  onTap: () {
-                    padVerticallyAscendingMobj.value = !padVerticallyAscending;
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
               Builder(
                 builder: (context) {
                   final padLandscapeMobj = Mobj.getAlreadyLoaded(
@@ -5404,6 +5330,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Navigator.of(context).pop();
                     }
                   },
+                );
+              }),
+              // Right-handed mode setting
+              Watch((context) {
+                final isRightHandedMobj = Mobj.getAlreadyLoaded(
+                  isRightHandedID,
+                  BoolType(),
+                );
+                final isRightHanded = isRightHandedMobj.value ?? true;
+                return ListTile(
+                  title: Text(
+                    '${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  subtitle: Text(
+                    'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+
+                  // splashColor: Colors.black,
+
+                  // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
+                  // focusColor: Colors.red,
+                  // selectedColor: Colors.red,
+                  // // tileColor: Colors.red,
+                  // selectedTileColor: Colors.red,
+                  // textColor: Colors.red,
+                  // hoverColor: Colors.red,
+                  // splashColor: Colors.black,
+                  trailing: trailing(
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(
+                        begin: isRightHanded ? -1.0 : 1.0,
+                        end: isRightHanded ? -1.0 : 1.0,
+                      ),
+                      duration: Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      builder: (context, scaleX, child) {
+                        return Transform.scale(scaleX: scaleX, child: child);
+                      },
+                      child: Transform.rotate(
+                        angle: 45 * pi / 180, // 45 degrees clockwise
+                        child: Icon(
+                          Icons.back_hand_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  onTap: () {
+                    isRightHandedMobj.value = !isRightHanded;
+                  },
+                  contentPadding: listItemPadding,
+                );
+              }),
+              Watch((context) {
+                final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
+                  padVerticallyAscendingID,
+                  BoolType(),
+                );
+                final padVerticallyAscending =
+                    padVerticallyAscendingMobj.value ?? false;
+                return ListTile(
+                  title: Text('Numpad type', style: theme.textTheme.bodyLarge),
+                  subtitle: Text(
+                    padVerticallyAscending
+                        ? 'calculator/keyboard style'
+                        : 'phone style',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  trailing: trailing(
+                    _NumpadTypeIndicator(
+                      isAscending: padVerticallyAscending,
+                      width: 36,
+                    ),
+                  ),
+                  onTap: () {
+                    padVerticallyAscendingMobj.value = !padVerticallyAscending;
+                  },
+                  contentPadding: listItemPadding,
                 );
               }),
               Builder(
@@ -6022,8 +6032,11 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             if (_localSelection.value?.url != audio?.url) {
               hasPlayed = false;
             }
-            if (!hasPlayed && audio != null) {
-              jukeBox.playAudio(audio);
+            if (!hasPlayed) {
+              final toPlay =
+                  audio ??
+                  Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value;
+              if (toPlay != null) jukeBox.playAudio(toPlay);
             }
             hasPlayed = !hasPlayed;
           },

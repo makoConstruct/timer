@@ -3960,17 +3960,18 @@ class RoundedCheckbox extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.dimWhenFalse = false,
     this.size = 20.0,
   });
 
   final bool value;
   final ValueChanged<bool> onChanged;
   final double size;
-
+  final bool dimWhenFalse;
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.primary;
-    final outlineColor = Theme.of(context).colorScheme.outline;
+    final outlineColor = color;
     final radius = Radius.circular(size * 0.3);
     final innerInset = size * 0.22;
     return GestureDetector(
@@ -3981,7 +3982,9 @@ class RoundedCheckbox extends StatelessWidget {
         duration: const Duration(milliseconds: 130),
         builder: (context, t, _) {
           final tt = Curves.easeOutExpo.transform(t);
-          final borderColor = Color.lerp(outlineColor, color, tt)!;
+          final borderColor = dimWhenFalse
+              ? Color.lerp(Colors.grey, outlineColor, tt)!
+              : outlineColor;
           return SizedBox(
             width: size,
             height: size,

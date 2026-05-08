@@ -63,7 +63,9 @@ android/app/src/main/res/
 
 
 # temporary, haven't decided which binaries we're keeping yet
-assets/
+assets/sounds/
+assets/fonts/
+assets/journey/
 
 sorting sounds/
 .vscode/settings.json
