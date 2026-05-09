@@ -6,7 +6,7 @@ This app's website is: https://timer.dreamshrine.org
 
 # How This was Made
 
-## Just One Touch
+## Just One Motion
 
 The first design was just one big dial. I started with an intuition that no more than one interaction should be required to create, set, and start a timer. You'd simply turn the dial until you had the number you wanted, and you'd release it, and then it would start winding back, and when it hit 0 the timer would sound.
 

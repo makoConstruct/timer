@@ -493,17 +493,30 @@ class TimerHolm {
       case TimerKind.series:
       case TimerKind.loop:
         final childIdx = parent.children.indexOf(childMobj.id);
-        final nextIdx = (childIdx + 1) % parent.children.length;
-        if (parent.kind != TimerKind.loop && nextIdx == 0) {
-          returnAndContinueParent(parentMobj);
-        } else {
-          bool timerComplete = startTimer(
-            parentMobj,
-            reset: false,
-            suggestedStart: nextIdx,
-          );
-          if (timerComplete) {
-            returnAndContinueParent(parentMobj);
+        while (true) {
+          final nextIdx = (childIdx + 1) % parent.children.length;
+          if (parent.kind != TimerKind.loop && nextIdx == 0) {
+            parentMobj.value = parent.withChanges(
+              runningState: TimerData.completed,
+              completedRecently: true,
+            );
+            return returnAndContinueParent(parentMobj);
+          } else {
+            bool timerComplete = startTimer(
+              parentMobj,
+              reset: false,
+              suggestedStart: nextIdx,
+            );
+            if (!timerComplete) {
+              return;
+            } else if (nextIdx == childIdx) {
+              // breaks out of instant loops
+              parentMobj.value = parent.withChanges(
+                runningState: TimerData.completed,
+                completedRecently: true,
+              );
+              return returnAndContinueParent(parentMobj);
+            }
           }
         }
       case TimerKind.parallelStartJustified:
@@ -4014,7 +4027,7 @@ class TimerScreenState extends State<TimerScreen>
       ),
       Positioned.fromRect(
         rect: controlGridBound(innerPaletteAnchor + Offset(0, 0), Size(1, 1)),
-        child: configButton,
+        child: selectButton,
       ),
       // Positioned.fromRect(
       //     rect: positionAt(outerPaletteAnchor, Size(1, 1)),
@@ -4027,7 +4040,7 @@ class TimerScreenState extends State<TimerScreen>
       //     child: createStopwatchButton),
       Positioned.fromRect(
         rect: controlGridBound(innerPaletteAnchor + Offset(0, 1), Size(1, 1)),
-        child: selectButton,
+        child: configButton,
       ),
       // // squish button
       // Positioned.fromRect(
