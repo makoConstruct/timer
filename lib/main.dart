@@ -76,7 +76,7 @@ final sharedDriftIsolateName = "sharedDrift";
 
 const databaseName = 'mako_timer_db';
 
-const double timerOutline = 7;
+const double defaultTimerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
 final Signal<double> timerWidgetRadius = Signal(25);
@@ -1810,8 +1810,9 @@ class TimerState extends TimerBaseState<Timer> {
     final mt = MakoThemeData.fromTheme(theme);
     final mover = 0.1;
     final clockRadius = watchSignal(context, timerWidgetRadius);
+    final outerBackground = mt.timerculeHighlightBackground(0);
     final depth = watchSignal(context, this.depth);
-    final outerBackground = mt.timerculeHighlightBackground(depth);
+    final hasParent = depth > 0;
 
     // final thumbSpan = Thumbspan.of(context);
 
@@ -2010,9 +2011,10 @@ class TimerState extends TimerBaseState<Timer> {
         stopwatchPulse *
         (1 -
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
-    final double innerTimerSpan = 2 * (clockRadius - timerOutline);
+    final double timerOutline = depth > 0 ? 1.4 : defaultTimerOutline;
+    final double innerTimerSpan = 2 * (clockRadius - defaultTimerOutline);
     final stopwatchPulseSize = lerp(
-      innerTimerSpan - timerOutline * 2,
+      innerTimerSpan - defaultTimerOutline * 2,
       (clockRadius - timerGap / 2) * 2 * 0.28,
       // Curves.easeOutCubic.transform(stopwatchPulse) *
       stopwatchPulseProgress,
@@ -2037,9 +2039,12 @@ class TimerState extends TimerBaseState<Timer> {
             child: Container(
               width: 2 * clockRadius,
               height: 2 * clockRadius,
-              padding: EdgeInsets.all(timerOutline),
-              decoration: containerShape(outerBackground),
-              child: next,
+              padding: EdgeInsets.all(defaultTimerOutline - timerOutline),
+              child: Container(
+                padding: EdgeInsets.all(timerOutline),
+                decoration: containerShape(outerBackground),
+                child: next,
+              ),
             ),
           );
         },
@@ -2058,7 +2063,7 @@ class TimerState extends TimerBaseState<Timer> {
                               _completedRecentlyAnimation.value,
                             ),
                           ) *
-                          ((timerOutline * 2) / innerTimerSpan)) *
+                          ((defaultTimerOutline * 2) / innerTimerSpan)) *
                   (1 -
                       unlerpUnit(
                         0.5,
@@ -3664,7 +3669,8 @@ class TimerScreenState extends State<TimerScreen>
         // label: Icon(Icons.select_all),
         // label: Icon(Icons.border_outer_rounded),
         key: selectButtonKey,
-        label: const SpecialTimerShapesLabel(),
+        // label: const SpecialTimerShapesLabel(),
+        label: const ManyIcon(),
         onPanDown: (Offset p) {
           specialTimerCreateDragRingController.onPanDown(
             context,

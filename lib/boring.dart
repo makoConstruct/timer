@@ -3945,6 +3945,85 @@ class SpecialTimerShapesLabel extends StatelessWidget {
   }
 }
 
+class ManyIconPainter extends CustomPainter {
+  ManyIconPainter({required this.color, required this.isRightHanded});
+  final Color color;
+  final bool isRightHanded;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final hub = Offset(size.width / 2, size.height / 2);
+    final scale = min(size.width, size.height) * 0.04;
+    // commented out: actual european CE logo proportions per https://ux.stackexchange.com/questions/155512/what-are-the-dimensions-proportions-of-the-ce-conformité-européenne-marking-lo/155513
+    // final scale = min(size.width, size.height) * 0.024;
+    final outerR = 6.0 * scale;
+    // final outerR = 10.0 * scale;
+    final innerR = 3.0 * scale;
+    // final innerR = 7.0 * scale;
+    final outerAngle = acos(1 / 6);
+    // final outerAngle = acos(1 / 10);
+    final innerAngle = acos(1 / 3);
+    // final innerAngle = acos(1 / 7);
+
+    final fill = Paint()..color = color;
+
+    final outerRect = Rect.fromCircle(center: hub, radius: outerR);
+    final innerRect = Rect.fromCircle(center: hub, radius: innerR);
+
+    final path = Path()
+      ..moveTo(
+        hub.dx + outerR * cos(-outerAngle),
+        hub.dy + outerR * sin(-outerAngle),
+      )
+      ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
+      ..lineTo(
+        hub.dx + innerR * cos(innerAngle),
+        hub.dy + innerR * sin(innerAngle),
+      )
+      ..arcTo(innerRect, innerAngle, tau - 2 * innerAngle, false)
+      ..close();
+
+    if (isRightHanded) {
+      canvas.drawPath(path, fill);
+    } else {
+      canvas.save();
+      canvas.translate(2 * hub.dx, 0);
+      canvas.scale(-1, 1);
+      canvas.drawPath(path, fill);
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant ManyIconPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.isRightHanded != isRightHanded;
+}
+
+class ManyIcon extends StatelessWidget {
+  const ManyIcon({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
+    final isRightHanded =
+        watchSignal(
+          context,
+          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()),
+        ) ??
+        true;
+    return ScalingAspectRatio(
+      child: SizedBox(
+        width: 50,
+        height: 50,
+        child: CustomPaint(
+          painter: ManyIconPainter(color: color, isRightHanded: isRightHanded),
+        ),
+      ),
+    );
+  }
+}
+
 class Thumbspan {
   /// measured in logical pixels
   double thumbspan;
