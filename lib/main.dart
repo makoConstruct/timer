@@ -4402,7 +4402,7 @@ class TimerScreenState extends State<TimerScreen>
       type: TimerDataType(),
       initial: TimerData(
         startTime: null,
-        runningState: runningState ?? TimerData.paused,
+        runningState: runningState ?? TimerData.completed,
         hue: nextRandomHue(),
         selected: selecting,
         digits: digits ?? const [],
@@ -5192,6 +5192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       BoolSignalTween(
                         signal: padLandscapeNonNull,
                         duration: Duration(milliseconds: 600),
+                        // duration: Duration(milliseconds: 190),
                         builder: (context, progress, _) {
                           final longDimension = 22 / 4 * 3;
                           final shortDimension = 22.0;
@@ -5210,7 +5211,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               unlerpUnit(1 - hpu, 1, progress),
                             ),
                           );
-                          final movementp = Curves.easeInOutCubic.transform(
+                          final movementp = Curves.easeInOutQuad.transform(
                             1 - progress,
                           );
                           final centeredInset =
@@ -5236,6 +5237,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ],
                             ),
                           );
+                          // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
+                          // return SizedBox(
+                          //   width: lerp(
+                          //     longDimension,
+                          //     shortDimension,
+                          //     Curves.easeIn.transform(progress),
+                          //   ),
+                          //   height: lerp(
+                          //     shortDimension,
+                          //     longDimension,
+                          //     Curves.easeOut.transform(progress),
+                          //   ),
+                          //   child: Container(
+                          //     decoration: BoxDecoration(
+                          //       color: theme.colorScheme.primary,
+                          //       borderRadius: BorderRadius.circular(4),
+                          //     ),
+                          //   ),
+                          // );
                         },
                       ),
                     ),
