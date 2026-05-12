@@ -1905,6 +1905,9 @@ class TimerState extends TimerBaseState<Timer> {
       );
     }
 
+    /// this whole feature ended up being insufficiently visually clean, but I can't bring myself to remove the code yet.
+    const bool showingTimeLevels = false;
+
     var animatedTextPartForTimer = AnimatedBuilder(
       animation: _runningAnimation,
       builder: (context, child) {
@@ -1927,7 +1930,8 @@ class TimerState extends TimerBaseState<Timer> {
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    timeText(durationDigits, withTimeLevel: true),
+                    // this is where you'd set withTimeLevel to true to have that feature
+                    timeText(durationDigits, withTimeLevel: showingTimeLevels),
                     selectionUnderline,
                   ],
                 ),
@@ -1963,7 +1967,7 @@ class TimerState extends TimerBaseState<Timer> {
               children: [
                 timeText(timeDigits, isNegative: timeIsNegative),
                 Text('/'),
-                timeText(durationDigits, withTimeLevel: true),
+                timeText(durationDigits, withTimeLevel: showingTimeLevels),
               ],
             ),
             TimerKind.stopwatch => timeText(
