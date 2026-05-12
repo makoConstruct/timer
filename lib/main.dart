@@ -1978,16 +1978,16 @@ class TimerState extends TimerBaseState<Timer> {
       );
     }
 
-    final Widget textPart = DefaultTextStyle.merge(
-      style: TextStyle(
-        height: 1.2,
-        fontSize: 20,
-        color: theme.colorScheme.onSurface,
-      ),
-      child: ignoreVerticalHeight(
-        (d.title != null || _titleEditMode)
-            ? titledTextPart()
-            : switch (d.kind) {
+    final Widget textPart = ignoreVerticalHeight(
+      (d.title != null || _titleEditMode)
+          ? titledTextPart()
+          : DefaultTextStyle.merge(
+              style: TextStyle(
+                height: 1.2,
+                fontSize: 20,
+                color: theme.colorScheme.onSurface,
+              ),
+              child: switch (d.kind) {
                 TimerKind.timer => animatedTextPartForTimer,
                 TimerKind.stopwatch => timeText(
                   timeDigits,
@@ -1997,7 +1997,7 @@ class TimerState extends TimerBaseState<Timer> {
                 ),
                 _ => throw wrongTimerVariantError(d.kind),
               },
-      ),
+            ),
     );
 
     final playIconRadius = 10;
@@ -4090,7 +4090,8 @@ class TimerScreenState extends State<TimerScreen>
                 opacity: opacity,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: onTap,
+                  // using onPanEnd so that if the finger moves slightly it doesn't cancel the action
+                  onPanEnd: (DragEndDetails d) => onTap(),
                   child: SizedBox.expand(
                     child: Icon(
                       icon,
