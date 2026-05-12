@@ -1962,7 +1962,7 @@ class TimerState extends TimerBaseState<Timer> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 timeText(timeDigits, isNegative: timeIsNegative),
-                Text(' / '),
+                Text('/'),
                 timeText(durationDigits, withTimeLevel: true),
               ],
             ),
@@ -2200,13 +2200,14 @@ class TimerculeState extends TimerBaseState<Timercule> {
       constraints: BoxConstraints(
         minWidth: timerHeight * 0.7,
         minHeight: timerHeight + timerGap,
-        maxWidth: timerHeight * 2,
+        maxWidth: timerHeight * 3,
       ),
       child: child,
     );
 
     Widget handle = handleContainer(
       child: Stack(
+        alignment: Alignment.centerLeft,
         children: [
           Positioned.fill(
             child: Center(
