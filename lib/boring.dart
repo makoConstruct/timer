@@ -1072,6 +1072,22 @@ int formatTimeFull(
   return initialUnderLevel;
 }
 
+Widget ignoreVerticalHeight(
+  Widget child, {
+  Alignment alignment = Alignment.centerLeft,
+}) {
+  return Container(
+    clipBehavior: .none,
+    height: 0,
+    child: OverflowBox(
+      alignment: alignment,
+      maxHeight: double.infinity,
+      fit: .deferToChild,
+      child: child,
+    ),
+  );
+}
+
 ///returns the index of the angleRadius segment that angle intersects, otherwise, returns -1
 int radialDragResult(
   List<double> angleRadius,

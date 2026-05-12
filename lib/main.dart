@@ -1808,11 +1808,10 @@ class TimerState extends TimerBaseState<Timer> {
     final d = watchSignal(context, widget.mobj) ?? previousValue!;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
-    final mover = 0.1;
+    final moveTextWhenUp = 0.1;
     final clockRadius = watchSignal(context, timerWidgetRadius);
     final outerBackground = mt.timerculeHighlightBackground(0);
     final depth = watchSignal(context, this.depth);
-    final hasParent = depth > 0;
 
     // final thumbSpan = Thumbspan.of(context);
 
@@ -1906,43 +1905,37 @@ class TimerState extends TimerBaseState<Timer> {
       );
     }
 
-    var animatedTextPartForTimer = Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.centerLeft,
-      children: [
-        AnimatedBuilder(
-          animation: _runningAnimation,
-          builder: (context, child) {
-            final v = Curves.easeInCubic.transform(_runningAnimation.value);
-            return FractionalTranslation(
-              translation: Offset(0, lerp(-mover, mover, v)),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.start,
-                children: [
-                  Transform.scale(
-                    alignment: Alignment.bottomLeft,
-                    scale: lerp(0.6, 1, v),
-                    child: timeText(timeDigits, isNegative: timeIsNegative),
-                  ),
-                  Transform.scale(
-                    alignment: Alignment.topLeft,
-                    scale: lerp(1, 0.6, v),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        timeText(durationDigits, withTimeLevel: true),
-                        selectionUnderline,
-                      ],
-                    ),
-                  ),
-                ],
+    var animatedTextPartForTimer = AnimatedBuilder(
+      animation: _runningAnimation,
+      builder: (context, child) {
+        final v = Curves.easeInCubic.transform(_runningAnimation.value);
+        return FractionalTranslation(
+          translation: Offset(0, lerp(-moveTextWhenUp, moveTextWhenUp, v)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Transform.scale(
+                alignment: Alignment.bottomLeft,
+                scale: lerp(0.63, 1, v),
+                child: timeText(timeDigits, isNegative: timeIsNegative),
               ),
-            );
-          },
-        ),
-      ],
+              Transform.scale(
+                alignment: Alignment.topLeft,
+                scale: lerp(1, 0.63, v),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    timeText(durationDigits, withTimeLevel: true),
+                    selectionUnderline,
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
 
     Widget titledTextPart() {
@@ -1986,19 +1979,25 @@ class TimerState extends TimerBaseState<Timer> {
     }
 
     final Widget textPart = DefaultTextStyle.merge(
-      style: TextStyle(color: theme.colorScheme.onSurface),
-      child: (d.title != null || _titleEditMode)
-          ? titledTextPart()
-          : switch (d.kind) {
-              TimerKind.timer => animatedTextPartForTimer,
-              TimerKind.stopwatch => timeText(
-                timeDigits,
-                centiseconds: ((dt % 1) * 100).toInt(),
-                isNegative: timeIsNegative,
-                withTimeLevel: true,
-              ),
-              _ => throw wrongTimerVariantError(d.kind),
-            },
+      style: TextStyle(
+        height: 1.2,
+        fontSize: 20,
+        color: theme.colorScheme.onSurface,
+      ),
+      child: ignoreVerticalHeight(
+        (d.title != null || _titleEditMode)
+            ? titledTextPart()
+            : switch (d.kind) {
+                TimerKind.timer => animatedTextPartForTimer,
+                TimerKind.stopwatch => timeText(
+                  timeDigits,
+                  centiseconds: ((dt % 1) * 100).toInt(),
+                  isNegative: timeIsNegative,
+                  withTimeLevel: true,
+                ),
+                _ => throw wrongTimerVariantError(d.kind),
+              },
+      ),
     );
 
     final playIconRadius = 10;
@@ -2115,7 +2114,9 @@ class TimerState extends TimerBaseState<Timer> {
 
     return buildShell(
       context,
-      Padding(
+      Container(
+        clipBehavior: Clip.none,
+        height: clockRadius * 2 + timerGap,
         padding: EdgeInsets.all(timerGap / 2),
         child: AnimatedBuilder(
           animation: _slideActivateBounceAnimation,
