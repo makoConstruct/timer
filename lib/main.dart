@@ -3203,7 +3203,18 @@ class TimerScreenState extends State<TimerScreen>
     ],
     radialActivatorPositions: List.generate(5, decAngleFor),
     radialActivatorIcons: [
-      Icon(Icons.square_rounded),
+      Container(
+        width: dragActionRingIconSize.width,
+        height: dragActionRingIconSize.height,
+        decoration: ShapeDecoration(
+          shape: StarBorder.polygon(
+            sides: 8,
+            pointRounding: 0.2,
+            rotation: 45 / 2,
+          ),
+          color: Theme.of(context).colorScheme.onPrimary,
+        ),
+      ),
       Builder(
         builder: (context) => CustomPaint(
           size: dragActionRingIconSize,
