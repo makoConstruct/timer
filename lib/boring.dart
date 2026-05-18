@@ -847,25 +847,21 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   }
 
   /// (rise, fall)
-  @override
   (double, double) get value {
     final now = DateTime.now();
-
     double riseValue = 0.0;
     if (_riseTime != null) {
-      final elapsed = now.difference(_riseTime!);
+      final elapsed = now.difference(_riseTime!).inMicroseconds;
       riseValue = clampUnit(
-        elapsed.inMicroseconds.toDouble() /
-            riseDuration.inMicroseconds.toDouble(),
+        elapsed.toDouble() / riseDuration.inMicroseconds.toDouble(),
       );
     }
 
     double fallValue = 0.0;
     if (_fallTime != null) {
-      final elapsed = now.difference(_fallTime!);
+      final elapsed = now.difference(_fallTime!).inMicroseconds;
       fallValue = clampUnit(
-        elapsed.inMicroseconds.toDouble() /
-            fallDuration.inMicroseconds.toDouble(),
+        elapsed.toDouble() / fallDuration.inMicroseconds.toDouble(),
       );
     }
 

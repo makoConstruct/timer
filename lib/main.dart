@@ -19,7 +19,6 @@ import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter/physics.dart' as physics;
 import 'package:flutter/scheduler.dart' hide Priority;
 import 'package:flutter/services.dart';
 import 'package:hsluv/extensions.dart';
@@ -40,7 +39,6 @@ import 'package:provider/provider.dart';
 import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'package:animove/animove.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:springster/springster.dart';
 import 'package:uuid/v4.dart';
 
 Future<void> deleteDatabase() async {
@@ -1220,57 +1218,9 @@ class _MenuRevealClipper extends CustomClipper<Path> {
       Offset(0, arrowHeight) & targetRectSize,
       Radius.circular(cornerRounding),
     );
-    final intermediateTargetSpan = min(
-      targetRectSize.height,
-      targetRectSize.width,
-    );
-    final earlyProgress = unlerpUnit(0, 0.5, progress);
-    final distanceFromCenter = origin - sizeToOffset(targetRectSize / 2);
-    final Offset earlyOrigin = Offset(origin.dx, targetRect.top);
-    final intermediateOriginTarget =
-        // Offset(0, arrowHeight) +
-        (distanceFromCenter.dx > distanceFromCenter.dy
-        ? Offset(
-            origin.dx.clamp(
-              intermediateTargetSpan / 2,
-              targetRectSize.width - intermediateTargetSpan / 2,
-            ),
-            targetRect.center.dy,
-          )
-        : Offset(
-            targetRect.center.dx,
-            origin.dy.clamp(
-              intermediateTargetSpan / 2,
-              targetRectSize.height - intermediateTargetSpan / 2,
-            ),
-          ));
     final arrowProgress = Curves.easeOut.transform(
       unlerpUnit(0.15, 0.7, progress),
     );
-    var earlyCornerRounding = cornerRounding * earlyProgress;
-    final earlySpan = arrowHeight * arrowProgress * 2 + 2 * earlyCornerRounding;
-    final earlyRect = RRect.fromRectAndRadius(
-      rectFromAlign(
-        align: Alignment.topCenter,
-        anchor: earlyOrigin,
-        width: earlySpan,
-        height: lerp(0, earlySpan, earlyProgress),
-      ),
-      Radius.circular(earlyCornerRounding),
-    );
-    // intermediate rect target is square
-    final intermediateRect = RRect.fromRectAndRadius(
-      Rect.fromCircle(
-        center: intermediateOriginTarget,
-        radius: intermediateTargetSpan / 2,
-      ),
-      Radius.circular(cornerRounding),
-    );
-    // final lerpr = RRect.lerp(
-    //     earlyRect,
-    //     RRect.lerp(
-    //         intermediateRect, targetRect, unlerpUnit(0.37, 1, progress))!,
-    //     unlerpUnit(0.2, 0.65, progress))!;
 
     final lerpr = RRect.lerp(
       RRect.fromRectAndRadius(
@@ -1684,7 +1634,6 @@ class TimerState extends TimerBaseState<Timer> {
   late final AnimationController _slideActivateBounceAnimation;
   late final AnimationController _selectedUnderlineAnimation;
   late final AnimationController _completedRecentlyAnimation;
-  final GlobalKey _clockKey = GlobalKey();
   StateError wrongTimerVariantError(TimerKind kind) =>
       StateError("timer kind $kind shouldn't appear in a non-composite timer");
 
@@ -1943,19 +1892,23 @@ class TimerState extends TimerBaseState<Timer> {
     );
 
     Widget titledTextPart() {
-      final Widget titleWidget = _titleEditMode
-          ? IntrinsicWidth(
-              child: TextField(
-                focusNode: _titleFocusNode,
-                controller: _titleController,
-                style: DefaultTextStyle.of(context).style,
-                decoration: InputDecoration.collapsed(hintText: 'description'),
-                onChanged: (text) {
-                  widget.mobj.value = p.withChanges(title: text);
-                },
-              ),
-            )
-          : Text(d.title!, overflow: TextOverflow.clip);
+      final Widget titleWidget = DefaultTextStyle.merge(
+        style: TextStyle(fontSize: 26),
+        child: _titleEditMode
+            ? IntrinsicWidth(
+                child: TextField(
+                  focusNode: _titleFocusNode,
+                  controller: _titleController,
+                  decoration: InputDecoration.collapsed(
+                    hintText: 'description',
+                  ),
+                  onChanged: (text) {
+                    widget.mobj.value = p.withChanges(title: text);
+                  },
+                ),
+              )
+            : Text(d.title!, overflow: TextOverflow.clip),
+      );
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1983,15 +1936,11 @@ class TimerState extends TimerBaseState<Timer> {
     }
 
     final Widget textPart = ignoreVerticalHeight(
-      (d.title != null || _titleEditMode)
-          ? titledTextPart()
-          : DefaultTextStyle.merge(
-              style: TextStyle(
-                height: 1.2,
-                fontSize: 20,
-                color: theme.colorScheme.onSurface,
-              ),
-              child: switch (d.kind) {
+      DefaultTextStyle.merge(
+        style: TextStyle(height: 0.71, fontSize: 35, fontFamily: 'Dongle'),
+        child: (d.title != null || _titleEditMode)
+            ? titledTextPart()
+            : switch (d.kind) {
                 TimerKind.timer => animatedTextPartForTimer,
                 TimerKind.stopwatch => timeText(
                   timeDigits,
@@ -2001,7 +1950,7 @@ class TimerState extends TimerBaseState<Timer> {
                 ),
                 _ => throw wrongTimerVariantError(d.kind),
               },
-            ),
+      ),
     );
 
     final playIconRadius = 10;
@@ -2112,20 +2061,20 @@ class TimerState extends TimerBaseState<Timer> {
       // size: 90),
     );
 
-    // do a bounce animation to respond to slide to start interactions
-    double bounceDistance =
-        10 * defaultPulserFunction(_slideActivateBounceAnimation.value);
-
     return buildShell(
       context,
       Container(
         clipBehavior: Clip.none,
         height: clockRadius * 2 + timerGap,
         padding: EdgeInsets.all(timerGap / 2),
+        // do a bounce animation to respond to slide to start interactions
         child: AnimatedBuilder(
           animation: _slideActivateBounceAnimation,
           builder: (context, child) => Transform.translate(
-            offset: _slideBounceDirection * bounceDistance,
+            offset:
+                _slideBounceDirection *
+                10 *
+                defaultPulserFunction(_slideActivateBounceAnimation.value),
             child: child,
           ),
           child: Row(
@@ -3150,12 +3099,11 @@ class TimerScreenState extends State<TimerScreen>
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
-  Rect editPopoverControls = Rect.zero;
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
         vsync: this,
-        riseDuration: Duration(milliseconds: 400),
-        fallDuration: Duration(milliseconds: 200),
+        riseDuration: Duration(milliseconds: 150),
+        fallDuration: Duration(milliseconds: 120),
       );
   late final ScrollController timersScroller = ScrollController();
   late final AnimationController squishPanelController = AnimationController(
@@ -3704,43 +3652,6 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
-    var backspaceButton = TimersButton(
-      key: deleteButtonKey,
-      label: proportionedIcon(Icons.backspace),
-      onPanDown: (_) {
-        _backspace();
-      },
-    );
-
-    var pinButton = TimersButton(
-      key: pinButtonKey,
-      label: Transform.rotate(
-        angle: pi / 4,
-        child: proportionedIcon(Icons.push_pin),
-      ),
-      onPanEnd: () {
-        _selectAction('pin');
-      },
-    );
-
-    final addButton = TimersButton(
-      label: proportionedIcon(Icons.add_circle),
-      onPanDown: (_) {
-        addNewTimer(selected: true);
-      },
-    );
-
-    // stopwatches probably shouldn't be timers, but need to go in the timer list
-    // final createStopwatchButton = TimersButton(
-    //     label: proportionedIcon(Icons.stop),
-    //     onPanDown: (_) {
-    //       addNewStopwatch();
-    //     },
-    //     onPanEnd: () {
-    //       // start the stopwatch (starting on end gives the user more precision)
-    //       pausePlaySelected();
-    //     });
-
     // todo: animate the play icon out when playing
     Widget playIcon(Icon otherIcon) {
       // todo: measure the width of the icons to make this precise
@@ -4083,17 +3994,12 @@ class TimerScreenState extends State<TimerScreen>
       // ),
     ];
 
-    Widget editPopoverIcon(
-      Offset gridPos,
-      IconData icon,
-      Function() onTap,
-      double size,
-    ) {
+    Widget editFadeButton(Offset gridPos, Widget button, int i) {
       return AnimatedBuilder(
         animation: editPopoverAnimation,
         builder: (context, child) {
           final opacity = unlerpUnit(
-            0.5,
+            0.2,
             1.0,
             editPopoverAnimation.scalarValue,
           );
@@ -4101,91 +4007,36 @@ class TimerScreenState extends State<TimerScreen>
             rect: controlGridBound(gridPos, Size(1, 1)),
             child: IgnorePointer(
               ignoring: selectedTimer.value == null,
-              child: Opacity(
-                opacity: opacity,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  // using onPanEnd so that if the finger moves slightly it doesn't cancel the action
-                  onPanEnd: (DragEndDetails d) => onTap(),
-                  child: SizedBox.expand(
-                    child: Icon(
-                      icon,
-                      color: theme.colorScheme.primary,
-                      size: buttonSpan * size,
-                    ),
-                  ),
-                ),
-              ),
+              child: Opacity(opacity: opacity * 0.25, child: child),
             ),
           );
         },
+        child: button,
       );
     }
 
-    // edit popover
-    final editPopoverOrigin = Offset(-4, 1);
-    final editPopoverBacking = AnimatedBuilder(
-      animation: editPopoverAnimation,
-      builder: (context, child) {
-        if (padLandscape) {
-          // the popover cells are already covered by the numpad backing
-          return SizedBox.shrink();
-        }
-        final fromRect = controlGridBound(
-          editPopoverOrigin,
-          Size(1, 1),
-        ).deflate(backingDeflation).shift(Offset(buttonSpan * 0.4, 0));
-        final toRect = controlGridBound(
-          editPopoverOrigin,
-          Size(1, 2),
-        ).deflate(backingDeflation);
-        final backingRectProgress = unlerpUnit(
-          0,
-          0.7,
-          editPopoverAnimation.scalarValue,
-        );
-        // deflated to nothing by targetRad at first
-        final targetRad = buttonSpan - backingDeflation * 2;
-        final backingRect =
-            Rect.lerp(
-              fromRect,
-              toRect,
-              Curves.easeInOutCubic.transform(
-                unlerpUnit(0.3, 1, backingRectProgress),
-              ),
-            )!.deflate(
-              (1 - Curves.easeOut.transform(backingRectProgress)) * targetRad,
-            );
-        return Positioned.fromRect(
-          rect: backingRect,
-          child: Container(
-            constraints: BoxConstraints.expand(),
-            decoration: BoxDecoration(
-              color: mt.foreBackColor,
-              borderRadius: BorderRadius.circular(
-                backingCornerRounding * buttonSpan,
-              ),
-            ),
-          ),
-        );
-      },
+    final editBackspaceButton = editFadeButton(
+      padLandscape ? Offset(-4, 1) : Offset(-2, 3),
+      TimersButton(
+        label: proportionedIcon(Icons.backspace_rounded, size: 17),
+        onPanDown: (_) {
+          // without this, currentlyPressingKey going to 1 would briefly close the buttons (and ignore the press) while isFirstPressForSelectedTimer is still true
+          isFirstPressForSelectedTimer.value = false;
+          _backspace();
+        },
+      ),
+      0,
     );
-
-    final editPopoverBackspaceButton = editPopoverIcon(
-      editPopoverOrigin,
-      Icons.backspace_rounded,
-      () {
-        _backspace();
-      },
-      0.4,
-    );
-    final editPopoverPlayButton = editPopoverIcon(
-      editPopoverOrigin + Offset(0, 1),
-      Icons.play_arrow_rounded,
-      () {
-        pausePlaySelected();
-      },
-      0.6,
+    final editPlayButton = editFadeButton(
+      padLandscape ? Offset(-4, 2) : Offset(-1, 3),
+      TimersButton(
+        label: proportionedIcon(Icons.play_arrow_rounded, size: 26),
+        onPanDown: (_) {
+          isFirstPressForSelectedTimer.value = false;
+          pausePlaySelected();
+        },
+      ),
+      1,
     );
 
     // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
@@ -4384,9 +4235,8 @@ class TimerScreenState extends State<TimerScreen>
                     ),
                   ),
                   ...controls,
-                  editPopoverBacking,
-                  editPopoverBackspaceButton,
-                  editPopoverPlayButton,
+                  editBackspaceButton,
+                  editPlayButton,
                   buttonScaleDial,
                 ] +
                 children,
@@ -4755,17 +4605,14 @@ class _NumeralButtonState extends State<NumeralButton> {
                     .toList();
           final lti = tss.timerListMobj.peek()!.lastOrNull;
           if (lti != null) {
-            final sts = tss.selectedTimer.peek();
-            if (sts != null) {
-              final ts =
-                  (tss.timerWidgetCache[sts]?.key as GlobalKey<TimerState>?)
-                      ?.currentState;
-              ts?._slideActivateBounceAnimation.forward(from: 0);
-              ts?._slideBounceDirection = Offset.fromDirection(
-                rectifiedActivatorPositions[i],
-                1,
-              );
-            }
+            final ts =
+                (tss.timerWidgetCache[lti]?.key as GlobalKey<TimerState>?)
+                    ?.currentState;
+            ts?._slideActivateBounceAnimation.forward(from: 0);
+            ts?._slideBounceDirection = Offset.fromDirection(
+              rectifiedActivatorPositions[i],
+              1,
+            );
           }
         },
       ),
