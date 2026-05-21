@@ -1399,7 +1399,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
             if (renderBox != null && renderBox.hasSize) {
               final ephemeralAnimationLayer = context
                   .findAncestorStateOfType<TimerScreenState>()!
-                  .ephemeralAnimationLayer;
+                  .backgroundEphemeralAnimationLayer;
               final tr = boxRectRelativeTo(
                 boring.renderBox(widget.key as GlobalKey),
                 ephemeralAnimationLayer.currentContext?.findRenderObject()
@@ -1418,9 +1418,8 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
                 final timerScreen = context
                     .findAncestorStateOfType<TimerScreenState>();
                 if (_deletionHostChild != null) {
-                  timerScreen?.ephemeralAnimationLayer.currentState?.remove(
-                    _deletionHostChild!,
-                  );
+                  timerScreen?.backgroundEphemeralAnimationLayer.currentState
+                      ?.remove(_deletionHostChild!);
                   _deletionHostChild = null;
                 }
               });
@@ -3034,7 +3033,10 @@ class TimerScreenState extends State<TimerScreen>
   GlobalKey<TimerTrayState> timerTrayKey = GlobalKey<TimerTrayState>();
   GlobalKey pinButtonKey = GlobalKey();
   GlobalKey deleteButtonKey = GlobalKey();
-  GlobalKey<SelfRemovalHostState> ephemeralAnimationLayer = GlobalKey();
+  GlobalKey<SelfRemovalHostState> foregroundEphemeralAnimationLayer =
+      GlobalKey();
+  GlobalKey<SelfRemovalHostState> backgroundEphemeralAnimationLayer =
+      GlobalKey();
   final Mobj<List<MobjID<TimerData>>> timerListMobj = Mobj.getAlreadyLoaded(
     timerListID,
     timerListType,
@@ -3107,7 +3109,7 @@ class TimerScreenState extends State<TimerScreen>
   late final AnimationController buttonScaleFlashAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 1600));
   late final Signal<Offset?> buttonScaleDialCenter = Signal(Offset.zero);
-  final GlobalKey selectButtonKey = GlobalKey();
+  final GlobalKey specialTimerCreateButtonKey = GlobalKey();
   late final Signal<double> buttonScaleDialAngle = Signal(0.0);
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
@@ -3636,18 +3638,18 @@ class TimerScreenState extends State<TimerScreen>
       );
     }
 
-    var selectButton = Builder(
+    var specialTimerCreateButton = Builder(
       builder: (context) => TimersButton(
         // label: Icon(Icons.select_all),
         // label: Icon(Icons.border_outer_rounded),
-        key: selectButtonKey,
+        key: specialTimerCreateButtonKey,
         // label: const SpecialTimerShapesLabel(),
         label: const ManyIcon(),
         onPanDown: (Offset p) {
           specialTimerCreateDragRingController.onPanDown(
             context,
             p,
-            boxRect(selectButtonKey as GlobalKey)!.center,
+            boxRect(specialTimerCreateButtonKey as GlobalKey)!.center,
           );
         },
         onPanUpdate: (Offset p) {
@@ -3968,7 +3970,7 @@ class TimerScreenState extends State<TimerScreen>
       ),
       Positioned.fromRect(
         rect: controlGridBound(innerPaletteAnchor + Offset(0, 0), Size(1, 1)),
-        child: selectButton,
+        child: specialTimerCreateButton,
       ),
       // Positioned.fromRect(
       //     rect: positionAt(outerPaletteAnchor, Size(1, 1)),
@@ -4194,62 +4196,75 @@ class TimerScreenState extends State<TimerScreen>
         ),
       ],
       SelfRemovalHost(
-        key: ephemeralAnimationLayer,
-        builder: (children, context) => ConstrainedBox(
-          constraints: BoxConstraints.expand(),
-          child: Stack(
-            children:
-                [
-                  hintTray,
-                  Positioned.fill(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        AnimatedBuilder(
-                          animation: squishPanelController,
-                          builder: (context, child) {
-                            final w =
-                                screenSize.width *
-                                0.7 *
-                                squishPanelController.value;
-                            return SizedBox(
-                              width: w,
-                              child: w <= 0
-                                  ? null
-                                  : SquishBoundaryPlane(theme: theme, mt: mt),
-                            );
-                          },
-                        ),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            controller: timersScroller,
-                            reverse: true,
-                            child: Column(
+        key: backgroundEphemeralAnimationLayer,
+        builder: (children, context) {
+          return Stack(
+            children: [
+              ...children,
+              SelfRemovalHost(
+                key: foregroundEphemeralAnimationLayer,
+                builder: (children, context) => ConstrainedBox(
+                  constraints: BoxConstraints.expand(),
+                  child: Stack(
+                    children:
+                        [
+                          hintTray,
+                          Positioned.fill(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                SizedBox(
-                                  height:
-                                      screenSize.height -
-                                      controlsh -
-                                      timerHeight,
+                                AnimatedBuilder(
+                                  animation: squishPanelController,
+                                  builder: (context, child) {
+                                    final w =
+                                        screenSize.width *
+                                        0.7 *
+                                        squishPanelController.value;
+                                    return SizedBox(
+                                      width: w,
+                                      child: w <= 0
+                                          ? null
+                                          : SquishBoundaryPlane(
+                                              theme: theme,
+                                              mt: mt,
+                                            ),
+                                    );
+                                  },
                                 ),
-                                timersWidget,
-                                SizedBox(height: controlsh),
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    controller: timersScroller,
+                                    reverse: true,
+                                    child: Column(
+                                      children: [
+                                        SizedBox(
+                                          height:
+                                              screenSize.height -
+                                              controlsh -
+                                              timerHeight,
+                                        ),
+                                        timersWidget,
+                                        SizedBox(height: controlsh),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
-                        ),
-                      ],
-                    ),
+                          ...controls,
+                          editBackspaceButton,
+                          editPlayButton,
+                          buttonScaleDial,
+                        ] +
+                        children,
                   ),
-                  ...controls,
-                  editBackspaceButton,
-                  editPlayButton,
-                  buttonScaleDial,
-                ] +
-                children,
-          ),
-        ),
-        // we stack a bunch of stuff here that's not ephemeral because that's allowed
+                ),
+                // we stack a bunch of stuff here that's not ephemeral because that's allowed
+              ),
+            ],
+          );
+        },
       ),
     );
   }
