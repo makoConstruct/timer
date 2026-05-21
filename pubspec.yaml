@@ -2,8 +2,8 @@ name: makos_timer
 description: "The most ergonomic timer. (set and initiate a timer with a single sweep)"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
-license: 'BSL-1.1(Apache-2.0, non-compete)'
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
+license: "BSL-1.1(Apache-2.0, non-compete)"
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -64,7 +64,6 @@ dependencies:
   flutter_svg: ^2.0.9
   flutter_markdown_plus: ^1.0.3
   url_launcher: ^6.3.1
-
 
 dev_dependencies:
   flutter_test:
@@ -132,10 +131,9 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
   fonts:
-    - family: Dongle
+    - family: DongleLatin
       fonts:
-        - asset: assets/fonts/Dongle-Regular.ttf
-        - asset: assets/fonts/Dongle-Light.ttf
-          weight: 300
-        - asset: assets/fonts/Dongle-Bold.ttf
+        - asset: assets/fonts/DongleLatin-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/DongleLatin-Bold.ttf
           weight: 700

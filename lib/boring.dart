@@ -1075,6 +1075,7 @@ Widget ignoreVerticalHeight(
   return Container(
     clipBehavior: .none,
     height: 0,
+    padding: EdgeInsets.only(right: 5),
     child: OverflowBox(
       alignment: alignment,
       maxHeight: double.infinity,
@@ -1176,11 +1177,11 @@ Function() cancellableFutureThen<T>(Future<T> future, Function(T) then) {
   };
 }
 
-/// where padLevel is the number of figures to include as 0 values if the duration isn't really that long
+/// where padLevel is the index of the number of figures to include as 0 values if the duration isn't really that long, eg, 0 is seconds, so 2 figures, 1 is minutes, 4 figures.
 /// isNegative just adds a second. I can't exactly explain why countdowns feel better with an extra second added, so that they end at 0 instead of lingering at a 0 for a second before triggering. I think it has something to do with rounding. Rounding down properly generally means negative numbers go more negative, rather than going towards zero, and if we did this without the added second the second place would be as if it were rounding up. Indeed, if this supported centiseconds, you'd want to add an extra centisecond instead of a second. But we shouldn't show centiseconds in any countdowns in practice, so we'll keep it crude like this.
 List<int> durationToDigits(
   double d, {
-  int padLevel = 1,
+  int padLevel = 0,
   bool isNegative = false,
 }) {
   List<int> digits = [];
@@ -1190,28 +1191,28 @@ List<int> durationToDigits(
   );
   int days = dur.inDays;
   // Years
-  if (days >= 365 || padLevel > 4) {
+  if (days >= 365 || padLevel >= 4) {
     pushDigits(digits, days ~/ 365, 4, indefinite: true);
     days = days % 365;
     started = true;
   }
   // Days
-  if (started || days > 0 || padLevel > 3) {
+  if (started || days > 0 || padLevel >= 3) {
     pushDigits(digits, days, 3);
     started = true;
   }
   // Hours
-  if (started || dur.inHours % 24 > 0 || padLevel > 2) {
+  if (started || dur.inHours % 24 > 0 || padLevel >= 2) {
     pushDigits(digits, dur.inHours % 24, 2);
     started = true;
   }
   // Minutes
-  if (started || dur.inMinutes % 60 > 0 || padLevel > 1) {
+  if (started || dur.inMinutes % 60 > 0 || padLevel >= 1) {
     pushDigits(digits, dur.inMinutes % 60, 2);
     started = true;
   }
   // Seconds
-  if (started || dur.inSeconds % 60 > 0 || padLevel > 0) {
+  if (started || dur.inSeconds % 60 > 0 || padLevel >= 0) {
     pushDigits(digits, dur.inSeconds % 60, 2);
   }
 
@@ -3962,6 +3963,9 @@ class ManyIconPainter extends CustomPainter {
   final Color color;
   final bool isRightHanded;
 
+  /// Ring thickness as a fraction of the arc's radius: 1 collapses the inner  radius to the center. The right vertical edge of the shape always sits  thickness/2 of the radius to the right of the center.
+  static const double thickness = 0.46;
+
   @override
   void paint(Canvas canvas, Size size) {
     final hub = Offset(size.width / 2, size.height / 2);
@@ -3970,30 +3974,45 @@ class ManyIconPainter extends CustomPainter {
     // final scale = min(size.width, size.height) * 0.024;
     final outerR = 6.0 * scale;
     // final outerR = 10.0 * scale;
-    final innerR = 3.0 * scale;
-    // final innerR = 7.0 * scale;
-    final outerAngle = acos(1 / 6);
-    // final outerAngle = acos(1 / 10);
-    final innerAngle = acos(1 / 3);
-    // final innerAngle = acos(1 / 7);
+    final innerR = outerR * (1 - thickness);
+    final edgeX = outerR * thickness / 2;
+    final outerAngle = acos(edgeX / outerR);
 
     final fill = Paint()..color = color;
 
     final outerRect = Rect.fromCircle(center: hub, radius: outerR);
-    final innerRect = Rect.fromCircle(center: hub, radius: innerR);
 
-    final path = Path()
-      ..moveTo(
-        hub.dx + outerR * cos(-outerAngle),
-        hub.dy + outerR * sin(-outerAngle),
-      )
-      ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
-      ..lineTo(
-        hub.dx + innerR * cos(innerAngle),
-        hub.dy + innerR * sin(innerAngle),
-      )
-      ..arcTo(innerRect, innerAngle, tau - 2 * innerAngle, false)
-      ..close();
+    final Path path;
+    if (innerR >= edgeX) {
+      final innerAngle = acos(edgeX / innerR);
+      final innerRect = Rect.fromCircle(center: hub, radius: innerR);
+      path = Path()
+        ..moveTo(
+          hub.dx + outerR * cos(-outerAngle),
+          hub.dy + outerR * sin(-outerAngle),
+        )
+        ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
+        ..lineTo(
+          hub.dx + innerR * cos(innerAngle),
+          hub.dy + innerR * sin(innerAngle),
+        )
+        ..arcTo(innerRect, innerAngle, tau - 2 * innerAngle, false)
+        ..close();
+    } else {
+      // The inner radius is too small to reach the right edge, so the inner
+      // arc becomes a fully enclosed hole punched out of a solid wedge.
+      path = Path()
+        ..fillType = PathFillType.evenOdd
+        ..moveTo(
+          hub.dx + outerR * cos(-outerAngle),
+          hub.dy + outerR * sin(-outerAngle),
+        )
+        ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
+        ..close();
+      if (innerR > 0) {
+        path.addOval(Rect.fromCircle(center: hub, radius: innerR));
+      }
+    }
 
     if (isRightHanded) {
       canvas.drawPath(path, fill);

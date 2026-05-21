@@ -1937,7 +1937,7 @@ class TimerState extends TimerBaseState<Timer> {
 
     final Widget textPart = ignoreVerticalHeight(
       DefaultTextStyle.merge(
-        style: TextStyle(height: 0.71, fontSize: 35, fontFamily: 'Dongle'),
+        style: TextStyle(height: 0.71, fontSize: 35, fontFamily: 'DongleLatin'),
         child: (d.title != null || _titleEditMode)
             ? titledTextPart()
             : switch (d.kind) {
@@ -1946,7 +1946,7 @@ class TimerState extends TimerBaseState<Timer> {
                   timeDigits,
                   centiseconds: ((dt % 1) * 100).toInt(),
                   isNegative: timeIsNegative,
-                  withTimeLevel: true,
+                  withTimeLevel: showingTimeLevels,
                 ),
                 _ => throw wrongTimerVariantError(d.kind),
               },
@@ -3073,6 +3073,9 @@ class TimerScreenState extends State<TimerScreen>
   }, autoDispose: true);
   late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
     () =>
+        // doesn't appear until the other two hints are solved
+        !userDragActionHintCondition.value &&
+        hasUsedMenuTwice.value &&
         // also goes away if the user just uses timers and ignores the timercule feature
         (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
             10) &&
@@ -3534,7 +3537,7 @@ class TimerScreenState extends State<TimerScreen>
     return ret;
   }
 
-  void numeralPressed(List<int> number, {bool viaKeyboard = false}) {
+  void numeralPressed(List<int> number) {
     if (selectedTimer.peek() == null) {
       isFirstPressForSelectedTimer.value = true;
       addNewTimer(selected: true, digits: stripZeroes(number));
@@ -3546,12 +3549,6 @@ class TimerScreenState extends State<TimerScreen>
         ct.add(n);
       }
       mt.value = mt.peek()!.withChanges(digits: ct);
-    }
-    if (viaKeyboard) {
-      final flashAnimation = numeralKeys[number.first].currentState?.longFlash;
-      if (flashAnimation != null) {
-        flashAnimation.forward(from: 0);
-      }
     }
   }
 
@@ -3576,7 +3573,7 @@ class TimerScreenState extends State<TimerScreen>
     // Handle number keys 0-9
     int? kn = recognizeDigitPress(event.logicalKey);
     if (kn != null) {
-      numeralPressed([kn], viaKeyboard: true);
+      numeralPressed([kn]);
     } else {
       switch (event.logicalKey) {
         case LogicalKeyboardKey.backspace:
@@ -4665,10 +4662,9 @@ class _NumeralButtonState extends State<NumeralButton> {
 }
 
 const controlPadTextStyle = TextStyle(
-  fontSize: 26,
+  fontSize: 40,
   fontWeight: FontWeight.normal,
-  fontFamily: 'Dongle',
-  height: 1.71, // Controls line height, adjust to fine-tune vertical centering
+  fontFamily: 'DongleLatin',
 );
 
 class TimersButton extends StatefulWidget {
@@ -4698,30 +4694,7 @@ class TimersButton extends StatefulWidget {
   State<TimersButton> createState() => TimersButtonState();
 }
 
-class TimersButtonState extends State<TimersButton>
-    with TickerProviderStateMixin {
-  late AnimationController shortFlash;
-  late AnimationController longFlash;
-  @override
-  initState() {
-    super.initState();
-    shortFlash = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 450),
-    )..value = 1;
-    longFlash = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 800),
-    )..value = 1;
-  }
-
-  @override
-  void dispose() {
-    shortFlash.dispose();
-    longFlash.dispose();
-    super.dispose();
-  }
-
+class TimersButtonState extends State<TimersButton> {
   @override
   Widget build(BuildContext context) {
     ThemeData theme = Theme.of(context);
@@ -4759,7 +4732,7 @@ class TimersButtonState extends State<TimersButton>
           ),
           child: child,
         ),
-        // most of this is junk, you can just cut it down to the label widget if you ever need to
+        // I think this is just some junk for keyboard response flash I added on a whim that we don't need
         (child) => InkWell(
           onTap: widget.onTap,
           splashColor: widget.accented ? Colors.transparent : null,
@@ -4770,23 +4743,14 @@ class TimersButtonState extends State<TimersButton>
           child: child,
         ),
       ],
-      AnimatedBuilder(
-        animation: Listenable.merge([shortFlash, longFlash]),
-        builder: (context, child) {
-          double flash = max(
-            (1 - Curves.easeIn.transform(shortFlash.value)),
-            (1 - Curves.easeInOutCubic.transform(longFlash.value)),
-          );
+      Builder(
+        builder: (context) {
           Color? textColor = widget.accented ? theme.colorScheme.primary : null;
-          final backingColor = lerpColor(
-            widget.accented
-                ? theme.colorScheme.primary
-                : widget.solidColor
-                ? theme.colorScheme.surfaceContainerLowest
-                : Colors.white.withAlpha(0),
-            Colors.white,
-            flash,
-          );
+          final backingColor = widget.accented
+              ? theme.colorScheme.primary
+              : widget.solidColor
+              ? theme.colorScheme.surfaceContainerLowest
+              : Colors.white.withAlpha(0);
           final backing = Container(
             decoration: BoxDecoration(
               color: backingColor,
@@ -4801,18 +4765,10 @@ class TimersButtonState extends State<TimersButton>
           );
           final Widget labelWidget;
           if (widget.label is String) {
-            labelWidget = ScalingAspectRatio(
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Center(
-                  child: Text(
-                    widget.label as String,
-                    style: controlPadTextStyle.merge(
-                      TextStyle(color: textColor),
-                    ),
-                  ),
-                ),
+            labelWidget = Center(
+              child: Text(
+                widget.label as String,
+                style: controlPadTextStyle.merge(TextStyle(color: textColor)),
               ),
             );
           } else {
@@ -4861,7 +4817,7 @@ class _NumpadTypeIndicator extends StatelessWidget {
               fontSize: fontSize,
               color: color,
               fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
-              fontFamily: 'Dongle',
+              fontFamily: 'DongleLatin',
             ),
           );
           // : Icon(Icons.circle, size: 3.0, color: theme.colorScheme.primary);
