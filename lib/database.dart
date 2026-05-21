@@ -39,12 +39,11 @@ const MobjID persistentAlarmModeID = 'fb66e93f-84d1-4809-a997-293218a83ddc';
 // cursor made this id up lol
 const MobjID usedMenuCountID = '91012689-136a-4b23-9629-5a71657709a4';
 
-/// whether the user has created a cycle timer
+/// whether the user has created a composite timer
 const MobjID hintGetsCompositeTimersID = 'aa1b4520-d435-41f4-a13f-d5a1b2d617ae';
 
 /// total count of timers ever created in this install (plain, stopwatch, composite)
-const MobjID numberOfTimersCreatedID =
-    'f1d7810e-0a88-4a61-b7c3-9ad89604c890';
+const MobjID numberOfTimersCreatedID = 'f1d7810e-0a88-4a61-b7c3-9ad89604c890';
 
 mixin UUIDd on Table {
   TextColumn get id => text()();
@@ -80,12 +79,12 @@ class KVs extends Table with UUIDd {
   BoolColumn get isActive => boolean().withDefault(const Constant(false))();
 }
 
-@DriftDatabase(tables: [
-  KVs
-], queries: {
-  /// updates the value if it's lexicographically (includes chronologically) after the current value (drift_dev will produce warnings about the comparison of string-formatted timestamps, but iso8601 is lexicographically ordered in this situation)
-  // the select used to list :id, :value, :timestamp, :sequence_number, but I couldn't see what they were doing, so I removed them. I think claude might have just put them there to control the order the parameters would be in in the generated code. We turned on named parameters so that doesn't matter now.
-  'insertIfMoreRecent': '''
+@DriftDatabase(
+  tables: [KVs],
+  queries: {
+    /// updates the value if it's lexicographically (includes chronologically) after the current value (drift_dev will produce warnings about the comparison of string-formatted timestamps, but iso8601 is lexicographically ordered in this situation)
+    // the select used to list :id, :value, :timestamp, :sequence_number, but I couldn't see what they were doing, so I removed them. I think claude might have just put them there to control the order the parameters would be in in the generated code. We turned on named parameters so that doesn't matter now.
+    'insertIfMoreRecent': '''
 WITH comparison AS (
   SELECT 
     CASE 
@@ -110,8 +109,8 @@ ON CONFLICT(id) DO UPDATE SET
                   THEN excluded.is_active ELSE k_vs.is_active END
 ''',
 
-  /// inserts a row if it doesn't exist, returns the final value and whether an insert occurred
-  'insertIfNotExistsAndReturn': '''
+    /// inserts a row if it doesn't exist, returns the final value and whether an insert occurred
+    'insertIfNotExistsAndReturn': '''
   INSERT INTO k_vs (id, value, timestamp, sequence_number, is_active)
   VALUES (:id, :value, :timestamp, :sequence_number, :is_active)
   ON CONFLICT(id) DO NOTHING
@@ -124,8 +123,9 @@ ON CONFLICT(id) DO UPDATE SET
     (SELECT is_active FROM k_vs WHERE id = :id) as is_active
 ''',
 
-  'fetchActive': 'SELECT * FROM k_vs WHERE is_active = 1'
-})
+    'fetchActive': 'SELECT * FROM k_vs WHERE is_active = 1',
+  },
+)
 class TheDatabase extends _$TheDatabase {
   TheDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
   @override
@@ -160,8 +160,9 @@ class TheDatabase extends _$TheDatabase {
     return driftDatabase(
       name: 'mako_timer_db',
       native: const DriftNativeOptions(
-          databaseDirectory: getApplicationSupportDirectory,
-          shareAcrossIsolates: true),
+        databaseDirectory: getApplicationSupportDirectory,
+        shareAcrossIsolates: true,
+      ),
     );
   }
 }

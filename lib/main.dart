@@ -3063,6 +3063,12 @@ class TimerScreenState extends State<TimerScreen>
   );
   // emits whenever a drag action ring is created, so that older ones can disable themselves
   late final ChangeNotifier onNewNumeralDragActionRing = ChangeNotifier();
+  late final Computed<bool> timerculeCurrentlyDeployed = Computed(
+    () => timerListMobj.value!.any(
+      // we peek, because the type of a timer never changes, so this shouldn't recompute every time a root timerdata changes
+      (id) => Mobj.getAlreadyLoaded(id, TimerDataType()).peek()!.isComposite,
+    ),
+  );
   late final Computed<bool> userDragActionHintCondition = Computed(() {
     final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
     return (dagc.value! & 3) != 3;
@@ -3073,21 +3079,25 @@ class TimerScreenState extends State<TimerScreen>
   }, autoDispose: true);
   late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
     () =>
-        // doesn't appear until the other two hints are solved
-        !userDragActionHintCondition.value &&
-        hasUsedMenuTwice.value &&
-        // also goes away if the user just uses timers and ignores the timercule feature
-        (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
-            10) &&
-        // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
-        // (DateTime.now()
-        //         .difference(
-        //             Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
-        //                 .value!)
-        //         .inDays <
-        //     7) &&
+        timerculeCurrentlyDeployed.value &&
         !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value ??
             false),
+    // these were a bunch of conditions that would prevent it from being annoying despite it being shown appropos of nothing. Since we're showing it only appropos of the presence of a timercule, we no longer have to be careful in that way
+    // // doesn't appear until the other two hints are solved
+    // !userDragActionHintCondition.value &&
+    // hasUsedMenuTwice.value &&
+    // // also goes away if the user just uses timers and ignores the timercule feature
+    // (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
+    //     10) &&
+    // // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
+    // // (DateTime.now()
+    // //         .difference(
+    // //             Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
+    // //                 .value!)
+    // //         .inDays <
+    // //     7) &&
+    // !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value ??
+    //     false),
     autoDispose: true,
   );
   late final AnimationController buttonScaleDialAnimation = AnimationController(
@@ -4671,7 +4681,6 @@ class TimersButton extends StatefulWidget {
   /// either a String or a Widget
   final Object label;
   final VoidCallback? onTap;
-  final bool accented;
   final Function(Offset globalPosition)? onPanDown;
   final Function(Offset globalPosition)? onPanUpdate;
   final Function()? onPanEnd;
@@ -4683,7 +4692,6 @@ class TimersButton extends StatefulWidget {
     required this.label,
     this.onTap,
     this.solidColor = false,
-    this.accented = false,
     this.onPanDown,
     this.onPanUpdate,
     this.onPanEnd,
@@ -4732,23 +4740,10 @@ class TimersButtonState extends State<TimersButton> {
           ),
           child: child,
         ),
-        // I think this is just some junk for keyboard response flash I added on a whim that we don't need
-        (child) => InkWell(
-          onTap: widget.onTap,
-          splashColor: widget.accented ? Colors.transparent : null,
-          highlightColor: widget.accented ? Colors.transparent : null,
-          hoverColor: widget.accented ? Colors.transparent : null,
-          focusColor: widget.accented ? Colors.transparent : null,
-          // overlayColor: WidgetStateColor.resolveWith((_) => Colors.white),
-          child: child,
-        ),
       ],
       Builder(
         builder: (context) {
-          Color? textColor = widget.accented ? theme.colorScheme.primary : null;
-          final backingColor = widget.accented
-              ? theme.colorScheme.primary
-              : widget.solidColor
+          final backingColor = widget.solidColor
               ? theme.colorScheme.surfaceContainerLowest
               : Colors.white.withAlpha(0);
           final backing = Container(
@@ -4756,9 +4751,7 @@ class TimersButtonState extends State<TimersButton> {
               color: backingColor,
               border: Border.all(
                 width: standardLineWidth,
-                color: widget.accented
-                    ? theme.colorScheme.primary
-                    : Colors.transparent,
+                color: Colors.transparent,
               ),
               // borderRadius: BorderRadius.circular(9)
             ),
@@ -4766,10 +4759,7 @@ class TimersButtonState extends State<TimersButton> {
           final Widget labelWidget;
           if (widget.label is String) {
             labelWidget = Center(
-              child: Text(
-                widget.label as String,
-                style: controlPadTextStyle.merge(TextStyle(color: textColor)),
-              ),
+              child: Text(widget.label as String, style: controlPadTextStyle),
             );
           } else {
             labelWidget = widget.label as Widget;
@@ -4787,12 +4777,13 @@ class TimersButtonState extends State<TimersButton> {
   }
 }
 
-class _NumpadTypeIndicator extends StatelessWidget {
+class NumpadTypeIndicator extends StatelessWidget {
   final bool isAscending;
   final Color? color;
   final double width;
 
-  const _NumpadTypeIndicator({
+  const NumpadTypeIndicator({
+    super.key,
     required this.isAscending,
     this.color,
     this.width = 100.0,
@@ -4829,7 +4820,7 @@ class _NumpadTypeIndicator extends StatelessWidget {
             duration: Duration(milliseconds: 300),
             curve: Curves.easeInOut,
             left: cellSpan / 2 + x * cellSpan,
-            top: cellSpan / 2 + py * cellSpan + fontSize * 0.25,
+            top: cellSpan / 2 + py * cellSpan,
             child: FractionalTranslation(
               translation: Offset(-0.5, -0.5),
               child: Transform.scale(scale: fontScale, child: widg),
@@ -5265,7 +5256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   trailing: trailing(
-                    _NumpadTypeIndicator(
+                    NumpadTypeIndicator(
                       isAscending: padVerticallyAscending,
                       width: 36,
                     ),
@@ -6390,7 +6381,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
               color: backgroundColorFor(theme, isOn),
               borderRadius: BorderRadius.circular(buttonCornerRadius),
             ),
-            child: _NumpadTypeIndicator(
+            child: NumpadTypeIndicator(
               isAscending: isAscending,
               color: foregroundColorFor(theme, isOn),
               width: 132 - 2 * gap,
