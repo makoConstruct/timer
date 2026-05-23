@@ -2536,6 +2536,203 @@ final List<Function(TimerScreenState)> numericRadialActivatorFunctions = [
   },
 ];
 
+/// Geometry handed to a [DragRingClipBuilder] so it can shape the colored backdrop of a drag ring. The builder returns a [Path] in the coordinate space of a [totalSpan]-square box whose center sits at [center].
+class DragRingClipArgs {
+  /// grow-in/out only: 0 = collapsed into the button, 1 = fully open. Does not itself account for selection — that's [swipep] and [selections].
+  final double growth;
+
+  /// 0..1 "something is considered selected"; stays raised while a choice is held, so a builder can keep its base collapsed during the commit.
+  final double swipep;
+
+  /// per-item selection amount (eased, with release recede applied). A builder uses this to slide/highlight toward the chosen item.
+  final List<double> selections;
+
+  /// distance of the icon centers from [center].
+  final double radius;
+
+  /// radius of an individual icon disc (half of actionRadiusMax).
+  final double actionRadius;
+
+  /// icon angles, already rectified for handedness.
+  final List<double> angles;
+  final bool isRightHanded;
+  final Offset center;
+
+  /// the button's span; the resting shape is sized off this.
+  final double buttonSpan;
+
+  /// 0..1 scalar on the resting centerline radius, played on every ring's first build. At 0 the rest band collapses to a [halfThickness]-radius filled circle (since the cap discs merge); at 1 it's the normal rest shape. Has no effect once the ring is fully open.
+  final double growIn;
+
+  const DragRingClipArgs({
+    required this.growth,
+    required this.swipep,
+    required this.selections,
+    required this.radius,
+    required this.actionRadius,
+    required this.angles,
+    required this.isRightHanded,
+    required this.center,
+    required this.buttonSpan,
+    this.growIn = 1.0,
+  });
+}
+
+class _DragRingPathClipper extends CustomClipper<Path> {
+  final Path path;
+  const _DragRingPathClipper(this.path);
+  @override
+  Path getClip(Size size) => path;
+  @override
+  bool shouldReclip(covariant _DragRingPathClipper oldClipper) =>
+      oldClipper.path != path;
+}
+
+/// Reveal clip for a drag ring label pill: a fully-rounded rect that grows from a point at one end, lengthening with the constant-change-in-area math of the crank game progress bar.
+class _FluidPillClipper extends CustomClipper<Path> {
+  final double progress;
+  final bool growFromLeft;
+  const _FluidPillClipper({required this.progress, required this.growFromLeft});
+
+  @override
+  Path getClip(Size size) {
+    final (radius, length) = fluidBarRadiusAndHeightForProgress(
+      size.height,
+      size.width,
+      progress,
+    );
+    final left = growFromLeft ? 0.0 : size.width - length;
+    return Path()..addRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, size.height / 2 - radius, length, radius * 2),
+        Radius.circular(radius),
+      ),
+    );
+  }
+
+  @override
+  bool shouldReclip(covariant _FluidPillClipper oldClipper) =>
+      oldClipper.progress != progress ||
+      oldClipper.growFromLeft != growFromLeft;
+}
+
+/// Drag-to-play style clip: the central disc unioned with a disc at each icon position. Replicates the circles the icons used to occupy.
+Path circlesDragRingClip(DragRingClipArgs args) {
+  // base collapses while a choice is held; the per-item selection circles below are what remain lit.
+  final e = Curves.easeOut.transform(
+    args.growth * (1 - Curves.easeOut.transform(args.swipep)),
+  );
+  Path path = Path()
+    ..addOval(Rect.fromCircle(center: args.center, radius: args.radius * e));
+  final leafp = unlerpUnit(0.4, 1, e);
+  for (final angle in args.angles) {
+    final c = args.center + Offset.fromDirection(angle, args.radius * leafp);
+    path = Path.combine(
+      PathOperation.union,
+      path,
+      Path()..addOval(
+        Rect.fromCircle(center: c, radius: args.actionRadius * leafp),
+      ),
+    );
+  }
+  for (int i = 0; i < args.selections.length; i++) {
+    final sel = args.selections[i];
+    if (sel <= 0) continue;
+    // slightly bigger than the icon discs.
+    final c = args.center + Offset.fromDirection(args.angles[i], args.radius);
+    path = Path.combine(
+      PathOperation.union,
+      path,
+      Path()..addOval(
+        Rect.fromCircle(center: c, radius: args.actionRadius * 1.12 * sel),
+      ),
+    );
+  }
+  return path;
+}
+
+/// A thick arc band with rounded caps: an annular sector unioned with a disc (radius [halfThickness]) at each centerline endpoint. When [startAngle] equals [endAngle] it degenerates to a single disc at that point.
+Path roundedArcBand({
+  required Offset center,
+  required double radius,
+  required double halfThickness,
+  required double startAngle,
+  required double endAngle,
+}) {
+  final ro = radius + halfThickness;
+  final ri = max(0.0, radius - halfThickness);
+  final sweep = endAngle - startAngle;
+  Path band = Path()
+    ..moveTo(center.dx + ro * cos(startAngle), center.dy + ro * sin(startAngle))
+    ..arcTo(
+      Rect.fromCircle(center: center, radius: ro),
+      startAngle,
+      sweep,
+      false,
+    )
+    ..lineTo(center.dx + ri * cos(endAngle), center.dy + ri * sin(endAngle))
+    ..arcTo(
+      Rect.fromCircle(center: center, radius: ri),
+      endAngle,
+      -sweep,
+      false,
+    )
+    ..close();
+  for (final a in {startAngle, endAngle}) {
+    band = Path.combine(
+      PathOperation.union,
+      band,
+      Path()..addOval(
+        Rect.fromCircle(
+          center: center + Offset.fromDirection(a, radius),
+          radius: halfThickness,
+        ),
+      ),
+    );
+  }
+  return band;
+}
+
+/// Special-timer style clip: a rounded-cap arc straddling the icon ring. It grows out of the button (centerRadius 0 -> radius), and on selection slides its caps together onto the chosen item, becoming the highlight itself.
+Path arcDragRingClip(DragRingClipArgs args) {
+  final g = args.growth;
+  final fullStart = args.angles.first;
+  final fullEnd = args.angles.last;
+  final restArc = pi * 1.3;
+  final restFocus = (fullStart + fullEnd) / 2;
+  final fullArc = fullEnd - fullStart;
+  final restStart = restFocus - fullArc.sign * restArc / 2;
+  final restEnd = restFocus + fullArc.sign * restArc / 2;
+
+  // selection focus: weighted toward whichever item(s) are selected, collapsing the arc onto it as selAmount -> 1.
+  double sumSel = 0, weightedAngle = 0;
+  for (int i = 0; i < args.selections.length; i++) {
+    sumSel += args.selections[i];
+    weightedAngle += args.selections[i] * args.angles[i];
+  }
+  // final selAmount = sumSel.clamp(0.0, 1.0);
+  final focus = sumSel > 0 ? weightedAngle / sumSel : restFocus;
+
+  // at rest, a thin half-arc whose radial profile matches the old icon (centerline radius and thickness), opening out to straddle the icon ring.
+  final restOuterR = 0.24 * args.buttonSpan;
+  final restHalfWidth = restOuterR * 0.3;
+  final restRadius = restOuterR - restHalfWidth;
+
+  return roundedArcBand(
+    center: args.center,
+    // growIn only affects the rest end of the lerp; at growIn=0 the radius is 0
+    // and the cap discs merge into a filled circle of [halfThickness].
+    radius: lerp(restRadius * args.growIn, args.radius, g),
+    halfThickness: lerp(restHalfWidth, args.actionRadius, g),
+    startAngle: lerp(
+      restStart,
+      lerp(fullStart, focus, sumSel.clamp(0.0, 1.0)),
+      g,
+    ),
+    endAngle: lerp(restEnd, lerp(fullEnd, focus, sumSel.clamp(0.0, 1.0)), g),
+  );
+}
+
 class DragActionRing extends StatefulWidget {
   final Offset position;
   final Signal<int?> dragEvents;
@@ -2545,10 +2742,25 @@ class DragActionRing extends StatefulWidget {
   final List<Widget> radialActivatorIcons;
   final List<Widget>? radialActivatorLabels;
   final List<double> radialActivatorPositions;
+  final Path Function(DragRingClipArgs args) clipBuilder;
 
   /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
   final Offset visualPosition;
   final bool? shuntRight;
+
+  /// when true, the ring is rendered permanently (its collapsed phase is the
+  /// button itself) instead of being added/removed ephemerally: it starts
+  /// closed, opens on pan-down, and returns to rest instead of self-removing.
+  final bool persistent;
+
+  /// set true (by the persistent host) on the ring that's bowing out after a selection. The ring stops taking input and plays its [completionAnimation] down — thinning its arc to nothing while its selection keeps sliding home — then calls [onRetireComplete] so the host drops it.
+  final bool retiring;
+
+  /// a persistent live ring calls this when its selection lands, so the host can retire it and stand up a fresh live ring in its place.
+  final VoidCallback? onRetire;
+
+  /// a retiring ring calls this once its completion animation finishes, so its container can remove it.
+  final VoidCallback? onRetireComplete;
 
   const DragActionRing({
     super.key,
@@ -2560,6 +2772,11 @@ class DragActionRing extends StatefulWidget {
     required this.radialActivatorIcons,
     this.radialActivatorLabels,
     required this.radialActivatorPositions,
+    required this.clipBuilder,
+    this.persistent = false,
+    this.retiring = false,
+    this.onRetire,
+    this.onRetireComplete,
   });
 
   @override
@@ -2573,20 +2790,52 @@ class DragActionRingState extends State<DragActionRing>
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
   late final List<AnimationController> labelAnimations;
+
+  /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
+  late final List<AnimationController> selectionAnimations;
   late final UpDownAnimationController upDownAnimation =
       UpDownAnimationController(
         vsync: this,
         riseDuration: Duration(milliseconds: 300),
-        fallDuration: Duration(milliseconds: 140),
+        fallDuration: Duration(milliseconds: 200),
       );
   late final AnimationController optionActivationAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   late final AnimationController optionConsiderationAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
+
+  /// 0 = fully present, 1 = thinned away to nothing. A retiring ring plays this forward to vanish; while it runs, build scales the arc's thickness (and the icons/labels) down by it.
+  late final AnimationController completionAnimation = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 350),
+  );
+
+  /// 0 = unborn (rest radius scaled to 0, so the band collapses to a filled disc of halfThickness), 1 = normal rest. Forwarded on initState so every fresh ring eases in.
+  late final AnimationController growInAnimation = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 180),
+  );
   Function()? dragEventsSubscription;
 
   void _onOtherRingOpens() {
     upDownAnimation.reverse();
+  }
+
+  /// persistent rings call this once fully closed (upDown dismissed): clear the selection state. It's invisible because at growth 0 the arc is collapsed to a disc at the center regardless of selection.
+  void _silentReset() {
+    if (!mounted) return;
+    for (final c in selectionAnimations) {
+      c.value = 0;
+    }
+    for (final c in labelAnimations) {
+      c.value = 0;
+    }
+    optionConsiderationAnimation.value = 0;
+    optionActivationAnimation.value = 0;
+    setState(() {
+      numberSelected = -1;
+      centeredNumber = -1;
+    });
   }
 
   @override
@@ -2596,42 +2845,75 @@ class DragActionRingState extends State<DragActionRing>
       widget.radialActivatorPositions.length,
       (_) => AnimationController(
         vsync: this,
-        duration: Duration(milliseconds: 540),
+        duration: Duration(milliseconds: 500),
+      ),
+    );
+    selectionAnimations = List.generate(
+      widget.radialActivatorPositions.length,
+      (_) => AnimationController(
+        vsync: this,
+        duration: Duration(milliseconds: 180),
       ),
     );
     widget.suppressionBus?.addListener(_onOtherRingOpens);
-    upDownAnimation.forward();
-    optionActivationAnimation.addStatusListener((status) {
-      if (!mounted) {
-        return;
-      }
-      if (status == AnimationStatus.completed) {
-        context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(widget);
-      }
+    if (!widget.persistent) {
+      upDownAnimation.forward();
+    }
+    completionAnimation.addStatusListener((status) {
+      if (status == AnimationStatus.completed) widget.onRetireComplete?.call();
     });
-    upDownAnimation.addStatusListener((status) {
-      // wait for option activation if it's going
-      if (!optionActivationAnimation.isAnimating &&
-          status == AnimationStatus.dismissed) {
+    growInAnimation.forward();
+    if (widget.persistent) {
+      // once fully closed, clear selection state for the next interaction.
+      upDownAnimation.addStatusListener((status) {
+        if (status == AnimationStatus.dismissed) _silentReset();
+      });
+    } else {
+      optionActivationAnimation.addStatusListener((status) {
         if (!mounted) {
           return;
         }
-        context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(widget);
-      }
-    });
+        if (status == AnimationStatus.completed) {
+          context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(
+            widget,
+          );
+        }
+      });
+      upDownAnimation.addStatusListener((status) {
+        // wait for option activation if it's going
+        if (!optionActivationAnimation.isAnimating &&
+            status == AnimationStatus.dismissed) {
+          if (!mounted) {
+            return;
+          }
+          context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(
+            widget,
+          );
+        }
+      });
+    }
     dragEventsSubscription = widget.dragEvents.subscribe((v) {
       if (v == null) {
         if (numberSelected != -1) {
-          optionActivationAnimation.forward();
+          if (widget.persistent) {
+            // hand off: the host retires this ring (it'll thin away while its selection finishes sliding home) and stands up a fresh live ring.
+            widget.onRetire?.call();
+          } else {
+            optionActivationAnimation.forward();
+          }
         } else {
           upDownAnimation.reverse();
         }
-        dragEventsSubscription?.call();
+        if (!widget.persistent) dragEventsSubscription?.call();
       } else if (v != -1) {
         if (v != numberSelected) {
           HapticFeedback.heavyImpact();
-          if (numberSelected != -1) labelAnimations[numberSelected].reverse();
+          if (numberSelected != -1) {
+            labelAnimations[numberSelected].reverse();
+            selectionAnimations[numberSelected].reverse();
+          }
           labelAnimations[v].forward();
+          selectionAnimations[v].forward();
         }
         setState(() {
           numberSelected = v;
@@ -2640,7 +2922,10 @@ class DragActionRingState extends State<DragActionRing>
           optionConsiderationAnimation.forward();
         });
       } else {
-        if (numberSelected != -1) labelAnimations[numberSelected].reverse();
+        if (numberSelected != -1) {
+          labelAnimations[numberSelected].reverse();
+          selectionAnimations[numberSelected].reverse();
+        }
         setState(() {
           numberSelected = -1;
           optionConsiderationAnimation.reverse();
@@ -2651,10 +2936,32 @@ class DragActionRingState extends State<DragActionRing>
   }
 
   @override
+  void didUpdateWidget(DragActionRing oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.retiring && !oldWidget.retiring) {
+      // freeze input but let the selection animation keep running; just thin the arc out to nothing, then ask the host to drop us.
+      dragEventsSubscription?.call();
+      dragEventsSubscription = null;
+      widget.suppressionBus?.removeListener(_onOtherRingOpens);
+      for (final c in labelAnimations) {
+        c.reverse();
+      }
+      completionAnimation.forward();
+    }
+  }
+
+  @override
   void dispose() {
-    for (final c in labelAnimations) c.dispose();
+    for (final c in labelAnimations) {
+      c.dispose();
+    }
+    for (final c in selectionAnimations) {
+      c.dispose();
+    }
     optionActivationAnimation.dispose();
     optionConsiderationAnimation.dispose();
+    completionAnimation.dispose();
+    growInAnimation.dispose();
     upDownAnimation.dispose();
     dragEventsSubscription?.call();
     widget.suppressionBus?.removeListener(_onOtherRingOpens);
@@ -2680,89 +2987,66 @@ class DragActionRingState extends State<DragActionRing>
     double releasep,
   ) {
     final theme = Theme.of(context);
-    final mt = MakoThemeData.fromTheme(theme);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded = watchSignal(
       context,
       Mobj.getAlreadyLoaded(isRightHandedID, BoolType()),
     )!;
+    final buttonSpan = watchSignal(
+      context,
+      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
+    )!;
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
-    // disable fade down if a number is selected
-    final double fallpIfNotSelected = numberSelected != -1 ? 0 : fallp;
-    final radius =
-        radialRadiusMax *
-        Curves.easeOut.transform(
-          unlerpUnit(0, 0.6, risep * (1 - fallpIfNotSelected)),
-        );
-    final Widget radialActivationRing = Positioned(
-      left: 0,
-      top: 0,
-      child: FractionalTranslation(
-        translation: Offset(-0.5, -0.5),
-        child: Container(
-          constraints: BoxConstraints.tight(Size(radius * 2, radius * 2)),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary,
-            shape: BoxShape.circle,
-          ),
-        ),
-      ),
+    // how grown the ring is overall (grow-in, fall-out). selection collapse is handled by the clip builder via swipep / selections, not here.
+    final baseGrow = Curves.easeOut.transform(
+      unlerpUnit(0, 0.6, risep * (1 - fallp)),
     );
+    final completion = Curves.easeInCubic.transform(completionAnimation.value);
+    final iconFade =
+        unlerpUnit(0.6, 1, baseGrow) *
+        // fades a bit immediately on completion, but doesn't fade all the way out
+        lerp(1, 0.3, unlerpUnit(0, 0.36, completionAnimation.value));
+
+    final selections = [
+      for (int i = 0; i < selectionAnimations.length; i++)
+        Curves.easeOut.transform(selectionAnimations[i].value) *
+            (i == numberSelected ? 1 - Curves.easeOut.transform(releasep) : 1),
+    ];
 
     final actionRadiusMax = thumbSpan * 0.6;
     Widget dragChoiceWidget(Widget child) {
-      return Container(
-        constraints: BoxConstraints.tight(
-          Size(actionRadiusMax, actionRadiusMax),
-        ),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary,
-          shape: BoxShape.circle,
-        ),
-        padding: EdgeInsets.all(8),
-        child: Opacity(
-          opacity: unlerpUnit(0.6, 1, risep),
-          child: IconTheme(
-            data: IconThemeData(color: theme.colorScheme.onPrimary),
-            child: DefaultTextStyle(
-              style: controlPadTextStyle.merge(
-                TextStyle(color: theme.colorScheme.onPrimary),
+      return SizedBox(
+        width: actionRadiusMax,
+        height: actionRadiusMax,
+        child: Padding(
+          padding: EdgeInsets.all(8),
+          child: Opacity(
+            opacity: iconFade,
+            child: IconTheme(
+              data: IconThemeData(color: theme.colorScheme.surface),
+              child: DefaultTextStyle(
+                style: controlPadTextStyle.merge(
+                  TextStyle(color: theme.colorScheme.surface),
+                ),
+                child: FittedBox(fit: BoxFit.scaleDown, child: child),
               ),
-              child: FittedBox(fit: BoxFit.scaleDown, child: child),
             ),
           ),
         ),
       );
     }
 
-    final List<Widget> radialActivatorWidgets = widget.radialActivatorIcons
-        .map((icon) => dragChoiceWidget(icon))
-        .toList();
-
-    Offset positionFor(int actionIndex, {double? overrideRisep}) {
+    Offset positionFor(int actionIndex) {
       final angle = conditionallyApplyIf<double>(
         !isRightHanded,
         flipAngleHorizontally,
         widget.radialActivatorPositions[actionIndex],
       );
-      return Offset.fromDirection(
-        angle,
-        lerp(
-          radius - actionRadiusMax,
-          radius,
-          Curves.easeInOut.transform(
-            unlerpUnit(
-              0.6,
-              1,
-              (overrideRisep ?? risep) * (1 - fallpIfNotSelected),
-            ),
-          ),
-        ),
-      );
+      return Offset.fromDirection(angle, radialRadiusMax);
     }
 
-    final List<Widget> unselectedNumeralDragRadialActivators = List.generate(
+    final List<Widget> radialActivatorIcons = List.generate(
       widget.radialActivatorPositions.length,
       (i) {
         Offset o = positionFor(i);
@@ -2771,55 +3055,64 @@ class DragActionRingState extends State<DragActionRing>
           top: o.dy,
           child: FractionalTranslation(
             translation: Offset(-0.5, -0.5),
-            child: Transform.scale(
-              scale: currentActionSize(),
-              child: radialActivatorWidgets[i],
-            ),
+            child: dragChoiceWidget(widget.radialActivatorIcons[i]),
           ),
         );
       },
     );
 
-    Widget? selectedNumeralDragRadialActivator;
-    if (centeredNumber != -1) {
-      selectedNumeralDragRadialActivator = unselectedNumeralDragRadialActivators
-          .removeAt(centeredNumber);
-    }
-
     double totalSpan = 2 * radialRadiusMax + 2 * actionRadiusMax;
+    final center = Offset(totalSpan / 2, totalSpan / 2);
 
-    final revealFraction = 1 - Curves.easeOut.transform(swipep);
-    final revealCenter = centeredNumber != -1
-        ? positionFor(centeredNumber, overrideRisep: 1)
-        : Offset.zero;
-    final revealMaxRadius = totalSpan;
+    // the builder shapes the colored backdrop, including its response to
+    // selection (a sliding arc, or per-item circles).
+    final Path clipPath = widget.clipBuilder(
+      DragRingClipArgs(
+        growth: baseGrow,
+        swipep: swipep,
+        selections: selections,
+        radius: radialRadiusMax,
+        // at full growth this is the arc's half-thickness, so playing completion
+        // up to 1 thins the retiring arc down to nothing in place.
+        actionRadius: (actionRadiusMax / 2) * (1 - completion),
+        angles: widget.radialActivatorPositions
+            .map(
+              (a) => conditionallyApplyIf<double>(
+                !isRightHanded,
+                flipAngleHorizontally,
+                a,
+              ),
+            )
+            .toList(),
+        isRightHanded: isRightHanded,
+        center: center,
+        buttonSpan: buttonSpan,
+        growIn: Curves.easeOutCubic.transform(growInAnimation.value),
+      ),
+    );
 
-    Widget radialRevealShaderMask({
-      required double fraction,
-      required double maxRadius,
-      required List<Widget> stackChildren,
-    }) {
-      return ShaderMask(
-        shaderCallback: (bounds) => createRadialRevealShader(
-          bounds: bounds,
-          center: Alignment(
-            revealCenter.dx / (bounds.size.width / 2),
-            revealCenter.dy / (bounds.size.height / 2),
-          ),
-          fraction: fraction,
-          fuzzyEdgeWidth: 20.0,
-          maxRadius: maxRadius,
+    final Widget clippedRing = ClipPath(
+      clipper: _DragRingPathClipper(clipPath),
+      child: SizedBox(
+        width: totalSpan,
+        height: totalSpan,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: ColoredBox(color: theme.colorScheme.onSurface),
+            ),
+            Transform.translate(
+              offset: center,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: radialActivatorIcons,
+              ),
+            ),
+          ],
         ),
-        child: SizedBox(
-          width: totalSpan,
-          height: totalSpan,
-          child: Transform.translate(
-            offset: Offset(totalSpan / 2, totalSpan / 2),
-            child: Stack(clipBehavior: Clip.none, children: stackChildren),
-          ),
-        ),
-      );
-    }
+      ),
+    );
 
     Widget labelWidgetAt(int index, double progress) {
       final angle = conditionallyApplyIf<double>(
@@ -2829,7 +3122,7 @@ class DragActionRingState extends State<DragActionRing>
       );
       final labelPos = Offset.fromDirection(
         angle,
-        radius + actionRadiusMax * 0.8,
+        radialRadiusMax + actionRadiusMax * 0.27,
       );
       // alignment parameters are projected to the manhattan unit square
 
@@ -2843,70 +3136,35 @@ class DragActionRingState extends State<DragActionRing>
         }
       }
       final m = max(rawTx.abs(), rawTy.abs());
-      final double fontSize = 38;
-      return nesting(
-        [
-          (w) => Positioned(left: labelPos.dx, top: labelPos.dy, child: w),
-          (w) => FractionalTranslation(
-            translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
-            child: w,
-          ),
-          (w) => FuzzyCircleClip(
-            origin: RelAlignment(
-              originAlignX: -labelPos.dx,
-              originAlignY: -labelPos.dy,
-            ),
-            progress: progress,
-            fuzzyEdgeWidth: 20.0,
-            child: w,
-          ),
-          (w) => Transform.translate(
-            offset:
-                angleToOffset(angle) *
-                (actionRadiusMax * 0.2) *
-                easeIn(1 - progress),
-            child: w,
-          ),
-          // tombstone: it seems as if you can't nest these inside the FuzzyCircleClip, they get their boundaries clipped and messed up. I really don't understand why!
-          // (w) => ShadowWidget(
-          //       color: mt.lowestBackColor.withValues(alpha: 1),
-          //       offset: Offset.zero,
-          //       blurRadius: 4,
-          //       child: w,
-          //     ),
-          // (child) => DecoratedBox(
-          //     decoration: BoxDecoration(
-          //       borderRadius: BorderRadius.circular(fontSize * 0.5),
-          //       boxShadow: [
-          //         BoxShadow(
-          //           color: mt.lowestBackColor.withValues(alpha: 0.8),
-          //           offset: Offset.zero,
-          //           blurRadius: 5,
-          //           spreadRadius: 2,
-          //         ),
-          //       ],
-          //     ),
-          //     child: child),
-          (w) => DefaultTextStyle(
-            style: controlPadTextStyle.copyWith(
-              color: theme.colorScheme.primary,
-              fontSize: fontSize,
-              shadows: [
-                Shadow(
-                  color: mt.lowestBackColor.withValues(alpha: 0.8),
-                  offset: Offset.zero,
-                  blurRadius: 5,
-                ),
-              ],
-            ),
-            child: w,
-          ),
-        ],
-        SignedPadding(
-          insets: EdgeInsets.symmetric(vertical: -fontSize * 0.57),
-          child: widget.radialActivatorLabels![index],
+      final double fontSize = 30;
+      // the pill grows from its edge nearest the ring: for a right-side label that's its left edge.
+      final growFromLeft = rawTx > 0;
+      return nesting([
+        (w) => Positioned(left: labelPos.dx, top: labelPos.dy, child: w),
+        (w) => FractionalTranslation(
+          translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
+          child: w,
         ),
-      );
+        (w) => ClipPath(
+          clipper: _FluidPillClipper(
+            progress: progress,
+            growFromLeft: growFromLeft,
+          ),
+          child: w,
+        ),
+        (w) => ColoredBox(color: theme.colorScheme.onSurface, child: w),
+        (w) => Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: w,
+        ),
+        (w) => DefaultTextStyle(
+          style: controlPadTextStyle.copyWith(
+            color: theme.colorScheme.surface,
+            fontSize: fontSize,
+          ),
+          child: w,
+        ),
+      ], widget.radialActivatorLabels![index]);
     }
 
     return IgnorePointer(
@@ -2915,24 +3173,7 @@ class DragActionRingState extends State<DragActionRing>
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // disappearing on swipe
-            radialRevealShaderMask(
-              fraction: revealFraction,
-              maxRadius: revealMaxRadius,
-              stackChildren: [
-                radialActivationRing,
-                ...unselectedNumeralDragRadialActivators,
-              ],
-            ),
-            // disappearing on release
-            radialRevealShaderMask(
-              fraction: 1 - Curves.easeOut.transform(releasep),
-              maxRadius: revealMaxRadius * 0.8,
-              stackChildren: [
-                if (selectedNumeralDragRadialActivator != null)
-                  selectedNumeralDragRadialActivator,
-              ],
-            ),
+            clippedRing,
             if (widget.radialActivatorLabels != null)
               SizedBox(
                 width: totalSpan,
@@ -2946,7 +3187,14 @@ class DragActionRingState extends State<DragActionRing>
                         if (labelAnimations[i].value > 0)
                           labelWidgetAt(
                             i,
-                            unlerpUnit(0.66, 1, labelAnimations[i].value),
+                            unlerpUnit(
+                                  0.7,
+                                  1,
+                                  Curves.easeIn.transform(
+                                    labelAnimations[i].value,
+                                  ),
+                                ) *
+                                (1 - completion),
                           ),
                     ],
                   ),
@@ -2968,7 +3216,10 @@ class DragActionRingState extends State<DragActionRing>
           upDownAnimation,
           optionConsiderationAnimation,
           optionActivationAnimation,
+          completionAnimation,
+          growInAnimation,
           ...labelAnimations,
+          ...selectionAnimations,
         ]),
         builder: (context, child) {
           return buildWithGivenAnimationParameters(
@@ -3157,6 +3408,8 @@ class TimerScreenState extends State<TimerScreen>
   static const Size dragActionRingIconSize = Size.square(26);
   late final specialTimerCreateDragRingController = DragActionRingController(
     shuntRight: false,
+    persistent: true,
+    clipBuilder: arcDragRingClip,
     radialActivatorFunctions: [
       addNewStopwatch,
       () => addNewCompositeTimer(TimerKind.loop),
@@ -3217,8 +3470,8 @@ class TimerScreenState extends State<TimerScreen>
       Text('stopwatch'),
       Text('cycle'),
       Text('series'),
-      Text('simultaneous (start)'),
-      Text('simultaneous (end)'),
+      Text('simultaneous start'),
+      Text('simultaneous end'),
     ],
   );
   late final StreamController<void> modeActivationPulse =
@@ -3644,7 +3897,9 @@ class TimerScreenState extends State<TimerScreen>
         // label: Icon(Icons.border_outer_rounded),
         key: specialTimerCreateButtonKey,
         // label: const SpecialTimerShapesLabel(),
-        label: const ManyIcon(),
+        // the ManyIcon is now drawn by the persistent drag ring (its collapsed
+        // phase); this keeps the button's footprint for hit testing only.
+        label: const ScalingAspectRatio(child: SizedBox(width: 50, height: 50)),
         onPanDown: (Offset p) {
           specialTimerCreateDragRingController.onPanDown(
             context,
@@ -4256,6 +4511,14 @@ class TimerScreenState extends State<TimerScreen>
                           editBackspaceButton,
                           editPlayButton,
                           buttonScaleDial,
+                          specialTimerCreateDragRingController
+                              .buildPersistentRing(
+                                key: const ValueKey('specialTimerRing'),
+                                visualCenter: controlGridBound(
+                                  innerPaletteAnchor + Offset(0, 0),
+                                  Size(1, 1),
+                                ).center,
+                              ),
                         ] +
                         children,
                   ),
@@ -4491,6 +4754,11 @@ class DragActionRingController {
   final List<double> radialActivatorPositions;
   final List<Widget>? radialActivatorLabels;
   final List<Widget> radialActivatorIcons;
+  final Path Function(DragRingClipArgs args) clipBuilder;
+
+  /// when true, the ring is rendered permanently by [buildPersistentRing]
+  /// instead of being added to a SelfRemovalHost on pan-down.
+  final bool persistent;
 
   /// whether to shunt text to the right or to the left, when the angle is close to a vertical position. Important for radial menus that're closer to the side of the screen. It's with respect to handedness, the meaning flips when the handedness flips.
   final bool? shuntRight;
@@ -4501,6 +4769,8 @@ class DragActionRingController {
     required this.radialActivatorPositions,
     this.radialActivatorLabels,
     required this.radialActivatorIcons,
+    required this.clipBuilder,
+    this.persistent = false,
     this.shuntRight,
   }) {
     assert(
@@ -4532,6 +4802,45 @@ class DragActionRingController {
     return srh;
   }
 
+  /// builds the always-rendered ring for [persistent] controllers; place it in
+  /// the same Stack as the rest of the controls, centered on [visualCenter]. The
+  /// host keeps one live ring plus any rings that are retiring after a commit.
+  Widget buildPersistentRing({required Offset visualCenter, Key? key}) {
+    return _PersistentDragRingHost(
+      key: key,
+      controller: this,
+      visualCenter: visualCenter,
+    );
+  }
+
+  /// builds one ring for the [_PersistentDragRingHost]: a live one (which calls
+  /// [onRetire] when its selection lands) or a retiring one (which thins itself
+  /// out, then calls [onRetireComplete]).
+  Widget buildPersistentRingInstance({
+    required Key key,
+    required Offset visualCenter,
+    required bool retiring,
+    VoidCallback? onRetire,
+    VoidCallback? onRetireComplete,
+  }) {
+    return DragActionRing(
+      key: key,
+      persistent: true,
+      retiring: retiring,
+      onRetire: onRetire,
+      onRetireComplete: onRetireComplete,
+      position: visualCenter,
+      visualPosition: visualCenter,
+      suppressionBus: suppressingNotifier,
+      dragEvents: _dragEvents,
+      shuntRight: shuntRight,
+      radialActivatorIcons: radialActivatorIcons,
+      radialActivatorLabels: radialActivatorLabels,
+      radialActivatorPositions: radialActivatorPositions,
+      clipBuilder: clipBuilder,
+    );
+  }
+
   void onPanDown(
     BuildContext context,
     Offset touchOrigin,
@@ -4540,7 +4849,10 @@ class DragActionRingController {
     dragActionRingDisabled = false;
     _startDrag = touchOrigin;
 
+    // setting -1 opens the ring (the persistent one is already mounted).
     _dragEvents.value = -1;
+    if (persistent) return;
+
     // it's a void listenable, so we can't just set the value (it'll be equivalent to the previous value and wont notify listeners)
     // ignore: invalid_use_of_protected_member
     final numeralDragActionRing = DragActionRing(
@@ -4553,6 +4865,7 @@ class DragActionRingController {
       radialActivatorIcons: radialActivatorIcons,
       radialActivatorLabels: radialActivatorLabels,
       radialActivatorPositions: radialActivatorPositions,
+      clipBuilder: clipBuilder,
     );
     getSelfRemovalHostState(context).add(numeralDragActionRing);
   }
@@ -4588,6 +4901,61 @@ class DragActionRingController {
   }
 }
 
+/// hosts a persistent drag ring: one live ring (rebuilt each frame so it tracks [visualCenter]) plus any rings that committed and are now thinning themselves away. On a commit the live ring keeps its element/state (matched by key) and slides into the retiring list, while a fresh live ring is stood up in its place.
+class _PersistentDragRingHost extends StatefulWidget {
+  final DragActionRingController controller;
+  final Offset visualCenter;
+  const _PersistentDragRingHost({
+    super.key,
+    required this.controller,
+    required this.visualCenter,
+  });
+  @override
+  State<_PersistentDragRingHost> createState() =>
+      _PersistentDragRingHostState();
+}
+
+class _PersistentDragRingHostState extends State<_PersistentDragRingHost> {
+  Key _liveKey = UniqueKey();
+
+  /// rings that have committed and are playing down. Their center is frozen at commit time; the live ring keeps tracking [_PersistentDragRingHost.visualCenter].
+  final List<({Key key, Offset center})> _retiring = [];
+
+  void _retireLive() {
+    setState(() {
+      _retiring.add((key: _liveKey, center: widget.visualCenter));
+      _liveKey = UniqueKey();
+    });
+  }
+
+  void _onRetireComplete(Key key) {
+    if (!mounted) return;
+    setState(() => _retiring.removeWhere((r) => r.key == key));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        for (final r in _retiring)
+          widget.controller.buildPersistentRingInstance(
+            key: r.key,
+            visualCenter: r.center,
+            retiring: true,
+            onRetireComplete: () => _onRetireComplete(r.key),
+          ),
+        widget.controller.buildPersistentRingInstance(
+          key: _liveKey,
+          visualCenter: widget.visualCenter,
+          retiring: false,
+          onRetire: _retireLive,
+        ),
+      ],
+    );
+  }
+}
+
 class NumeralButton extends StatefulWidget {
   final List<int> digits;
   final GlobalKey<TimersButtonState>? timerButtonKey;
@@ -4610,6 +4978,7 @@ class _NumeralButtonState extends State<NumeralButton> {
     super.initState();
     dragActionRingController = DragActionRingController(
       suppressingNotifier: widget.otherDragActionRingStarted,
+      clipBuilder: circlesDragRingClip,
       radialActivatorFunctions: List.generate(
         numericRadialActivatorFunctions.length,
         (i) => () {

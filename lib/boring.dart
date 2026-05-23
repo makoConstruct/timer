@@ -731,17 +731,21 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   // falltime overrides risetime, so reversing while the forward is still happening always looks fine (special), but there can be glitches when going forward while reverse is in progress.
   DateTime? _riseTime;
   DateTime? _fallTime;
-  final Duration riseDuration;
-  final Duration fallDuration;
+  final Duration rawRiseDuration;
+  final Duration rawFallDuration;
+  // durations scaled by devtools' slow-animations factor
+  Duration get riseDuration => rawRiseDuration * timeDilation;
+  Duration get fallDuration => rawFallDuration * timeDilation;
   final List<AnimationStatusListener> _statusListeners = [];
   AnimationStatus _lastStatus = AnimationStatus.dismissed;
   late final Ticker _ticker;
 
   UpDownAnimationController({
-    required this.riseDuration,
-    required this.fallDuration,
+    required Duration riseDuration,
+    required Duration fallDuration,
     required TickerProvider vsync,
-  }) {
+  }) : rawRiseDuration = riseDuration,
+       rawFallDuration = fallDuration {
     _ticker = vsync.createTicker(_tick);
   }
 
@@ -3550,7 +3554,7 @@ class SeparatorGradient extends StatelessWidget {
   }
 }
 
-// Returns the (circular radius, rectangle height) for a given progress, for animating a vertically-growing progress bar
+// Returns the (circular radius, rectangle length) for a given progress, for animating a vertically-growing progress bar
 (double, double) fluidBarRadiusAndHeightForProgress(
   double width,
   double height,
@@ -3958,13 +3962,68 @@ class SpecialTimerShapesLabel extends StatelessWidget {
   }
 }
 
+/// Builds the ManyIcon "C" path centered on [center]: an arc band between outer
+/// radius [outerR] and inner radius [innerR], with the gap on the right bounded
+/// by vertical edges sitting [edgeX] to the right of [center]. Right-handed
+/// orientation; mirror with [mirrorPathHorizontally] for left-handed.
+Path buildManyIconPath({
+  required Offset center,
+  required double outerR,
+  required double innerR,
+  required double edgeX,
+}) {
+  final outerAngle = acos((edgeX / outerR).clamp(-1.0, 1.0));
+  final outerRect = Rect.fromCircle(center: center, radius: outerR);
+
+  final Path path;
+  if (innerR >= edgeX) {
+    final innerAngle = acos((edgeX / innerR).clamp(-1.0, 1.0));
+    final innerRect = Rect.fromCircle(center: center, radius: innerR);
+    path = Path()
+      ..moveTo(
+        center.dx + outerR * cos(-outerAngle),
+        center.dy + outerR * sin(-outerAngle),
+      )
+      ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
+      ..lineTo(
+        center.dx + innerR * cos(innerAngle),
+        center.dy + innerR * sin(innerAngle),
+      )
+      ..arcTo(innerRect, innerAngle, tau - 2 * innerAngle, false)
+      ..close();
+  } else {
+    // The inner radius is too small to reach the right edge, so the inner
+    // arc becomes a fully enclosed hole punched out of a solid wedge.
+    path = Path()
+      ..fillType = PathFillType.evenOdd
+      ..moveTo(
+        center.dx + outerR * cos(-outerAngle),
+        center.dy + outerR * sin(-outerAngle),
+      )
+      ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
+      ..close();
+    if (innerR > 0) {
+      path.addOval(Rect.fromCircle(center: center, radius: innerR));
+    }
+  }
+  return path;
+}
+
+Path mirrorPathHorizontally(Path path, double axisX) {
+  final m = Matrix4.identity()
+    ..translateByDouble(axisX, 0, 0, 1)
+    ..scaleByDouble(-1.0, 1.0, 1.0, 1.0)
+    ..translateByDouble(-axisX, 0, 0, 1);
+  return path.transform(m.storage);
+}
+
 class ManyIconPainter extends CustomPainter {
   ManyIconPainter({required this.color, required this.isRightHanded});
   final Color color;
   final bool isRightHanded;
 
   /// Ring thickness as a fraction of the arc's radius: 1 collapses the inner  radius to the center. The right vertical edge of the shape always sits  thickness/2 of the radius to the right of the center.
-  static const double thickness = 0.46;
+  static const double thickness = 0.65;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -3976,53 +4035,18 @@ class ManyIconPainter extends CustomPainter {
     // final outerR = 10.0 * scale;
     final innerR = outerR * (1 - thickness);
     final edgeX = outerR * thickness / 2;
-    final outerAngle = acos(edgeX / outerR);
 
     final fill = Paint()..color = color;
-
-    final outerRect = Rect.fromCircle(center: hub, radius: outerR);
-
-    final Path path;
-    if (innerR >= edgeX) {
-      final innerAngle = acos(edgeX / innerR);
-      final innerRect = Rect.fromCircle(center: hub, radius: innerR);
-      path = Path()
-        ..moveTo(
-          hub.dx + outerR * cos(-outerAngle),
-          hub.dy + outerR * sin(-outerAngle),
-        )
-        ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
-        ..lineTo(
-          hub.dx + innerR * cos(innerAngle),
-          hub.dy + innerR * sin(innerAngle),
-        )
-        ..arcTo(innerRect, innerAngle, tau - 2 * innerAngle, false)
-        ..close();
-    } else {
-      // The inner radius is too small to reach the right edge, so the inner
-      // arc becomes a fully enclosed hole punched out of a solid wedge.
-      path = Path()
-        ..fillType = PathFillType.evenOdd
-        ..moveTo(
-          hub.dx + outerR * cos(-outerAngle),
-          hub.dy + outerR * sin(-outerAngle),
-        )
-        ..arcTo(outerRect, -outerAngle, -(tau - 2 * outerAngle), false)
-        ..close();
-      if (innerR > 0) {
-        path.addOval(Rect.fromCircle(center: hub, radius: innerR));
-      }
-    }
-
-    if (isRightHanded) {
-      canvas.drawPath(path, fill);
-    } else {
-      canvas.save();
-      canvas.translate(2 * hub.dx, 0);
-      canvas.scale(-1, 1);
-      canvas.drawPath(path, fill);
-      canvas.restore();
-    }
+    final path = buildManyIconPath(
+      center: hub,
+      outerR: outerR,
+      innerR: innerR,
+      edgeX: edgeX,
+    );
+    canvas.drawPath(
+      isRightHanded ? path : mirrorPathHorizontally(path, hub.dx),
+      fill,
+    );
   }
 
   @override

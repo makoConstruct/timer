@@ -10,47 +10,9 @@ A timer app that's roughly (considering all of the factors below) *11 times more
 
 - Timers are visually compact and color-coded, so users can easily find and reuse timers. (*No other timer app has this as far as we're aware.*)
 
-<!--
-maybe explicitly count the interactions to make it clear, we're twice as efficient in general
+It also has:
 
-get
-unlock
-open
-create
-first digit
-second digit
-third digit
-start timer
-return to pocket
-[timer goes off] retreive from pocket
-dismiss timer
-
-get
-unlock
-open
-first digit [creates]
-second digit
-third digit [+ start timer]
-
-// or arguably
-
-create
-first digit
-second digit
-third digit
-start timer
-return to pocket
-[timer goes off] retreive from pocket
-dismiss timer
-
-first digit [creates]
-second digit
-third digit [+ start timer]
--->
-
-Special features:
-
-- Chained timers, which are often useful for, say, executing multi-stage cooking processes, and looping timers, which can be used in combination with chaining to make pomodoro timers.
+- Chained timers, which are often useful for, say, executing multi-stage cooking processes, and looping timers, which can be used in combination with chaining to make pomodoro timers, or any ad-hoc repeating reminder.
 
 - A ludic nature.
 
@@ -58,23 +20,23 @@ Special features:
 
 There is going to be a donation nag. In this house we believe that societies grow great by incentivizing good actions. Be the incentive you want to see in the world. (accordingly we will be forwarding some portion of the income to the open source projects that made ours possible). -->
 
-<!-- ## contributions
+## contributing
 
-Contributions that are accepted will be compensated if they're substantial enough. -->
+### style
 
-<!-- ## audio assets
+Don't spread comments over multiple lines, assume everyones' editors have automatic linewrap and don't require that.
 
-These are currently not committed, as I haven't decided which ones I want to include.
+Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long.
 
-credit goes mostly to [Kenney](kenney.nl) for the short audio sound effects. -->
+### compensation
 
-## License
+If you have a substantial idea for the app, tell us before you start work, and we can make an agreement about how many shares we think it deserves on completion. Contributions submitted without any agreement shouldn't expect compensation, but compensation may be offered anyway.
 
-It's BSL-1.1(Apache-2.0, non-compete), a fair use license, which means you can use the code for anything as long as it isn't a directly competing project (a timer app). Even that restriction goes away after 4 years, at which point it converts to Apache 2. "Mako's Timer" and its logo are trademarks of the licensor.
+## license
 
-## building
+It's BSL-1.1(Apache-2.0, non-compete), a fair source license, which means you can use the code for anything as long as it isn't a directly competing project (a timer app). Even that restriction goes away after 4 years, at which point it converts to Apache 2. "mako's timer" and its logo are trademarks of the licensor.
 
-<!-- You'll need to fetch those audio assets. -->
+## Building
 
 `flutter create .`
 
@@ -84,6 +46,6 @@ It's BSL-1.1(Apache-2.0, non-compete), a fair use license, which means you can u
 
 `flutter run`
 
-### testing
+### Testing
 
 Whenever you push a change to the device, the foreground task connection will break. You will likely have to force stop the app and restart before the foreground task will connect correctly. This probably has something to do with sendChannels not surviving hot reloading, it may also involve the new install automatically booting the old background task code before the new version is installed. Idk, whatever it is, this fixes it, and this issue doesn't occur in deployment.

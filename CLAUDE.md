@@ -14,6 +14,8 @@ This is a user who's very specific in what they want. Usually any code they will
 
 Don't leave excessive comments, if the code is self-explanatory, no comment.
 
+Honor CONTRIBUTING.md
+
 ## Project Overview
 
 Mako's Timer is an ergonomic Flutter timer app that optimizes the user experience through visual compactness, color-coding, and gesture-based interactions. The app uses a custom reactive persistence system called Mobj that combines Signals for reactivity with Drift (SQLite) for persistence.
