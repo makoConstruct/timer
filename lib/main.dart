@@ -89,6 +89,9 @@ final GlobalKey configButtonKey = GlobalKey();
 const backingCornerRounding = 0.37;
 const backingDeflationProportion = 0.07;
 
+/// line width of icon strokes (the special timer arc, the hamburger) as a fraction of buttonSpan
+const iconLineRatio = 0.12;
+
 /// I meticulously fitted the actual core of the play icon to this box. You can scale it to get a play icon that has the dimensions you want.
 Widget fittedPlayIcon(color) => SizedBox(
   height: 10,
@@ -2772,11 +2775,14 @@ Path arcDragRingClip(DragRingClipArgs args) {
 
   // at rest, a thin half-arc whose radial profile matches the old icon (centerline radius and thickness), opening out to straddle the icon ring.
   final restOuterR = 0.2 * args.buttonSpan;
-  final restHalfThickness = restOuterR * 0.3 * unlerpUnit(0, 0.4, args.growIn);
+  final restHalfThickness =
+      iconLineRatio / 2 * args.buttonSpan * unlerpUnit(0, 0.4, args.growIn);
   final restRadius = restOuterR - restHalfThickness;
+  final handednessSign = args.isRightHanded ? 1 : -1;
 
   return roundedArcBand(
-    center: args.center,
+    center:
+        args.center + Offset(handednessSign * restRadius * 0.34, 0) * (1 - g),
     radius: lerp(restRadius, args.radius, g),
     halfThickness: lerp(restHalfThickness, args.actionRadius, g),
     startAngle: lerp(
@@ -2847,8 +2853,8 @@ class DragActionRingState extends State<DragActionRing>
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
   late final List<AnimationController> labelAnimations;
-  static const labelAnimationDuration = Duration(milliseconds: 270);
-  static const labelAnimationDelay = Duration(milliseconds: 200);
+  static const labelAnimationDuration = Duration(milliseconds: 290);
+  static const labelAnimationDelay = Duration(milliseconds: 300);
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
   late final List<AnimationController> selectionAnimations;
@@ -3261,13 +3267,16 @@ class DragActionRingState extends State<DragActionRing>
                         if (labelAnimations[i].value > 0)
                           labelWidgetAt(
                             i,
-                            unlerpUnit(
-                                  labelAnimationDelay.inMicroseconds /
-                                      (labelAnimationDelay.inMicroseconds +
-                                          labelAnimationDuration
-                                              .inMicroseconds),
-                                  1,
-                                  Curves.easeInCubic.transform(
+                            Curves.easeOutCubic.transform(
+                                  unlerpUnit(
+                                    (labelAnimationDelay.inMicroseconds
+                                            .toDouble()) /
+                                        ((labelAnimationDelay.inMicroseconds
+                                                .toDouble()) +
+                                            (labelAnimationDuration
+                                                .inMicroseconds
+                                                .toDouble())),
+                                    1,
                                     labelAnimations[i].value,
                                   ),
                                 ) *
@@ -3441,10 +3450,11 @@ class TimerScreenState extends State<TimerScreen>
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
+  static const editPopoverDelay = Duration(milliseconds: 1200);
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
         vsync: this,
-        riseDuration: Duration(milliseconds: 150),
+        riseDuration: Duration(milliseconds: 200),
         fallDuration: Duration(milliseconds: 120),
       );
   late final ScrollController timersScroller = ScrollController();
@@ -3624,6 +3634,7 @@ class TimerScreenState extends State<TimerScreen>
             timerData.kind == TimerKind.timer &&
             (!isFirstPressForSelectedTimer.value ||
                 currentlyPressingKey.value == 0),
+        forwardDelay: editPopoverDelay,
       );
     });
   }
@@ -4168,13 +4179,11 @@ class TimerScreenState extends State<TimerScreen>
     final configButton = TimersButton(
       key: configButtonKey,
       label: SizedBox(
-        width: buttonSpan * 0.54,
-        height: buttonSpan * 0.54,
+        width: buttonSpan * 0.43,
+        height: buttonSpan * 0.43,
         child: Hero(
           tag: 'configButton',
-          child: ScalingAspectRatio(
-            child: Icon(size: 10, Icons.settings_rounded),
-          ),
+          child: HamburgerIcon(lineWidth: iconLineRatio * buttonSpan),
         ),
       ),
       // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
@@ -5368,6 +5377,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget trailing(Widget child) =>
         SizedBox(width: 40.0, child: Center(child: child));
 
+    Widget sectionHeading(String label) => Padding(
+      padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
+      child: Text(
+        label,
+        style: theme.textTheme.bodyMedium!.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+
+    Widget sectionDivider() => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: SeparatorGradient(color: indentColor),
+    );
+
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
       subtitle: Text(
@@ -5412,12 +5437,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       tag: 'configButton',
                       createRectTween: (begin, end) =>
                           DelayedRectTween(begin: begin, end: end, delay: 0.14),
-                      child: ScalingAspectRatio(
-                        child: Icon(
-                          Icons.settings_rounded,
-                          color: theme.colorScheme.onSurface,
-                          size: 10,
-                        ),
+                      child: HamburgerIcon(
+                        lineWidth:
+                            iconLineRatio *
+                            Mobj.getAlreadyLoaded(
+                              buttonSpanID,
+                              DoubleType(),
+                            ).value!,
                       ),
                     ),
                   ),
@@ -5443,6 +5469,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SliverList(
             delegate: SliverChildListDelegate([
+              sectionHeading('Settings'),
               Builder(
                 builder: (context) {
                   final padLandscapeMobj = Mobj.getAlreadyLoaded(
@@ -5733,6 +5760,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: listItemPadding,
                 );
               }),
+              sectionDivider(),
+              sectionHeading('Info'),
               Builder(
                 builder: (context) {
                   // Need a Builder to get the correct context for finding the icon's position
@@ -5819,22 +5848,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 },
               ),
-              // ---------------
-              // Divider(indent: 22, endIndent: 22, height: 34),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: SeparatorGradient(color: indentColor),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
-                child: Text(
-                  'Extra',
-                  style: theme.textTheme.bodyMedium!.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
+              sectionDivider(),
+              sectionHeading('Extra'),
               Builder(
                 builder: (context) {
                   final GlobalKey iconKey = GlobalKey();

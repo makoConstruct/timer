@@ -761,11 +761,15 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     }
   }
 
-  void towards(bool direction) {
+  void towards(
+    bool direction, {
+    Duration? forwardDelay,
+    Duration? reverseDelay,
+  }) {
     if (direction) {
-      forward();
+      forward(delay: forwardDelay);
     } else {
-      reverse();
+      reverse(delay: reverseDelay);
     }
   }
 
@@ -782,32 +786,41 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
           );
     } else if (_riseTime == null) {
       _riseTime = DateTime.now().add(dd);
-    } else if (_fallTime != null) {
-      // tries to start from where it currently is (this may not work if you're using heterogenous easers on rise and fall)
-      double riseProgress = durationToSeconds(
-        DateTime.now().difference(_riseTime!),
-      );
-      double fallProgress = _fallTime != null
-          ? durationToSeconds(DateTime.now().difference(_fallTime!))
-          : 0;
-      double forwardPosition = max(
-        0,
-        min(
-              riseProgress,
-              durationToSeconds(riseDuration) -
-                  fallProgress /
-                      durationToSeconds(fallDuration) *
-                      durationToSeconds(riseDuration),
-            ) /
-            durationToSeconds(riseDuration),
-      );
-      if (forwardPosition > 0) {
-        _riseTime = DateTime.now().subtract(secondsToDuration(forwardPosition));
+    } else {
+      if (_fallTime != null) {
+        // tries to start from where it currently is (this may not work if you're using heterogenous easers on rise and fall)
+        double riseProgress = durationToSeconds(
+          DateTime.now().difference(_riseTime!),
+        );
+        double fallProgress = _fallTime != null
+            ? durationToSeconds(DateTime.now().difference(_fallTime!))
+            : 0;
+        double forwardPosition = max(
+          0,
+          min(
+                riseProgress,
+                durationToSeconds(riseDuration) -
+                    fallProgress /
+                        durationToSeconds(fallDuration) *
+                        durationToSeconds(riseDuration),
+              ) /
+              durationToSeconds(riseDuration),
+        );
+        if (forwardPosition > 0) {
+          _riseTime = DateTime.now().subtract(
+            secondsToDuration(forwardPosition),
+          );
+        } else {
+          _riseTime = DateTime.now().add(dd);
+        }
       } else {
-        _riseTime = DateTime.now().add(dd);
+        // else already going forward, so just keeps going forward
+        // but may need to bump the delay forward
+        if (delay != null && DateTime.now().compareTo(_riseTime!) < 0) {
+          _riseTime = DateTime.now().add(delay);
+        }
       }
     }
-    // else already going forward, so just keeps going forward
     _fallTime = null;
     if (!_ticker.isActive) {
       _ticker.start();
@@ -816,12 +829,12 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
     _updateStatus();
   }
 
-  void reverse() {
+  void reverse({Duration? delay}) {
     // do nothing if already falling
     if (_fallTime != null) {
       return;
     }
-    _fallTime = DateTime.now();
+    _fallTime = delay != null ? DateTime.now().add(delay) : DateTime.now();
     if (!_ticker.isActive) {
       _ticker.start();
     }
@@ -4160,6 +4173,47 @@ class ManyIcon extends StatelessWidget {
           painter: ManyIconPainter(color: color, isRightHanded: isRightHanded),
         ),
       ),
+    );
+  }
+}
+
+class HamburgerIconPainter extends CustomPainter {
+  HamburgerIconPainter({required this.color, required this.lineWidth});
+  final Color color;
+  final double lineWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = lineWidth;
+    final spread = lineWidth * 1.5;
+    final x0 = size.width / 2 - spread / 2;
+    final x1 = size.width / 2 + spread / 2;
+    final y0 = size.height / 2 - spread / 2;
+    for (var i = 0; i < 2; i++) {
+      final y = y0 + i * spread;
+      canvas.drawLine(Offset(x0, y), Offset(x1, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant HamburgerIconPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.lineWidth != lineWidth;
+}
+
+/// actually only renders two bars rather than 3
+class HamburgerIcon extends StatelessWidget {
+  const HamburgerIcon({super.key, required this.lineWidth});
+  final double lineWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
+    return CustomPaint(
+      painter: HamburgerIconPainter(color: color, lineWidth: lineWidth),
     );
   }
 }
