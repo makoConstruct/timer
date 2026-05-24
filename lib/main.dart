@@ -2559,6 +2559,12 @@ class DragRingClipArgs {
   /// 0..1 scalar on the resting centerline radius, played on every ring's first build. At 0 the rest band collapses to a [halfThickness]-radius filled circle (since the cap discs merge); at 1 it's the normal rest shape. Has no effect once the ring is fully open.
   final double growIn;
 
+  /// spring-driven angle of the arc's start cap (in the same handedness-rectified space as [angles]). Equals [angles].first at rest, slides to the selected item's angle.
+  final double selectionStartAngle;
+
+  /// spring-driven angle of the arc's end cap. Equals [angles].last at rest, slides to the selected item's angle.
+  final double selectionEndAngle;
+
   const DragRingClipArgs({
     required this.growth,
     required this.swipep,
@@ -2569,6 +2575,8 @@ class DragRingClipArgs {
     required this.isRightHanded,
     required this.center,
     required this.buttonSpan,
+    required this.selectionStartAngle,
+    required this.selectionEndAngle,
     this.growIn = 1.0,
   });
 }
@@ -2744,7 +2752,7 @@ Path roundedArcBand({
   return p;
 }
 
-/// Special-timer style clip: a rounded-cap arc straddling the icon ring. It grows out of the button (centerRadius 0 -> radius), and on selection slides its caps together onto the chosen item, becoming the highlight itself.
+/// Special-timer style clip: a rounded-cap arc straddling the icon ring. It grows out of the button (centerRadius 0 -> radius), and on selection slides its caps together onto the chosen item (the caps are spring-tracked by the host state and handed in via [DragRingClipArgs.selectionStartAngle]/[DragRingClipArgs.selectionEndAngle]), becoming the highlight itself.
 Path arcDragRingClip(DragRingClipArgs args) {
   final g = args.growth;
   final fullStart = args.angles.first;
@@ -2755,15 +2763,6 @@ Path arcDragRingClip(DragRingClipArgs args) {
   final appearanceSpin = -(1 - args.growIn) * pi * 1.6;
   final restStart = restFocus - fullArc.sign * restArc / 2 + appearanceSpin;
   final restEnd = restFocus + fullArc.sign * restArc / 2 + appearanceSpin;
-
-  // selection focus: weighted toward whichever item(s) are selected, collapsing the arc onto it as selAmount -> 1.
-  double sumSel = 0, weightedAngle = 0;
-  for (int i = 0; i < args.selections.length; i++) {
-    sumSel += args.selections[i];
-    weightedAngle += args.selections[i] * args.angles[i];
-  }
-  // final selAmount = sumSel.clamp(0.0, 1.0);
-  final focus = sumSel > 0 ? weightedAngle / sumSel : restFocus;
 
   // at rest, a thin half-arc whose radial profile matches the old icon (centerline radius and thickness), opening out to straddle the icon ring.
   final restOuterR = 0.2 * args.buttonSpan;
@@ -2777,12 +2776,8 @@ Path arcDragRingClip(DragRingClipArgs args) {
         args.center + Offset(handednessSign * restRadius * 0.34, 0) * (1 - g),
     radius: lerp(restRadius, args.radius, g),
     halfThickness: lerp(restHalfThickness, args.actionRadius, g),
-    startAngle: lerp(
-      restStart,
-      lerp(fullStart, focus, sumSel.clamp(0.0, 1.0)),
-      g,
-    ),
-    endAngle: lerp(restEnd, lerp(fullEnd, focus, sumSel.clamp(0.0, 1.0)), g),
+    startAngle: lerp(restStart, args.selectionStartAngle, g),
+    endAngle: lerp(restEnd, args.selectionEndAngle, g),
   );
 }
 
@@ -2851,6 +2846,10 @@ class DragActionRingState extends State<DragActionRing>
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
   late final List<AnimationController> selectionAnimations;
+
+  /// physical springs tracking the arc's start and end cap angles (in handedness-rectified space). They rest at the first/last activator and both retarget to the current selection when one exists. The arc clip reads their values in lieu of a linear average over the per-item selection animations.
+  late final TargetSpring _arcStartSpring;
+  late final TargetSpring _arcEndSpring;
 
   UpDownAnimationController? _upDown;
   SpringExpansionController? _spring;
@@ -2921,6 +2920,45 @@ class DragActionRingState extends State<DragActionRing>
       numberSelected = -1;
       centeredNumber = -1;
     });
+    // ring's invisible — jump the springs straight to rest instead of animating, so they're ready for the next open.
+    final (restStart, restEnd) = _restCapAngles();
+    _arcStartSpring.jump(restStart);
+    _arcEndSpring.jump(restEnd);
+  }
+
+  /// rendered-space (handedness-rectified) angles of the first and last activators — where the arc's caps rest when nothing is selected.
+  (double, double) _restCapAngles() {
+    if (widget.radialActivatorPositions.isEmpty) return (0, 0);
+    final isRightHanded =
+        Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).peek() ?? true;
+    double rectify(double a) => conditionallyApplyIf<double>(
+      !isRightHanded,
+      flipAngleHorizontally,
+      a,
+    );
+    return (
+      rectify(widget.radialActivatorPositions.first),
+      rectify(widget.radialActivatorPositions.last),
+    );
+  }
+
+  /// retarget the cap springs based on [numberSelected]: both onto the chosen item, or back to rest if nothing's selected.
+  void _retargetArcSprings() {
+    if (numberSelected == -1) {
+      final (restStart, restEnd) = _restCapAngles();
+      _arcStartSpring.target = restStart;
+      _arcEndSpring.target = restEnd;
+    } else {
+      final isRightHanded =
+          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).peek() ?? true;
+      final a = conditionallyApplyIf<double>(
+        !isRightHanded,
+        flipAngleHorizontally,
+        widget.radialActivatorPositions[numberSelected],
+      );
+      _arcStartSpring.target = a;
+      _arcEndSpring.target = a;
+    }
   }
 
   @override
@@ -2950,6 +2988,9 @@ class DragActionRingState extends State<DragActionRing>
         duration: Duration(milliseconds: 220),
       ),
     );
+    final (restStart, restEnd) = _restCapAngles();
+    _arcStartSpring = TargetSpring(vsync: this, initial: restStart);
+    _arcEndSpring = TargetSpring(vsync: this, initial: restEnd);
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     if (!widget.persistent) {
       _expansionForward();
@@ -3001,12 +3042,17 @@ class DragActionRingState extends State<DragActionRing>
           }
           labelAnimations[v].forward(delay: labelAnimationDelay);
           selectionAnimations[v].forward();
+          setState(() {
+            numberSelected = v;
+            centeredNumber = v;
+            optionConsiderationAnimation.forward();
+          });
+          _retargetArcSprings();
+        } else {
+          setState(() {
+            optionConsiderationAnimation.forward();
+          });
         }
-        setState(() {
-          numberSelected = v;
-          centeredNumber = v;
-          optionConsiderationAnimation.forward();
-        });
       } else {
         if (numberSelected != -1) {
           labelAnimations[numberSelected].reverse();
@@ -3017,6 +3063,7 @@ class DragActionRingState extends State<DragActionRing>
           optionConsiderationAnimation.reverse();
           _expansionForward();
         });
+        _retargetArcSprings();
       }
     });
   }
@@ -3048,6 +3095,8 @@ class DragActionRingState extends State<DragActionRing>
     optionConsiderationAnimation.dispose();
     completionAnimation.dispose();
     growInAnimation.dispose();
+    _arcStartSpring.dispose();
+    _arcEndSpring.dispose();
     _upDown?.dispose();
     _spring?.dispose();
     dragEventsSubscription?.call();
@@ -3162,6 +3211,8 @@ class DragActionRingState extends State<DragActionRing>
         center: center,
         buttonSpan: buttonSpan,
         growIn: Curves.easeOutCubic.transform(growInAnimation.value),
+        selectionStartAngle: _arcStartSpring.value,
+        selectionEndAngle: _arcEndSpring.value,
       ),
     );
 
@@ -3290,6 +3341,8 @@ class DragActionRingState extends State<DragActionRing>
           growInAnimation,
           ...labelAnimations,
           ...selectionAnimations,
+          _arcStartSpring,
+          _arcEndSpring,
         ]),
         builder: (context, child) {
           return buildWithGivenAnimationParameters(
@@ -4329,7 +4382,7 @@ class TimerScreenState extends State<TimerScreen>
         animation: editPopoverAnimation,
         builder: (context, child) {
           final p = editPopoverAnimation.scalarValue;
-          final opacity = lerp(0.2, 1.0, p);
+          final opacity = lerp(0.1, 1.0, p);
           return Positioned.fromRect(
             rect: controlGridBound(gridPos, Size(1, 1)),
             child: IgnorePointer(

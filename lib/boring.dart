@@ -1053,6 +1053,66 @@ class SpringExpansionController extends Animation<double>
   void didStopListening() {}
 }
 
+/// Spring-driven scalar that tracks an arbitrary target — like [SpringExpansionController] but the target isn't pinned to 0 or 1. Useful for chasing a position (e.g. an angle) where the rest value can be anywhere on the number line. Mid-flight retargets preserve velocity; retargets from rest get a velocity kick in the direction of motion so the response leads instead of dribbling out of the slow exponential a critically damped spring gives a step input.
+class TargetSpring extends Animation<double>
+    with
+        AnimationLazyListenerMixin,
+        AnimationLocalListenersMixin,
+        AnimationLocalStatusListenersMixin {
+  final SpringDescription spring;
+  final double kickSpeed;
+  final double restThreshold;
+  late final AnimationController _controller;
+  double _target;
+
+  TargetSpring({
+    required TickerProvider vsync,
+    required double initial,
+    this.spring = const SpringDescription(mass: 1, stiffness: 625, damping: 50),
+    this.kickSpeed = 8.0,
+    this.restThreshold = 0.001,
+  }) : _target = initial {
+    _controller = AnimationController.unbounded(value: initial, vsync: vsync);
+    _controller.addListener(notifyListeners);
+  }
+
+  double get target => _target;
+
+  set target(double newTarget) {
+    if (newTarget == _target && !_controller.isAnimating) return;
+    _target = newTarget;
+    final delta = newTarget - _controller.value;
+    final v = _controller.velocity.abs() < restThreshold && delta != 0
+        ? kickSpeed * delta.sign
+        : _controller.velocity;
+    _controller.animateWith(
+      SpringSimulation(spring, _controller.value, newTarget, v),
+    );
+  }
+
+  /// Jump immediately to [v] with zero velocity, cancelling any in-flight simulation.
+  void jump(double v) {
+    _target = v;
+    _controller.value = v;
+  }
+
+  @override
+  double get value => _controller.value;
+
+  @override
+  AnimationStatus get status => AnimationStatus.forward;
+
+  void dispose() {
+    _controller.dispose();
+  }
+
+  @override
+  void didStartListening() {}
+
+  @override
+  void didStopListening() {}
+}
+
 const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
 const List<int> datetimeSectionOffsets = [0, 2, 4, 6, 9];
 const List<int> datetimeMaxima = [60, 60, 24, 365];
