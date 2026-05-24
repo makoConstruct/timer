@@ -1,4 +1,4 @@
-mako is an interaction designer and a home cook, who lives in a hole in the outskirts of auckland, aotearoa. mako occasionally goes on adventures to further places whenever the loneliness becomes too much.
+mako is an interaction designer and a home cook, who lives in a hole in the outskirts of auckland, aotearoa. They occasionally go on adventures to further places whenever the loneliness becomes too much.
 
 mako's other works can be viewed here: [aboutmako.makopool.com](https://aboutmako.makopool.com)
 
@@ -8,9 +8,9 @@ This app's website is: [timer.dreamshrine.org](https://timer.dreamshrine.org)
 
 ## Just One Motion
 
-The first design was just one big dial. I started with an intuition that no more than one interaction should be required to create, set, and start a timer. You'd simply turn the dial until you had the number you wanted, and you'd release it, and then it would start winding back, and when it hit 0 the timer would sound.
+The first design was just one big dial. I started with an intuition that it ought to be possible to create, set, and start a timer with just one interaction. You'd simply turn the dial until you had the number you wanted, and you'd release it, and then it would start winding back, and when it hit 0 the timer would sound.
 
-We did ultimately reduce the number of interactions required to create, set and start a timer to just one, but it couldn't be done through the dial design. In practice, there was no way to make the dial feel good. You'd tend to be one to three seconds off from the exact time you wanted, which wouldn't matter on a practical level, but it felt horrible, because in a sense, you would have the wrong timer, not quite the timer you wanted, and you'd smell the wrongness of it hanging in the air.
+We did ultimately succeed at making it possible to create, set and start a timer with just one interaction, but it couldn't be done through the dial design. In practice, there was no way to make the dial feel good. You'd tend to be one to three seconds off from the exact time you wanted, which wouldn't matter on a practical level, but it felt horrible, because in a sense, you would have the wrong timer, not quite the timer you wanted, and you'd smell the wrongness of it hanging in the air.
 
 I could make the dial clicky, limit it to 30 second increments, but then we'd lose the precision that made a dial interesting to begin with. Ultimately, a dial would always require you to read the screen as you confirmed your final number, you'd never be able to configure a timer *absentmindedly*, let alone without really looking at the screen at all.
 

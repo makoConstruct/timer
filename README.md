@@ -38,7 +38,7 @@ It's BSL-1.1(Apache-2.0, non-compete), a fair source license, which means you ca
 
 ## Building
 
-`flutter create .`
+`flutter create .` (we don't currently commit most generated flutter files. We want to stay compatible with whatever the latest template for flutter projects is, so if the build fails with these, we want to make it not fail. This may change in the future.)a
 
 `flutter pub get` to get build runner
 

@@ -6,6 +6,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -939,8 +940,7 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   }
 }
 
-/// Adapter that converts Animation<(double, double)> to Animation<double>
-/// by computing min(rise, 1 - fall)
+/// Adapter that converts Animation<(double, double)> to Animation<double> by computing min(rise, 1 - fall)
 class _UpDownToDoubleAdapter extends Animation<double>
     with AnimationWithParentMixin<(double, double)> {
   _UpDownToDoubleAdapter(this.parent);
@@ -953,6 +953,91 @@ class _UpDownToDoubleAdapter extends Animation<double>
     final (rise, fall) = parent.value;
     return min(rise, 1 - fall);
   }
+}
+
+/// Critically-damped spring with an initial-velocity kick on forward-from-rest so the response shape resembles easeOut instead of the lazy exponential critical damping gives a step input. Mid-flight re-targets preserve velocity.
+class SpringExpansionController extends Animation<double>
+    with
+        AnimationLazyListenerMixin,
+        AnimationLocalListenersMixin,
+        AnimationLocalStatusListenersMixin {
+  final SpringDescription spring;
+  final double kickSpeed;
+  final double restThreshold;
+  late final AnimationController _controller;
+  final List<VoidCallback> _closedListeners = [];
+  double _target = 0;
+  bool _settledAtZero = true;
+
+  SpringExpansionController({
+    required TickerProvider vsync,
+    this.spring = const SpringDescription(mass: 1, stiffness: 625, damping: 50),
+    this.kickSpeed = 25.0,
+    this.restThreshold = 0.01,
+  }) {
+    _controller = AnimationController.unbounded(vsync: vsync);
+    _controller.addListener(_onTick);
+  }
+
+  void _onTick() {
+    notifyListeners();
+    final isSettledAtZero =
+        _target == 0 &&
+        _controller.value.abs() < restThreshold &&
+        _controller.velocity.abs() < restThreshold;
+    if (isSettledAtZero && !_settledAtZero) {
+      _settledAtZero = true;
+      for (final cb in _closedListeners.toList()) {
+        cb();
+      }
+    } else if (!isSettledAtZero) {
+      _settledAtZero = false;
+    }
+  }
+
+  void _launch(double target) {
+    _target = target;
+    final v = _controller.value.abs() < restThreshold && target != 0
+        ? kickSpeed
+        : _controller.velocity;
+    _controller.animateWith(
+      SpringSimulation(spring, _controller.value, target, v),
+    );
+  }
+
+  void forward() => _launch(1);
+  void reverse() => _launch(0);
+
+  void towards(bool direction) {
+    if (direction) {
+      forward();
+    } else {
+      reverse();
+    }
+  }
+
+  void addClosedListener(VoidCallback listener) =>
+      _closedListeners.add(listener);
+  void removeClosedListener(VoidCallback listener) =>
+      _closedListeners.remove(listener);
+
+  @override
+  double get value => _controller.value;
+
+  @override
+  AnimationStatus get status => _settledAtZero
+      ? AnimationStatus.dismissed
+      : (_target >= 0.5 ? AnimationStatus.forward : AnimationStatus.reverse);
+
+  void dispose() {
+    _controller.dispose();
+  }
+
+  @override
+  void didStartListening() {}
+
+  @override
+  void didStopListening() {}
 }
 
 const List<int> datetimeSectionLengths = [2, 2, 2, 3, 4];
@@ -3833,7 +3918,7 @@ Widget timerKindIcon(
 }
 
 class SquishBoundaryPlane extends StatelessWidget {
-  SquishBoundaryPlane({super.key, required this.theme, required this.mt});
+  const SquishBoundaryPlane({super.key, required this.theme, required this.mt});
 
   final ThemeData theme;
   final MakoThemeData mt;
@@ -3946,7 +4031,7 @@ class SpecialTimerShapesPainter extends CustomPainter {
 }
 
 class SpecialTimerShapesLabel extends StatelessWidget {
-  const SpecialTimerShapesLabel();
+  const SpecialTimerShapesLabel({required super.key});
 
   @override
   Widget build(BuildContext context) {

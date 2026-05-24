@@ -2624,7 +2624,7 @@ Path circlesDragRingClip(DragRingClipArgs args) {
   );
   Path path = Path()
     ..addOval(Rect.fromCircle(center: args.center, radius: args.radius * e));
-  final leafp = unlerpUnit(0.4, 1, e);
+  final leafp = unlerpUnit(0.7, 1, e);
   for (final angle in args.angles) {
     final c = args.center + Offset.fromDirection(angle, args.radius * leafp);
     path = Path.combine(
@@ -2651,7 +2651,18 @@ Path circlesDragRingClip(DragRingClipArgs args) {
   return path;
 }
 
-/// A thick arc band with rounded caps: an annular sector unioned with a disc (radius [halfThickness]) at each centerline endpoint. When [startAngle] equals [endAngle] it degenerates to a single disc at that point.
+/// A thick arc band with rounded caps. Built as a single closed contour
+/// (outer arc → end cap semicircle → inner arc → start cap semicircle) so the
+/// caps and band aren't separate `Path.combine` operands — earlier union-based
+/// versions glitched for a frame because each cap disc's diameter coincided
+/// exactly with the band's flat radial edge, which is a known SkPathOps
+/// instability with tangent-sharing curves.
+///
+/// Degenerates: [startAngle] == [endAngle] collapses to a single cap disc; the
+/// sub-thickness regime ([radius] < [halfThickness], hit briefly during the
+/// initial grow-in when the caps cross the center) falls back to a
+/// `Path.combine` of the two cap discs and a pie sector — those operands have
+/// area overlap rather than tangent contact, which Skia handles cleanly.
 Path roundedArcBand({
   required Offset center,
   required double radius,
@@ -2659,38 +2670,83 @@ Path roundedArcBand({
   required double startAngle,
   required double endAngle,
 }) {
+  if (startAngle == endAngle) {
+    return Path()..addOval(
+      Rect.fromCircle(
+        center: center + Offset.fromDirection(startAngle, radius),
+        radius: halfThickness,
+      ),
+    );
+  }
+
+  if (radius < halfThickness) {
+    final startCapCenter = center + Offset.fromDirection(startAngle, radius);
+    final endCapCenter = center + Offset.fromDirection(endAngle, radius);
+    final ro = radius + halfThickness;
+    final sweep = endAngle - startAngle;
+    Path p = Path()
+      ..addOval(Rect.fromCircle(center: startCapCenter, radius: halfThickness));
+    p = Path.combine(
+      PathOperation.union,
+      p,
+      Path()
+        ..addOval(Rect.fromCircle(center: endCapCenter, radius: halfThickness)),
+    );
+    final sector = Path()
+      ..moveTo(center.dx, center.dy)
+      ..lineTo(
+        center.dx + ro * cos(startAngle),
+        center.dy + ro * sin(startAngle),
+      )
+      ..arcTo(
+        Rect.fromCircle(center: center, radius: ro),
+        startAngle,
+        sweep,
+        false,
+      )
+      ..close();
+    return Path.combine(PathOperation.union, p, sector);
+  }
+
   final ro = radius + halfThickness;
-  final ri = max(0.0, radius - halfThickness);
+  final ri = radius - halfThickness;
   final sweep = endAngle - startAngle;
-  Path band = Path()
-    ..moveTo(center.dx + ro * cos(startAngle), center.dy + ro * sin(startAngle))
+  final dir = sweep.sign;
+  final startOuter = center + Offset.fromDirection(startAngle, ro);
+  final startCapCenter = center + Offset.fromDirection(startAngle, radius);
+  final endCapCenter = center + Offset.fromDirection(endAngle, radius);
+
+  final p = Path()
+    ..moveTo(startOuter.dx, startOuter.dy)
     ..arcTo(
       Rect.fromCircle(center: center, radius: ro),
       startAngle,
       sweep,
       false,
     )
-    ..lineTo(center.dx + ri * cos(endAngle), center.dy + ri * sin(endAngle))
     ..arcTo(
+      Rect.fromCircle(center: endCapCenter, radius: halfThickness),
+      endAngle,
+      dir * pi,
+      false,
+    );
+  if (ri > 0) {
+    p.arcTo(
       Rect.fromCircle(center: center, radius: ri),
       endAngle,
       -sweep,
       false,
-    )
-    ..close();
-  for (final a in {startAngle, endAngle}) {
-    band = Path.combine(
-      PathOperation.union,
-      band,
-      Path()..addOval(
-        Rect.fromCircle(
-          center: center + Offset.fromDirection(a, radius),
-          radius: halfThickness,
-        ),
-      ),
     );
   }
-  return band;
+  p
+    ..arcTo(
+      Rect.fromCircle(center: startCapCenter, radius: halfThickness),
+      startAngle + pi,
+      dir * pi,
+      false,
+    )
+    ..close();
+  return p;
 }
 
 /// Special-timer style clip: a rounded-cap arc straddling the icon ring. It grows out of the button (centerRadius 0 -> radius), and on selection slides its caps together onto the chosen item, becoming the highlight itself.
@@ -2698,11 +2754,12 @@ Path arcDragRingClip(DragRingClipArgs args) {
   final g = args.growth;
   final fullStart = args.angles.first;
   final fullEnd = args.angles.last;
-  final restArc = pi * 1.3;
+  final restArc = lerp(2 * pi, pi, Curves.easeOutCubic.transform(args.growIn));
   final restFocus = (fullStart + fullEnd) / 2;
   final fullArc = fullEnd - fullStart;
-  final restStart = restFocus - fullArc.sign * restArc / 2;
-  final restEnd = restFocus + fullArc.sign * restArc / 2;
+  final appearanceSpin = -(1 - args.growIn) * pi * 1.6;
+  final restStart = restFocus - fullArc.sign * restArc / 2 + appearanceSpin;
+  final restEnd = restFocus + fullArc.sign * restArc / 2 + appearanceSpin;
 
   // selection focus: weighted toward whichever item(s) are selected, collapsing the arc onto it as selAmount -> 1.
   double sumSel = 0, weightedAngle = 0;
@@ -2714,16 +2771,14 @@ Path arcDragRingClip(DragRingClipArgs args) {
   final focus = sumSel > 0 ? weightedAngle / sumSel : restFocus;
 
   // at rest, a thin half-arc whose radial profile matches the old icon (centerline radius and thickness), opening out to straddle the icon ring.
-  final restOuterR = 0.24 * args.buttonSpan;
-  final restHalfWidth = restOuterR * 0.3;
-  final restRadius = restOuterR - restHalfWidth;
+  final restOuterR = 0.2 * args.buttonSpan;
+  final restHalfThickness = restOuterR * 0.3 * unlerpUnit(0, 0.4, args.growIn);
+  final restRadius = restOuterR - restHalfThickness;
 
   return roundedArcBand(
     center: args.center,
-    // growIn only affects the rest end of the lerp; at growIn=0 the radius is 0
-    // and the cap discs merge into a filled circle of [halfThickness].
-    radius: lerp(restRadius * args.growIn, args.radius, g),
-    halfThickness: lerp(restHalfWidth, args.actionRadius, g),
+    radius: lerp(restRadius, args.radius, g),
+    halfThickness: lerp(restHalfThickness, args.actionRadius, g),
     startAngle: lerp(
       restStart,
       lerp(fullStart, focus, sumSel.clamp(0.0, 1.0)),
@@ -2762,6 +2817,8 @@ class DragActionRing extends StatefulWidget {
   /// a retiring ring calls this once its completion animation finishes, so its container can remove it.
   final VoidCallback? onRetireComplete;
 
+  final bool useSpringExpansion;
+
   const DragActionRing({
     super.key,
     required this.position,
@@ -2777,6 +2834,7 @@ class DragActionRing extends StatefulWidget {
     this.retiring = false,
     this.onRetire,
     this.onRetireComplete,
+    this.useSpringExpansion = false,
   });
 
   @override
@@ -2785,20 +2843,48 @@ class DragActionRing extends StatefulWidget {
 
 class DragActionRingState extends State<DragActionRing>
     with TickerProviderStateMixin, SignalsMixin {
-  double actionSizepAtSelection = 0;
   int numberSelected = -1;
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
   late final List<AnimationController> labelAnimations;
+  static const labelAnimationDuration = Duration(milliseconds: 270);
+  static const labelAnimationDelay = Duration(milliseconds: 200);
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
   late final List<AnimationController> selectionAnimations;
-  late final UpDownAnimationController upDownAnimation =
-      UpDownAnimationController(
-        vsync: this,
-        riseDuration: Duration(milliseconds: 300),
-        fallDuration: Duration(milliseconds: 200),
-      );
+
+  UpDownAnimationController? _upDown;
+  SpringExpansionController? _spring;
+
+  Listenable get _expansionListenable => _upDown ?? _spring!;
+  double get _expansionGrowth =>
+      _upDown != null ? _upDown!.scalarValue : _spring!.value;
+  void _expansionForward() {
+    if (_upDown != null) {
+      _upDown!.forward();
+    } else {
+      _spring!.forward();
+    }
+  }
+
+  void _expansionReverse() {
+    if (_upDown != null) {
+      _upDown!.reverse();
+    } else {
+      _spring!.reverse();
+    }
+  }
+
+  void _addExpansionClosedListener(VoidCallback listener) {
+    if (_upDown != null) {
+      _upDown!.addStatusListener((status) {
+        if (status == AnimationStatus.dismissed) listener();
+      });
+    } else {
+      _spring!.addClosedListener(listener);
+    }
+  }
+
   late final AnimationController optionActivationAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
   late final AnimationController optionConsiderationAnimation =
@@ -2813,12 +2899,12 @@ class DragActionRingState extends State<DragActionRing>
   /// 0 = unborn (rest radius scaled to 0, so the band collapses to a filled disc of halfThickness), 1 = normal rest. Forwarded on initState so every fresh ring eases in.
   late final AnimationController growInAnimation = AnimationController(
     vsync: this,
-    duration: Duration(milliseconds: 180),
+    duration: Duration(milliseconds: 220),
   );
   Function()? dragEventsSubscription;
 
   void _onOtherRingOpens() {
-    upDownAnimation.reverse();
+    _expansionReverse();
   }
 
   /// persistent rings call this once fully closed (upDown dismissed): clear the selection state. It's invisible because at growth 0 the arc is collapsed to a disc at the center regardless of selection.
@@ -2841,23 +2927,32 @@ class DragActionRingState extends State<DragActionRing>
   @override
   void initState() {
     super.initState();
+    if (widget.useSpringExpansion) {
+      _spring = SpringExpansionController(vsync: this);
+    } else {
+      _upDown = UpDownAnimationController(
+        vsync: this,
+        riseDuration: Duration(milliseconds: 300),
+        fallDuration: Duration(milliseconds: 200),
+      );
+    }
     labelAnimations = List.generate(
       widget.radialActivatorPositions.length,
       (_) => AnimationController(
         vsync: this,
-        duration: Duration(milliseconds: 500),
+        duration: labelAnimationDelay + labelAnimationDuration,
       ),
     );
     selectionAnimations = List.generate(
       widget.radialActivatorPositions.length,
       (_) => AnimationController(
         vsync: this,
-        duration: Duration(milliseconds: 180),
+        duration: Duration(milliseconds: 220),
       ),
     );
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     if (!widget.persistent) {
-      upDownAnimation.forward();
+      _expansionForward();
     }
     completionAnimation.addStatusListener((status) {
       if (status == AnimationStatus.completed) widget.onRetireComplete?.call();
@@ -2865,9 +2960,7 @@ class DragActionRingState extends State<DragActionRing>
     growInAnimation.forward();
     if (widget.persistent) {
       // once fully closed, clear selection state for the next interaction.
-      upDownAnimation.addStatusListener((status) {
-        if (status == AnimationStatus.dismissed) _silentReset();
-      });
+      _addExpansionClosedListener(_silentReset);
     } else {
       optionActivationAnimation.addStatusListener((status) {
         if (!mounted) {
@@ -2879,17 +2972,11 @@ class DragActionRingState extends State<DragActionRing>
           );
         }
       });
-      upDownAnimation.addStatusListener((status) {
+      _addExpansionClosedListener(() {
         // wait for option activation if it's going
-        if (!optionActivationAnimation.isAnimating &&
-            status == AnimationStatus.dismissed) {
-          if (!mounted) {
-            return;
-          }
-          context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(
-            widget,
-          );
-        }
+        if (optionActivationAnimation.isAnimating) return;
+        if (!mounted) return;
+        context.findAncestorStateOfType<SelfRemovalHostState>()?.remove(widget);
       });
     }
     dragEventsSubscription = widget.dragEvents.subscribe((v) {
@@ -2902,7 +2989,7 @@ class DragActionRingState extends State<DragActionRing>
             optionActivationAnimation.forward();
           }
         } else {
-          upDownAnimation.reverse();
+          _expansionReverse();
         }
         if (!widget.persistent) dragEventsSubscription?.call();
       } else if (v != -1) {
@@ -2918,7 +3005,6 @@ class DragActionRingState extends State<DragActionRing>
         setState(() {
           numberSelected = v;
           centeredNumber = v;
-          actionSizepAtSelection = currentActionSize();
           optionConsiderationAnimation.forward();
         });
       } else {
@@ -2929,7 +3015,7 @@ class DragActionRingState extends State<DragActionRing>
         setState(() {
           numberSelected = -1;
           optionConsiderationAnimation.reverse();
-          upDownAnimation.forward();
+          _expansionForward();
         });
       }
     });
@@ -2962,27 +3048,15 @@ class DragActionRingState extends State<DragActionRing>
     optionConsiderationAnimation.dispose();
     completionAnimation.dispose();
     growInAnimation.dispose();
-    upDownAnimation.dispose();
+    _upDown?.dispose();
+    _spring?.dispose();
     dragEventsSubscription?.call();
     widget.suppressionBus?.removeListener(_onOtherRingOpens);
     super.dispose();
   }
 
-  double currentActionSize() {
-    // disables fade down if action selected
-    return Curves.easeIn.transform(
-      unlerpUnit(
-        0.4,
-        0.65,
-        upDownAnimation.value.$1 *
-            (1 - (numberSelected != -1 ? 0 : upDownAnimation.value.$2)),
-      ),
-    );
-  }
-
   Widget buildWithGivenAnimationParameters(
-    double risep,
-    double fallp,
+    double growp,
     double swipep,
     double releasep,
   ) {
@@ -2999,14 +3073,14 @@ class DragActionRingState extends State<DragActionRing>
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
     // how grown the ring is overall (grow-in, fall-out). selection collapse is handled by the clip builder via swipep / selections, not here.
-    final baseGrow = Curves.easeOut.transform(
-      unlerpUnit(0, 0.6, risep * (1 - fallp)),
-    );
+    final baseGrow = widget.useSpringExpansion
+        ? growp.clamp(0.0, 1.0)
+        : Curves.easeOut.transform(unlerpUnit(0, 0.6, growp));
     final completion = Curves.easeInCubic.transform(completionAnimation.value);
     final iconFade =
         unlerpUnit(0.6, 1, baseGrow) *
         // fades a bit immediately on completion, but doesn't fade all the way out
-        lerp(1, 0.3, unlerpUnit(0, 0.36, completionAnimation.value));
+        lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
 
     final selections = [
       for (int i = 0; i < selectionAnimations.length; i++)
@@ -3188,9 +3262,12 @@ class DragActionRingState extends State<DragActionRing>
                           labelWidgetAt(
                             i,
                             unlerpUnit(
-                                  0.7,
+                                  labelAnimationDelay.inMicroseconds /
+                                      (labelAnimationDelay.inMicroseconds +
+                                          labelAnimationDuration
+                                              .inMicroseconds),
                                   1,
-                                  Curves.easeIn.transform(
+                                  Curves.easeInCubic.transform(
                                     labelAnimations[i].value,
                                   ),
                                 ) *
@@ -3213,7 +3290,7 @@ class DragActionRingState extends State<DragActionRing>
       top: widget.visualPosition.dy,
       child: AnimatedBuilder(
         animation: Listenable.merge([
-          upDownAnimation,
+          _expansionListenable,
           optionConsiderationAnimation,
           optionActivationAnimation,
           completionAnimation,
@@ -3223,8 +3300,7 @@ class DragActionRingState extends State<DragActionRing>
         ]),
         builder: (context, child) {
           return buildWithGivenAnimationParameters(
-            upDownAnimation.value.$1,
-            upDownAnimation.value.$2,
+            _expansionGrowth,
             optionConsiderationAnimation.value,
             optionActivationAnimation.value,
           );
@@ -3409,6 +3485,7 @@ class TimerScreenState extends State<TimerScreen>
   late final specialTimerCreateDragRingController = DragActionRingController(
     shuntRight: false,
     persistent: true,
+    useSpringExpansion: true,
     clipBuilder: arcDragRingClip,
     radialActivatorFunctions: [
       addNewStopwatch,
@@ -3904,7 +3981,7 @@ class TimerScreenState extends State<TimerScreen>
           specialTimerCreateDragRingController.onPanDown(
             context,
             p,
-            boxRect(specialTimerCreateButtonKey as GlobalKey)!.center,
+            boxRect(specialTimerCreateButtonKey)!.center,
           );
         },
         onPanUpdate: (Offset p) {
@@ -4763,6 +4840,8 @@ class DragActionRingController {
   /// whether to shunt text to the right or to the left, when the angle is close to a vertical position. Important for radial menus that're closer to the side of the screen. It's with respect to handedness, the meaning flips when the handedness flips.
   final bool? shuntRight;
 
+  final bool useSpringExpansion;
+
   DragActionRingController({
     this.suppressingNotifier,
     required this.radialActivatorFunctions,
@@ -4772,6 +4851,7 @@ class DragActionRingController {
     required this.clipBuilder,
     this.persistent = false,
     this.shuntRight,
+    this.useSpringExpansion = false,
   }) {
     assert(
       radialActivatorIcons.length == radialActivatorPositions.length,
@@ -4838,6 +4918,7 @@ class DragActionRingController {
       radialActivatorLabels: radialActivatorLabels,
       radialActivatorPositions: radialActivatorPositions,
       clipBuilder: clipBuilder,
+      useSpringExpansion: useSpringExpansion,
     );
   }
 
@@ -4866,6 +4947,7 @@ class DragActionRingController {
       radialActivatorLabels: radialActivatorLabels,
       radialActivatorPositions: radialActivatorPositions,
       clipBuilder: clipBuilder,
+      useSpringExpansion: useSpringExpansion,
     );
     getSelfRemovalHostState(context).add(numeralDragActionRing);
   }
