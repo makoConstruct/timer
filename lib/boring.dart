@@ -4060,10 +4060,7 @@ class SpecialTimerShapesLabel extends StatelessWidget {
   }
 }
 
-/// Builds the ManyIcon "C" path centered on [center]: an arc band between outer
-/// radius [outerR] and inner radius [innerR], with the gap on the right bounded
-/// by vertical edges sitting [edgeX] to the right of [center]. Right-handed
-/// orientation; mirror with [mirrorPathHorizontally] for left-handed.
+/// Builds the ManyIcon "C" path centered on [center]: an arc band between outer radius [outerR] and inner radius [innerR], with the gap on the right bounded by vertical edges sitting [edgeX] to the right of [center]. Right-handed orientation; mirror with [mirrorPathHorizontally] for left-handed.
 Path buildManyIconPath({
   required Offset center,
   required double outerR,
@@ -4214,6 +4211,138 @@ class HamburgerIcon extends StatelessWidget {
         IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
     return CustomPaint(
       painter: HamburgerIconPainter(color: color, lineWidth: lineWidth),
+    );
+  }
+}
+
+/// Stroke + fill on the same path with rounded joins/caps; corners become arcs of radius [cornerRadius]. The path is inset by [cornerRadius] so the stroke stays inside the canvas.
+void _drawRoundedPolygon(
+  Canvas canvas,
+  Path path,
+  Color color,
+  double cornerRadius,
+) {
+  canvas.drawPath(
+    path,
+    Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = cornerRadius * 2
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round,
+  );
+  canvas.drawPath(path, Paint()..color = color);
+}
+
+class PaintedBackspaceIconPainter extends CustomPainter {
+  PaintedBackspaceIconPainter({
+    required this.color,
+    required this.cornerRadius,
+  });
+  final Color color;
+  final double cornerRadius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final left = cornerRadius;
+    final right = size.width - cornerRadius;
+    final top = cornerRadius;
+    final bottom = size.height - cornerRadius;
+    final sh = size.height - cornerRadius * 2;
+    // (2*triw)^2 = (sh/2)^2 + triw^2
+    final triW = sqrt(sh * sh / 12);
+
+    final path = Path()
+      ..moveTo(left + triW, top)
+      ..lineTo(left, size.height / 2)
+      ..lineTo(left + triW, bottom)
+      ..lineTo(right, bottom)
+      ..lineTo(right, top)
+      ..close();
+    _drawRoundedPolygon(canvas, path, color, cornerRadius);
+  }
+
+  @override
+  bool shouldRepaint(covariant PaintedBackspaceIconPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.cornerRadius != cornerRadius;
+}
+
+class PaintedBackspaceIcon extends StatelessWidget {
+  const PaintedBackspaceIcon({super.key, this.size = 24, this.color});
+  final double size;
+  final Color? color;
+
+  /// Width as a fraction of [size].
+  static const double aspect = 1.2;
+
+  @override
+  Widget build(BuildContext context) {
+    final c =
+        color ??
+        IconTheme.of(context).color ??
+        Theme.of(context).colorScheme.onSurface;
+    return SizedBox(
+      width: size * aspect,
+      height: size,
+      child: CustomPaint(
+        painter: PaintedBackspaceIconPainter(
+          color: c,
+          cornerRadius: size * 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+class PaintedPlayIconPainter extends CustomPainter {
+  PaintedPlayIconPainter({required this.color, required this.cornerRadius});
+  final Color color;
+  final double cornerRadius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Inscribe an equilateral triangle pointing right inside the box.
+    final triH = min(size.height, size.width * 2 / sqrt(3));
+    final triW = triH * sqrt(3) / 2;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    // Centroid of an equilateral triangle pointing right sits at 1/3 of its
+    // width from the base; offset so the centroid lands at the box center.
+    final baseX = cx - triW / 3;
+    final apexX = baseX + triW;
+    final topY = cy - triH / 2;
+    final bottomY = cy + triH / 2;
+
+    final path = Path()
+      ..moveTo(baseX, topY)
+      ..lineTo(apexX, cy)
+      ..lineTo(baseX, bottomY)
+      ..close();
+    _drawRoundedPolygon(canvas, path, color, cornerRadius);
+  }
+
+  @override
+  bool shouldRepaint(covariant PaintedPlayIconPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.cornerRadius != cornerRadius;
+}
+
+class PaintedPlayIcon extends StatelessWidget {
+  const PaintedPlayIcon({super.key, this.size = 24, this.color});
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final c =
+        color ??
+        IconTheme.of(context).color ??
+        Theme.of(context).colorScheme.onSurface;
+    return SizedBox(
+      width: size * sqrt(3) / 2,
+      height: size,
+      child: CustomPaint(
+        painter: PaintedPlayIconPainter(color: c, cornerRadius: size * 0.2),
+      ),
     );
   }
 }

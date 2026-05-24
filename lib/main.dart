@@ -92,15 +92,7 @@ const backingDeflationProportion = 0.07;
 /// line width of icon strokes (the special timer arc, the hamburger) as a fraction of buttonSpan
 const iconLineRatio = 0.12;
 
-/// I meticulously fitted the actual core of the play icon to this box. You can scale it to get a play icon that has the dimensions you want.
-Widget fittedPlayIcon(color) => SizedBox(
-  height: 10,
-  width: 8.15,
-  child: Transform.translate(
-    offset: Offset(-6.3, -4.5),
-    child: Icon(Icons.play_arrow_rounded, size: 19, color: color),
-  ),
-);
+Widget fittedPlayIcon(color) => PaintedPlayIcon(size: 10, color: color);
 
 /// Was supposed to be a custom Hero flight shuttle builder with 60ms delay, but I it looks like it does nothing, I can't see how the movement part of the animation would be affected by this, it would only affect an animation over the hero widget
 /// should have been a builder for createRectTween instead
@@ -2852,9 +2844,10 @@ class DragActionRingState extends State<DragActionRing>
   int numberSelected = -1;
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
-  late final List<AnimationController> labelAnimations;
+  late final List<UpDownAnimationController> labelAnimations;
   static const labelAnimationDuration = Duration(milliseconds: 290);
   static const labelAnimationDelay = Duration(milliseconds: 300);
+  static const labelAnimationFallDuration = Duration(milliseconds: 160);
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
   late final List<AnimationController> selectionAnimations;
@@ -2920,7 +2913,7 @@ class DragActionRingState extends State<DragActionRing>
       c.value = 0;
     }
     for (final c in labelAnimations) {
-      c.value = 0;
+      c.reset();
     }
     optionConsiderationAnimation.value = 0;
     optionActivationAnimation.value = 0;
@@ -2944,9 +2937,10 @@ class DragActionRingState extends State<DragActionRing>
     }
     labelAnimations = List.generate(
       widget.radialActivatorPositions.length,
-      (_) => AnimationController(
+      (_) => UpDownAnimationController(
         vsync: this,
-        duration: labelAnimationDelay + labelAnimationDuration,
+        riseDuration: labelAnimationDuration,
+        fallDuration: labelAnimationFallDuration,
       ),
     );
     selectionAnimations = List.generate(
@@ -3005,7 +2999,7 @@ class DragActionRingState extends State<DragActionRing>
             labelAnimations[numberSelected].reverse();
             selectionAnimations[numberSelected].reverse();
           }
-          labelAnimations[v].forward();
+          labelAnimations[v].forward(delay: labelAnimationDelay);
           selectionAnimations[v].forward();
         }
         setState(() {
@@ -3264,21 +3258,11 @@ class DragActionRingState extends State<DragActionRing>
                     clipBehavior: Clip.none,
                     children: [
                       for (int i = 0; i < labelAnimations.length; i++)
-                        if (labelAnimations[i].value > 0)
+                        if (labelAnimations[i].scalarValue > 0)
                           labelWidgetAt(
                             i,
                             Curves.easeOutCubic.transform(
-                                  unlerpUnit(
-                                    (labelAnimationDelay.inMicroseconds
-                                            .toDouble()) /
-                                        ((labelAnimationDelay.inMicroseconds
-                                                .toDouble()) +
-                                            (labelAnimationDuration
-                                                .inMicroseconds
-                                                .toDouble())),
-                                    1,
-                                    labelAnimations[i].value,
-                                  ),
+                                  labelAnimations[i].scalarValue,
                                 ) *
                                 (1 - completion),
                           ),
@@ -3454,8 +3438,8 @@ class TimerScreenState extends State<TimerScreen>
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
         vsync: this,
-        riseDuration: Duration(milliseconds: 200),
-        fallDuration: Duration(milliseconds: 120),
+        riseDuration: Duration(milliseconds: 170),
+        fallDuration: Duration(milliseconds: 170),
       );
   late final ScrollController timersScroller = ScrollController();
   late final AnimationController squishPanelController = AnimationController(
@@ -3969,13 +3953,9 @@ class TimerScreenState extends State<TimerScreen>
     final timerHeight = Timer.usualHeight();
     bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
 
-    Widget proportionedIcon(IconData icon, {double size = 22}) {
+    Widget proportionedIcon(Widget icon) {
       return ScalingAspectRatio(
-        child: SizedBox(
-          width: 50,
-          height: 50,
-          child: Center(child: Icon(size: size, icon)),
-        ),
+        child: SizedBox(width: 50, height: 50, child: Center(child: icon)),
       );
     }
 
@@ -4018,7 +3998,7 @@ class TimerScreenState extends State<TimerScreen>
             scale: 0.8,
             child: FractionalTranslation(
               translation: Offset(dispf, 0),
-              child: Icon(Icons.play_arrow_rounded),
+              child: PaintedPlayIcon(),
             ),
           ),
         ],
@@ -4348,16 +4328,33 @@ class TimerScreenState extends State<TimerScreen>
       return AnimatedBuilder(
         animation: editPopoverAnimation,
         builder: (context, child) {
-          final opacity = unlerpUnit(
-            0.2,
-            1.0,
-            editPopoverAnimation.scalarValue,
-          );
+          final p = editPopoverAnimation.scalarValue;
+          final opacity = lerp(0.2, 1.0, p);
           return Positioned.fromRect(
             rect: controlGridBound(gridPos, Size(1, 1)),
             child: IgnorePointer(
               ignoring: selectedTimer.value == null,
-              child: Opacity(opacity: opacity * 0.25, child: child),
+              child: Opacity(
+                opacity: opacity,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (p != 1)
+                      Container(
+                        width: buttonSpan * 0.12,
+                        height: buttonSpan * 0.12,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.onSurface,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    Transform.scale(
+                      scale: Curves.easeOutCubic.transform(p),
+                      child: child!,
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
         },
@@ -4368,7 +4365,7 @@ class TimerScreenState extends State<TimerScreen>
     final editBackspaceButton = editFadeButton(
       padLandscape ? Offset(-4, 1) : Offset(-2, 3),
       TimersButton(
-        label: proportionedIcon(Icons.backspace_rounded, size: 17),
+        label: proportionedIcon(PaintedBackspaceIcon(size: 12)),
         onPanDown: (_) {
           // without this, currentlyPressingKey going to 1 would briefly close the buttons (and ignore the press) while isFirstPressForSelectedTimer is still true
           isFirstPressForSelectedTimer.value = false;
@@ -4380,7 +4377,7 @@ class TimerScreenState extends State<TimerScreen>
     final editPlayButton = editFadeButton(
       padLandscape ? Offset(-4, 2) : Offset(-1, 3),
       TimersButton(
-        label: proportionedIcon(Icons.play_arrow_rounded, size: 26),
+        label: proportionedIcon(PaintedPlayIcon(size: 10)),
         onPanDown: (_) {
           isFirstPressForSelectedTimer.value = false;
           pausePlaySelected();
@@ -5100,12 +5097,12 @@ class _NumeralButtonState extends State<NumeralButton> {
       ),
       radialActivatorPositions: numericRadialActivatorPositions,
       radialActivatorIcons: [
-        Icon(Icons.play_arrow_rounded),
+        PaintedPlayIcon(size: 12),
         Row(
           mainAxisSize: MainAxisSize.min,
           spacing: 0,
           crossAxisAlignment: CrossAxisAlignment.center,
-          children: [Icon(Icons.play_arrow_rounded), Text('+00')],
+          children: [PaintedPlayIcon(size: 10), Text('+00')],
         ),
       ],
     );
