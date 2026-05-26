@@ -3893,29 +3893,25 @@ class TimerculeSerialPainter extends CustomPainter {
     // decided we want them to be square
     double w = timerculeRectHeight;
     timerculeIconScaling(canvas, size);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          -w - timerculeGap / 2,
-          -timerculeRectHeight / 2,
-          w,
-          timerculeRectHeight,
-        ),
-        Radius.circular(timerculeCornerRadius),
+    _drawRoundedPolygon(
+      canvas,
+      rightwardsArrowBox(
+        Offset(-w - timerculeGap / 2, -timerculeRectHeight / 2),
+        Size(w, timerculeRectHeight),
+        timerculeCornerRadius,
       ),
-      paint,
+      color,
+      timerculeCornerRadius,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          timerculeGap / 2,
-          -timerculeRectHeight / 2,
-          w,
-          timerculeRectHeight,
-        ),
-        Radius.circular(timerculeCornerRadius),
+    _drawRoundedPolygon(
+      canvas,
+      rightwardsArrowBox(
+        Offset(timerculeGap / 2, -timerculeRectHeight / 2),
+        Size(w, timerculeRectHeight),
+        timerculeCornerRadius,
       ),
-      paint,
+      color,
+      timerculeCornerRadius,
     );
   }
 
@@ -3931,6 +3927,7 @@ class TimerculeCyclePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
@@ -4304,27 +4301,49 @@ class PaintedBackspaceIconPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final left = cornerRadius;
-    final right = size.width - cornerRadius;
-    final top = cornerRadius;
-    final bottom = size.height - cornerRadius;
-    final sh = size.height - cornerRadius * 2;
-    // (2*triw)^2 = (sh/2)^2 + triw^2
-    final triW = sqrt(sh * sh / 12);
-
-    final path = Path()
-      ..moveTo(left + triW, top)
-      ..lineTo(left, size.height / 2)
-      ..lineTo(left + triW, bottom)
-      ..lineTo(right, bottom)
-      ..lineTo(right, top)
-      ..close();
+    final path = leftwardsArrowBox(Offset.zero, size, cornerRadius);
     _drawRoundedPolygon(canvas, path, color, cornerRadius);
   }
 
   @override
   bool shouldRepaint(covariant PaintedBackspaceIconPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.cornerRadius != cornerRadius;
+}
+
+Path leftwardsArrowBox(Offset offset, Size size, double cornerRadius) {
+  final left = offset.dx + cornerRadius;
+  final right = offset.dx + size.width - cornerRadius;
+  final top = offset.dy + cornerRadius;
+  final bottom = offset.dy + size.height - cornerRadius;
+  final sh = size.height - cornerRadius * 2;
+  // (2*triw)^2 = (sh/2)^2 + triw^2
+  final triW = sqrt(sh * sh / 12);
+
+  return Path()
+    ..moveTo(left + triW, top)
+    ..lineTo(left, offset.dy + size.height / 2)
+    ..lineTo(left + triW, bottom)
+    ..lineTo(right, bottom)
+    ..lineTo(right, top)
+    ..close();
+}
+
+Path rightwardsArrowBox(Offset offset, Size size, double cornerRadius) {
+  final left = offset.dx + cornerRadius;
+  final right = offset.dx + size.width - cornerRadius;
+  final top = offset.dy + cornerRadius;
+  final bottom = offset.dy + size.height - cornerRadius;
+  final sh = size.height - cornerRadius * 2;
+  // (2*triw)^2 = (sh/2)^2 + triw^2
+  final triW = sqrt(sh * sh / 12);
+
+  return Path()
+    ..moveTo(right - triW, top)
+    ..lineTo(right, offset.dy + size.height / 2)
+    ..lineTo(right - triW, bottom)
+    ..lineTo(left, bottom)
+    ..lineTo(left, top)
+    ..close();
 }
 
 class PaintedBackspaceIcon extends StatelessWidget {
