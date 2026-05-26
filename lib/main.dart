@@ -2931,11 +2931,8 @@ class DragActionRingState extends State<DragActionRing>
     if (widget.radialActivatorPositions.isEmpty) return (0, 0);
     final isRightHanded =
         Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).peek() ?? true;
-    double rectify(double a) => conditionallyApplyIf<double>(
-      !isRightHanded,
-      flipAngleHorizontally,
-      a,
-    );
+    double rectify(double a) =>
+        conditionallyApplyIf<double>(!isRightHanded, flipAngleHorizontally, a);
     return (
       rectify(widget.radialActivatorPositions.first),
       rectify(widget.radialActivatorPositions.last),
@@ -3285,6 +3282,7 @@ class DragActionRingState extends State<DragActionRing>
         (w) => DefaultTextStyle(
           style: controlPadTextStyle.copyWith(
             color: theme.colorScheme.surface,
+            fontWeight: FontWeight.w700,
             fontSize: fontSize,
           ),
           child: w,
@@ -3487,12 +3485,12 @@ class TimerScreenState extends State<TimerScreen>
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
-  static const editPopoverDelay = Duration(milliseconds: 1200);
+  static const editPopoverDelay = Duration(milliseconds: 800);
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
         vsync: this,
-        riseDuration: Duration(milliseconds: 170),
-        fallDuration: Duration(milliseconds: 170),
+        riseDuration: Duration(milliseconds: 240),
+        fallDuration: Duration(milliseconds: 150),
       );
   late final ScrollController timersScroller = ScrollController();
   late final AnimationController squishPanelController = AnimationController(
@@ -4006,6 +4004,39 @@ class TimerScreenState extends State<TimerScreen>
     final timerHeight = Timer.usualHeight();
     bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
 
+    Widget iconScaledToPip(Widget icon, UpDownAnimationController animation) {
+      return AnimatedBuilder(
+        animation: animation,
+        builder: (context, child) {
+          final p =
+              Curves.easeInOut.transform(editPopoverAnimation.value.$1) *
+              (1 - Curves.easeIn.transform(editPopoverAnimation.value.$2));
+          final opacity = lerp(0.1, 1.0, p);
+          return Opacity(
+            opacity: opacity,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (p != 1)
+                  Container(
+                    width: buttonSpan * 0.12,
+                    height: buttonSpan * 0.12,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.onSurface,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                Transform.scale(
+                  scale: Curves.easeOutCubic.transform(p),
+                  child: Center(child: icon),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
     Widget proportionedIcon(Widget icon) {
       return ScalingAspectRatio(
         child: SizedBox(width: 50, height: 50, child: Center(child: icon)),
@@ -4302,6 +4333,7 @@ class TimerScreenState extends State<TimerScreen>
     final numeralPartAnchor = Offset(-3, 0);
     final outerPaletteAnchor = Offset(-4, 0);
     final innerPaletteAnchor = Offset(0, 0);
+    final numeralColor = theme.colorScheme.onSurface;
 
     final controls = [
       modalHighlightBacking,
@@ -4381,33 +4413,11 @@ class TimerScreenState extends State<TimerScreen>
       return AnimatedBuilder(
         animation: editPopoverAnimation,
         builder: (context, child) {
-          final p = editPopoverAnimation.scalarValue;
-          final opacity = lerp(0.1, 1.0, p);
           return Positioned.fromRect(
             rect: controlGridBound(gridPos, Size(1, 1)),
             child: IgnorePointer(
               ignoring: selectedTimer.value == null,
-              child: Opacity(
-                opacity: opacity,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (p != 1)
-                      Container(
-                        width: buttonSpan * 0.12,
-                        height: buttonSpan * 0.12,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.onSurface,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    Transform.scale(
-                      scale: Curves.easeOutCubic.transform(p),
-                      child: child!,
-                    ),
-                  ],
-                ),
-              ),
+              child: child!,
             ),
           );
         },
@@ -4418,7 +4428,12 @@ class TimerScreenState extends State<TimerScreen>
     final editBackspaceButton = editFadeButton(
       padLandscape ? Offset(-4, 1) : Offset(-2, 3),
       TimersButton(
-        label: proportionedIcon(PaintedBackspaceIcon(size: 12)),
+        label: proportionedIcon(
+          iconScaledToPip(
+            PaintedBackspaceIcon(size: 12, color: numeralColor),
+            editPopoverAnimation,
+          ),
+        ),
         onPanDown: (_) {
           // without this, currentlyPressingKey going to 1 would briefly close the buttons (and ignore the press) while isFirstPressForSelectedTimer is still true
           isFirstPressForSelectedTimer.value = false;
@@ -4430,7 +4445,12 @@ class TimerScreenState extends State<TimerScreen>
     final editPlayButton = editFadeButton(
       padLandscape ? Offset(-4, 2) : Offset(-1, 3),
       TimersButton(
-        label: proportionedIcon(PaintedPlayIcon(size: 10)),
+        label: proportionedIcon(
+          iconScaledToPip(
+            PaintedPlayIcon(size: 10, color: numeralColor),
+            editPopoverAnimation,
+          ),
+        ),
         onPanDown: (_) {
           isFirstPressForSelectedTimer.value = false;
           pausePlaySelected();
