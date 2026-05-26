@@ -936,14 +936,14 @@ bool trivialAndClearable(Mobj<TimerData> mobj, TimerData? prev) {
       d.selected) {
     return false;
   }
-  if (mobj.peek() == null) {
-    return d.parentId == null;
+  if (d.parentId == null) {
+    return true;
   }
   final parent = Mobj.seekTypedAlreadyLoaded(d.parentId!, TimerDataType());
   if (parent == null) {
     return true;
   }
-  return trivialAndClearable(parent, prev);
+  return trivialAndClearable(parent, null);
 }
 
 // Global to cache screen corner radius
@@ -2840,7 +2840,7 @@ class DragActionRingState extends State<DragActionRing>
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
   late final List<UpDownAnimationController> labelAnimations;
-  static const labelAnimationDuration = Duration(milliseconds: 290);
+  static const labelAnimationDuration = Duration(milliseconds: 250);
   static const labelAnimationDelay = Duration(milliseconds: 300);
   static const labelAnimationFallDuration = Duration(milliseconds: 160);
 
@@ -3310,7 +3310,7 @@ class DragActionRingState extends State<DragActionRing>
                         if (labelAnimations[i].scalarValue > 0)
                           labelWidgetAt(
                             i,
-                            Curves.easeOutCubic.transform(
+                            Curves.easeOut.transform(
                                   labelAnimations[i].scalarValue,
                                 ) *
                                 (1 - completion),
@@ -3485,11 +3485,12 @@ class TimerScreenState extends State<TimerScreen>
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
-  static const editPopoverDelay = Duration(milliseconds: 800);
+  static const editPopoverDelay = Duration(milliseconds: 220);
+  // static const editPopoverDelay = Duration(milliseconds: 1000);
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(
         vsync: this,
-        riseDuration: Duration(milliseconds: 240),
+        riseDuration: Duration(milliseconds: 220),
         fallDuration: Duration(milliseconds: 150),
       );
   late final ScrollController timersScroller = ScrollController();
@@ -4011,7 +4012,7 @@ class TimerScreenState extends State<TimerScreen>
           final p =
               Curves.easeInOut.transform(editPopoverAnimation.value.$1) *
               (1 - Curves.easeIn.transform(editPopoverAnimation.value.$2));
-          final opacity = lerp(0.1, 1.0, p);
+          final opacity = lerp(0.06, 1.0, p);
           return Opacity(
             opacity: opacity,
             child: Stack(
