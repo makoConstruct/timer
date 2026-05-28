@@ -3866,13 +3866,6 @@ class TimerculeParallelPainter extends CustomPainter {
 
   final Color color;
 
-  // @override
-  // bool operator ==(Object other) {
-  //   return other is TimerculeParallelPainter &&
-  //       other.color == color &&
-  //       other.rightJustified == rightJustified;
-  // }
-
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -3887,32 +3880,54 @@ class TimerculeParallelPainter extends CustomPainter {
     final bottomOffset = (rightJustified == null || !rightJustified!)
         ? -topWidth / 2
         : topWidth / 2 - bottomWidth;
+    final cr = timerculeCornerRadius;
 
     timerculeIconScaling(canvas, size);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          -topWidth / 2,
-          -contentH / 2,
-          topWidth,
-          timerculeRectHeight,
-        ),
-        Radius.circular(timerculeCornerRadius),
+    _drawRoundedPolygon(
+      canvas,
+      rightwardsArrowBox(
+        Offset(-topWidth / 2, -contentH / 2),
+        Size(topWidth, timerculeRectHeight),
+        cr,
       ),
-      paint,
+      color,
+      cr,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          bottomOffset,
-          timerculeGap / 2,
-          bottomWidth,
-          timerculeRectHeight,
-        ),
-        Radius.circular(timerculeCornerRadius),
+    _drawRoundedPolygon(
+      canvas,
+      rightwardsArrowBox(
+        Offset(bottomOffset, timerculeGap / 2),
+        Size(bottomWidth, timerculeRectHeight),
+        cr,
       ),
-      paint,
+      color,
+      cr,
     );
+
+    // canvas.drawRRect(
+    //   RRect.fromRectAndRadius(
+    //     Rect.fromLTWH(
+    //       -topWidth / 2,
+    //       -contentH / 2,
+    //       topWidth,
+    //       timerculeRectHeight,
+    //     ),
+    //     Radius.circular(timerculeCornerRadius),
+    //   ),
+    //   paint,
+    // );
+    // canvas.drawRRect(
+    //   RRect.fromRectAndRadius(
+    //     Rect.fromLTWH(
+    //       bottomOffset,
+    //       timerculeGap / 2,
+    //       bottomWidth,
+    //       timerculeRectHeight,
+    //     ),
+    //     Radius.circular(timerculeCornerRadius),
+    //   ),
+    //   paint,
+    // );
   }
 
   @override
@@ -4019,31 +4034,27 @@ class TimerculeCyclePainter extends CustomPainter {
     final cr = timerculeCornerRadius;
     final cr2 = cr * 2;
     // parameters
-    final innerR = timerculeGap / 2 * 2.5 + cr2;
-    final topThickness = (timerculeRectHeight - cr2) * 1.1;
-    final outerR = (topThickness + innerR * 2 + timerculeRectHeight) / 2;
-    final slotSpan = timerculeGap + cr2;
-    final arrowProjection = timerculeGap * 0.3;
+    final innerR = timerculeGap * 1.6 + cr;
+    final topThickness = 0;
+    final trs = timerculeRectHeight - cr2;
+    final outerR = (topThickness + innerR * 2 + trs) / 2;
+    final slotSpan = timerculeGap * 1.6 + cr2;
 
+    final arrowProjection = sqrt(trs * trs / 3);
     final innerCenter = Offset(0, -outerR + topThickness + innerR);
-    final innerCenterToSlotCenterDy =
-        ((innerCenter.dy + innerR + outerR) / 2) - (innerCenter.dy);
     final arrowTipFromCenter = slotSpan / 2 - arrowProjection;
-    final arrowTip = Offset(-arrowTipFromCenter, innerCenterToSlotCenterDy);
-    final lp = leftTangentPoint(arrowTip - innerCenter, r: innerR);
-    final arrowTangentAng = norm(arrowTip - lp);
-    final arrowBottomAng = mirrorx(arrowTangentAng);
-    final bottomArrowPoint = rayCircleIntersection(
-      arrowTip,
-      dir: arrowBottomAng,
-      r: outerR,
-    )!;
     final rightSlotTop =
         innerCenter +
         Offset(slotSpan / 2, sqrt(innerR * innerR - slotSpan * slotSpan / 4));
     final rightSlotBottom = Offset(
       slotSpan / 2,
       sqrt(outerR * outerR - slotSpan * slotSpan / 4),
+    );
+    final bottomArrowPoint = mirrorx(rightSlotBottom);
+    final topArrowPoint = mirrorx(rightSlotTop);
+    final arrowTip = Offset(
+      -arrowTipFromCenter,
+      (bottomArrowPoint.dy + topArrowPoint.dy) / 2,
     );
 
     final path = Path()
@@ -4056,9 +4067,9 @@ class TimerculeCyclePainter extends CustomPainter {
         clockwise: false,
       )
       ..lineToOffset(arrowTip)
-      ..lineToOffset(lp)
+      ..lineToOffset(topArrowPoint)
       ..arcBetweenOffsets(
-        start: lp,
+        start: topArrowPoint,
         end: rightSlotTop,
         centerPoint: innerCenter,
         clockwise: true,

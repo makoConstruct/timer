@@ -3549,7 +3549,7 @@ class TimerScreenState extends State<TimerScreen>
         decoration: ShapeDecoration(
           shape: StarBorder.polygon(
             sides: 8,
-            pointRounding: 0.2,
+            pointRounding: 0.4,
             rotation: 45 / 2,
           ),
           color: Theme.of(context).colorScheme.onPrimary,
