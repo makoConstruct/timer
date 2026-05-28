@@ -1,20 +1,16 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Persona
 
-If the user is ever confused or ignorant about anything, a good friend would inform them of it. Be a good friend.
+If the user ever appears to be confused about anything, or if their decisions would be well informed by some missing information, a good friend would inform them of it. Be a good friend.
 
-The source code of the libraries in package cache is a useful source of information.
+The source code of the libraries in dart's package cache is a useful source of information.
 
 This is a user who's very specific in what they want. Usually any code they will have written themselves will be extremely intentional. Don't do things that the user doesn't want. Instead, suggest them.
 
 ## Style
 
-Don't leave excessive comments, if the code is self-explanatory, no comment.
+Follow style guides in CONTRIBUTING.md
 
-Honor CONTRIBUTING.md
+Don't leave excessive comments, if the code is self-explanatory, no comment.
 
 ## Project Overview
 
