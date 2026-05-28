@@ -2696,7 +2696,7 @@ Path roundedArcBand({
         ..addOval(Rect.fromCircle(center: endCapCenter, radius: halfThickness)),
     );
     final sector = Path()
-      ..moveTo(center.dx, center.dy)
+      ..moveToOffset(center)
       ..lineTo(
         center.dx + ro * cos(startAngle),
         center.dy + ro * sin(startAngle),
@@ -2720,7 +2720,7 @@ Path roundedArcBand({
   final endCapCenter = center + Offset.fromDirection(endAngle, radius);
 
   final p = Path()
-    ..moveTo(startOuter.dx, startOuter.dy)
+    ..moveToOffset(startOuter)
     ..arcTo(
       Rect.fromCircle(center: center, radius: ro),
       startAngle,
@@ -3485,7 +3485,8 @@ class TimerScreenState extends State<TimerScreen>
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
-  static const editPopoverDelay = Duration(milliseconds: 220);
+  static const editPopoverDelay = Duration(milliseconds: 0);
+  // static const editPopoverDelay = Duration(milliseconds: 340);
   // static const editPopoverDelay = Duration(milliseconds: 1000);
   late final UpDownAnimationController editPopoverAnimation =
       UpDownAnimationController(

@@ -613,6 +613,18 @@ double offsetAngle(Offset offset) {
   return atan2(offset.dy, offset.dx);
 }
 
+Offset norm(Offset v) {
+  final vd = v.distance;
+  if (vd == 0) {
+    return Offset(1, 0);
+  }
+  return v / vd;
+}
+
+Offset mirrorx(Offset v) {
+  return Offset(-v.dx, v.dy);
+}
+
 /// Converts a Size to an Offset by using the width as x and height as y.
 Offset sizeToOffset(Size size) {
   return Offset(size.width, size.height);
@@ -622,6 +634,36 @@ Offset sizeToOffset(Size size) {
 double shortestAngleDistance(double from, double to) {
   double diff = ((to % tau) - (from % tau)) % tau;
   return diff <= pi ? diff : -(tau - diff);
+}
+
+extension PathOffsetDrawing on Path {
+  /// If [start] and [end] have different distances from [centerPoint], this
+  /// uses [start]'s distance as the arc radius.
+  void arcBetweenOffsets({
+    required Offset start,
+    required Offset end,
+    required Offset centerPoint,
+    required bool clockwise,
+    bool forceMoveTo = false,
+  }) {
+    final startDelta = start - centerPoint;
+    final endDelta = end - centerPoint;
+    final startAngle = offsetAngle(startDelta);
+    final endAngle = offsetAngle(endDelta);
+    final sweepAngle = clockwise
+        ? moduloProperly(endAngle - startAngle, tau)
+        : -moduloProperly(startAngle - endAngle, tau);
+    arcTo(
+      Rect.fromCircle(center: centerPoint, radius: startDelta.distance),
+      startAngle,
+      sweepAngle,
+      forceMoveTo,
+    );
+  }
+
+  void moveToOffset(Offset offset) => moveTo(offset.dx, offset.dy);
+
+  void lineToOffset(Offset offset) => lineTo(offset.dx, offset.dy);
 }
 
 Offset topLeftManhattanCenter(Rect r) {
@@ -3886,10 +3928,6 @@ class TimerculeSerialPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
     // decided we want them to be square
     double w = timerculeRectHeight;
     timerculeIconScaling(canvas, size);
@@ -3920,6 +3958,57 @@ class TimerculeSerialPainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
+Offset leftTangentPoint(Offset p, {required double r}) {
+  final d2 = p.dx * p.dx + p.dy * p.dy;
+
+  if (d2 <= r * r) {
+    throw ArgumentError('Point must be outside the circle.');
+  }
+
+  final s = sqrt(d2 - r * r);
+
+  final gx = (r * r * p.dx - r * p.dy * s) / d2;
+  final gy = (r * r * p.dy + r * p.dx * s) / d2;
+
+  return Offset(gx, gy);
+}
+
+double? rayCircleIntersectionDistance(
+  Offset p, {
+  required Offset dir,
+  required double r,
+}) {
+  final pd = p.dx * dir.dx + p.dy * dir.dy;
+  final pp = p.dx * p.dx + p.dy * p.dy;
+
+  final discriminant = pd * pd - (pp - r * r);
+
+  if (discriminant < 0) {
+    return null; // no intersection
+  }
+
+  final s = sqrt(discriminant);
+
+  final t1 = -pd - s;
+  final t2 = -pd + s;
+
+  // first positive intersection along the ray
+  if (t1 >= 0) return t1;
+  if (t2 >= 0) return t2;
+
+  return null;
+}
+
+Offset? rayCircleIntersection(
+  Offset p, {
+  required Offset dir,
+  required double r,
+}) {
+  final d = rayCircleIntersectionDistance(p, dir: dir, r: r);
+  if (d == null) return null;
+  return p + dir * d;
+}
+
 class TimerculeCyclePainter extends CustomPainter {
   TimerculeCyclePainter({this.color = Colors.black});
 
@@ -3927,26 +4016,55 @@ class TimerculeCyclePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    final cr = timerculeCornerRadius;
+    final cr2 = cr * 2;
+    // parameters
+    final innerR = timerculeGap / 2 * 2.5 + cr2;
+    final topThickness = (timerculeRectHeight - cr2) * 1.1;
+    final outerR = (topThickness + innerR * 2 + timerculeRectHeight) / 2;
+    final slotSpan = timerculeGap + cr2;
+    final arrowProjection = timerculeGap * 0.3;
 
-    final innerR = timerculeGap / 2 * 3.8;
-    final bottomThickness = timerculeGap * 1.1;
-    final outerR = (bottomThickness + innerR * 2 + timerculeRectHeight) / 2;
-    final innerCenter = Offset(0, outerR - (bottomThickness + innerR));
+    final innerCenter = Offset(0, -outerR + topThickness + innerR);
+    final innerCenterToSlotCenterDy =
+        ((innerCenter.dy + innerR + outerR) / 2) - (innerCenter.dy);
+    final arrowTipFromCenter = slotSpan / 2 - arrowProjection;
+    final arrowTip = Offset(-arrowTipFromCenter, innerCenterToSlotCenterDy);
+    final lp = leftTangentPoint(arrowTip - innerCenter, r: innerR);
+    final arrowTangentAng = norm(arrowTip - lp);
+    final arrowBottomAng = mirrorx(arrowTangentAng);
+    final bottomArrowPoint = rayCircleIntersection(
+      arrowTip,
+      dir: arrowBottomAng,
+      r: outerR,
+    )!;
+    final rightSlotTop =
+        innerCenter +
+        Offset(slotSpan / 2, sqrt(innerR * innerR - slotSpan * slotSpan / 4));
+    final rightSlotBottom = Offset(
+      slotSpan / 2,
+      sqrt(outerR * outerR - slotSpan * slotSpan / 4),
+    );
 
+    final path = Path()
+      ..moveToOffset(rightSlotTop)
+      ..lineToOffset(rightSlotBottom)
+      ..arcBetweenOffsets(
+        start: rightSlotBottom,
+        end: bottomArrowPoint,
+        centerPoint: Offset.zero,
+        clockwise: false,
+      )
+      ..lineToOffset(arrowTip)
+      ..lineToOffset(lp)
+      ..arcBetweenOffsets(
+        start: lp,
+        end: rightSlotTop,
+        centerPoint: innerCenter,
+        clockwise: true,
+      );
     timerculeIconScaling(canvas, size);
-    if (innerR <= 0) {
-      canvas.drawCircle(Offset.zero, outerR, paint);
-    } else {
-      final path = Path()
-        ..addOval(Rect.fromCircle(center: Offset.zero, radius: outerR))
-        ..addOval(Rect.fromCircle(center: innerCenter, radius: innerR))
-        ..fillType = PathFillType.evenOdd;
-      canvas.drawPath(path, paint);
-    }
+    _drawRoundedPolygon(canvas, path, color, cr);
   }
 
   @override

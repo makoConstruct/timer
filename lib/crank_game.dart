@@ -15,13 +15,12 @@ TextStyle _crankGameText(
   Color color,
   double fontSize, {
   FontWeight? fontWeight,
-}) =>
-    controlPadTextStyle.copyWith(
-      color: color,
-      fontSize: fontSize,
-      height: crankGameLineHeight,
-      fontWeight: fontWeight,
-    );
+}) => controlPadTextStyle.copyWith(
+  color: color,
+  fontSize: fontSize,
+  height: crankGameLineHeight,
+  fontWeight: fontWeight,
+);
 
 class CrankGameScreen extends StatefulWidget {
   final GlobalKey? iconKey;
@@ -137,8 +136,10 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   void initState() {
     super.initState();
     nextTargetSpeed = _nextTargetSpeed();
-    _winMessageIndexMobj =
-        Mobj.getAlreadyLoaded(crankGameWinMessageIndexID, IntType());
+    _winMessageIndexMobj = Mobj.getAlreadyLoaded(
+      crankGameWinMessageIndexID,
+      IntType(),
+    );
     _tickController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
@@ -199,9 +200,9 @@ class _CrankGameScreenState extends State<CrankGameScreen>
 
   void _calculateCurrentSpeed(DateTime now) {
     // Remove old samples outside the window
-    final cutoff = now.subtract(Duration(
-      milliseconds: (windowSeconds * 1000).round(),
-    ));
+    final cutoff = now.subtract(
+      Duration(milliseconds: (windowSeconds * 1000).round()),
+    );
     _angleSamples.removeWhere((s) => s.time.isBefore(cutoff));
 
     if (_angleSamples.length < 2) {
@@ -216,7 +217,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     }
 
     // Convert to rotations per second
-    final windowDuration = _angleSamples.last.time
+    final windowDuration =
+        _angleSamples.last.time
             .difference(_angleSamples.first.time)
             .inMicroseconds /
         1e6;
@@ -231,11 +233,17 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   }
 
   void _onPanUpdate(
-      DragUpdateDetails details, Offset dialCenter, double crankRadius) {
+    DragUpdateDetails details,
+    Offset dialCenter,
+    double crankRadius,
+  ) {
     final prevPos = details.globalPosition - details.delta;
-    final angularChange = shortestAngleDistance(angleFrom(dialCenter, prevPos),
-        angleFrom(dialCenter, details.globalPosition));
-    _crankAngle = _crankAngle +
+    final angularChange = shortestAngleDistance(
+      angleFrom(dialCenter, prevPos),
+      angleFrom(dialCenter, details.globalPosition),
+    );
+    _crankAngle =
+        _crankAngle +
         (widget.byAngularSpeed
                 ? angularChange
                 : details.delta.distance / (crankRadius * 0.67)) *
@@ -265,15 +273,19 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final crankGameTheme = CrankGameTheme.fromContext(context);
-    final (backgroundColorA, backgroundColorB) =
-        maybeFlippedBackgroundColors(theme, widget.flipBackgroundColors);
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      widget.flipBackgroundColors,
+    );
     final mq = MediaQuery.of(context);
     final screenWidth = mq.size.width;
     final screenHeight = mq.size.height;
 
     // Assert that the screen is vertical (portrait orientation)
-    assert(screenHeight > screenWidth,
-        "CrankGameScreen layout assumes vertical (portrait) screen orientation, it will scream otherwise. You'll need to add a more sophisticated layout approach (and then remove this assert) if you want it to work for horizontal");
+    assert(
+      screenHeight > screenWidth,
+      "CrankGameScreen layout assumes vertical (portrait) screen orientation, it will scream otherwise. You'll need to add a more sophisticated layout approach (and then remove this assert) if you want it to work for horizontal",
+    );
 
     final outerDiameter = screenWidth * 0.8;
     final innerDiameter = screenWidth * 0.1;
@@ -343,29 +355,34 @@ class _CrankGameScreenState extends State<CrankGameScreen>
             right: 24,
             top: 24,
             bottom: barBottom,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              _SpeedArrow(
-                currentSpeed: _currentSpeed,
-                targetSpeed: targetSpeed,
-                errorMargin: errorMargin * targetSpeed,
-                crankGameTheme: crankGameTheme,
-                size: 30,
-              ),
-              SizedBox(height: 14),
-              Flexible(
-                flex: 1,
-                child: _ProgressBar(
-                  thickness: barThickness,
-                  progress: _progress,
-                  isWithinBounds: _isDragging &&
-                      (_currentSpeed - targetSpeed).abs() <=
-                          (errorMargin * targetSpeed),
-                  isTooSlow:
-                      _currentSpeed < targetSpeed - (errorMargin * targetSpeed),
-                  hasWon: _hasWon,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SpeedArrow(
+                  currentSpeed: _currentSpeed,
+                  targetSpeed: targetSpeed,
+                  errorMargin: errorMargin * targetSpeed,
+                  crankGameTheme: crankGameTheme,
+                  size: 30,
                 ),
-              )
-            ]),
+                SizedBox(height: 14),
+                Flexible(
+                  flex: 1,
+                  child: _ProgressBar(
+                    thickness: barThickness,
+                    progress: _progress,
+                    isWithinBounds:
+                        _isDragging &&
+                        (_currentSpeed - targetSpeed).abs() <=
+                            (errorMargin * targetSpeed),
+                    isTooSlow:
+                        _currentSpeed <
+                        targetSpeed - (errorMargin * targetSpeed),
+                    hasWon: _hasWon,
+                  ),
+                ),
+              ],
+            ),
           ),
 
           // Crank dial
@@ -440,12 +457,16 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                       Text(
                         'difficulty (error margin)',
                         style: _crankGameText(
-                            theme.colorScheme.onSurfaceVariant, 22),
+                          theme.colorScheme.onSurfaceVariant,
+                          22,
+                        ),
                       ),
                       Text(
                         '${(errorMargin * 100).toStringAsFixed(1)}%',
                         style: _crankGameText(
-                            theme.colorScheme.onSurfaceVariant, 22),
+                          theme.colorScheme.onSurfaceVariant,
+                          22,
+                        ),
                       ),
                     ],
                   ),
@@ -476,8 +497,10 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                           Text(
                             textAlign: TextAlign.center,
                             'Successfully produced high purity rotation at ${targetSpeed.toStringAsFixed(2)} rotations per second',
-                            style:
-                                _crankGameText(theme.colorScheme.onSurface, 40),
+                            style: _crankGameText(
+                              theme.colorScheme.onSurface,
+                              40,
+                            ),
                           ),
                           Padding(
                             padding: const EdgeInsets.only(top: 30.0),
@@ -485,14 +508,18 @@ class _CrankGameScreenState extends State<CrankGameScreen>
                               textAlign: TextAlign.center,
                               _currentWinMessage!,
                               style: _crankGameText(
-                                  theme.colorScheme.onSurface, 40),
+                                theme.colorScheme.onSurface,
+                                40,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 30.0),
                           Text(
                             'Tap for next challenge (${nextTargetSpeed.toStringAsFixed(2)}rps)',
                             style: _crankGameText(
-                                theme.colorScheme.onSurfaceVariant, 28),
+                              theme.colorScheme.onSurfaceVariant,
+                              28,
+                            ),
                           ),
                         ],
                       ),
@@ -544,10 +571,16 @@ class _CrankDialPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
     canvas.drawCircle(center, outerDiameter / 2, handlePaint);
     handlePaint.color = backgroundColor;
-    canvas.drawCircle(center + angleToOffset(angle) * handleDistance,
-        handleRadius, handlePaint);
-    canvas.drawCircle(center + angleToOffset(angle + pi) * handleDistance,
-        handleRadius, handlePaint);
+    canvas.drawCircle(
+      center + angleToOffset(angle) * handleDistance,
+      handleRadius,
+      handlePaint,
+    );
+    canvas.drawCircle(
+      center + angleToOffset(angle + pi) * handleDistance,
+      handleRadius,
+      handlePaint,
+    );
   }
 
   @override
@@ -582,35 +615,41 @@ class _ProgressBar extends StatelessWidget {
         final crankGameTheme = CrankGameTheme.fromContext(context);
 
         final (radius, rectHeight) = fluidBarRadiusAndHeightForProgress(
-            thickness, constraints.maxHeight, progress);
+          thickness,
+          constraints.maxHeight,
+          progress,
+        );
 
         return Container(
-            width: thickness,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(thickness / 2),
-              // border: Border.all(
-              //   color: theme.colorScheme.outline.withValues(alpha: 0.3),
-              //   width: 1,
-              // ),
-            ),
-            child: Stack(
-              children: [
-                fluidBar(
-                    size: Size(thickness, constraints.maxHeight),
-                    progress: progress,
-                    alignment: Alignment.bottomCenter,
-                    child: Container(
-                        decoration: BoxDecoration(
-                      color: isWithinBounds
-                          ? crankGameTheme.withinBoundsColor
-                          : isTooSlow
-                              ? crankGameTheme.tooSlowColor
-                              : crankGameTheme.tooFastColor,
-                      borderRadius: BorderRadius.circular(radius),
-                    ))),
-              ],
-            ));
+          width: thickness,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(thickness / 2),
+            // border: Border.all(
+            //   color: theme.colorScheme.outline.withValues(alpha: 0.3),
+            //   width: 1,
+            // ),
+          ),
+          child: Stack(
+            children: [
+              fluidBar(
+                size: Size(thickness, constraints.maxHeight),
+                progress: progress,
+                alignment: Alignment.bottomCenter,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isWithinBounds
+                        ? crankGameTheme.withinBoundsColor
+                        : isTooSlow
+                        ? crankGameTheme.tooSlowColor
+                        : crankGameTheme.tooFastColor,
+                    borderRadius: BorderRadius.circular(radius),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
       },
     );
   }
@@ -666,10 +705,7 @@ class _ArrowPainter extends CustomPainter {
   final double t; // -1 (pointing up) to 1 (pointing down)
   final Color color;
 
-  _ArrowPainter({
-    required this.t,
-    required this.color,
-  });
+  _ArrowPainter({required this.t, required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -707,12 +743,12 @@ class _ArrowPainter extends CustomPainter {
 
     moveTo(Offset offset) {
       final p = center + offset;
-      path.moveTo(p.dx, p.dy);
+      path.moveToOffset(p);
     }
 
     lineTo(Offset offset) {
       final p = center + offset;
-      path.lineTo(p.dx, p.dy);
+      path.lineToOffset(p);
     }
 
     final tip = Offset(0, centerness + topness);
@@ -774,14 +810,18 @@ class _DifficultySlider extends StatelessWidget {
           onVerticalDragUpdate: (details) {
             // Invert: dragging up increases difficulty (lowers error margin)
             final newNormalized =
-                (details.localPosition.dy / constraints.maxHeight)
-                    .clamp(0.0, 1.0);
+                (details.localPosition.dy / constraints.maxHeight).clamp(
+                  0.0,
+                  1.0,
+                );
             onChanged(_toErrorMargin(newNormalized));
           },
           onTapDown: (details) {
             final newNormalized =
-                (details.localPosition.dy / constraints.maxHeight)
-                    .clamp(0.0, 1.0);
+                (details.localPosition.dy / constraints.maxHeight).clamp(
+                  0.0,
+                  1.0,
+                );
             onChanged(_toErrorMargin(newNormalized));
           },
           child: Container(
@@ -796,14 +836,15 @@ class _DifficultySlider extends StatelessWidget {
                 Positioned(
                   bottom: thickness / 2 - innerThickness / 2,
                   child: Container(
-                      width: innerThickness,
-                      height: (constraints.maxHeight -
-                              (thickness - innerThickness)) *
-                          normalized,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerLow,
-                        borderRadius: BorderRadius.circular(innerThickness / 2),
-                      )),
+                    width: innerThickness,
+                    height:
+                        (constraints.maxHeight - (thickness - innerThickness)) *
+                        normalized,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(innerThickness / 2),
+                    ),
+                  ),
                 ),
               ],
             ),
