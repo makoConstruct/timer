@@ -4510,12 +4510,12 @@ class PaintedPlayIconPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // Inscribe an equilateral triangle pointing right inside the box.
+    // w = h * sqrt(3/4)
     final triH = min(size.height, size.width * 2 / sqrt(3));
     final triW = triH * sqrt(3) / 2;
     final cx = size.width / 2;
     final cy = size.height / 2;
-    // Centroid of an equilateral triangle pointing right sits at 1/3 of its
-    // width from the base; offset so the centroid lands at the box center.
+    // Centroid of an equilateral triangle pointing right sits at 1/3 of its width from the base; offset so the centroid lands at the box center.
     final baseX = cx - triW / 3;
     final apexX = baseX + triW;
     final topY = cy - triH / 2;
@@ -4546,8 +4546,8 @@ class PaintedPlayIcon extends StatelessWidget {
         IconTheme.of(context).color ??
         Theme.of(context).colorScheme.onSurface;
     return SizedBox(
-      width: size * sqrt(3) / 2,
-      height: size,
+      width: size,
+      height: size * (sqrt(3) / 2),
       child: CustomPaint(
         painter: PaintedPlayIconPainter(color: c, cornerRadius: size * 0.2),
       ),

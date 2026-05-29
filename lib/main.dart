@@ -3549,7 +3549,7 @@ class TimerScreenState extends State<TimerScreen>
         decoration: ShapeDecoration(
           shape: StarBorder.polygon(
             sides: 8,
-            pointRounding: 0.4,
+            pointRounding: 0.5,
             rotation: 45 / 2,
           ),
           color: Theme.of(context).colorScheme.onPrimary,
@@ -5172,12 +5172,16 @@ class _NumeralButtonState extends State<NumeralButton> {
       ),
       radialActivatorPositions: numericRadialActivatorPositions,
       radialActivatorIcons: [
-        PaintedPlayIcon(size: 12),
+        PaintedPlayIcon(size: 16),
         Row(
           mainAxisSize: MainAxisSize.min,
           spacing: 0,
           crossAxisAlignment: CrossAxisAlignment.center,
-          children: [PaintedPlayIcon(size: 10), Text('+00')],
+          children: [
+            PaintedPlayIcon(size: 12),
+            SizedBox(width: 4),
+            Text('+00', style: TextStyle(fontSize: 22)),
+          ],
         ),
       ],
     );
