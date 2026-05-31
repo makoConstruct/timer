@@ -2539,6 +2539,9 @@ class DragRingClipArgs {
   /// 0..1 "something is considered selected"; stays raised while a choice is held, so a builder can keep its base collapsed during the commit.
   final double swipep;
 
+  /// 0..1 release/dismissal commit (the option-activation animation). A builder uses this to finish collapsing onto the chosen item as the ring bows out.
+  final double releasep;
+
   /// per-item selection amount (eased, with release recede applied). A builder uses this to slide/highlight toward the chosen item.
   final List<double> selections;
 
@@ -2568,6 +2571,7 @@ class DragRingClipArgs {
   const DragRingClipArgs({
     required this.growth,
     required this.swipep,
+    this.releasep = 0,
     required this.selections,
     required this.radius,
     required this.actionRadius,
@@ -2619,35 +2623,79 @@ class _FluidPillClipper extends CustomClipper<Path> {
       oldClipper.growFromLeft != growFromLeft;
 }
 
-/// Drag-to-play style clip: the central disc unioned with a disc at each icon position. Replicates the circles the icons used to occupy.
+/// A selected item's highlight disc, as a multiple of the icon disc radius — a touch bigger than the resting dot it grows out of.
+const double dragRingSelectedClipScale = 1.12;
+
+/// how far the sweep has collapsed by the time a choice is fully held (before release finishes it off). Just shy of 1 so a sliver of the ring still rides on the chosen item during the hold.
+const double dragRingSweepHoldShrink = 0.9;
+
+/// Drag-to-play style clip. The total surface is
+///   union(selectedItemClips…, intersect(sweep, union(centerRing, unselectedItemClips…)))
+/// The center disc and each item's resting dot live *inside* a big "sweep"
+/// circle that, as a choice is made, collapses down onto the chosen item — its
+/// center eased toward the spring-tracked selection focus — wiping the rest of
+/// the ring away in the direction of the choice (driven by [DragRingClipArgs.swipep]
+/// while held, finished off by [DragRingClipArgs.releasep] on dismissal). Each
+/// selected item's highlight disc is unioned on *top* of the sweep so it stays
+/// crisp while everything else collapses onto it.
 Path circlesDragRingClip(DragRingClipArgs args) {
-  // base collapses while a choice is held; the per-item selection circles below are what remain lit.
-  final e = Curves.easeOut.transform(
-    args.growth * (1 - Curves.easeOut.transform(args.swipep)),
-  );
-  Path path = Path()
-    ..addOval(Rect.fromCircle(center: args.center, radius: args.radius * e));
+  // center + unselected dots: presence follows grow-in/out only. The sweep
+  // (below), not the swipe, is what hides them once a choice is underway.
+  final e = Curves.easeOut.transform(args.growth);
   final leafp = unlerpUnit(0.7, 1, e);
+
+  // --- inside the sweep: the center ring and the unselected item dots ---
+  Path inner = Path()
+    ..addOval(Rect.fromCircle(center: args.center, radius: args.radius * e));
   for (final angle in args.angles) {
     final c = args.center + Offset.fromDirection(angle, args.radius * leafp);
-    path = Path.combine(
+    inner = Path.combine(
       PathOperation.union,
-      path,
+      inner,
       Path()..addOval(
         Rect.fromCircle(center: c, radius: args.actionRadius * leafp),
       ),
     );
   }
+
+  // --- the sweep: a circle that collapses onto the selection focus ---
+  final dismiss = max(
+    Curves.easeOut.transform(args.swipep) * dragRingSweepHoldShrink,
+    Curves.easeOut.transform(args.releasep),
+  );
+  final focusAngle = (args.selectionStartAngle + args.selectionEndAngle) / 2;
+  final focusPoint =
+      args.center + Offset.fromDirection(focusAngle, args.radius);
+  // the center stays put while the sweep is still large (easeIn), then rides in
+  // onto the chosen item as it closes, so we never clip the far side early.
+  final sweepCenter = Offset.lerp(
+    args.center,
+    focusPoint,
+    Curves.easeIn.transform(dismiss),
+  )!;
+  final sweepRadius = lerp(args.radius + args.actionRadius * 2.5, 0, dismiss);
+  final sweep = Path()
+    ..addOval(Rect.fromCircle(center: sweepCenter, radius: sweepRadius));
+
+  Path path = Path.combine(PathOperation.intersect, sweep, inner);
+
+  // --- on top of the sweep: the selected item highlight discs ---
   for (int i = 0; i < args.selections.length; i++) {
-    final sel = args.selections[i];
+    // hold full through the release, then a quick final shrink so the highlight
+    // doesn't pop out of existence when the ring is removed.
+    final sel =
+        args.selections[i] *
+        (1 - Curves.easeOut.transform(unlerpUnit(0.7, 1, args.releasep)));
     if (sel <= 0) continue;
-    // slightly bigger than the icon discs.
     final c = args.center + Offset.fromDirection(args.angles[i], args.radius);
     path = Path.combine(
       PathOperation.union,
       path,
       Path()..addOval(
-        Rect.fromCircle(center: c, radius: args.actionRadius * 1.12 * sel),
+        Rect.fromCircle(
+          center: c,
+          radius: args.actionRadius * dragRingSelectedClipScale * sel,
+        ),
       ),
     );
   }
@@ -2958,6 +3006,18 @@ class DragActionRingState extends State<DragActionRing>
     }
   }
 
+  /// the raw selection-animation value at which a freshly chosen item's
+  /// highlight disc exactly matches the unselected dot it grows out of, so the
+  /// first selection grows continuously from the still-visible dot. Mirrors the
+  /// dot/disc radius math in [circlesDragRingClip].
+  double _firstSelectionStartValue() {
+    final growth = widget.useSpringExpansion
+        ? _expansionGrowth.clamp(0.0, 1.0)
+        : Curves.easeOut.transform(unlerpUnit(0, 0.6, _expansionGrowth));
+    final leafp = unlerpUnit(0.7, 1, Curves.easeOut.transform(growth));
+    return (leafp / dragRingSelectedClipScale).clamp(0.0, 1.0);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -3033,12 +3093,23 @@ class DragActionRingState extends State<DragActionRing>
       } else if (v != -1) {
         if (v != numberSelected) {
           HapticFeedback.heavyImpact();
+          final wasNothingSelected = numberSelected == -1;
           if (numberSelected != -1) {
             labelAnimations[numberSelected].reverse();
             selectionAnimations[numberSelected].reverse();
           }
           labelAnimations[v].forward(delay: labelAnimationDelay);
-          selectionAnimations[v].forward();
+          if (wasNothingSelected) {
+            // first selection: the unselected dot is still visible, so grow the
+            // highlight continuously out of it (from the selection value whose
+            // disc matches the dot's current radius).
+            selectionAnimations[v].forward(from: _firstSelectionStartValue());
+          } else {
+            // a choice was already held, so the sweep has hidden the dots —
+            // starting from the (now-invisible) dot's width would pop. Grow from
+            // wherever this item's animation already sits (usually 0).
+            selectionAnimations[v].forward();
+          }
           setState(() {
             numberSelected = v;
             centeredNumber = v;
@@ -3128,11 +3199,10 @@ class DragActionRingState extends State<DragActionRing>
         // fades a bit immediately on completion, but doesn't fade all the way out
         lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
 
-    final selections = [
-      for (int i = 0; i < selectionAnimations.length; i++)
-        Curves.easeOut.transform(selectionAnimations[i].value) *
-            (i == numberSelected ? 1 - Curves.easeOut.transform(releasep) : 1),
-    ];
+    // raw per-item selection growth; the clip builder owns any release recede
+    // (it keeps the chosen item's highlight crisp while the sweep collapses onto
+    // it, only shrinking it away at the very end of the dismissal).
+    final selections = [for (final c in selectionAnimations) c.value];
 
     final actionRadiusMax = thumbSpan * 0.6;
     Widget dragChoiceWidget(Widget child) {
@@ -3190,6 +3260,7 @@ class DragActionRingState extends State<DragActionRing>
       DragRingClipArgs(
         growth: baseGrow,
         swipep: swipep,
+        releasep: releasep,
         selections: selections,
         radius: radialRadiusMax,
         // at full growth this is the arc's half-thickness, so playing completion
@@ -3485,15 +3556,20 @@ class TimerScreenState extends State<TimerScreen>
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   late final Signal<int> currentlyPressingKey = Signal(0);
-  static const editPopoverDelay = Duration(milliseconds: 0);
-  // static const editPopoverDelay = Duration(milliseconds: 340);
-  // static const editPopoverDelay = Duration(milliseconds: 1000);
-  late final UpDownAnimationController editPopoverAnimation =
-      UpDownAnimationController(
-        vsync: this,
-        riseDuration: Duration(milliseconds: 220),
-        fallDuration: Duration(milliseconds: 150),
-      );
+  // whether the edit popover (and its pip icons) should be popped up: a plain
+  // timer is selected and the user has released the key at least once. Hoisted
+  // to a Computed so consumers can Watch it directly — synchronous flips (e.g. a
+  // numeral drag that starts a timer) coalesce into a single frame-time rebuild
+  // instead of flashing an eagerly-driven animation.
+  late final Computed<bool> poppingUp = Computed(() {
+    final sv = selectedTimer.value;
+    final timerData =
+        sv != null ? Mobj.getAlreadyLoaded(sv, TimerDataType()).value : null;
+    return timerData != null &&
+        timerData.kind == TimerKind.timer &&
+        (!isFirstPressForSelectedTimer.value ||
+            currentlyPressingKey.value == 0);
+  });
   late final ScrollController timersScroller = ScrollController();
   late final AnimationController squishPanelController = AnimationController(
     vsync: this,
@@ -3657,22 +3733,10 @@ class TimerScreenState extends State<TimerScreen>
       if (sv != null) {
         final svm = Mobj.getAlreadyLoaded(sv, TimerDataType()).value;
         if (svm == null || svm.selected == false) {
-          selectedTimer.value = null;
+          selectedTimer.value =
+              null; // note, this will recurse on this effect handler, we don't want that, but it's harmless
         }
       }
-      // control editPopoverAnimation
-      // edit popover doesn't pop up until there's a selected timer and the user has released the key at least once (you could simplify this logic a lot by directly tracking key release instead of this cocamamie bullshit)
-      // this is null excepting, understandably, you can't peek it, it was just deleted
-      final timerData = sv != null
-          ? Mobj.getAlreadyLoaded(sv, TimerDataType()).peek()
-          : null;
-      editPopoverAnimation.towards(
-        timerData != null &&
-            timerData.kind == TimerKind.timer &&
-            (!isFirstPressForSelectedTimer.value ||
-                currentlyPressingKey.value == 0),
-        forwardDelay: editPopoverDelay,
-      );
     });
   }
 
@@ -4006,37 +4070,42 @@ class TimerScreenState extends State<TimerScreen>
     final timerHeight = Timer.usualHeight();
     bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
 
-    Widget iconScaledToPip(Widget icon, UpDownAnimationController animation) {
-      return AnimatedBuilder(
-        animation: animation,
-        builder: (context, child) {
-          final p =
-              Curves.easeInOut.transform(editPopoverAnimation.value.$1) *
-              (1 - Curves.easeIn.transform(editPopoverAnimation.value.$2));
-          final opacity = lerp(0.06, 1.0, p);
-          return Opacity(
-            opacity: opacity,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                if (p != 1)
-                  Container(
-                    width: buttonSpan * 0.12,
-                    height: buttonSpan * 0.12,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.onSurface,
-                      shape: BoxShape.circle,
+    Widget iconScaledToPip(Widget icon) {
+      return Watch((context) {
+        final up = poppingUp.value;
+        return TweenAnimationBuilder<double>(
+          // a transient flip of `up` within one tick coalesces away, so this
+          // never animates toward a target that no longer holds. `t` is linear;
+          // opacity uses it directly, scale curves it (per-direction) below.
+          tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
+          duration: up
+              ? const Duration(milliseconds: 220) // rise
+              : const Duration(milliseconds: 150), // fall
+          builder: (context, t, child) {
+            final scale = (up ? Curves.easeInOut : Curves.easeIn).transform(t);
+            return Opacity(
+              // a linear ease is correct for opacity
+              opacity: lerp(0.07, 1.0, t),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (scale != 1)
+                    Container(
+                      width: buttonSpan * 0.12,
+                      height: buttonSpan * 0.12,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.onSurface,
+                        shape: BoxShape.circle,
+                      ),
                     ),
-                  ),
-                Transform.scale(
-                  scale: Curves.easeOutCubic.transform(p),
-                  child: Center(child: icon),
-                ),
-              ],
-            ),
-          );
-        },
-      );
+                  Transform.scale(scale: scale, child: child),
+                ],
+              ),
+            );
+          },
+          child: Center(child: icon),
+        );
+      });
     }
 
     Widget proportionedIcon(Widget icon) {
@@ -4412,18 +4481,14 @@ class TimerScreenState extends State<TimerScreen>
     ];
 
     Widget editFadeButton(Offset gridPos, Widget button, int i) {
-      return AnimatedBuilder(
-        animation: editPopoverAnimation,
-        builder: (context, child) {
-          return Positioned.fromRect(
-            rect: controlGridBound(gridPos, Size(1, 1)),
-            child: IgnorePointer(
-              ignoring: selectedTimer.value == null,
-              child: child!,
-            ),
-          );
-        },
-        child: button,
+      return Positioned.fromRect(
+        rect: controlGridBound(gridPos, Size(1, 1)),
+        child: Watch(
+          (context) => IgnorePointer(
+            ignoring: !poppingUp.value,
+            child: button,
+          ),
+        ),
       );
     }
 
@@ -4433,7 +4498,6 @@ class TimerScreenState extends State<TimerScreen>
         label: proportionedIcon(
           iconScaledToPip(
             PaintedBackspaceIcon(size: 12, color: numeralColor),
-            editPopoverAnimation,
           ),
         ),
         onPanDown: (_) {
@@ -4450,7 +4514,6 @@ class TimerScreenState extends State<TimerScreen>
         label: proportionedIcon(
           iconScaledToPip(
             PaintedPlayIcon(size: 10, color: numeralColor),
-            editPopoverAnimation,
           ),
         ),
         onPanDown: (_) {
