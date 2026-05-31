@@ -2120,23 +2120,27 @@ class TimerculeState extends TimerBaseState<Timercule> {
     final cornerRadius = backingCornerRounding * buttonSpan;
     Widget? titleWidget;
     if (d.title != null || _titleEditMode) {
+      final titleStyle = TextStyle(
+        color: theme.colorScheme.onSurface,
+        height: 0.71,
+        fontFamily: 'DongleLatin',
+        fontSize: 26,
+      );
       titleWidget = Padding(
         padding: const EdgeInsets.all(timerGap / 2),
         child: DefaultTextStyle.merge(
-          style: TextStyle(color: theme.colorScheme.onSurface),
+          style: titleStyle,
           child: _titleEditMode
-              ? IntrinsicWidth(
-                  child: TextField(
-                    focusNode: _titleFocusNode,
-                    controller: _titleController,
-                    style: DefaultTextStyle.of(context).style,
-                    decoration: InputDecoration.collapsed(
-                      hintText: 'description',
-                    ),
-                    onChanged: (text) {
-                      widget.mobj.value = p.withChanges(title: text);
-                    },
+              ? TextField(
+                  focusNode: _titleFocusNode,
+                  controller: _titleController,
+                  style: titleStyle,
+                  decoration: InputDecoration.collapsed(
+                    hintText: 'description',
                   ),
+                  onChanged: (text) {
+                    widget.mobj.value = p.withChanges(title: text);
+                  },
                 )
               : Text(d.title!, overflow: TextOverflow.clip),
         ),
@@ -3561,10 +3565,11 @@ class TimerScreenState extends State<TimerScreen>
   // to a Computed so consumers can Watch it directly — synchronous flips (e.g. a
   // numeral drag that starts a timer) coalesce into a single frame-time rebuild
   // instead of flashing an eagerly-driven animation.
-  late final Computed<bool> poppingUp = Computed(() {
+  late final Computed<bool> editPopoversUp = Computed(() {
     final sv = selectedTimer.value;
-    final timerData =
-        sv != null ? Mobj.getAlreadyLoaded(sv, TimerDataType()).value : null;
+    final timerData = sv != null
+        ? Mobj.getAlreadyLoaded(sv, TimerDataType()).value
+        : null;
     return timerData != null &&
         timerData.kind == TimerKind.timer &&
         (!isFirstPressForSelectedTimer.value ||
@@ -4072,24 +4077,24 @@ class TimerScreenState extends State<TimerScreen>
 
     Widget iconScaledToPip(Widget icon) {
       return Watch((context) {
-        final up = poppingUp.value;
+        final up = editPopoversUp.value;
         return TweenAnimationBuilder<double>(
           // a transient flip of `up` within one tick coalesces away, so this
           // never animates toward a target that no longer holds. `t` is linear;
           // opacity uses it directly, scale curves it (per-direction) below.
           tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
           duration: up
-              ? const Duration(milliseconds: 220) // rise
+              ? const Duration(milliseconds: 150) // rise
               : const Duration(milliseconds: 150), // fall
           builder: (context, t, child) {
-            final scale = (up ? Curves.easeInOut : Curves.easeIn).transform(t);
+            final p = (up ? Curves.easeInOut : Curves.easeIn).transform(t);
             return Opacity(
               // a linear ease is correct for opacity
-              opacity: lerp(0.07, 1.0, t),
+              opacity: lerp(0.07, 1.0, p),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  if (scale != 1)
+                  if (p != 1)
                     Container(
                       width: buttonSpan * 0.12,
                       height: buttonSpan * 0.12,
@@ -4098,7 +4103,7 @@ class TimerScreenState extends State<TimerScreen>
                         shape: BoxShape.circle,
                       ),
                     ),
-                  Transform.scale(scale: scale, child: child),
+                  Transform.scale(scale: p, child: child),
                 ],
               ),
             );
@@ -4484,10 +4489,8 @@ class TimerScreenState extends State<TimerScreen>
       return Positioned.fromRect(
         rect: controlGridBound(gridPos, Size(1, 1)),
         child: Watch(
-          (context) => IgnorePointer(
-            ignoring: !poppingUp.value,
-            child: button,
-          ),
+          (context) =>
+              IgnorePointer(ignoring: !editPopoversUp.value, child: button),
         ),
       );
     }
@@ -4496,9 +4499,7 @@ class TimerScreenState extends State<TimerScreen>
       padLandscape ? Offset(-4, 1) : Offset(-2, 3),
       TimersButton(
         label: proportionedIcon(
-          iconScaledToPip(
-            PaintedBackspaceIcon(size: 12, color: numeralColor),
-          ),
+          iconScaledToPip(PaintedBackspaceIcon(size: 12, color: numeralColor)),
         ),
         onPanDown: (_) {
           // without this, currentlyPressingKey going to 1 would briefly close the buttons (and ignore the press) while isFirstPressForSelectedTimer is still true
@@ -4512,9 +4513,7 @@ class TimerScreenState extends State<TimerScreen>
       padLandscape ? Offset(-4, 2) : Offset(-1, 3),
       TimersButton(
         label: proportionedIcon(
-          iconScaledToPip(
-            PaintedPlayIcon(size: 10, color: numeralColor),
-          ),
+          iconScaledToPip(PaintedPlayIcon(size: 10, color: numeralColor)),
         ),
         onPanDown: (_) {
           isFirstPressForSelectedTimer.value = false;
@@ -5560,7 +5559,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // Collapsible app bar with title
           SliverAppBar(
             pinned: true,
-            centerTitle: true,
+            centerTitle: false,
             expandedHeight: halfScreenHeight(context),
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale:
@@ -5569,24 +5568,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Hero(
-                      tag: 'configButton',
-                      createRectTween: (begin, end) =>
-                          DelayedRectTween(begin: begin, end: end, delay: 0.14),
-                      child: HamburgerIcon(
-                        lineWidth:
-                            iconLineRatio *
-                            Mobj.getAlreadyLoaded(
-                              buttonSpanID,
-                              DoubleType(),
-                            ).value!,
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 5),
+                  // SizedBox(
+                  //   width: 40,
+                  //   height: 40,
+                  //   child: Hero(
+                  //     tag: 'configButton',
+                  //     createRectTween: (begin, end) =>
+                  //         DelayedRectTween(begin: begin, end: end, delay: 0.14),
+                  //     child: HamburgerIcon(
+                  //       lineWidth:
+                  //           iconLineRatio *
+                  //           Mobj.getAlreadyLoaded(
+                  //             buttonSpanID,
+                  //             DoubleType(),
+                  //           ).value!,
+                  //     ),
+                  //   ),
+                  // ),
+                  // SizedBox(width: 5),
                   Text(
                     'Settings',
                     style: TextStyle(
@@ -5596,10 +5595,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ),
-              titlePadding: EdgeInsetsDirectional.only(
-                start: 72.0,
-                bottom: 16.0,
-              ),
+              // titlePadding: EdgeInsetsDirectional.only(
+              //   start: 72.0,
+              //   bottom: 16.0,
+              // ),
             ),
             backgroundColor: headingBackground,
             surfaceTintColor: headingBackground,
