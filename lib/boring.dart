@@ -2036,6 +2036,62 @@ class CircularRevealRoute<T> extends PageRoute<T>
   }
 }
 
+/// A route whose barrier is transparent and which is non-opaque until its
+/// transition completes, so the incoming page can fade its own background up
+/// over whatever is behind it (à la the timer menu). The page is handed the
+/// route [animation] to drive its own fade/reveal (and reverse on pop).
+class FadeBackgroundRoute<T> extends PageRoute<T> {
+  final Widget Function(BuildContext context, Animation<double> animation)
+  builder;
+  final Duration _transitionDuration;
+  final Duration _reverseTransitionDuration;
+
+  FadeBackgroundRoute({
+    required this.builder,
+    Duration transitionDuration = const Duration(milliseconds: 450),
+    Duration reverseTransitionDuration = const Duration(milliseconds: 300),
+  }) : _transitionDuration = transitionDuration,
+       _reverseTransitionDuration = reverseTransitionDuration;
+
+  @override
+  Color? get barrierColor => null;
+
+  @override
+  String? get barrierLabel => null;
+
+  @override
+  bool get barrierDismissible => false;
+
+  @override
+  bool get maintainState => true;
+
+  // Let what's behind keep painting while we fade in; become opaque once settled.
+  @override
+  bool get opaque => animation?.isCompleted ?? false;
+
+  @override
+  Duration get transitionDuration => _transitionDuration;
+
+  @override
+  Duration get reverseTransitionDuration => _reverseTransitionDuration;
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) => builder(context, animation);
+
+  // The page drives its own transition off the animation handed to builder.
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => child;
+}
+
 /// Route for pages that should clip to screen corners and scale when covered
 class ScreenCornerClippedRoute extends MaterialPageRoute {
   ScreenCornerClippedRoute({required super.builder});

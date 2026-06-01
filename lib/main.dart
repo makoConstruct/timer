@@ -3351,7 +3351,7 @@ class DragActionRingState extends State<DragActionRing>
         ),
         (w) => ColoredBox(color: theme.colorScheme.onSurface, child: w),
         (w) => Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 4),
           child: w,
         ),
         (w) => DefaultTextStyle(
@@ -4331,9 +4331,12 @@ class TimerScreenState extends State<TimerScreen>
       onPanEnd: () {
         Navigator.push(
           context,
-          CircularRevealRoute(
-            builder: (context) => SettingsScreen(flipBackgroundColors: false),
-            iconOriginKey: configButtonKey,
+          FadeBackgroundRoute(
+            builder: (context, animation) => SettingsScreen(
+              flipBackgroundColors: false,
+              revealOrigin: boxRect(configButtonKey)?.center,
+              revealAnimation: animation,
+            ),
           ),
         );
       },
@@ -4441,7 +4444,7 @@ class TimerScreenState extends State<TimerScreen>
       }),
       Positioned.fromRect(
         rect: controlGridBound(
-          numeralPartAnchor + (padLandscape ? Offset(-1, 0) : Offset(0, 3)),
+          numeralPartAnchor + (padLandscape ? Offset(-1, 2) : Offset(0, 3)),
           Size(1, 1),
         ),
         child: NumeralButton(
@@ -4496,7 +4499,7 @@ class TimerScreenState extends State<TimerScreen>
     }
 
     final editBackspaceButton = editFadeButton(
-      padLandscape ? Offset(-4, 1) : Offset(-2, 3),
+      padLandscape ? Offset(-4, 0) : Offset(-2, 3),
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(PaintedBackspaceIcon(size: 12, color: numeralColor)),
@@ -4510,7 +4513,7 @@ class TimerScreenState extends State<TimerScreen>
       0,
     );
     final editPlayButton = editFadeButton(
-      padLandscape ? Offset(-4, 2) : Offset(-1, 3),
+      padLandscape ? Offset(-4, 1) : Offset(-1, 3),
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(PaintedPlayIcon(size: 10, color: numeralColor)),
@@ -5476,22 +5479,58 @@ double halfScreenHeight(BuildContext context) {
 
 class SettingsScreen extends StatefulWidget {
   final bool flipBackgroundColors;
-  const SettingsScreen({super.key, this.flipBackgroundColors = false});
+
+  /// Global-space point the first section's reveal clip should emanate from
+  /// (the settings icon on the timer screen). Captured at push time.
+  final Offset? revealOrigin;
+
+  /// The route transition animation, used to fade the background up and reveal
+  /// the first section (and reverse both on pop).
+  final Animation<double> revealAnimation;
+  const SettingsScreen({
+    super.key,
+    this.flipBackgroundColors = false,
+    this.revealOrigin,
+    required this.revealAnimation,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with SingleTickerProviderStateMixin {
   late ScrollController _scrollController;
+  // Drives the background fade, per-section fades and the first-section reveal.
+  // Owned here (rather than the route's animation directly) because the route
+  // animation wasn't producing a usable tick for the clip; we sync this to the
+  // route by mirroring its status so the close still plays out on pop.
+  late AnimationController _revealController;
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController(initialScrollOffset: 0);
+    _revealController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+      reverseDuration: const Duration(milliseconds: 300),
+    )..forward();
+    widget.revealAnimation.addStatusListener(_onRouteStatus);
+  }
+
+  void _onRouteStatus(AnimationStatus status) {
+    // Follow the route: play out when it starts popping, back in if re-entered.
+    if (status == AnimationStatus.reverse) {
+      _revealController.reverse();
+    } else if (status == AnimationStatus.forward) {
+      _revealController.forward();
+    }
   }
 
   @override
   void dispose() {
+    widget.revealAnimation.removeStatusListener(_onRouteStatus);
+    _revealController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -5499,14 +5538,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (contentBackground, headingBackground) = maybeFlippedBackgroundColors(
-      theme,
-      widget.flipBackgroundColors,
-    );
-    // it was too confusing to figure out which mt.indentColor to use here since there isn't even a correspondence between mt colors and the results of the maybeFlippedBackgroundColors function
-    final indentColor = theme.brightness == Brightness.light
-        ? darkenColor(contentBackground, 0.03)
-        : lightenColor(contentBackground, 0.03);
+    final mt = MakoThemeData.fromTheme(theme);
+    final revealAnimation = _revealController;
     final listItemPadding = const EdgeInsets.symmetric(
       horizontal: 16.0,
       vertical: 8.0,
@@ -5515,21 +5548,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget trailing(Widget child) =>
         SizedBox(width: 40.0, child: Center(child: child));
 
-    Widget sectionHeading(String label) => Padding(
-      padding: const EdgeInsets.only(top: 0.0, bottom: 3.0),
-      child: Text(
-        label,
-        style: theme.textTheme.bodyMedium!.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-        textAlign: TextAlign.center,
-      ),
-    );
+    const double sectionRadius = 22;
 
-    Widget sectionDivider() => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: SeparatorGradient(color: indentColor),
-    );
+    // A titled roundrect grouping a set of tiles. When [revealOrigin] is given,
+    // the roundrect is clipped open from a zero-size rect at that global point
+    // (the settings icon) out to its full size as [animation] runs in — and,
+    // because the clip alone carries the entrance, this section does NOT fade
+    // in (it sits at full opacity the whole way in). Other sections fade in and
+    // out. Everything fades out on the way back (in/out treated separately).
+    Widget section(
+      String title, {
+      required Animation<double> animation,
+      Offset? revealOrigin,
+      required List<Widget> children,
+    }) {
+      final bool revealing = revealOrigin != null;
+      Widget items = Column(mainAxisSize: MainAxisSize.min, children: children);
+      // Use a Material (rather than a Container) so the tiles' ink splashes
+      // paint onto this surface in front of the background, instead of being
+      // drawn by some ancestor Material behind the roundrect's fill.
+      Widget roundRect = Material(
+        color: mt.foreBackColor,
+        borderRadius: BorderRadius.circular(sectionRadius),
+        clipBehavior: Clip.antiAlias,
+        child: items,
+      );
+      if (revealing) {
+        roundRect = _SectionReveal(
+          animation: animation,
+          globalOrigin: revealOrigin,
+          cornerRadius: sectionRadius,
+          child: roundRect,
+        );
+      }
+      Widget result = Padding(
+        padding: const EdgeInsets.fromLTRB(12.0, 6.0, 12.0, 14.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 18.0, bottom: 2.0),
+              child: AnimatedBuilder(
+                animation: animation,
+                builder: (context, child) {
+                  return FuzzyLinearClip(
+                    angle: tau - pi / 2,
+                    progress: unlerpUnit(0.6, 1.0, animation.value),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontFamily: 'DongleLatin',
+                        fontSize: 38,
+                        height: 1.0,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            roundRect,
+          ],
+        ),
+      );
+      return AnimatedBuilder(
+        animation: animation,
+        builder: (context, child) {
+          final closing = animation.status == AnimationStatus.reverse;
+          // Snappier on the way out (mirrors the timer menu).
+          final p = closing
+              ? unlerpUnit(0.5, 1, animation.value)
+              : animation.value;
+          final fade = Curves.easeInOut.transform(unlerpUnit(0.37, 1.0, p));
+          // Reveal section: full opacity in (clip carries it), fade only out.
+          final opacity = (revealing && !closing) ? 1.0 : fade;
+          return Opacity(opacity: opacity, child: child);
+        },
+        child: result,
+      );
+    }
 
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
@@ -5550,545 +5647,595 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
 
-    return Scaffold(
-      backgroundColor: contentBackground,
-      resizeToAvoidBottomInset: false,
-      body: CustomScrollView(
+    return AnimatedBuilder(
+      animation: revealAnimation,
+      builder: (context, child) {
+        // Backdrop dim fades up/down with the traversal (per-section content
+        // fades are handled inside section()). Compressed on the way out so the
+        // close doesn't drag, mirroring the timer menu.
+        final forward = revealAnimation.status != AnimationStatus.reverse;
+        final p = forward
+            ? revealAnimation.value
+            : unlerpUnit(0.5, 1, revealAnimation.value);
+        final backdrop = Curves.easeInOut.transform(p);
+        return Scaffold(
+          backgroundColor: Color.lerp(
+            mt.lowestBackColor.withAlpha(0),
+            mt.lowestBackColor,
+            backdrop,
+          ),
+          resizeToAvoidBottomInset: false,
+          body: child,
+        );
+      },
+      child: CustomScrollView(
         controller: _scrollController,
         slivers: [
           // Collapsible app bar with title
           SliverAppBar(
-            pinned: true,
+            pinned: false,
             centerTitle: false,
             expandedHeight: halfScreenHeight(context),
             flexibleSpace: FlexibleSpaceBar(
               expandedTitleScale:
                   1.0, // Disable title scaling to prevent Hero discontinuity
-              title: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // SizedBox(
-                  //   width: 40,
-                  //   height: 40,
-                  //   child: Hero(
-                  //     tag: 'configButton',
-                  //     createRectTween: (begin, end) =>
-                  //         DelayedRectTween(begin: begin, end: end, delay: 0.14),
-                  //     child: HamburgerIcon(
-                  //       lineWidth:
-                  //           iconLineRatio *
-                  //           Mobj.getAlreadyLoaded(
-                  //             buttonSpanID,
-                  //             DoubleType(),
-                  //           ).value!,
-                  //     ),
-                  //   ),
-                  // ),
-                  // SizedBox(width: 5),
-                  Text(
-                    'Settings',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+              // title: Row(
+              //   mainAxisSize: MainAxisSize.min,
+              //   crossAxisAlignment: CrossAxisAlignment.center,
+              //   children: [
+              //     // SizedBox(
+              //     //   width: 40,
+              //     //   height: 40,
+              //     //   child: Hero(
+              //     //     tag: 'configButton',
+              //     //     createRectTween: (begin, end) =>
+              //     //         DelayedRectTween(begin: begin, end: end, delay: 0.14),
+              //     //     child: HamburgerIcon(
+              //     //       lineWidth:
+              //     //           iconLineRatio *
+              //     //           Mobj.getAlreadyLoaded(
+              //     //             buttonSpanID,
+              //     //             DoubleType(),
+              //     //           ).value!,
+              //     //     ),
+              //     //   ),
+              //     // ),
+              //     // SizedBox(width: 5),
+              //     Text(
+              //       'Settings',
+              //       style: TextStyle(
+              //         color: theme.colorScheme.onSurface,
+              //         fontWeight: FontWeight.w500,
+              //       ),
+              //     ),
+              //   ],
+              // ),
               // titlePadding: EdgeInsetsDirectional.only(
               //   start: 72.0,
               //   bottom: 16.0,
               // ),
             ),
-            backgroundColor: headingBackground,
-            surfaceTintColor: headingBackground,
-            shadowColor: Colors.transparent,
+            backgroundColor: Colors.transparent,
+            // backgroundColor: mt.lowestBackColor,
+            // surfaceTintColor: mt.lowestBackColor,
+            // shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
           ),
           SliverList(
             delegate: SliverChildListDelegate([
-              sectionHeading('Settings'),
-              Builder(
-                builder: (context) {
-                  final padLandscapeMobj = Mobj.getAlreadyLoaded(
-                    padLandscapeID,
-                    BoolType(),
-                  );
-                  final padLandscapeNonNull = computed(
-                    () => padLandscapeMobj.value ?? false,
-                    autoDispose: true,
-                  );
-                  return ListTile(
-                    title: Text(
-                      'Numpad orientation',
-                      style: theme.textTheme.bodyLarge,
-                    ),
-                    subtitle: Watch(
-                      (context) => Text(
-                        padLandscapeNonNull.value ? 'landscape' : 'portrait',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+              section(
+                'settings',
+                animation: revealAnimation,
+                revealOrigin: widget.revealOrigin,
+                children: [
+                  Builder(
+                    builder: (context) {
+                      final padLandscapeMobj = Mobj.getAlreadyLoaded(
+                        padLandscapeID,
+                        BoolType(),
+                      );
+                      final padLandscapeNonNull = computed(
+                        () => padLandscapeMobj.value ?? false,
+                        autoDispose: true,
+                      );
+                      return ListTile(
+                        title: Text(
+                          'Numpad orientation',
+                          style: theme.textTheme.bodyLarge,
                         ),
-                      ),
-                    ),
-                    trailing: trailing(
-                      BoolSignalTween(
-                        signal: padLandscapeNonNull,
-                        duration: Duration(milliseconds: 600),
-                        // duration: Duration(milliseconds: 190),
-                        builder: (context, progress, _) {
-                          final longDimension = 22 / 4 * 3;
-                          final shortDimension = 22.0;
-                          final hpu = 0.37;
-                          final h = lerp(
-                            shortDimension,
-                            longDimension,
-                            Curves.easeInOutCubic.transform(
-                              unlerpUnit(0, hpu, progress),
+                        subtitle: Watch(
+                          (context) => Text(
+                            padLandscapeNonNull.value
+                                ? 'landscape'
+                                : 'portrait',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
-                          );
-                          final w = lerp(
-                            longDimension,
-                            shortDimension,
-                            Curves.easeInOutCubic.transform(
-                              unlerpUnit(1 - hpu, 1, progress),
-                            ),
-                          );
-                          final movementp = Curves.easeInOutQuad.transform(
-                            1 - progress,
-                          );
-                          final centeredInset =
-                              (longDimension - shortDimension) / 2;
-                          return SizedBox(
-                            width: longDimension,
-                            height: longDimension,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned(
-                                  width: w,
-                                  height: h,
-                                  top: lerp(0, centeredInset, movementp),
-                                  right: lerp(centeredInset, 0, movementp),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primary,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                  ),
+                          ),
+                        ),
+                        trailing: trailing(
+                          BoolSignalTween(
+                            signal: padLandscapeNonNull,
+                            duration: Duration(milliseconds: 600),
+                            // duration: Duration(milliseconds: 190),
+                            builder: (context, progress, _) {
+                              final longDimension = 22 / 4 * 3;
+                              final shortDimension = 22.0;
+                              final hpu = 0.37;
+                              final h = lerp(
+                                shortDimension,
+                                longDimension,
+                                Curves.easeInOutCubic.transform(
+                                  unlerpUnit(0, hpu, progress),
                                 ),
-                              ],
+                              );
+                              final w = lerp(
+                                longDimension,
+                                shortDimension,
+                                Curves.easeInOutCubic.transform(
+                                  unlerpUnit(1 - hpu, 1, progress),
+                                ),
+                              );
+                              final movementp = Curves.easeInOutQuad.transform(
+                                1 - progress,
+                              );
+                              final centeredInset =
+                                  (longDimension - shortDimension) / 2;
+                              return SizedBox(
+                                width: longDimension,
+                                height: longDimension,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Positioned(
+                                      width: w,
+                                      height: h,
+                                      top: lerp(0, centeredInset, movementp),
+                                      right: lerp(centeredInset, 0, movementp),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: theme.colorScheme.primary,
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
+                              // return SizedBox(
+                              //   width: lerp(
+                              //     longDimension,
+                              //     shortDimension,
+                              //     Curves.easeIn.transform(progress),
+                              //   ),
+                              //   height: lerp(
+                              //     shortDimension,
+                              //     longDimension,
+                              //     Curves.easeOut.transform(progress),
+                              //   ),
+                              //   child: Container(
+                              //     decoration: BoxDecoration(
+                              //       color: theme.colorScheme.primary,
+                              //       borderRadius: BorderRadius.circular(4),
+                              //     ),
+                              //   ),
+                              // );
+                            },
+                          ),
+                        ),
+                        onTap: () {
+                          padLandscapeMobj.value = !padLandscapeMobj.value!;
+                        },
+                        contentPadding: listItemPadding,
+                      );
+                    },
+                  ),
+                  // Alarm sound setting
+                  Builder(
+                    builder: (context) {
+                      final GlobalKey iconKey = GlobalKey();
+                      final hereIconKey = GlobalKey();
+                      return ListTile(
+                        title: Text(
+                          'Alarm sound',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        subtitle: Watch((context) {
+                          return Text(
+                            Mobj.getAlreadyLoaded(
+                              selectedAudioID,
+                              AudioInfoType(),
+                            ).value!.name,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           );
-                          // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
-                          // return SizedBox(
-                          //   width: lerp(
-                          //     longDimension,
-                          //     shortDimension,
-                          //     Curves.easeIn.transform(progress),
-                          //   ),
-                          //   height: lerp(
-                          //     shortDimension,
-                          //     longDimension,
-                          //     Curves.easeOut.transform(progress),
-                          //   ),
-                          //   child: Container(
-                          //     decoration: BoxDecoration(
-                          //       color: theme.colorScheme.primary,
-                          //       borderRadius: BorderRadius.circular(4),
-                          //     ),
-                          //   ),
-                          // );
+                        }),
+                        trailing: trailing(
+                          SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'alarm-sound-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.music_note,
+                                  key: hereIconKey,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            CircularRevealRoute(
+                              builder: (context) => AlarmSoundPickerScreen(
+                                iconKey: iconKey,
+                                flipBackgroundColors:
+                                    !widget.flipBackgroundColors,
+                              ),
+                              buttonCenter: widgetCenter(hereIconKey),
+                              iconOriginKey: iconKey,
+                            ),
+                          );
                         },
-                      ),
-                    ),
-                    onTap: () {
-                      padLandscapeMobj.value = !padLandscapeMobj.value!;
-                    },
-                    contentPadding: listItemPadding,
-                  );
-                },
-              ),
-              // Alarm sound setting
-              Builder(
-                builder: (context) {
-                  final GlobalKey iconKey = GlobalKey();
-                  final hereIconKey = GlobalKey();
-                  return ListTile(
-                    title: Text(
-                      'Alarm sound',
-                      style: theme.textTheme.bodyLarge,
-                    ),
-                    subtitle: Watch((context) {
-                      return Text(
-                        Mobj.getAlreadyLoaded(
-                          selectedAudioID,
-                          AudioInfoType(),
-                        ).value!.name,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      );
-                    }),
-                    trailing: trailing(
-                      SizedBox(
-                        width: 26,
-                        height: 26,
-                        child: Hero(
-                          tag: 'alarm-sound-icon',
-                          child: ScalingAspectRatio(
-                            child: Icon(
-                              Icons.music_note,
-                              key: hereIconKey,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        CircularRevealRoute(
-                          builder: (context) => AlarmSoundPickerScreen(
-                            iconKey: iconKey,
-                            flipBackgroundColors: !widget.flipBackgroundColors,
-                          ),
-                          buttonCenter: widgetCenter(hereIconKey),
-                          iconOriginKey: iconKey,
-                        ),
+                        contentPadding: listItemPadding,
                       );
                     },
-                    contentPadding: listItemPadding,
-                  );
-                },
-              ),
-              // Persistent alarm mode setting
-              Watch((context) {
-                final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
-                  persistentAlarmModeID,
-                  BoolType(),
-                );
-                final persistentAlarmMode =
-                    persistentAlarmModeMobj.value ?? false;
-                return RoundedCheckboxListTile(
-                  title: Text(
-                    'Persistent alarm',
-                    style: theme.textTheme.bodyLarge,
                   ),
-                  subtitle: Text(
-                    persistentAlarmMode
-                        ? 'On. Alarm loops until you open the app'
-                        : 'Off. Alarm plays once',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  value: persistentAlarmMode,
-                  onChanged: (value) {
-                    persistentAlarmModeMobj.value = value;
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
-              Watch((context) {
-                final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
-                  buttonScaleDialOnID,
-                  BoolType(),
-                );
-                return ListTile(
-                  title: Text('Button size', style: theme.textTheme.bodyLarge),
-                  subtitle: Text(
-                    buttonScaleDialOnOn.value!
-                        ? "Button scale dial is currently deployed, tap here to turn it off"
-                        : 'Introduce a dial by which you can adjust UI scale',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  onTap: () {
-                    buttonScaleDialOnOn.value = !buttonScaleDialOnOn.value!;
-                    if (buttonScaleDialOnOn.value!) {
-                      Navigator.of(context).pop();
-                    }
-                  },
-                );
-              }),
-              // Right-handed mode setting
-              Watch((context) {
-                final isRightHandedMobj = Mobj.getAlreadyLoaded(
-                  isRightHandedID,
-                  BoolType(),
-                );
-                final isRightHanded = isRightHandedMobj.value ?? true;
-                return ListTile(
-                  title: Text(
-                    '${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                  subtitle: Text(
-                    'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-
-                  // splashColor: Colors.black,
-
-                  // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
-                  // focusColor: Colors.red,
-                  // selectedColor: Colors.red,
-                  // // tileColor: Colors.red,
-                  // selectedTileColor: Colors.red,
-                  // textColor: Colors.red,
-                  // hoverColor: Colors.red,
-                  // splashColor: Colors.black,
-                  trailing: trailing(
-                    TweenAnimationBuilder<double>(
-                      tween: Tween(
-                        begin: isRightHanded ? -1.0 : 1.0,
-                        end: isRightHanded ? -1.0 : 1.0,
-                      ),
-                      duration: Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      builder: (context, scaleX, child) {
-                        return Transform.scale(scaleX: scaleX, child: child);
-                      },
-                      child: Transform.rotate(
-                        angle: 45 * pi / 180, // 45 degrees clockwise
-                        child: Icon(
-                          Icons.back_hand_rounded,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  onTap: () {
-                    isRightHandedMobj.value = !isRightHanded;
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
-              Watch((context) {
-                final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
-                  padVerticallyAscendingID,
-                  BoolType(),
-                );
-                final padVerticallyAscending =
-                    padVerticallyAscendingMobj.value ?? false;
-                return ListTile(
-                  title: Text('Numpad type', style: theme.textTheme.bodyLarge),
-                  subtitle: Text(
-                    padVerticallyAscending
-                        ? 'calculator/keyboard style'
-                        : 'phone style',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  trailing: trailing(
-                    NumpadTypeIndicator(
-                      isAscending: padVerticallyAscending,
-                      width: 36,
-                    ),
-                  ),
-                  onTap: () {
-                    padVerticallyAscendingMobj.value = !padVerticallyAscending;
-                  },
-                  contentPadding: listItemPadding,
-                );
-              }),
-              sectionDivider(),
-              sectionHeading('Info'),
-              Builder(
-                builder: (context) {
-                  // Need a Builder to get the correct context for finding the icon's position
-                  final GlobalKey iconKey = GlobalKey();
-                  final hereIconKey = GlobalKey();
-                  return ListTile(
-                    title: Text(
-                      'About this app',
-                      style: theme.textTheme.bodyLarge,
-                    ),
-                    trailing: trailing(
-                      SizedBox(
-                        width: 26,
-                        height: 26,
-                        child: Hero(
-                          tag: 'about-icon',
-                          child: ScalingAspectRatio(
-                            child: Icon(
-                              Icons.info_outline,
-                              key: hereIconKey,
-                              size: 10,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        CircularRevealRoute(
-                          builder: (context) => AboutScreen(
-                            iconKey: iconKey,
-                            flipBackgroundColors: !widget.flipBackgroundColors,
-                          ),
-                          buttonCenter: widgetCenter(hereIconKey),
-                          iconOriginKey: iconKey,
-                        ),
-                      );
-                    },
-                    contentPadding: listItemPadding,
-                  );
-                },
-              ),
-              Builder(
-                builder: (context) {
-                  final GlobalKey iconKey = GlobalKey();
-                  final hereIconKey = GlobalKey();
-                  return ListTile(
-                    title: Text(
-                      'Thank the author',
-                      style: theme.textTheme.bodyLarge,
-                    ),
-                    trailing: trailing(
-                      SizedBox(
-                        width: 26,
-                        height: 26,
-                        child: Hero(
-                          tag: 'thank-author-icon',
-                          child: ScalingAspectRatio(
-                            child: Icon(
-                              Icons.heart_broken,
-                              key: hereIconKey,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        CircularRevealRoute(
-                          builder: (context) => ThankAuthorScreen(
-                            iconKey: iconKey,
-                            flipBackgroundColors: !widget.flipBackgroundColors,
-                          ),
-                          buttonCenter: widgetCenter(hereIconKey),
-                          iconOriginKey: iconKey,
-                        ),
-                      );
-                    },
-                    contentPadding: listItemPadding,
-                  );
-                },
-              ),
-              sectionDivider(),
-              sectionHeading('Extra'),
-              Builder(
-                builder: (context) {
-                  final GlobalKey iconKey = GlobalKey();
-                  Offset? tapPosition;
-                  return GestureDetector(
-                    onTapDown: (details) {
-                      tapPosition = details.globalPosition;
-                    },
-                    child: ListTile(
+                  // Persistent alarm mode setting
+                  Watch((context) {
+                    final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
+                      persistentAlarmModeID,
+                      BoolType(),
+                    );
+                    final persistentAlarmMode =
+                        persistentAlarmModeMobj.value ?? false;
+                    return RoundedCheckboxListTile(
                       title: Text(
-                        'Crank game',
+                        'Persistent alarm',
                         style: theme.textTheme.bodyLarge,
                       ),
                       subtitle: Text(
-                        "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
+                        persistentAlarmMode
+                            ? 'On. Alarm loops until you open the app'
+                            : 'Off. Alarm plays once',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      value: persistentAlarmMode,
+                      onChanged: (value) {
+                        persistentAlarmModeMobj.value = value;
+                      },
+                      contentPadding: listItemPadding,
+                    );
+                  }),
+                  Watch((context) {
+                    final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
+                      buttonScaleDialOnID,
+                      BoolType(),
+                    );
+                    return ListTile(
+                      title: Text(
+                        'Button size',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      subtitle: Text(
+                        buttonScaleDialOnOn.value!
+                            ? "Button scale dial is currently deployed, tap here to turn it off"
+                            : 'Introduce a dial by which you can adjust UI scale',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      onTap: () {
+                        buttonScaleDialOnOn.value = !buttonScaleDialOnOn.value!;
+                        if (buttonScaleDialOnOn.value!) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                    );
+                  }),
+                  // Right-handed mode setting
+                  Watch((context) {
+                    final isRightHandedMobj = Mobj.getAlreadyLoaded(
+                      isRightHandedID,
+                      BoolType(),
+                    );
+                    final isRightHanded = isRightHandedMobj.value ?? true;
+                    return ListTile(
+                      title: Text(
+                        '${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      subtitle: Text(
+                        'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+
+                      // splashColor: Colors.black,
+
+                      // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
+                      // focusColor: Colors.red,
+                      // selectedColor: Colors.red,
+                      // // tileColor: Colors.red,
+                      // selectedTileColor: Colors.red,
+                      // textColor: Colors.red,
+                      // hoverColor: Colors.red,
+                      // splashColor: Colors.black,
                       trailing: trailing(
-                        SizedBox(
-                          width: 26,
-                          height: 26,
-                          child: Hero(
-                            tag: 'crank-game-icon',
-                            child: ScalingAspectRatio(
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.rotate_right_rounded,
-                                    color: theme.colorScheme.primary,
-                                    size: 24,
-                                  ),
-                                  Positioned(
-                                    right: 0,
-                                    bottom: 0,
-                                    child: Icon(
-                                      Icons.sports_esports,
-                                      color: theme.colorScheme.primary,
-                                      size: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(
+                            begin: isRightHanded ? -1.0 : 1.0,
+                            end: isRightHanded ? -1.0 : 1.0,
+                          ),
+                          duration: Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          builder: (context, scaleX, child) {
+                            return Transform.scale(
+                              scaleX: scaleX,
+                              child: child,
+                            );
+                          },
+                          child: Transform.rotate(
+                            angle: 45 * pi / 180, // 45 degrees clockwise
+                            child: Icon(
+                              Icons.back_hand_rounded,
+                              color: theme.colorScheme.primary,
                             ),
                           ),
                         ),
                       ),
                       onTap: () {
-                        Navigator.push(
-                          context,
-                          CircularRevealRoute(
-                            builder: (context) => CrankGameScreen(
-                              iconKey: iconKey,
-                              flipBackgroundColors:
-                                  !widget.flipBackgroundColors,
-                            ),
-                            buttonCenter: tapPosition ?? Offset.zero,
-                            iconOriginKey: iconKey,
-                          ),
-                        );
+                        isRightHandedMobj.value = !isRightHanded;
                       },
                       contentPadding: listItemPadding,
-                    ),
-                  );
-                },
+                    );
+                  }),
+                  Watch((context) {
+                    final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
+                      padVerticallyAscendingID,
+                      BoolType(),
+                    );
+                    final padVerticallyAscending =
+                        padVerticallyAscendingMobj.value ?? false;
+                    return ListTile(
+                      title: Text(
+                        'Numpad type',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      subtitle: Text(
+                        padVerticallyAscending
+                            ? 'calculator/keyboard style'
+                            : 'phone style',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      trailing: trailing(
+                        NumpadTypeIndicator(
+                          isAscending: padVerticallyAscending,
+                          width: 36,
+                        ),
+                      ),
+                      onTap: () {
+                        padVerticallyAscendingMobj.value =
+                            !padVerticallyAscending;
+                      },
+                      contentPadding: listItemPadding,
+                    );
+                  }),
+                ],
               ),
+              section(
+                'info',
+                animation: revealAnimation,
+                children: [
+                  Builder(
+                    builder: (context) {
+                      // Need a Builder to get the correct context for finding the icon's position
+                      final GlobalKey iconKey = GlobalKey();
+                      final hereIconKey = GlobalKey();
+                      return ListTile(
+                        title: Text(
+                          'About this app',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        trailing: trailing(
+                          SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'about-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.info_outline,
+                                  key: hereIconKey,
+                                  size: 10,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            CircularRevealRoute(
+                              builder: (context) => AboutScreen(
+                                iconKey: iconKey,
+                                flipBackgroundColors:
+                                    !widget.flipBackgroundColors,
+                              ),
+                              buttonCenter: widgetCenter(hereIconKey),
+                              iconOriginKey: iconKey,
+                            ),
+                          );
+                        },
+                        contentPadding: listItemPadding,
+                      );
+                    },
+                  ),
+                  Builder(
+                    builder: (context) {
+                      final GlobalKey iconKey = GlobalKey();
+                      final hereIconKey = GlobalKey();
+                      return ListTile(
+                        title: Text(
+                          'Thank the author',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        trailing: trailing(
+                          SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'thank-author-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.heart_broken,
+                                  key: hereIconKey,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            CircularRevealRoute(
+                              builder: (context) => ThankAuthorScreen(
+                                iconKey: iconKey,
+                                flipBackgroundColors:
+                                    !widget.flipBackgroundColors,
+                              ),
+                              buttonCenter: widgetCenter(hereIconKey),
+                              iconOriginKey: iconKey,
+                            ),
+                          );
+                        },
+                        contentPadding: listItemPadding,
+                      );
+                    },
+                  ),
+                ],
+              ),
+              section(
+                'extra',
+                animation: revealAnimation,
+                children: [
+                  Builder(
+                    builder: (context) {
+                      final GlobalKey iconKey = GlobalKey();
+                      Offset? tapPosition;
+                      return GestureDetector(
+                        onTapDown: (details) {
+                          tapPosition = details.globalPosition;
+                        },
+                        child: ListTile(
+                          title: Text(
+                            'Crank game',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          subtitle: Text(
+                            "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          trailing: trailing(
+                            SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: Hero(
+                                tag: 'crank-game-icon',
+                                child: ScalingAspectRatio(
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.rotate_right_rounded,
+                                        color: theme.colorScheme.primary,
+                                        size: 24,
+                                      ),
+                                      Positioned(
+                                        right: 0,
+                                        bottom: 0,
+                                        child: Icon(
+                                          Icons.sports_esports,
+                                          color: theme.colorScheme.primary,
+                                          size: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) => CrankGameScreen(
+                                  iconKey: iconKey,
+                                  flipBackgroundColors:
+                                      !widget.flipBackgroundColors,
+                                ),
+                                buttonCenter: tapPosition ?? Offset.zero,
+                                iconOriginKey: iconKey,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
+                        ),
+                      );
+                    },
+                  ),
 
-              // abandoned on journey_game branch
-              // ListTile(
-              //   title: Text(
-              //     'Journeying game',
-              //     style: theme.textTheme.bodyLarge,
-              //   ),
-              //   subtitle: Text(
-              //     "A world to wander.",
-              //     style: theme.textTheme.bodyMedium?.copyWith(
-              //       color: theme.colorScheme.onSurfaceVariant,
-              //     ),
-              //   ),
-              //   trailing: trailing(
-              //     Icon(
-              //       Icons.explore_rounded,
-              //       color: theme.colorScheme.primary,
-              //       size: 24,
-              //     ),
-              //   ),
-              //   onTap: () {
-              //     Navigator.pushReplacement(
-              //       context,
-              //       CircularRevealRoute(
-              //         builder: (context) => const JourneyingGameScreen(),
-              //       ),
-              //     );
-              //   },
-              //   contentPadding: listItemPadding,
-              // ),
+                  // abandoned on journey_game branch
+                  // ListTile(
+                  //   title: Text(
+                  //     'Journeying game',
+                  //     style: theme.textTheme.bodyLarge,
+                  //   ),
+                  //   subtitle: Text(
+                  //     "A world to wander.",
+                  //     style: theme.textTheme.bodyMedium?.copyWith(
+                  //       color: theme.colorScheme.onSurfaceVariant,
+                  //     ),
+                  //   ),
+                  //   trailing: trailing(
+                  //     Icon(
+                  //       Icons.explore_rounded,
+                  //       color: theme.colorScheme.primary,
+                  //       size: 24,
+                  //     ),
+                  //   ),
+                  //   onTap: () {
+                  //     Navigator.pushReplacement(
+                  //       context,
+                  //       CircularRevealRoute(
+                  //         builder: (context) => const JourneyingGameScreen(),
+                  //       ),
+                  //     );
+                  //   },
+                  //   contentPadding: listItemPadding,
+                  // ),
 
-              // if (!completedSetup) ...[
-              if (true) ...[setupTile],
+                  // if (!completedSetup) ...[
+                  if (true) ...[setupTile],
+                ],
+              ),
               SizedBox(height: MediaQuery.of(context).padding.bottom),
             ]),
           ),
@@ -6096,6 +6243,132 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+/// Clips [child] open from a zero-size rounded rect at [globalOrigin] out to
+/// the child's full laid-out size, driven by [animation]. The origin is given
+/// in global coordinates (the settings icon on the timer screen) and resolved
+/// to the child's local space after first layout — until then the clip is a
+/// point at value 0, so nothing flashes. Once the animation completes the clip
+/// is dropped entirely so it never interferes with scrolling.
+class _SectionReveal extends StatefulWidget {
+  final Animation<double> animation;
+  final Offset? globalOrigin;
+  final double cornerRadius;
+  final Widget child;
+  const _SectionReveal({
+    required this.animation,
+    required this.globalOrigin,
+    required this.cornerRadius,
+    required this.child,
+  });
+
+  @override
+  State<_SectionReveal> createState() => _SectionRevealState();
+}
+
+class _SectionRevealState extends State<_SectionReveal> {
+  final GlobalKey _childKey = GlobalKey();
+  Offset? _localOrigin;
+  late bool _done;
+
+  @override
+  void initState() {
+    super.initState();
+    _done = widget.animation.isCompleted;
+    widget.animation.addStatusListener(_onStatus);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _resolveOrigin());
+  }
+
+  void _onStatus(AnimationStatus status) {
+    // Clip is an open-only flourish: once it's revealed (completed) — or as
+    // soon as we start closing — drop it for good so the close is a plain fade
+    // (handled by the content opacity) rather than the clip collapsing back.
+    if ((status == AnimationStatus.completed ||
+            status == AnimationStatus.reverse) &&
+        !_done) {
+      setState(() => _done = true);
+    }
+  }
+
+  void _resolveOrigin() {
+    if (!mounted || widget.globalOrigin == null) return;
+    final box = _childKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final local = box.globalToLocal(widget.globalOrigin!);
+    if (local != _localOrigin) setState(() => _localOrigin = local);
+  }
+
+  @override
+  void dispose() {
+    widget.animation.removeStatusListener(_onStatus);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyedChild = KeyedSubtree(key: _childKey, child: widget.child);
+    if (_done) return keyedChild;
+    return AnimatedBuilder(
+      animation: widget.animation,
+      builder: (context, child) {
+        // Origin may not be known on the very first frame; at value ~0 the clip
+        // is a point regardless, so this is invisible.
+        if (_localOrigin == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _resolveOrigin());
+        }
+        return ClipPath(
+          clipper: _SectionRevealClipper(
+            // Same shape/timing as the timer menu's reveal: snap open over the
+            // first 0.7 of the traversal with a quart ease-out.
+            progress: Curves.easeOutQuart.transform(
+              unlerpUnit(0.0, 0.7, widget.animation.value),
+            ),
+            origin: _localOrigin,
+            cornerRadius: widget.cornerRadius,
+          ),
+          child: child,
+        );
+      },
+      child: keyedChild,
+    );
+  }
+}
+
+class _SectionRevealClipper extends CustomClipper<Path> {
+  final double progress;
+  final Offset? origin;
+  final double cornerRadius;
+
+  _SectionRevealClipper({
+    required this.progress,
+    required this.origin,
+    required this.cornerRadius,
+  });
+
+  @override
+  Path getClip(Size size) {
+    final target = Offset.zero & size;
+    final o = origin ?? target.center;
+    final rr = RRect.lerp(
+      // Start as a rounded point at the origin (large radius so the early
+      // reveal is soft, like the menu's), morph out to the full section rect.
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: o, width: 0, height: 0),
+        Radius.circular(lerp(size.width / 2, cornerRadius, progress)),
+      ),
+      RRect.fromRectAndRadius(target, Radius.circular(cornerRadius)),
+      progress,
+    )!;
+    print(rr);
+    return Path()..addRRect(rr);
+  }
+
+  @override
+  bool shouldReclip(_SectionRevealClipper old) =>
+      old.progress != progress ||
+      old.origin != origin ||
+      old.cornerRadius != cornerRadius;
 }
 
 class ThankAuthorScreen extends StatelessWidget {
