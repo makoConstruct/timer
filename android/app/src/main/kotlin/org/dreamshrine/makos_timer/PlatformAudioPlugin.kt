@@ -289,16 +289,13 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Plu
 
                 audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                     .setAudioAttributes(audioAttributes)
-                    .setAcceptsDelayedFocusGain(false)
-                    .setWillPauseWhenDucked(false)
-                    .setOnAudioFocusChangeListener { }
                     .build()
 
                 audioManager.requestAudioFocus(audioFocusRequest!!)
             } else {
                 @Suppress("DEPRECATION")
                 audioManager.requestAudioFocus(
-                    { },
+                    null,
                     AudioManager.STREAM_ALARM,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
                 )
@@ -373,7 +370,7 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Plu
             audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         } else {
             @Suppress("DEPRECATION")
-            audioManager.abandonAudioFocus { }
+            audioManager.abandonAudioFocus(null)
         }
     }
 }

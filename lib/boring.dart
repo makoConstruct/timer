@@ -3479,11 +3479,19 @@ class _RenderSignedPadding extends RenderShiftedBox {
 
   BoxConstraints _childConstraints(BoxConstraints parent, EdgeInsets inset) {
     final inner = parent.deflate(inset);
+    // For positive insets `inner.max <= parent.max`, so the child may grow to
+    // the parent's max (the centering-overflow behavior described above). For
+    // negative insets `deflate` *inflates* both min and max (it does
+    // `min - horizontal` with horizontal < 0); capping max at `parent.max`
+    // would then leave `inner.minWidth > parent.maxWidth` under a tight parent,
+    // producing an invalid `minWidth > maxWidth` constraint. Taking the larger
+    // of the two keeps the constraint valid and lets the child exceed the
+    // parent by the negative inset, like OverflowBox.
     return BoxConstraints(
       minWidth: inner.minWidth,
-      maxWidth: parent.maxWidth,
+      maxWidth: max(parent.maxWidth, inner.maxWidth),
       minHeight: inner.minHeight,
-      maxHeight: parent.maxHeight,
+      maxHeight: max(parent.maxHeight, inner.maxHeight),
     );
   }
 
@@ -4384,6 +4392,66 @@ class HamburgerIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant HamburgerIconPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.lineWidth != lineWidth;
+}
+
+/// A back chevron rendered as line art — a sideways "v" (`<`) of the given
+/// stroke thickness, matching the rest of mako's line-art icons.
+class ChevronBackIconPainter extends CustomPainter {
+  ChevronBackIconPainter({required this.color, required this.lineWidth});
+  final Color color;
+  final double lineWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = lineWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.miter;
+    final spacing = 0;
+    // scale s so that the icon is 1s w and 2s h, with spacing*s separating it from the edges
+    final s = min(
+      size.width / (1 + spacing * 2),
+      size.height / (2 + spacing * 2),
+    );
+
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final path = Path()
+      ..moveTo(cx + s / 2, cy - s)
+      ..lineTo(cx - s / 2, cy)
+      ..lineTo(cx + s / 2, cy + s);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant ChevronBackIconPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.lineWidth != lineWidth;
+}
+
+class ChevronBackIcon extends StatelessWidget {
+  const ChevronBackIcon({
+    super.key,
+    required this.lineWidth,
+    this.color,
+    this.size,
+  });
+  final double lineWidth;
+  final Color? color;
+  final Size? size;
+
+  @override
+  Widget build(BuildContext context) {
+    final c =
+        color ??
+        IconTheme.of(context).color ??
+        Theme.of(context).colorScheme.onSurface;
+    return CustomPaint(
+      size: size ?? Size(24, 24),
+      painter: ChevronBackIconPainter(color: c, lineWidth: lineWidth),
+    );
+  }
 }
 
 /// actually only renders two bars rather than 3

@@ -137,5 +137,9 @@ class PlatformAudio {
         url: 'asset://assets/sounds/jingles_STEEL16.ogg',
         name: 'Steel Jingle 16',
         isLong: false),
+    AudioInfo(
+        url: 'asset://assets/sounds/silent.ogg',
+        name: 'Silent',
+        isLong: false),
   ];
 }

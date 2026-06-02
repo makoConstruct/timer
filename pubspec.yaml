@@ -101,6 +101,7 @@ flutter:
     - assets/sounds/jingles_STEEL15.ogg
     - assets/sounds/jingles_STEEL16.ogg
     - assets/sounds/june_russel_mako_timer_e-piano_1.ogg
+    - assets/sounds/silent.ogg
     - assets/journey/
     - assets/about.md
 
