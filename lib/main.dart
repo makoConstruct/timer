@@ -2914,10 +2914,7 @@ class DragActionRingState extends State<DragActionRing>
   int numberSelected = -1;
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
-  late final List<UpDownAnimationController> labelAnimations;
-  static const labelAnimationDuration = Duration(milliseconds: 250);
-  static const labelAnimationDelay = Duration(milliseconds: 300);
-  static const labelAnimationFallDuration = Duration(milliseconds: 160);
+  late final List<LabelSpring> labelAnimations;
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
   late final List<AnimationController> selectionAnimations;
@@ -3059,10 +3056,11 @@ class DragActionRingState extends State<DragActionRing>
     }
     labelAnimations = List.generate(
       widget.radialActivatorPositions.length,
-      (_) => UpDownAnimationController(
+      (_) => LabelSpring(
         vsync: this,
-        riseDuration: labelAnimationDuration,
-        fallDuration: labelAnimationFallDuration,
+        kickSpeed: 10,
+        delay: Duration(milliseconds: 300),
+        spring: SpringDescription.withDampingRatio(mass: 1, stiffness: 250),
       ),
     );
     selectionAnimations = List.generate(
@@ -3125,7 +3123,7 @@ class DragActionRingState extends State<DragActionRing>
             labelAnimations[numberSelected].reverse();
             selectionAnimations[numberSelected].reverse();
           }
-          labelAnimations[v].forward(delay: labelAnimationDelay);
+          labelAnimations[v].forward();
           if (wasNothingSelected) {
             // first selection: the unselected dot is still visible, so grow the
             // highlight continuously out of it (from the selection value whose
@@ -3405,12 +3403,11 @@ class DragActionRingState extends State<DragActionRing>
                     clipBehavior: Clip.none,
                     children: [
                       for (int i = 0; i < labelAnimations.length; i++)
-                        if (labelAnimations[i].scalarValue > 0)
+                        if (labelAnimations[i].value > 0)
                           labelWidgetAt(
                             i,
-                            Curves.easeOut.transform(
-                                  labelAnimations[i].scalarValue,
-                                ) *
+                            // cut off the bottom part so that the very slow reduction to zero isn't visible
+                            unlerpUnit(0.06, 1, labelAnimations[i].value) *
                                 (1 - completion),
                           ),
                     ],

@@ -1023,10 +1023,15 @@ class SpringExpansionController extends Animation<double>
   final List<VoidCallback> _closedListeners = [];
   double _target = 0;
   bool _settledAtZero = true;
+  static const defaultSpring = SpringDescription(
+    mass: 1,
+    stiffness: 625,
+    damping: 50,
+  );
 
   SpringExpansionController({
     required TickerProvider vsync,
-    this.spring = const SpringDescription(mass: 1, stiffness: 625, damping: 50),
+    this.spring = defaultSpring,
     this.kickSpeed = 25.0,
     this.restThreshold = 0.01,
   }) {
@@ -1085,6 +1090,92 @@ class SpringExpansionController extends Animation<double>
       : (_target >= 0.5 ? AnimationStatus.forward : AnimationStatus.reverse);
 
   void dispose() {
+    _controller.dispose();
+  }
+
+  @override
+  void didStartListening() {}
+
+  @override
+  void didStopListening() {}
+}
+
+/// A label's fade, a spring that runs 0↔1 with a velocity kick on forward-from-rest. [forward] waits [delay] before launching the rise (a real timer — the spring just sits at 0 until it fires), modelling the old delayed entrance without rescaling reads. [reverse] cancels any pending rise and falls immediately; if the rise was still waiting, the spring never left 0 so it just stays shut.
+class LabelSpring extends Animation<double>
+    with
+        AnimationLazyListenerMixin,
+        AnimationLocalListenersMixin,
+        AnimationLocalStatusListenersMixin {
+  final SpringDescription spring;
+  final double kickSpeed;
+
+  /// how long [forward] waits before the rise actually launches.
+  final Duration delay;
+  late final AnimationController _controller;
+  Timer? _delayTimer;
+  double _target = 0;
+
+  LabelSpring({
+    required TickerProvider vsync,
+    this.spring = const SpringDescription(mass: 1, stiffness: 625, damping: 40),
+    this.kickSpeed = 0.0,
+    this.delay = Duration.zero,
+  }) {
+    _controller = AnimationController.unbounded(vsync: vsync);
+    _controller.addListener(notifyListeners);
+  }
+
+  void _launch(double target) {
+    _target = target;
+    final v = _controller.value.abs() < 0.01 && target != 0
+        ? kickSpeed
+        : _controller.velocity;
+    _controller.animateWith(
+      SpringSimulation(spring, _controller.value, target, v, snapToEnd: true),
+    );
+  }
+
+  /// rise toward 1, after [delay]. Re-forwarding while the rise is still pending
+  /// just keeps waiting (the timer isn't restarted).
+  void forward() {
+    if (_target == 1) return;
+    _target = 1;
+    if (delay == Duration.zero) {
+      _launch(1);
+    } else {
+      _delayTimer?.cancel();
+      _delayTimer = Timer(delay, () {
+        _delayTimer = null;
+        _launch(1);
+      });
+    }
+  }
+
+  /// fall toward 0, cancelling any pending rise. If the rise hadn't launched yet
+  /// the spring is still at 0, so this just keeps it shut.
+  void reverse() {
+    _delayTimer?.cancel();
+    _delayTimer = null;
+    _launch(0);
+  }
+
+  void reset() {
+    _delayTimer?.cancel();
+    _delayTimer = null;
+    _target = 0;
+    _controller.value = 0;
+    notifyListeners();
+  }
+
+  @override
+  double get value => _controller.value;
+
+  @override
+  AnimationStatus get status =>
+      _target >= 0.5 ? AnimationStatus.forward : AnimationStatus.reverse;
+
+  void dispose() {
+    _delayTimer?.cancel();
     _controller.dispose();
   }
 
