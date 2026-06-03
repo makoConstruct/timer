@@ -5535,9 +5535,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // The label sits at the bottom-left of a band of headingBackground, its
     // left edge aligned with the list item titles (listItemPadding.left).
     final headingTextStyle = TextStyle(
-      color: theme.colorScheme.onSurface,
-      fontWeight: FontWeight.w400,
-      fontSize: 19,
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: 15,
     );
     const headingTitleBottomPadding = 14.0;
     const sectionHeadingHeight = 80.0;
@@ -6144,7 +6143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             child: ChevronBackIcon(
                               size: Size(chevronSpan, chevronSpan),
                               lineWidth: arrowBoxLineThickness,
-                              color: theme.colorScheme.primary,
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ),
