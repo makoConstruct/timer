@@ -4607,6 +4607,14 @@ class TimerScreenState extends State<TimerScreen>
           resizeToAvoidBottomInset: false,
           body: child,
         ),
+        // Scrim behind a transparent status bar — rarely visible since the
+        // timer UI sits below it, but keeps contrast if content reaches the top.
+        (child) => Stack(
+          children: [
+            child,
+            StatusBarScrim(background: mt.lowestBackColor),
+          ],
+        ),
         (child) => Focus(
           autofocus: true,
           onKeyEvent: (node, event) {
@@ -5494,6 +5502,291 @@ double halfScreenHeight(BuildContext context) {
   }
 }
 
+// Shared style/structure between the settings top title, the settings section
+// headings, and the info sub-page (About, How it was made) headers. The label
+// sits at the bottom-left of a band of `background`, its left edge aligned with
+// the list item titles (matches listItemPadding.left).
+const headingBandLeftInset = 16.0;
+const headingTitleBottomPadding = 14.0;
+
+TextStyle headingTextStyle(ThemeData theme) =>
+    TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 15);
+
+Widget headingBand({
+  required ThemeData theme,
+  Widget? label,
+  required double height,
+  required Color background,
+}) => Container(
+  width: double.infinity,
+  height: height,
+  color: background,
+  alignment: Alignment.bottomLeft,
+  padding: const EdgeInsets.only(
+    left: headingBandLeftInset,
+    bottom: headingTitleBottomPadding,
+  ),
+  child: label != null
+      ? DefaultTextStyle(style: headingTextStyle(theme), child: label)
+      : null,
+);
+
+// Geometry of the floating corner back button (and the matching gutter band
+// settings leaves for it at the bottom of its list).
+const backNavSpan = 67.0;
+const backNavGap = 15.0;
+const backNavGutterHeight = backNavSpan + backNavGap * 2;
+const chevronSpan = 14.0;
+const arrowBoxLineThickness = 3.0;
+
+/// Floating back button that sits in the bottom corner closest to the user's
+/// dominant hand (bottom-left when right-handed, bottom-right when not), its
+/// outer corner matched concentrically to the phone's screen corner. Shared by
+/// Settings and the info sub-pages (About, How it was made), which use a
+/// [headingBand] header rather than a Flutter app bar and so have no built-in
+/// back affordance. Expects to be placed as a child of a [Stack].
+class CornerBackButton extends StatelessWidget {
+  /// The button's fill — usually the page's heading band colour.
+  final Color background;
+  const CornerBackButton({super.key, required this.background});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isRightHandedMobj = Mobj.getAlreadyLoaded(
+      isRightHandedID,
+      BoolType(),
+    );
+    return Positioned.fill(
+      child: SafeArea(
+        child: Watch((context) {
+          final isRightHanded = isRightHandedMobj.value ?? true;
+          final corners = getCachedCornerRadius();
+          // Match the background's nearest corner to the phone's screen
+          // corner so they sit concentrically, shrunk by the gap between
+          // the screen edge and the background.
+          final screenCorner = isRightHanded
+              ? corners.bottomLeft
+              : corners.bottomRight;
+          final backgroundCornerRadius = screenCorner - backNavGap;
+          return AnimatedAlign(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            alignment: isRightHanded
+                ? Alignment.bottomLeft
+                : Alignment.bottomRight,
+            child: Padding(
+              padding: const EdgeInsets.all(backNavGap),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(backgroundCornerRadius),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkButton(
+                  backgroundColor: background,
+                  onTap: () => Navigator.of(context).maybePop(),
+                  child: SizedBox(
+                    width: backNavSpan,
+                    height: backNavSpan,
+                    child: Center(
+                      child: ChevronBackIcon(
+                        size: Size(chevronSpan, chevronSpan),
+                        lineWidth: arrowBoxLineThickness,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+/// Bottom-of-scroll spacer that clears the floating [CornerBackButton] so the
+/// last item in a scroll view isn't permanently obscured by it. The band is
+/// [backNavGutterHeight] tall (the button's footprint), with room for the
+/// bottom safe-area inset below it. Pass [background] to tint the band so it
+/// reads as a tray for the button, matching the button's fill.
+class BackNavBottomGutter extends StatelessWidget {
+  final Color? background;
+  const BackNavBottomGutter({super.key, this.background});
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: double.infinity,
+        height: backNavGutterHeight,
+        color: background,
+      ),
+      SizedBox(height: MediaQuery.of(context).padding.bottom),
+    ],
+  );
+}
+
+/// Translucent gradient behind a transparent OS status bar, fading from the
+/// page [background] at the very top down to transparent, so app content keeps
+/// contrast against the status-bar clock/icons floating over it. Sized to the
+/// top safe-area inset; renders nothing when the system reserves no top inset
+/// (e.g. an opaque status bar that already provides its own backdrop). Expects
+/// to be placed as a child of a [Stack].
+class StatusBarScrim extends StatelessWidget {
+  final Color background;
+  const StatusBarScrim({super.key, required this.background});
+
+  @override
+  Widget build(BuildContext context) {
+    double topInset = MediaQuery.of(context).viewPadding.top;
+    if (topInset <= 0) return const SizedBox.shrink();
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      height: topInset + 14,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [background, background.withValues(alpha: 0.0)],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Heading-band label with a [Hero]'d icon to the left of the [title] text,
+/// matching the info tiles in Settings. [heroTag] pairs with the originating
+/// list tile so the icon flies between them.
+Widget headingBandLabel({
+  required ThemeData theme,
+  required IconData icon,
+  required String heroTag,
+  required String title,
+  double iconSize = 32,
+  CreateRectTween? createRectTween,
+}) => Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    SizedBox(
+      width: iconSize,
+      height: iconSize,
+      child: Hero(
+        tag: heroTag,
+        createRectTween: createRectTween,
+        child: ScalingAspectRatio(
+          child: Icon(icon, color: theme.colorScheme.primary),
+        ),
+      ),
+    ),
+    const SizedBox(width: 9),
+    Text(title),
+  ],
+);
+
+/// The faded-in markdown body shared by the About / How-it-was-made pages.
+Widget markdownPageSliver(ThemeData theme, String? md) => SliverPadding(
+  padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 24.0),
+  sliver: SliverToBoxAdapter(
+    child: md == null
+        ? const SizedBox.shrink()
+        : TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 200),
+            builder: (context, value, child) =>
+                Opacity(opacity: value, child: child),
+            child: MarkdownBody(
+              data: md,
+              selectable: true,
+              onTapLink: (text, href, title) {
+                if (href != null) launchUrl(Uri.parse(href));
+              },
+              styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                h1: theme.textTheme.titleLarge,
+                h1Padding: const EdgeInsets.only(top: 24.0, bottom: 4.0),
+                h2: theme.textTheme.titleMedium,
+                h2Padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
+                p: theme.textTheme.bodyMedium,
+                pPadding: const EdgeInsets.only(bottom: 12.0),
+                a: TextStyle(
+                  color: theme.colorScheme.primary,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ),
+  ),
+);
+
+/// Standard chrome for a scrollable info/content page: a scrolling [headingBand]
+/// title (instead of a flickery SliverAppBar), a [CornerBackButton], a matching
+/// [BackNavBottomGutter] so the last item clears that button, and a
+/// [StatusBarScrim]. The page's own content [slivers] sit between the title band
+/// and the bottom gutter.
+class InfoScaffold extends StatelessWidget {
+  final bool flipBackgroundColors;
+
+  /// Heading-band label — usually [headingBandLabel] or a plain [Text].
+  final Widget title;
+  final List<Widget> slivers;
+  const InfoScaffold({
+    super.key,
+    required this.title,
+    required this.slivers,
+    this.flipBackgroundColors = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // Page / heading band / gutter use the section-header colour (so short
+    // pages never reveal a mismatched colour below the gutter); the content
+    // sits on the contrasting content colour so it stands out against them.
+    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
+      theme,
+      flipBackgroundColors,
+    );
+    return Scaffold(
+      backgroundColor: backgroundColorB,
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: headingBand(
+                  theme: theme,
+                  label: title,
+                  height:
+                      halfScreenHeight(context) +
+                      MediaQuery.of(context).viewPadding.top,
+                  background: backgroundColorB,
+                ),
+              ),
+              DecoratedSliver(
+                decoration: BoxDecoration(color: backgroundColorA),
+                sliver: SliverMainAxisGroup(slivers: slivers),
+              ),
+              SliverToBoxAdapter(
+                child: BackNavBottomGutter(background: backgroundColorB),
+              ),
+            ],
+          ),
+          CornerBackButton(background: backgroundColorB),
+          StatusBarScrim(background: backgroundColorB),
+        ],
+      ),
+    );
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   final bool flipBackgroundColors;
   const SettingsScreen({super.key, this.flipBackgroundColors = false});
@@ -5531,32 +5824,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget trailing(Widget child) =>
         SizedBox(width: 40.0, child: Center(child: child));
 
-    // Shared style/structure between the top title and the section headings.
-    // The label sits at the bottom-left of a band of headingBackground, its
-    // left edge aligned with the list item titles (listItemPadding.left).
-    final headingTextStyle = TextStyle(
-      color: theme.colorScheme.onSurfaceVariant,
-      fontSize: 15,
-    );
-    const headingTitleBottomPadding = 14.0;
     const sectionHeadingHeight = 80.0;
-    const backNavSpan = 67.0;
-    const backNavGap = 15.0;
-    const backNavGutterHeight = backNavSpan + backNavGap * 2;
-    const chevronSpan = 14.0;
-    const arrowBoxLineThickness = 3.0;
-
-    Widget headingBand({String? label, required double height}) => Container(
-      width: double.infinity,
-      height: height,
-      color: headingBackground,
-      alignment: Alignment.bottomLeft,
-      padding: EdgeInsets.only(
-        left: listItemPadding.left,
-        bottom: headingTitleBottomPadding,
-      ),
-      child: label != null ? Text(label, style: headingTextStyle) : null,
-    );
 
     Widget setupTile = ListTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
@@ -5577,470 +5845,173 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
 
-    final isRightHandedMobj = Mobj.getAlreadyLoaded(
-      isRightHandedID,
-      BoolType(),
-    );
-
     return Scaffold(
-      backgroundColor: contentBackground,
+      // Page background is the section-header colour (so short content / the
+      // area below the bottom gutter never reveals a mismatched colour); the
+      // tiles carry the contrasting content colour instead — see ListTileTheme.
+      backgroundColor: headingBackground,
       resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          CustomScrollView(
-            controller: _scrollController,
-            slivers: [
-              // Title band. Scrolls away with the content (it is not pinned)
-              // and shares its structure with the section headings below.
-              SliverToBoxAdapter(
-                child: headingBand(
-                  label: 'Settings',
-                  height:
-                      halfScreenHeight(context) +
-                      MediaQuery.of(context).viewPadding.top,
+      body: ListTileTheme(
+        data: ListTileThemeData(tileColor: contentBackground),
+        child: Stack(
+          children: [
+            CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                // Title band. Scrolls away with the content (it is not pinned)
+                // and shares its structure with the section headings below.
+                SliverToBoxAdapter(
+                  child: headingBand(
+                    theme: theme,
+                    label: Text('Settings'),
+                    height:
+                        halfScreenHeight(context) +
+                        MediaQuery.of(context).viewPadding.top,
+                    background: headingBackground,
+                  ),
                 ),
-              ),
-              SliverList(
-                delegate: SliverChildListDelegate([
-                  Builder(
-                    builder: (context) {
-                      final padLandscapeMobj = Mobj.getAlreadyLoaded(
-                        padLandscapeID,
-                        BoolType(),
-                      );
-                      final padLandscapeNonNull = computed(
-                        () => padLandscapeMobj.value ?? false,
-                        autoDispose: true,
-                      );
-                      return ListTile(
-                        title: Text(
-                          'Numpad orientation',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        subtitle: Watch(
-                          (context) => Text(
-                            padLandscapeNonNull.value
-                                ? 'landscape'
-                                : 'portrait',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                SliverList(
+                  delegate: SliverChildListDelegate([
+                    Builder(
+                      builder: (context) {
+                        final padLandscapeMobj = Mobj.getAlreadyLoaded(
+                          padLandscapeID,
+                          BoolType(),
+                        );
+                        final padLandscapeNonNull = computed(
+                          () => padLandscapeMobj.value ?? false,
+                          autoDispose: true,
+                        );
+                        return ListTile(
+                          title: Text(
+                            'Numpad orientation',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          subtitle: Watch(
+                            (context) => Text(
+                              padLandscapeNonNull.value
+                                  ? 'landscape'
+                                  : 'portrait',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
-                        ),
-                        trailing: trailing(
-                          BoolSignalTween(
-                            signal: padLandscapeNonNull,
-                            duration: Duration(milliseconds: 600),
-                            // duration: Duration(milliseconds: 190),
-                            builder: (context, progress, _) {
-                              final longDimension = 22 / 4 * 3;
-                              final shortDimension = 22.0;
-                              final hpu = 0.37;
-                              final h = lerp(
-                                shortDimension,
-                                longDimension,
-                                Curves.easeInOutCubic.transform(
-                                  unlerpUnit(0, hpu, progress),
-                                ),
-                              );
-                              final w = lerp(
-                                longDimension,
-                                shortDimension,
-                                Curves.easeInOutCubic.transform(
-                                  unlerpUnit(1 - hpu, 1, progress),
-                                ),
-                              );
-                              final movementp = Curves.easeInOutQuad.transform(
-                                1 - progress,
-                              );
-                              final centeredInset =
-                                  (longDimension - shortDimension) / 2;
-                              return SizedBox(
-                                width: longDimension,
-                                height: longDimension,
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Positioned(
-                                      width: w,
-                                      height: h,
-                                      top: lerp(0, centeredInset, movementp),
-                                      right: lerp(centeredInset, 0, movementp),
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: theme.colorScheme.primary,
-                                          borderRadius: BorderRadius.circular(
-                                            4,
+                          trailing: trailing(
+                            BoolSignalTween(
+                              signal: padLandscapeNonNull,
+                              duration: Duration(milliseconds: 600),
+                              // duration: Duration(milliseconds: 190),
+                              builder: (context, progress, _) {
+                                final longDimension = 22 / 4 * 3;
+                                final shortDimension = 22.0;
+                                final hpu = 0.37;
+                                final h = lerp(
+                                  shortDimension,
+                                  longDimension,
+                                  Curves.easeInOutCubic.transform(
+                                    unlerpUnit(0, hpu, progress),
+                                  ),
+                                );
+                                final w = lerp(
+                                  longDimension,
+                                  shortDimension,
+                                  Curves.easeInOutCubic.transform(
+                                    unlerpUnit(1 - hpu, 1, progress),
+                                  ),
+                                );
+                                final movementp = Curves.easeInOutQuad
+                                    .transform(1 - progress);
+                                final centeredInset =
+                                    (longDimension - shortDimension) / 2;
+                                return SizedBox(
+                                  width: longDimension,
+                                  height: longDimension,
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Positioned(
+                                        width: w,
+                                        height: h,
+                                        top: lerp(0, centeredInset, movementp),
+                                        right: lerp(
+                                          centeredInset,
+                                          0,
+                                          movementp,
+                                        ),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: theme.colorScheme.primary,
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
-                              // return SizedBox(
-                              //   width: lerp(
-                              //     longDimension,
-                              //     shortDimension,
-                              //     Curves.easeIn.transform(progress),
-                              //   ),
-                              //   height: lerp(
-                              //     shortDimension,
-                              //     longDimension,
-                              //     Curves.easeOut.transform(progress),
-                              //   ),
-                              //   child: Container(
-                              //     decoration: BoxDecoration(
-                              //       color: theme.colorScheme.primary,
-                              //       borderRadius: BorderRadius.circular(4),
-                              //     ),
-                              //   ),
-                              // );
-                            },
-                          ),
-                        ),
-                        onTap: () {
-                          padLandscapeMobj.value = !padLandscapeMobj.value!;
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    },
-                  ),
-                  // Alarm sound setting
-                  Builder(
-                    builder: (context) {
-                      final GlobalKey iconKey = GlobalKey();
-                      final hereIconKey = GlobalKey();
-                      return ListTile(
-                        title: Text(
-                          'Alarm sound',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        subtitle: Watch((context) {
-                          return Text(
-                            Mobj.getAlreadyLoaded(
-                              selectedAudioID,
-                              AudioInfoType(),
-                            ).value!.name,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          );
-                        }),
-                        trailing: trailing(
-                          SizedBox(
-                            width: 26,
-                            height: 26,
-                            child: Hero(
-                              tag: 'alarm-sound-icon',
-                              child: ScalingAspectRatio(
-                                child: Icon(
-                                  Icons.music_note,
-                                  key: hereIconKey,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
+                                    ],
+                                  ),
+                                );
+                                // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
+                                // return SizedBox(
+                                //   width: lerp(
+                                //     longDimension,
+                                //     shortDimension,
+                                //     Curves.easeIn.transform(progress),
+                                //   ),
+                                //   height: lerp(
+                                //     shortDimension,
+                                //     longDimension,
+                                //     Curves.easeOut.transform(progress),
+                                //   ),
+                                //   child: Container(
+                                //     decoration: BoxDecoration(
+                                //       color: theme.colorScheme.primary,
+                                //       borderRadius: BorderRadius.circular(4),
+                                //     ),
+                                //   ),
+                                // );
+                              },
                             ),
                           ),
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            CircularRevealRoute(
-                              builder: (context) => AlarmSoundPickerScreen(
-                                iconKey: iconKey,
-                                flipBackgroundColors:
-                                    !widget.flipBackgroundColors,
-                              ),
-                              buttonCenter: widgetCenter(hereIconKey),
-                              iconOriginKey: iconKey,
-                            ),
-                          );
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    },
-                  ),
-                  // Persistent alarm mode setting
-                  Watch((context) {
-                    final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
-                      persistentAlarmModeID,
-                      BoolType(),
-                    );
-                    final persistentAlarmMode =
-                        persistentAlarmModeMobj.value ?? false;
-                    return RoundedCheckboxListTile(
-                      title: Text(
-                        'Persistent alarm',
-                        style: theme.textTheme.bodyLarge,
-                      ),
-                      subtitle: Text(
-                        persistentAlarmMode
-                            ? 'On. Alarm loops until you open the app'
-                            : 'Off. Alarm plays once',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      value: persistentAlarmMode,
-                      onChanged: (value) {
-                        persistentAlarmModeMobj.value = value;
-                      },
-                      contentPadding: listItemPadding,
-                    );
-                  }),
-                  Watch((context) {
-                    final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
-                      buttonScaleDialOnID,
-                      BoolType(),
-                    );
-                    return ListTile(
-                      title: Text(
-                        'Button size',
-                        style: theme.textTheme.bodyLarge,
-                      ),
-                      subtitle: Text(
-                        buttonScaleDialOnOn.value!
-                            ? "Button scale dial is currently deployed, tap here to turn it off"
-                            : 'Introduce a dial by which you can adjust UI scale',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      onTap: () {
-                        buttonScaleDialOnOn.value = !buttonScaleDialOnOn.value!;
-                        if (buttonScaleDialOnOn.value!) {
-                          Navigator.of(context).pop();
-                        }
-                      },
-                    );
-                  }),
-                  // Right-handed mode setting
-                  Watch((context) {
-                    final isRightHandedMobj = Mobj.getAlreadyLoaded(
-                      isRightHandedID,
-                      BoolType(),
-                    );
-                    final isRightHanded = isRightHandedMobj.value ?? true;
-                    return ListTile(
-                      title: Text(
-                        '${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                        style: theme.textTheme.bodyLarge,
-                      ),
-                      subtitle: Text(
-                        'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-
-                      // splashColor: Colors.black,
-
-                      // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
-                      // focusColor: Colors.red,
-                      // selectedColor: Colors.red,
-                      // // tileColor: Colors.red,
-                      // selectedTileColor: Colors.red,
-                      // textColor: Colors.red,
-                      // hoverColor: Colors.red,
-                      // splashColor: Colors.black,
-                      trailing: trailing(
-                        TweenAnimationBuilder<double>(
-                          tween: Tween(
-                            begin: isRightHanded ? -1.0 : 1.0,
-                            end: isRightHanded ? -1.0 : 1.0,
-                          ),
-                          duration: Duration(milliseconds: 300),
-                          curve: Curves.easeInOut,
-                          builder: (context, scaleX, child) {
-                            return Transform.scale(
-                              scaleX: scaleX,
-                              child: child,
-                            );
+                          onTap: () {
+                            padLandscapeMobj.value = !padLandscapeMobj.value!;
                           },
-                          child: Transform.rotate(
-                            angle: 45 * pi / 180, // 45 degrees clockwise
-                            child: Icon(
-                              Icons.back_hand_rounded,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                      onTap: () {
-                        isRightHandedMobj.value = !isRightHanded;
+                          contentPadding: listItemPadding,
+                        );
                       },
-                      contentPadding: listItemPadding,
-                    );
-                  }),
-                  Watch((context) {
-                    final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
-                      padVerticallyAscendingID,
-                      BoolType(),
-                    );
-                    final padVerticallyAscending =
-                        padVerticallyAscendingMobj.value ?? false;
-                    return ListTile(
-                      title: Text(
-                        'Numpad type',
-                        style: theme.textTheme.bodyLarge,
-                      ),
-                      subtitle: Text(
-                        padVerticallyAscending
-                            ? 'calculator/keyboard style'
-                            : 'phone style',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      trailing: trailing(
-                        NumpadTypeIndicator(
-                          isAscending: padVerticallyAscending,
-                          width: 36,
-                        ),
-                      ),
-                      onTap: () {
-                        padVerticallyAscendingMobj.value =
-                            !padVerticallyAscending;
-                      },
-                      contentPadding: listItemPadding,
-                    );
-                  }),
-                  headingBand(label: 'Info', height: sectionHeadingHeight),
-                  Builder(
-                    builder: (context) {
-                      // Need a Builder to get the correct context for finding the icon's position
-                      final GlobalKey iconKey = GlobalKey();
-                      final hereIconKey = GlobalKey();
-                      return ListTile(
-                        title: Text(
-                          'About this app',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        trailing: trailing(
-                          SizedBox(
-                            width: 26,
-                            height: 26,
-                            child: Hero(
-                              tag: 'about-icon',
-                              child: ScalingAspectRatio(
-                                child: Icon(
-                                  Icons.info_outline,
-                                  key: hereIconKey,
-                                  size: 10,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            CircularRevealRoute(
-                              builder: (context) => AboutScreen(
-                                iconKey: iconKey,
-                                flipBackgroundColors:
-                                    !widget.flipBackgroundColors,
-                              ),
-                              buttonCenter: widgetCenter(hereIconKey),
-                              iconOriginKey: iconKey,
-                            ),
-                          );
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    },
-                  ),
-                  Builder(
-                    builder: (context) {
-                      final GlobalKey iconKey = GlobalKey();
-                      final hereIconKey = GlobalKey();
-                      return ListTile(
-                        title: Text(
-                          'Thank the author',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        trailing: trailing(
-                          SizedBox(
-                            width: 26,
-                            height: 26,
-                            child: Hero(
-                              tag: 'thank-author-icon',
-                              child: ScalingAspectRatio(
-                                child: Icon(
-                                  Icons.heart_broken,
-                                  key: hereIconKey,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            CircularRevealRoute(
-                              builder: (context) => ThankAuthorScreen(
-                                iconKey: iconKey,
-                                flipBackgroundColors:
-                                    !widget.flipBackgroundColors,
-                              ),
-                              buttonCenter: widgetCenter(hereIconKey),
-                              iconOriginKey: iconKey,
-                            ),
-                          );
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    },
-                  ),
-                  headingBand(label: 'Extra', height: sectionHeadingHeight),
-                  Builder(
-                    builder: (context) {
-                      final GlobalKey iconKey = GlobalKey();
-                      Offset? tapPosition;
-                      return GestureDetector(
-                        onTapDown: (details) {
-                          tapPosition = details.globalPosition;
-                        },
-                        child: ListTile(
+                    ),
+                    // Alarm sound setting
+                    Builder(
+                      builder: (context) {
+                        final GlobalKey iconKey = GlobalKey();
+                        final hereIconKey = GlobalKey();
+                        return ListTile(
                           title: Text(
-                            'Crank game',
+                            'Alarm sound',
                             style: theme.textTheme.bodyLarge,
                           ),
-                          subtitle: Text(
-                            "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
+                          subtitle: Watch((context) {
+                            return Text(
+                              Mobj.getAlreadyLoaded(
+                                selectedAudioID,
+                                AudioInfoType(),
+                              ).value!.name,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            );
+                          }),
                           trailing: trailing(
                             SizedBox(
                               width: 26,
                               height: 26,
                               child: Hero(
-                                tag: 'crank-game-icon',
+                                tag: 'alarm-sound-icon',
                                 child: ScalingAspectRatio(
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.rotate_right_rounded,
-                                        color: theme.colorScheme.primary,
-                                        size: 24,
-                                      ),
-                                      Positioned(
-                                        right: 0,
-                                        bottom: 0,
-                                        child: Icon(
-                                          Icons.sports_esports,
-                                          color: theme.colorScheme.primary,
-                                          size: 12,
-                                        ),
-                                      ),
-                                    ],
+                                  child: Icon(
+                                    Icons.music_note,
+                                    key: hereIconKey,
+                                    color: theme.colorScheme.primary,
                                   ),
                                 ),
                               ),
@@ -6050,111 +6021,419 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.push(
                               context,
                               CircularRevealRoute(
-                                builder: (context) => CrankGameScreen(
+                                builder: (context) => AlarmSoundPickerScreen(
                                   iconKey: iconKey,
                                   flipBackgroundColors:
                                       !widget.flipBackgroundColors,
                                 ),
-                                buttonCenter: tapPosition ?? Offset.zero,
+                                buttonCenter: widgetCenter(hereIconKey),
                                 iconOriginKey: iconKey,
                               ),
                             );
                           },
                           contentPadding: listItemPadding,
-                        ),
+                        );
+                      },
+                    ),
+                    // Persistent alarm mode setting
+                    Watch((context) {
+                      final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
+                        persistentAlarmModeID,
+                        BoolType(),
                       );
-                    },
-                  ),
-
-                  // abandoned on journey_game branch
-                  // ListTile(
-                  //   title: Text(
-                  //     'Journeying game',
-                  //     style: theme.textTheme.bodyLarge,
-                  //   ),
-                  //   subtitle: Text(
-                  //     "A world to wander.",
-                  //     style: theme.textTheme.bodyMedium?.copyWith(
-                  //       color: theme.colorScheme.onSurfaceVariant,
-                  //     ),
-                  //   ),
-                  //   trailing: trailing(
-                  //     Icon(
-                  //       Icons.explore_rounded,
-                  //       color: theme.colorScheme.primary,
-                  //       size: 24,
-                  //     ),
-                  //   ),
-                  //   onTap: () {
-                  //     Navigator.pushReplacement(
-                  //       context,
-                  //       CircularRevealRoute(
-                  //         builder: (context) => const JourneyingGameScreen(),
-                  //       ),
-                  //     );
-                  //   },
-                  //   contentPadding: listItemPadding,
-                  // ),
-
-                  // if (!completedSetup) ...[
-                  if (true) ...[setupTile],
-                  headingBand(height: backNavGutterHeight),
-                  SizedBox(height: MediaQuery.of(context).padding.bottom),
-                ]),
-              ),
-            ],
-          ),
-          // Back button floats in the bottom corner closest to the user's
-          // dominant hand: bottom-left when right-handed, bottom-right when not.
-          Positioned.fill(
-            child: SafeArea(
-              child: Watch((context) {
-                final isRightHanded = isRightHandedMobj.value ?? true;
-                final corners = getCachedCornerRadius();
-                // Match the background's nearest corner to the phone's screen
-                // corner so they sit concentrically, shrunk by the gap between
-                // the screen edge and the background.
-                final screenCorner = isRightHanded
-                    ? corners.bottomLeft
-                    : corners.bottomRight;
-                final backgroundCornerRadius = screenCorner - backNavGap;
-                return AnimatedAlign(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                  alignment: isRightHanded
-                      ? Alignment.bottomLeft
-                      : Alignment.bottomRight,
-                  child: Padding(
-                    padding: const EdgeInsets.all(backNavGap),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(
-                          backgroundCornerRadius,
+                      final persistentAlarmMode =
+                          persistentAlarmModeMobj.value ?? false;
+                      return RoundedCheckboxListTile(
+                        title: Text(
+                          'Persistent alarm',
+                          style: theme.textTheme.bodyLarge,
                         ),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: InkButton(
-                        backgroundColor: headingBackground,
-                        onTap: () => Navigator.of(context).maybePop(),
-                        child: SizedBox(
-                          width: backNavSpan,
-                          height: backNavSpan,
-                          child: Center(
-                            child: ChevronBackIcon(
-                              size: Size(chevronSpan, chevronSpan),
-                              lineWidth: arrowBoxLineThickness,
-                              color: theme.colorScheme.onSurfaceVariant,
+                        subtitle: Text(
+                          persistentAlarmMode
+                              ? 'On. Alarm loops until you open the app'
+                              : 'Off. Alarm plays once',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        value: persistentAlarmMode,
+                        onChanged: (value) {
+                          persistentAlarmModeMobj.value = value;
+                        },
+                        contentPadding: listItemPadding,
+                      );
+                    }),
+                    Watch((context) {
+                      final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
+                        buttonScaleDialOnID,
+                        BoolType(),
+                      );
+                      return ListTile(
+                        title: Text(
+                          'Button size',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        subtitle: Text(
+                          buttonScaleDialOnOn.value!
+                              ? "Button scale dial is currently deployed, tap here to turn it off"
+                              : 'Introduce a dial by which you can adjust UI scale',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        onTap: () {
+                          buttonScaleDialOnOn.value =
+                              !buttonScaleDialOnOn.value!;
+                          if (buttonScaleDialOnOn.value!) {
+                            Navigator.of(context).pop();
+                          }
+                        },
+                      );
+                    }),
+                    // Right-handed mode setting
+                    Watch((context) {
+                      final isRightHandedMobj = Mobj.getAlreadyLoaded(
+                        isRightHandedID,
+                        BoolType(),
+                      );
+                      final isRightHanded = isRightHandedMobj.value ?? true;
+                      return ListTile(
+                        title: Text(
+                          '${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        subtitle: Text(
+                          'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+
+                        // splashColor: Colors.black,
+
+                        // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
+                        // focusColor: Colors.red,
+                        // selectedColor: Colors.red,
+                        // // tileColor: Colors.red,
+                        // selectedTileColor: Colors.red,
+                        // textColor: Colors.red,
+                        // hoverColor: Colors.red,
+                        // splashColor: Colors.black,
+                        trailing: trailing(
+                          TweenAnimationBuilder<double>(
+                            tween: Tween(
+                              begin: isRightHanded ? -1.0 : 1.0,
+                              end: isRightHanded ? -1.0 : 1.0,
+                            ),
+                            duration: Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            builder: (context, scaleX, child) {
+                              return Transform.scale(
+                                scaleX: scaleX,
+                                child: child,
+                              );
+                            },
+                            child: Transform.rotate(
+                              angle: 45 * pi / 180, // 45 degrees clockwise
+                              child: Icon(
+                                Icons.back_hand_rounded,
+                                color: theme.colorScheme.primary,
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        onTap: () {
+                          isRightHandedMobj.value = !isRightHanded;
+                        },
+                        contentPadding: listItemPadding,
+                      );
+                    }),
+                    Watch((context) {
+                      final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
+                        padVerticallyAscendingID,
+                        BoolType(),
+                      );
+                      final padVerticallyAscending =
+                          padVerticallyAscendingMobj.value ?? false;
+                      return ListTile(
+                        title: Text(
+                          'Numpad type',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        subtitle: Text(
+                          padVerticallyAscending
+                              ? 'calculator/keyboard style'
+                              : 'phone style',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        trailing: trailing(
+                          NumpadTypeIndicator(
+                            isAscending: padVerticallyAscending,
+                            width: 36,
+                          ),
+                        ),
+                        onTap: () {
+                          padVerticallyAscendingMobj.value =
+                              !padVerticallyAscending;
+                        },
+                        contentPadding: listItemPadding,
+                      );
+                    }),
+                    headingBand(
+                      theme: theme,
+                      label: Text('Info'),
+                      height: sectionHeadingHeight,
+                      background: headingBackground,
                     ),
-                  ),
-                );
-              }),
+                    Builder(
+                      builder: (context) {
+                        // Need a Builder to get the correct context for finding the icon's position
+                        final GlobalKey iconKey = GlobalKey();
+                        final hereIconKey = GlobalKey();
+                        return ListTile(
+                          title: Text(
+                            'About this app',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          trailing: trailing(
+                            SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: Hero(
+                                tag: 'about-icon',
+                                child: ScalingAspectRatio(
+                                  child: Icon(
+                                    Icons.info_outline,
+                                    key: hereIconKey,
+                                    size: 10,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) => AboutScreen(
+                                  iconKey: iconKey,
+                                  flipBackgroundColors:
+                                      !widget.flipBackgroundColors,
+                                ),
+                                buttonCenter: widgetCenter(hereIconKey),
+                                iconOriginKey: iconKey,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final GlobalKey iconKey = GlobalKey();
+                        final hereIconKey = GlobalKey();
+                        return ListTile(
+                          title: Text(
+                            'How it was made',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          trailing: trailing(
+                            SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: Hero(
+                                tag: 'how-made-icon',
+                                child: ScalingAspectRatio(
+                                  child: Icon(
+                                    Icons.handyman_outlined,
+                                    key: hereIconKey,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) => HowMadeScreen(
+                                  iconKey: iconKey,
+                                  flipBackgroundColors:
+                                      !widget.flipBackgroundColors,
+                                ),
+                                buttonCenter: widgetCenter(hereIconKey),
+                                iconOriginKey: iconKey,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final GlobalKey iconKey = GlobalKey();
+                        final hereIconKey = GlobalKey();
+                        return ListTile(
+                          title: Text(
+                            'Thank the author',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          trailing: trailing(
+                            SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: Hero(
+                                tag: 'thank-author-icon',
+                                child: ScalingAspectRatio(
+                                  child: Icon(
+                                    Icons.heart_broken,
+                                    key: hereIconKey,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) => ThankAuthorScreen(
+                                  iconKey: iconKey,
+                                  flipBackgroundColors:
+                                      !widget.flipBackgroundColors,
+                                ),
+                                buttonCenter: widgetCenter(hereIconKey),
+                                iconOriginKey: iconKey,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    headingBand(
+                      theme: theme,
+                      label: Text('Extra'),
+                      height: sectionHeadingHeight,
+                      background: headingBackground,
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final GlobalKey iconKey = GlobalKey();
+                        Offset? tapPosition;
+                        return GestureDetector(
+                          onTapDown: (details) {
+                            tapPosition = details.globalPosition;
+                          },
+                          child: ListTile(
+                            title: Text(
+                              'Crank game',
+                              style: theme.textTheme.bodyLarge,
+                            ),
+                            subtitle: Text(
+                              "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            trailing: trailing(
+                              SizedBox(
+                                width: 26,
+                                height: 26,
+                                child: Hero(
+                                  tag: 'crank-game-icon',
+                                  child: ScalingAspectRatio(
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.rotate_right_rounded,
+                                          color: theme.colorScheme.primary,
+                                          size: 24,
+                                        ),
+                                        Positioned(
+                                          right: 0,
+                                          bottom: 0,
+                                          child: Icon(
+                                            Icons.sports_esports,
+                                            color: theme.colorScheme.primary,
+                                            size: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                CircularRevealRoute(
+                                  builder: (context) => CrankGameScreen(
+                                    iconKey: iconKey,
+                                    flipBackgroundColors:
+                                        !widget.flipBackgroundColors,
+                                  ),
+                                  buttonCenter: tapPosition ?? Offset.zero,
+                                  iconOriginKey: iconKey,
+                                ),
+                              );
+                            },
+                            contentPadding: listItemPadding,
+                          ),
+                        );
+                      },
+                    ),
+
+                    // abandoned on journey_game branch
+                    // ListTile(
+                    //   title: Text(
+                    //     'Journeying game',
+                    //     style: theme.textTheme.bodyLarge,
+                    //   ),
+                    //   subtitle: Text(
+                    //     "A world to wander.",
+                    //     style: theme.textTheme.bodyMedium?.copyWith(
+                    //       color: theme.colorScheme.onSurfaceVariant,
+                    //     ),
+                    //   ),
+                    //   trailing: trailing(
+                    //     Icon(
+                    //       Icons.explore_rounded,
+                    //       color: theme.colorScheme.primary,
+                    //       size: 24,
+                    //     ),
+                    //   ),
+                    //   onTap: () {
+                    //     Navigator.pushReplacement(
+                    //       context,
+                    //       CircularRevealRoute(
+                    //         builder: (context) => const JourneyingGameScreen(),
+                    //       ),
+                    //     );
+                    //   },
+                    //   contentPadding: listItemPadding,
+                    // ),
+
+                    // if (!completedSetup) ...[
+                    if (true) ...[setupTile],
+                    BackNavBottomGutter(background: headingBackground),
+                  ]),
+                ),
+              ],
             ),
-          ),
-        ],
+            CornerBackButton(background: headingBackground),
+            StatusBarScrim(background: headingBackground),
+          ],
+        ),
       ),
     );
   }
@@ -6172,68 +6451,28 @@ class ThankAuthorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
-      theme,
-      flipBackgroundColors,
-    );
-    return Scaffold(
-      backgroundColor: backgroundColorA,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            pinned: true,
-            expandedHeight: halfScreenHeight(context),
-            flexibleSpace: FlexibleSpaceBar(
-              expandedTitleScale: 1.0,
-              title: Row(
-                children: [
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: Hero(
-                      tag: 'thank-author-icon',
-                      child: ScalingAspectRatio(
-                        child: Icon(
-                          Icons.heart_broken,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 16),
-                  Text(
-                    'Thank the author',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              titlePadding: EdgeInsetsDirectional.only(
-                start: 72.0,
-                bottom: 16.0,
+    return InfoScaffold(
+      flipBackgroundColors: flipBackgroundColors,
+      title: headingBandLabel(
+        theme: theme,
+        icon: Icons.heart_broken,
+        heroTag: 'thank-author-icon',
+        title: 'Thank the author',
+      ),
+      slivers: [
+        SliverList(
+          delegate: SliverChildListDelegate([
+            Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Text(
+                'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
+                style: theme.textTheme.bodyLarge,
               ),
             ),
-            backgroundColor: backgroundColorB,
-            surfaceTintColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            scrolledUnderElevation: 0,
-          ),
-          SliverList(
-            delegate: SliverChildListDelegate([
-              Padding(
-                padding: EdgeInsets.all(24.0),
-                child: Text(
-                  'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
-                  style: theme.textTheme.bodyLarge,
-                ),
-              ),
-              SizedBox(height: 24),
-            ]),
-          ),
-        ],
-      ),
+            SizedBox(height: 24),
+          ]),
+        ),
+      ],
     );
   }
 }
@@ -6265,96 +6504,55 @@ class _AboutScreenState extends State<AboutScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
-      theme,
-      widget.flipBackgroundColors,
-    );
-    final md = _md;
-    return Scaffold(
-      backgroundColor: backgroundColorA,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            pinned: true,
-            expandedHeight: halfScreenHeight(context),
-            flexibleSpace: FlexibleSpaceBar(
-              expandedTitleScale: 1.0,
-              title: Row(
-                children: [
-                  SizedBox(
-                    width: 35,
-                    height: 35,
-                    child: Hero(
-                      tag: 'about-icon',
-                      child: ScalingAspectRatio(
-                        child: Icon(
-                          Icons.info_outline,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 9),
-                  Text(
-                    "About Mako's Timer",
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              titlePadding: EdgeInsetsDirectional.only(
-                start: 72.0,
-                bottom: 16.0,
-              ),
-            ),
-            backgroundColor: backgroundColorB,
-            surfaceTintColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            scrolledUnderElevation: 0,
-          ),
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 24.0),
-            sliver: SliverToBoxAdapter(
-              child: md == null
-                  ? SizedBox.shrink()
-                  : TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0.0, end: 1.0),
-                      duration: Duration(milliseconds: 200),
-                      builder: (context, value, child) =>
-                          Opacity(opacity: value, child: child),
-                      child: MarkdownBody(
-                        data: md,
-                        selectable: true,
-                        onTapLink: (text, href, title) {
-                          if (href != null) launchUrl(Uri.parse(href));
-                        },
-                        styleSheet: MarkdownStyleSheet.fromTheme(theme)
-                            .copyWith(
-                              h1: theme.textTheme.titleLarge,
-                              h1Padding: EdgeInsets.only(
-                                top: 24.0,
-                                bottom: 4.0,
-                              ),
-                              h2: theme.textTheme.titleMedium,
-                              h2Padding: EdgeInsets.only(
-                                top: 16.0,
-                                bottom: 4.0,
-                              ),
-                              p: theme.textTheme.bodyMedium,
-                              pPadding: EdgeInsets.only(bottom: 12.0),
-                              a: TextStyle(
-                                color: theme.colorScheme.primary,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                      ),
-                    ),
-            ),
-          ),
-        ],
+    return InfoScaffold(
+      flipBackgroundColors: widget.flipBackgroundColors,
+      title: headingBandLabel(
+        theme: theme,
+        icon: Icons.info_outline,
+        heroTag: 'about-icon',
+        title: "About Mako's Timer",
       ),
+      slivers: [markdownPageSliver(theme, _md)],
+    );
+  }
+}
+
+class HowMadeScreen extends StatefulWidget {
+  final bool flipBackgroundColors;
+  final GlobalKey? iconKey;
+  const HowMadeScreen({
+    super.key,
+    this.iconKey,
+    this.flipBackgroundColors = false,
+  });
+
+  @override
+  State<HowMadeScreen> createState() => _HowMadeScreenState();
+}
+
+class _HowMadeScreenState extends State<HowMadeScreen> {
+  String? _md;
+
+  @override
+  void initState() {
+    super.initState();
+    rootBundle.loadString('assets/how_made.md').then((md) {
+      if (mounted) setState(() => _md = md);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InfoScaffold(
+      flipBackgroundColors: widget.flipBackgroundColors,
+      title: headingBandLabel(
+        theme: theme,
+        icon: Icons.handyman_outlined,
+        heroTag: 'how-made-icon',
+        title: 'How it was made',
+      ),
+      slivers: [markdownPageSliver(theme, _md)],
     );
   }
 }
@@ -6477,7 +6675,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     Navigator.of(context).pop(_localSelection.value);
   }
 
-  Widget _buildPickFileChip(ThemeData theme) {
+  Widget _buildPickFileChip(ThemeData theme, Color backgroundColor) {
     final jukeBox = Provider.of<JukeBox>(context, listen: false);
     return InkWell(
       borderRadius: BorderRadius.circular(10),
@@ -6508,7 +6706,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLowest,
+          color: backgroundColor,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: theme.colorScheme.primary.withValues(alpha: 0.4),
@@ -6529,6 +6727,9 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Page background matches the heading band / section-header colour so short
+    // lists don't reveal a mismatched content colour below the bottom gutter;
+    // the sound chips use the contrasting content colour so they stand out.
     final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
       theme,
       widget.flipBackgroundColors,
@@ -6578,9 +6779,11 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                     color: theme.colorScheme.onPrimary,
                   )
                 : theme.textTheme.bodyMedium!;
+            // Chips sit inside the backgroundColorA section container, so they
+            // take the opposite (B) colour to stand out against it.
             final backgroundColor = isOn
                 ? theme.colorScheme.primary
-                : theme.colorScheme.surfaceContainerLowest;
+                : backgroundColorB;
             return Container(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
@@ -6608,12 +6811,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                 if (title != null && title.isNotEmpty)
                   Padding(
                     padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
-                    child: Text(
-                      title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
+                    child: Text(title, style: headingTextStyle(theme)),
                   ),
                 Wrap(
                   spacing: 8,
@@ -6640,101 +6838,98 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         }
       },
       child: Scaffold(
-        backgroundColor: backgroundColorA,
+        backgroundColor: backgroundColorB,
         body: Stack(
           children: [
             CustomScrollView(
               slivers: [
-                SliverAppBar(
-                  pinned: true,
-                  expandedHeight: halfScreenHeight(context),
-                  automaticallyImplyLeading: !widget.perTimerMode,
-                  flexibleSpace: FlexibleSpaceBar(
-                    expandedTitleScale: 1.0,
-                    title: Row(
-                      children: [
-                        if (!widget.perTimerMode)
-                          SizedBox(
-                            width: 32,
-                            height: 32,
-                            child: Hero(
-                              tag: 'alarm-sound-icon',
-                              createRectTween: (begin, end) => DelayedRectTween(
-                                begin: begin,
-                                end: end,
-                                delay: 0.14,
-                              ),
-                              child: ScalingAspectRatio(
-                                child: Icon(
-                                  Icons.music_note,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
+                SliverToBoxAdapter(
+                  child: headingBand(
+                    theme: theme,
+                    label: widget.perTimerMode
+                        ? Text('Pick a sound')
+                        : headingBandLabel(
+                            theme: theme,
+                            icon: Icons.music_note,
+                            heroTag: 'alarm-sound-icon',
+                            title: 'Alarm sound',
+                            createRectTween: (begin, end) => DelayedRectTween(
+                              begin: begin,
+                              end: end,
+                              delay: 0.14,
                             ),
                           ),
-                        if (!widget.perTimerMode) SizedBox(width: 16),
-                        Text(
-                          widget.perTimerMode ? 'Pick a sound' : 'Alarm sound',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurface,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                    titlePadding: EdgeInsetsDirectional.only(
-                      start: widget.perTimerMode ? 16.0 : 72.0,
-                      bottom: 16.0,
-                    ),
+                    height:
+                        halfScreenHeight(context) +
+                        MediaQuery.of(context).viewPadding.top,
+                    background: backgroundColorB,
                   ),
-                  backgroundColor: backgroundColorB,
-                  surfaceTintColor: Colors.transparent,
-                  shadowColor: Colors.transparent,
-                  scrolledUnderElevation: 0,
                 ),
                 if (!_loading) ...[
-                  if (widget.perTimerMode)
-                    section('', [null], fadeDelay: Duration(milliseconds: 0)),
-                  if (_assetSounds.isNotEmpty)
-                    section(
-                      "Our Sounds",
-                      _assetSounds,
-                      fadeDelay: Duration(milliseconds: 0),
-                    ),
-                  if (_notificationSounds != null &&
-                      _notificationSounds!.isNotEmpty)
-                    section(
-                      'Phone Notification Sounds',
-                      _notificationSounds!,
-                      fadeDelay: Duration(milliseconds: 200),
-                    ),
-                  if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-                    section(
-                      'Device alarm sounds (long duration)',
-                      _alarmSounds!,
-                      fadeDelay: Duration(milliseconds: 100),
-                    ),
-                  if (_ringtoneSounds != null && _ringtoneSounds!.isNotEmpty)
-                    section(
-                      'Device ringtones',
-                      _ringtoneSounds!,
-                      fadeDelay: Duration(milliseconds: 300),
-                    ),
-                  if (Platform.isAndroid)
-                    section(
-                      'From files',
-                      _pickedFiles,
-                      fadeDelay: Duration(milliseconds: 400),
-                      extraChildren: [_buildPickFileChip(theme)],
-                    ),
-                  SliverToBoxAdapter(
-                    child: SizedBox(
-                      height:
-                          (widget.perTimerMode ? bottomBarHeight : 0) +
-                          16 +
-                          MediaQuery.of(context).padding.bottom,
+                  // All the sound sections share one backgroundColorA container;
+                  // the chips inside flip to B to contrast against it.
+                  DecoratedSliver(
+                    decoration: BoxDecoration(color: backgroundColorA),
+                    sliver: SliverMainAxisGroup(
+                      slivers: [
+                        if (widget.perTimerMode)
+                          section('', [
+                            null,
+                          ], fadeDelay: Duration(milliseconds: 0)),
+                        if (_assetSounds.isNotEmpty)
+                          section(
+                            "Our Sounds",
+                            _assetSounds,
+                            fadeDelay: Duration(milliseconds: 0),
+                          ),
+                        if (_notificationSounds != null &&
+                            _notificationSounds!.isNotEmpty)
+                          section(
+                            'Phone Notification Sounds',
+                            _notificationSounds!,
+                            fadeDelay: Duration(milliseconds: 200),
+                          ),
+                        if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+                          section(
+                            'Device alarm sounds (long duration)',
+                            _alarmSounds!,
+                            fadeDelay: Duration(milliseconds: 100),
+                          ),
+                        if (_ringtoneSounds != null &&
+                            _ringtoneSounds!.isNotEmpty)
+                          section(
+                            'Device ringtones',
+                            _ringtoneSounds!,
+                            fadeDelay: Duration(milliseconds: 300),
+                          ),
+                        if (Platform.isAndroid)
+                          section(
+                            'From files',
+                            _pickedFiles,
+                            fadeDelay: Duration(milliseconds: 400),
+                            extraChildren: [
+                              _buildPickFileChip(theme, backgroundColorB),
+                            ],
+                          ),
+                        // Bottom breathing room inside the container, matching
+                        // the 16px gap above each section.
+                        SliverToBoxAdapter(child: SizedBox(height: 16)),
+                      ],
                     ),
                   ),
+                  if (widget.perTimerMode)
+                    SliverToBoxAdapter(
+                      child: SizedBox(
+                        height:
+                            bottomBarHeight +
+                            16 +
+                            MediaQuery.of(context).padding.bottom,
+                      ),
+                    )
+                  else
+                    SliverToBoxAdapter(
+                      child: BackNavBottomGutter(background: backgroundColorB),
+                    ),
                 ],
               ],
             ),
@@ -6787,6 +6982,11 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                   ),
                 ),
               ),
+            // perTimerMode is a modal picker with its own Done/Cancel bar and
+            // result-returning pop, so it gets no corner back button.
+            if (!widget.perTimerMode)
+              CornerBackButton(background: backgroundColorB),
+            StatusBarScrim(background: backgroundColorB),
           ],
         ),
       ),
@@ -7074,176 +7274,237 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
 
     return Scaffold(
       backgroundColor: backgroundColor,
-      body: CustomScrollView(
-        controller: _scrollController,
-        slivers: [
-          // Handedness selection - full screen
-          SliverToBoxAdapter(
-            key: handednessKey,
-            child: Container(
-              height: screenHeight,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHigh,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(standardSpacing),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHigh,
-                    ),
-                    child: Text("Setup", style: theme.textTheme.titleLarge),
+      body: Stack(
+        children: [
+          CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              // Handedness selection - full screen
+              SliverToBoxAdapter(
+                key: handednessKey,
+                child: Container(
+                  height: screenHeight,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh,
                   ),
-                  Container(
-                    padding: EdgeInsets.all(standardSpacing),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerLow,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Are you left or right-handed?',
-                          style: theme.textTheme.bodyMedium!,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        padding: EdgeInsets.all(standardSpacing),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHigh,
                         ),
-                        SizedBox(height: standardSpacing),
-                        Row(
+                        child: Text("Setup", style: theme.textTheme.titleLarge),
+                      ),
+                      Container(
+                        padding: EdgeInsets.all(standardSpacing),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerLow,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            handButton(isRight: false),
-                            spacer,
-                            handButton(isRight: true),
+                            Text(
+                              'Are you left or right-handed?',
+                              style: theme.textTheme.bodyMedium!,
+                            ),
+                            SizedBox(height: standardSpacing),
+                            Row(
+                              children: [
+                                handButton(isRight: false),
+                                spacer,
+                                handButton(isRight: true),
+                              ],
+                            ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            key: padKey,
-            child: Container(
-              padding: EdgeInsets.all(standardSpacing),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    "Which kind of numpad is more familiar to you?",
-                    style: theme.textTheme.bodyMedium!,
-                  ),
-                  spacer,
-                  Watch((context) {
-                    return AnimatedAlign(
-                      duration: Duration(milliseconds: 340),
-                      curve: Curves.easeInOutCubic,
-                      alignment: isRightHanded.value == true
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Column(
-                            children: [
-                              Text(
-                                "phone style",
-                                style: theme.textTheme.bodyMedium!,
-                              ),
-                              spacer,
-                              numpadForSetup(false),
-                            ],
-                          ),
-                          spacer,
-                          Column(
-                            children: [
-                              Text(
-                                "calculator style",
-                                style: theme.textTheme.bodyMedium!,
-                              ),
-                              spacer,
-                              numpadForSetup(true),
-                            ],
-                          ),
-                        ],
                       ),
-                    );
-                  }),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            key: ringModeKey,
-            child: Padding(
-              padding: EdgeInsets.all(standardSpacing),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    """Are you generally attentive and responsive to your phone notifications? If so, set this to "ring once," which is far more convenient, as it doesn't require you to interact with your phone every time an alarm goes off. Otherwise, you may need a more insistent notification to make absolutely sure that you're aware of timer completions, select "require acknowledgement." """,
-                    style: theme.textTheme.bodyMedium!,
+                    ],
                   ),
-                  SizedBox(height: standardSpacing),
-                  Row(
+                ),
+              ),
+              SliverToBoxAdapter(
+                key: padKey,
+                child: Container(
+                  padding: EdgeInsets.all(standardSpacing),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Flexible(flex: 20, child: Container()),
-                      Flexible(
-                        flex: 50,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            RadioItem<bool?>(
-                              selection: ringMode,
-                              duration: buttonAnimationDuration,
-                              me: true,
-                              onTap: () => inputCompleted(ringModeKey),
-                              builder: (context, isOn) => Container(
-                                height: standardButtonHeight,
-                                decoration: BoxDecoration(
-                                  color: backgroundColorFor(theme, isOn),
-                                  borderRadius: BorderRadius.circular(
-                                    buttonCornerRadius,
+                      Text(
+                        "Which kind of numpad is more familiar to you?",
+                        style: theme.textTheme.bodyMedium!,
+                      ),
+                      spacer,
+                      Watch((context) {
+                        return AnimatedAlign(
+                          duration: Duration(milliseconds: 340),
+                          curve: Curves.easeInOutCubic,
+                          alignment: isRightHanded.value == true
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Column(
+                                children: [
+                                  Text(
+                                    "phone style",
+                                    style: theme.textTheme.bodyMedium!,
                                   ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 22.0,
+                                  spacer,
+                                  numpadForSetup(false),
+                                ],
+                              ),
+                              spacer,
+                              Column(
+                                children: [
+                                  Text(
+                                    "calculator style",
+                                    style: theme.textTheme.bodyMedium!,
                                   ),
-                                  child: Center(
-                                    child: Text(
-                                      textAlign: TextAlign.center,
-                                      'require acknowledgement',
-                                      style: theme.textTheme.titleMedium!
-                                          .copyWith(
-                                            color: foregroundColorFor(
-                                              theme,
-                                              isOn,
-                                            ),
-                                          ),
+                                  spacer,
+                                  numpadForSetup(true),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                key: ringModeKey,
+                child: Padding(
+                  padding: EdgeInsets.all(standardSpacing),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        """Are you generally attentive and responsive to your phone notifications? If so, set this to "ring once," which is far more convenient, as it doesn't require you to interact with your phone every time an alarm goes off. Otherwise, you may need a more insistent notification to make absolutely sure that you're aware of timer completions, select "require acknowledgement." """,
+                        style: theme.textTheme.bodyMedium!,
+                      ),
+                      SizedBox(height: standardSpacing),
+                      Row(
+                        children: [
+                          Flexible(flex: 20, child: Container()),
+                          Flexible(
+                            flex: 50,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                RadioItem<bool?>(
+                                  selection: ringMode,
+                                  duration: buttonAnimationDuration,
+                                  me: true,
+                                  onTap: () => inputCompleted(ringModeKey),
+                                  builder: (context, isOn) => Container(
+                                    height: standardButtonHeight,
+                                    decoration: BoxDecoration(
+                                      color: backgroundColorFor(theme, isOn),
+                                      borderRadius: BorderRadius.circular(
+                                        buttonCornerRadius,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 22.0,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          textAlign: TextAlign.center,
+                                          'require acknowledgement',
+                                          style: theme.textTheme.titleMedium!
+                                              .copyWith(
+                                                color: foregroundColorFor(
+                                                  theme,
+                                                  isOn,
+                                                ),
+                                              ),
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            spacer,
-                            RadioItem<bool?>(
-                              selection: ringMode,
-                              duration: buttonAnimationDuration,
-                              me: false,
-                              onTap: () => inputCompleted(ringModeKey),
-                              builder: (context, isOn) => Container(
-                                height: standardButtonHeight,
-                                decoration: BoxDecoration(
-                                  color: backgroundColorFor(theme, isOn),
-                                  borderRadius: BorderRadius.circular(
-                                    buttonCornerRadius,
+                                spacer,
+                                RadioItem<bool?>(
+                                  selection: ringMode,
+                                  duration: buttonAnimationDuration,
+                                  me: false,
+                                  onTap: () => inputCompleted(ringModeKey),
+                                  builder: (context, isOn) => Container(
+                                    height: standardButtonHeight,
+                                    decoration: BoxDecoration(
+                                      color: backgroundColorFor(theme, isOn),
+                                      borderRadius: BorderRadius.circular(
+                                        buttonCornerRadius,
+                                      ),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'ring once',
+                                        style: theme.textTheme.titleMedium!
+                                            .copyWith(
+                                              color: foregroundColorFor(
+                                                theme,
+                                                isOn,
+                                              ),
+                                            ),
+                                      ),
+                                    ),
                                   ),
                                 ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (Platform.isAndroid)
+                SliverToBoxAdapter(
+                  key: notifKey,
+                  child: Padding(
+                    padding: EdgeInsets.all(standardSpacing),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: reverseIfNot(isRightHanded.value ?? true, [
+                        Flexible(
+                          child: Text(
+                            'Enable notifications permission',
+                            style: theme.textTheme.bodyMedium!,
+                          ),
+                        ),
+                        spacer,
+                        Flexible(
+                          child: Watch((context) {
+                            final granted = notifGranted.value;
+                            final isOn = granted == true;
+                            final label = granted == null
+                                ? 'request'
+                                : granted
+                                ? (_notifWasAlreadyGranted
+                                      ? 'already granted'
+                                      : 'granted')
+                                : 'request';
+                            return InkButton(
+                              backgroundColor: backgroundColorFor(theme, isOn),
+                              onTap: granted == true
+                                  ? null
+                                  : _requestNotificationPermission,
+                              borderRadius: BorderRadius.circular(
+                                buttonCornerRadius,
+                              ),
+                              child: SizedBox(
+                                height: standardButtonHeight,
                                 child: Center(
                                   child: Text(
-                                    'ring once',
+                                    label,
                                     style: theme.textTheme.titleMedium!
                                         .copyWith(
                                           color: foregroundColorFor(
@@ -7254,175 +7515,129 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            );
+                          }),
                         ),
-                      ),
-                    ],
+                      ]),
+                    ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          if (Platform.isAndroid)
-            SliverToBoxAdapter(
-              key: notifKey,
-              child: Padding(
-                padding: EdgeInsets.all(standardSpacing),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: reverseIfNot(isRightHanded.value ?? true, [
-                    Flexible(
-                      child: Text(
-                        'Enable notifications permission',
-                        style: theme.textTheme.bodyMedium!,
-                      ),
-                    ),
-                    spacer,
-                    Flexible(
-                      child: Watch((context) {
-                        final granted = notifGranted.value;
-                        final isOn = granted == true;
-                        final label = granted == null
-                            ? 'request'
-                            : granted
-                            ? (_notifWasAlreadyGranted
-                                  ? 'already granted'
-                                  : 'granted')
-                            : 'request';
-                        return InkButton(
-                          backgroundColor: backgroundColorFor(theme, isOn),
-                          onTap: granted == true
-                              ? null
-                              : _requestNotificationPermission,
-                          borderRadius: BorderRadius.circular(
-                            buttonCornerRadius,
-                          ),
-                          child: SizedBox(
-                            height: standardButtonHeight,
-                            child: Center(
-                              child: Text(
-                                label,
-                                style: theme.textTheme.titleMedium!.copyWith(
-                                  color: foregroundColorFor(theme, isOn),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ]),
                 ),
-              ),
-            ),
-          if (Platform.isAndroid)
-            SliverToBoxAdapter(
-              key: batteryOptimKey,
-              child: Padding(
-                padding: EdgeInsets.all(standardSpacing),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: reverseIfNot(isRightHanded.value ?? true, [
-                    Flexible(
-                      child: Text(
-                        'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
-                        style: theme.textTheme.bodyMedium!,
-                      ),
-                    ),
-                    spacer,
-                    Flexible(
-                      child: Watch((context) {
-                        final granted = batteryOptimGranted.value;
-                        final isOn = granted == true;
-                        final label = granted == null
-                            ? 'request'
-                            : granted
-                            ? (_batteryOptimWasAlreadyGranted
-                                  ? 'already granted'
-                                  : 'granted')
-                            : 'request';
-                        return InkButton(
-                          backgroundColor: backgroundColorFor(theme, isOn),
-                          onTap: granted == true
-                              ? null
-                              : _requestBatteryOptimization,
-                          borderRadius: BorderRadius.circular(
-                            buttonCornerRadius,
+              if (Platform.isAndroid)
+                SliverToBoxAdapter(
+                  key: batteryOptimKey,
+                  child: Padding(
+                    padding: EdgeInsets.all(standardSpacing),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: reverseIfNot(isRightHanded.value ?? true, [
+                        Flexible(
+                          child: Text(
+                            'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
+                            style: theme.textTheme.bodyMedium!,
                           ),
-                          child: SizedBox(
-                            height: standardButtonHeight,
-                            child: Center(
-                              child: Text(
-                                label,
-                                style: theme.textTheme.titleMedium!.copyWith(
-                                  color: foregroundColorFor(theme, isOn),
-                                ),
+                        ),
+                        spacer,
+                        Flexible(
+                          child: Watch((context) {
+                            final granted = batteryOptimGranted.value;
+                            final isOn = granted == true;
+                            final label = granted == null
+                                ? 'request'
+                                : granted
+                                ? (_batteryOptimWasAlreadyGranted
+                                      ? 'already granted'
+                                      : 'granted')
+                                : 'request';
+                            return InkButton(
+                              backgroundColor: backgroundColorFor(theme, isOn),
+                              onTap: granted == true
+                                  ? null
+                                  : _requestBatteryOptimization,
+                              borderRadius: BorderRadius.circular(
+                                buttonCornerRadius,
                               ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ]),
-                ),
-              ),
-            ),
-          // Skip button - full screen
-          SliverToBoxAdapter(
-            key: skipKey,
-            child: Padding(
-              padding: EdgeInsets.all(standardSpacing),
-              child: Row(
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
-                  // if (allChoicesCompleted.value) ...[
-                  //   Text('done'),
-                  //   spacer
-                  // ],
-                  Expanded(
-                    child: InkButton(
-                      onTap: () {
-                        moveOn();
-                      },
-                      borderRadius: BorderRadius.circular(buttonCornerRadius),
-                      builder: (context, isOn) => Container(
-                        color: backgroundColorFor(Theme.of(context), isOn),
-                        child: SizedBox(
-                          height: standardButtonHeight,
-                          child: Center(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Watch(
-                                  (context) => Text(
-                                    allChoicesCompleted.value
-                                        ? 'setup complete, click to continue'
-                                        : 'skip setup',
+                              child: SizedBox(
+                                height: standardButtonHeight,
+                                child: Center(
+                                  child: Text(
+                                    label,
                                     style: theme.textTheme.titleMedium!
                                         .copyWith(
                                           color: foregroundColorFor(
-                                            Theme.of(context),
+                                            theme,
                                             isOn,
                                           ),
                                         ),
                                   ),
                                 ),
-                              ],
+                              ),
+                            );
+                          }),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              // Skip button - full screen
+              SliverToBoxAdapter(
+                key: skipKey,
+                child: Padding(
+                  padding: EdgeInsets.all(standardSpacing),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
+                      // if (allChoicesCompleted.value) ...[
+                      //   Text('done'),
+                      //   spacer
+                      // ],
+                      Expanded(
+                        child: InkButton(
+                          onTap: () {
+                            moveOn();
+                          },
+                          borderRadius: BorderRadius.circular(
+                            buttonCornerRadius,
+                          ),
+                          builder: (context, isOn) => Container(
+                            color: backgroundColorFor(Theme.of(context), isOn),
+                            child: SizedBox(
+                              height: standardButtonHeight,
+                              child: Center(
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Watch(
+                                      (context) => Text(
+                                        allChoicesCompleted.value
+                                            ? 'setup complete, click to continue'
+                                            : 'skip setup',
+                                        style: theme.textTheme.titleMedium!
+                                            .copyWith(
+                                              color: foregroundColorFor(
+                                                Theme.of(context),
+                                                isOn,
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              SliverToBoxAdapter(
+                child: SizedBox(height: MediaQuery.of(context).padding.bottom),
+              ),
+            ],
           ),
-          SliverToBoxAdapter(
-            child: SizedBox(height: MediaQuery.of(context).padding.bottom),
-          ),
+          StatusBarScrim(background: theme.colorScheme.surfaceContainerHigh),
         ],
       ),
     );
