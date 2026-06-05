@@ -44,8 +44,4 @@ This was the first time in my life when I'd been truly satisfied with my medium.
 
 It isn't a perfect platform. It has nothing in the way of remote/multiplayer sync.
 
-I will have to leave this sunny glade for harsher places, now.
-
-It seems as if reactive databases are still an unsolved problem, no database today provides everything needed. People are still, like, taking postgres and glueing it to redis and managing their own hosting, and then not being able to interoperate well with other databases, so the data that dwells there dies there, and everything rots, and everything has to be rebuilt from nothing, and so nothing can grow tall enough to shelter life.
-
-We need to do something about that now.
+I will have to leave this sunny glade, for harsher places, now. The problem of sync (essentially: parallel mutation of shared data) and remains unsolved. Many have tried and failed. Many still try. If we are ever going to make computers beautiful, I must join them.

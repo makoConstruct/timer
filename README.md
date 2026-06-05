@@ -1,8 +1,8 @@
 # mako's timer
 
-A timer app that's roughly (considering all of the factors below) *11 times more ergonomic* than any other timer app. Our optimizations:
+A timer app that's roughly (considering all of the factors below) *11 times more ergonomic* than any other timer app, despite also being utterly simple to use. Our optimizations:
 
-- In most timer apps, it takes about 6 keypresses to make a new timer and start it. In this timer app, it takes just 1 or 2.
+- In most timer apps, it takes about 6 taps to make a new timer and start it. In this timer app, it takes just 1 or 2.
 
 - It's designed to fit the hand: every part of the app is easily usable one-handed, even in larger phones. (*Despite the fact that around a decade ago all sides of the industry acknowledged that it's good practice to keep most interactive components of an app in the "thumb zone". Afaik literally no app other than this one has fully followed through on that.*)
 
@@ -24,7 +24,7 @@ There is going to be a donation nag. In this house we believe that societies gro
 
 ### style
 
-Don't spread comments over multiple lines, assume everyones' editors have automatic linewrap and don't require that.
+Don't spread comments over multiple lines, assume everyones' editors have automatic linewrap and don't require that. If you see a comment spanning multiple lines, assume it was written by claude, who seems to have some weird hangup about this. (We tolerate it partly because it's useful to distinguish the comments written by claude from those written by humans, since they're often kind of bad)
 
 Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long.
 
@@ -38,7 +38,7 @@ It's BSL-1.1(Apache-2.0, non-compete), a fair source license, which means you ca
 
 ## Building
 
-`flutter create .` (we don't currently commit most generated flutter files. We want to stay compatible with whatever the latest template for flutter projects is, so if the build fails with these, we want to make it not fail. This may change in the future.)a
+`flutter create .` (we don't currently commit most generated flutter files. We want to try staying compatible with whatever the latest template for flutter projects is, so if the build fails with whatever comes out of this command, we want to make it not fail.)
 
 `flutter pub get` to get build runner
 

@@ -3203,6 +3203,7 @@ class DragActionRingState extends State<DragActionRing>
     double releasep,
   ) {
     final theme = Theme.of(context);
+    final mt = MakoThemeData.fromContext(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded = watchSignal(
       context,
@@ -3223,6 +3224,14 @@ class DragActionRingState extends State<DragActionRing>
         unlerpUnit(0.6, 1, baseGrow) *
         // fades a bit immediately on completion, but doesn't fade all the way out
         lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
+    final ringColor = lerpColor(
+      theme.colorScheme.onSurface,
+      // mt.reducedProminenceColor,
+      theme.colorScheme.primary,
+      baseGrow,
+    );
+    // final ringColor = mt.reducedProminenceColor;
+    // final ringColor = theme.colorScheme.onSurface;
 
     // raw per-item selection growth; the clip builder owns any release recede
     // (it keeps the chosen item's highlight crisp while the sweep collapses onto
@@ -3317,9 +3326,7 @@ class DragActionRingState extends State<DragActionRing>
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            Positioned.fill(
-              child: ColoredBox(color: theme.colorScheme.onSurface),
-            ),
+            Positioned.fill(child: ColoredBox(color: ringColor)),
             Transform.translate(
               offset: center,
               child: Stack(
@@ -3370,7 +3377,7 @@ class DragActionRingState extends State<DragActionRing>
           ),
           child: w,
         ),
-        (w) => ColoredBox(color: theme.colorScheme.onSurface, child: w),
+        (w) => ColoredBox(color: theme.colorScheme.primary, child: w),
         (w) => Padding(
           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: w,
@@ -4104,10 +4111,10 @@ class TimerScreenState extends State<TimerScreen>
           // opacity uses it directly, scale curves it (per-direction) below.
           tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
           duration: up
-              ? const Duration(milliseconds: 150) // rise
-              : const Duration(milliseconds: 150), // fall
+              ? const Duration(milliseconds: 100) // rise
+              : const Duration(milliseconds: 100), // fall
           builder: (context, t, child) {
-            final p = (up ? Curves.easeInOut : Curves.easeIn).transform(t);
+            final p = (up ? Curves.easeInOut : Curves.easeInOut).transform(t);
             return Opacity(
               // a linear ease is correct for opacity
               opacity: lerp(0.07, 1.0, p),
@@ -4190,12 +4197,12 @@ class TimerScreenState extends State<TimerScreen>
     //     onPanDown: (_) {
     //       pausePlaySelected();
     //     });
-    final stopPlayButton = TimersButton(
-      label: playIcon(Icon(Icons.restart_alt_rounded)),
-      onPanDown: (_) {
-        pausePlaySelected(reset: true);
-      },
-    );
+    // final stopPlayButton = TimersButton(
+    //   label: playIcon(Icon(Icons.restart_alt_rounded)),
+    //   onPanDown: (_) {
+    //     pausePlaySelected(reset: true);
+    //   },
+    // );
 
     final buttonScaleDial = Watch((context) {
       if (buttonScaleDialCenter.value == null) {
@@ -4343,7 +4350,10 @@ class TimerScreenState extends State<TimerScreen>
         height: buttonSpan * 0.43,
         child: Hero(
           tag: 'configButton',
-          child: HamburgerIcon(lineWidth: makoLineThickness),
+          child: HamburgerIcon(
+            lineWidth: makoLineThickness,
+            color: theme.colorScheme.onSurface,
+          ),
         ),
       ),
       // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
@@ -5509,14 +5519,24 @@ double halfScreenHeight(BuildContext context) {
 const headingBandLeftInset = 16.0;
 const headingTitleBottomPadding = 14.0;
 
-TextStyle headingTextStyle(ThemeData theme) =>
-    TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 15);
+TextStyle headingTextStyle(ThemeData theme, {bool fade = false}) => TextStyle(
+  color: fade
+      ? MakoThemeData.fromTheme(theme).reducedProminenceColor
+      // lerpColor(
+      //     theme.colorScheme.onSurfaceVariant,
+      //     theme.colorScheme.surface,
+      //     0.3,
+      //   )
+      : theme.colorScheme.onSurfaceVariant,
+  fontSize: 19,
+);
 
 Widget headingBand({
   required ThemeData theme,
   Widget? label,
   required double height,
   required Color background,
+  bool fade = false,
 }) => Container(
   width: double.infinity,
   height: height,
@@ -5527,7 +5547,10 @@ Widget headingBand({
     bottom: headingTitleBottomPadding,
   ),
   child: label != null
-      ? DefaultTextStyle(style: headingTextStyle(theme), child: label)
+      ? DefaultTextStyle(
+          style: headingTextStyle(theme, fade: fade),
+          child: label,
+        )
       : null,
 );
 
@@ -5683,7 +5706,7 @@ Widget headingBandLabel({
         tag: heroTag,
         createRectTween: createRectTween,
         child: ScalingAspectRatio(
-          child: Icon(icon, color: theme.colorScheme.primary),
+          child: Icon(icon, color: theme.colorScheme.onSurface),
         ),
       ),
     ),
@@ -5711,9 +5734,9 @@ Widget markdownPageSliver(ThemeData theme, String? md) => SliverPadding(
               },
               styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
                 h1: theme.textTheme.titleLarge,
-                h1Padding: const EdgeInsets.only(top: 24.0, bottom: 4.0),
+                h1Padding: const EdgeInsets.only(top: 6.0, bottom: 4.0),
                 h2: theme.textTheme.titleMedium,
-                h2Padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
+                h2Padding: const EdgeInsets.only(top: 6.0, bottom: 4.0),
                 p: theme.textTheme.bodyMedium,
                 pPadding: const EdgeInsets.only(bottom: 12.0),
                 a: TextStyle(
@@ -5868,6 +5891,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         halfScreenHeight(context) +
                         MediaQuery.of(context).viewPadding.top,
                     background: headingBackground,
+                    fade: true,
                   ),
                 ),
                 SliverList(
@@ -5893,7 +5917,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   ? 'landscape'
                                   : 'portrait',
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
+                                color: theme.colorScheme.onSurface,
                               ),
                             ),
                           ),
@@ -5941,7 +5965,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         ),
                                         child: Container(
                                           decoration: BoxDecoration(
-                                            color: theme.colorScheme.primary,
+                                            color: theme.colorScheme.onSurface,
                                             borderRadius: BorderRadius.circular(
                                               4,
                                             ),
@@ -6111,7 +6135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                         // splashColor: Colors.black,
 
-                        // aaargh I can't fix the awful white-grey aspect of the highlight and the smash
+                        // aaargh I can't fix the awful white-grey aspect of the highlight and the splash
                         // focusColor: Colors.red,
                         // selectedColor: Colors.red,
                         // // tileColor: Colors.red,
@@ -6137,7 +6161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               angle: 45 * pi / 180, // 45 degrees clockwise
                               child: Icon(
                                 Icons.back_hand_rounded,
-                                color: theme.colorScheme.primary,
+                                color: theme.colorScheme.onSurface,
                               ),
                             ),
                           ),
@@ -6186,6 +6210,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       label: Text('Info'),
                       height: sectionHeadingHeight,
                       background: headingBackground,
+                      fade: true,
                     ),
                     Builder(
                       builder: (context) {
@@ -6208,7 +6233,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     Icons.info_outline,
                                     key: hereIconKey,
                                     size: 10,
-                                    color: theme.colorScheme.primary,
+                                    color: theme.colorScheme.onSurface,
                                   ),
                                 ),
                               ),
@@ -6251,7 +6276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   child: Icon(
                                     Icons.handyman_outlined,
                                     key: hereIconKey,
-                                    color: theme.colorScheme.primary,
+                                    color: theme.colorScheme.onSurface,
                                   ),
                                 ),
                               ),
@@ -6294,7 +6319,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   child: Icon(
                                     Icons.heart_broken,
                                     key: hereIconKey,
-                                    color: theme.colorScheme.primary,
+                                    color: theme.colorScheme.onSurface,
                                   ),
                                 ),
                               ),
@@ -6323,6 +6348,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       label: Text('Extra'),
                       height: sectionHeadingHeight,
                       background: headingBackground,
+                      fade: true,
                     ),
                     Builder(
                       builder: (context) {
@@ -6355,7 +6381,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       children: [
                                         Icon(
                                           Icons.rotate_right_rounded,
-                                          color: theme.colorScheme.primary,
+                                          color: theme.colorScheme.onSurface,
                                           size: 24,
                                         ),
                                         Positioned(
@@ -6363,7 +6389,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                           bottom: 0,
                                           child: Icon(
                                             Icons.sports_esports,
-                                            color: theme.colorScheme.primary,
+                                            color: theme.colorScheme.onSurface,
                                             size: 12,
                                           ),
                                         ),
@@ -6408,7 +6434,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     //   trailing: trailing(
                     //     Icon(
                     //       Icons.explore_rounded,
-                    //       color: theme.colorScheme.primary,
+                    //       color: theme.colorScheme.onSurface,
                     //       size: 24,
                     //     ),
                     //   ),
@@ -6708,14 +6734,12 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: theme.colorScheme.primary.withValues(alpha: 0.4),
-          ),
+          border: Border.all(color: theme.colorScheme.onSurface),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.add, size: 16, color: theme.colorScheme.primary),
+            Icon(Icons.add, size: 16, color: theme.colorScheme.onSurface),
             SizedBox(width: 4),
             Text('Pick file…', style: theme.textTheme.bodyMedium),
           ],
@@ -6913,7 +6937,12 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                           ),
                         // Bottom breathing room inside the container, matching
                         // the 16px gap above each section.
-                        SliverToBoxAdapter(child: SizedBox(height: 16)),
+                        SliverToBoxAdapter(
+                          child: Container(
+                            height: 16,
+                            decoration: BoxDecoration(color: backgroundColorA),
+                          ),
+                        ),
                       ],
                     ),
                   ),

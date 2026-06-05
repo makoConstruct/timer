@@ -2567,7 +2567,7 @@ class _CircularRevealRouteTransitionState
 
     return Stack(
       children: [
-        // Black circular gradient
+        // circular shadow gradient moving in advance of the clip
         Positioned.fill(
           child: AnimatedBuilder(
             animation: widget.animation,
@@ -2587,7 +2587,7 @@ class _CircularRevealRouteTransitionState
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
-                      radius: progress * 3.0,
+                      radius: Curves.easeOut.transform(progress) * 3.0,
                       center: c,
                       focal: c,
                       colors: [
@@ -2608,7 +2608,7 @@ class _CircularRevealRouteTransitionState
           builder: (context, child) {
             final screenSize = MediaQuery.of(context).size;
             final fraction = Curves.easeOut.transform(
-              unlerpUnit(0.14, 1.0, widget.animation.value),
+              unlerpUnit(0.07, 1.0, widget.animation.value),
             );
             if (fraction == 1.0) {
               return child!;
@@ -3283,17 +3283,22 @@ class MakoThemeData {
   Color foreBackColor;
   Color foreIndentColor;
   Color inkColor;
+  Color reducedProminenceColor;
+  // todo: remove?
   Color harderForeIndentColor;
   Color hintTextColor;
+  bool hardEdges;
   MakoThemeData({
     required this.lowestBackColor,
     required this.lowestIndentColor,
     required this.midBackColor,
     required this.foreBackColor,
     required this.foreIndentColor,
+    required this.reducedProminenceColor,
     required this.inkColor,
     required this.harderForeIndentColor,
     required this.hintTextColor,
+    this.hardEdges = false,
   });
   static MakoThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
@@ -3305,6 +3310,10 @@ class MakoThemeData {
             lowestBackColor: theme.colorScheme.surfaceContainerLowest,
             midBackColor: theme.colorScheme.surfaceContainerLow,
             foreBackColor: theme.colorScheme.surfaceContainerHighest,
+            reducedProminenceColor: darkenColor(
+              theme.colorScheme.onSurface,
+              0.27,
+            ),
             lowestIndentColor: lightenColor(
               theme.colorScheme.surfaceContainerLowest,
               0.03,
@@ -3324,6 +3333,10 @@ class MakoThemeData {
             lowestBackColor: theme.colorScheme.surfaceContainerHighest,
             midBackColor: theme.colorScheme.surfaceContainerHigh,
             foreBackColor: theme.colorScheme.surfaceContainerLowest,
+            reducedProminenceColor: lightenColor(
+              theme.colorScheme.onSurface,
+              0.5,
+            ),
             lowestIndentColor: darkenColor(
               theme.colorScheme.surfaceContainerHighest,
               0.05,
@@ -4460,29 +4473,38 @@ class ManyIcon extends StatelessWidget {
 }
 
 class HamburgerIconPainter extends CustomPainter {
-  HamburgerIconPainter({required this.color, required this.lineWidth});
+  HamburgerIconPainter({
+    required this.color,
+    required this.lineWidthp,
+    required this.radiusp,
+  });
   final Color color;
-  final double lineWidth;
+  final double lineWidthp;
+  final double radiusp;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final md = min(size.width, size.height);
+    final radius = md * radiusp;
+    final lineWidth = radius * lineWidthp;
     final paint = Paint()
       ..color = color
-      ..strokeCap = StrokeCap.round
+      ..strokeCap = StrokeCap.square
       ..strokeWidth = lineWidth;
-    final spread = lineWidth * 1.5;
-    final x0 = size.width / 2 - spread / 2;
-    final x1 = size.width / 2 + spread / 2;
-    final y0 = size.height / 2 - spread / 2;
-    for (var i = 0; i < 2; i++) {
-      final y = y0 + i * spread;
+    final x0 = size.width / 2 - radius;
+    final x1 = size.width / 2 + radius;
+    double y = size.height / 2 - radius;
+    for (var i = 0; i < 3; i++) {
       canvas.drawLine(Offset(x0, y), Offset(x1, y), paint);
+      y += radius;
     }
   }
 
   @override
   bool shouldRepaint(covariant HamburgerIconPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.lineWidth != lineWidth;
+      oldDelegate.color != color ||
+      oldDelegate.lineWidthp != lineWidthp ||
+      oldDelegate.radiusp != radiusp;
 }
 
 /// A back chevron rendered as line art — a sideways "v" (`<`) of the given
@@ -4547,15 +4569,22 @@ class ChevronBackIcon extends StatelessWidget {
 
 /// actually only renders two bars rather than 3
 class HamburgerIcon extends StatelessWidget {
-  const HamburgerIcon({super.key, required this.lineWidth});
+  const HamburgerIcon({super.key, required this.lineWidth, this.color});
+  // todo: remove
   final double lineWidth;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
     return CustomPaint(
-      painter: HamburgerIconPainter(color: color, lineWidth: lineWidth),
+      painter: HamburgerIconPainter(
+        color:
+            color ??
+            IconTheme.of(context).color ??
+            Theme.of(context).colorScheme.onSurface,
+        radiusp: 0.33,
+        lineWidthp: 0.75,
+      ),
     );
   }
 }
