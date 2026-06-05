@@ -6,6 +6,10 @@ part 'database.g.dart';
 
 const MobjID timerListID = '0afc1e39-9ed7-4174-8d72-e9319224d6e8';
 const MobjID transientTimerListID = '0c02ee9a-6618-4231-a8c9-36f145970a4c';
+
+/// holds the IDs of deleted timers. They're retained as inactive Mobjs for a
+/// couple of days so the user can restore them from the trash bin, then pruned.
+const MobjID binListID = 'f06d47a9-4dd1-41d5-950b-abc12eb1f36e';
 const MobjID dbVersionID = '87012e13-974b-45f6-b0d7-ea8d1a3127ed';
 const MobjID nextHueID = 'cd813df3-bb7b-4b69-a238-89b4971198ef';
 const MobjID selectedAudioID = 'baa10d03-aa7f-4cc6-bd58-0c62bdaa9757';

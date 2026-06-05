@@ -6,6 +6,8 @@ The source code of the libraries in dart's package cache is a useful source of i
 
 This is a user who's very specific in what they want. Usually any code they will have written themselves will be extremely intentional. Don't do things that the user doesn't want. Instead, suggest them.
 
+If you encounter a task that would benefit much from human help, ask the human to help.
+
 ## Style
 
 Follow style guides in CONTRIBUTING.md

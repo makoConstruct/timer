@@ -145,6 +145,11 @@ Future<void> initializeDatabase() async {
       type: ListType(StringType()),
       initial: () => <MobjID>[],
     ),
+    Mobj.getOrCreate(
+      binListID,
+      type: ListType(StringType()),
+      initial: () => <MobjID>[],
+    ),
     Mobj.getOrCreate(nextHueID, type: DoubleType(), initial: () => 0.252),
     Mobj.getOrCreate(
       isRightHandedID,
@@ -1387,50 +1392,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
         if (parent == null ||
             parent.peek() != null ||
             parent is Mobj<List<String>>) {
-          if (mounted && !_deleted) {
-            final renderBox = context.findRenderObject() as RenderBox?;
-            final timerScreen = context
-                .findAncestorStateOfType<TimerScreenState>();
-            timerScreen?.timerWidgetCache.remove(widget.mobj.id);
-            if (renderBox != null && renderBox.hasSize) {
-              final ephemeralAnimationLayer = context
-                  .findAncestorStateOfType<TimerScreenState>()!
-                  .backgroundEphemeralAnimationLayer;
-              final tr = boxRectRelativeTo(
-                boring.renderBox(widget.key as GlobalKey),
-                ephemeralAnimationLayer.currentContext?.findRenderObject()
-                    as RenderBox?,
-              )!;
-              animatedToDisabled.value = true;
-              _deletionLayoutRect = tr;
-              _deletionAnimation = AnimationController(
-                duration: _deletionAnimationDuration,
-                vsync: this,
-              );
-              _deletionAnimation!.addStatusListener((status) {
-                if (status != AnimationStatus.completed) return;
-                _deletionAnimation?.dispose();
-                _deletionAnimation = null;
-                final timerScreen = context
-                    .findAncestorStateOfType<TimerScreenState>();
-                if (_deletionHostChild != null) {
-                  timerScreen?.backgroundEphemeralAnimationLayer.currentState
-                      ?.remove(_deletionHostChild!);
-                  _deletionHostChild = null;
-                }
-              });
-              _deletionHostChild = Positioned(
-                left: tr.left,
-                top: tr.top,
-                child: widget,
-              );
-              ephemeralAnimationLayer.currentState!.add(_deletionHostChild!);
-              setState(() {
-                _deleted = true;
-              });
-              _deletionAnimation!.forward();
-            }
-          }
+          playExitAnimation();
         }
 
         disable();
@@ -1463,6 +1425,49 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   void disable() {
     if (hasDisabled) return;
     hasDisabled = true;
+  }
+
+  /// Lifts this widget out of its place in the tray into the TimerScreen's
+  /// background ephemeral layer and plays the slide-up / fuzzy-clip
+  /// disappearance. Used both when the timer is truly deleted (its Mobj goes
+  /// null) and when it's shelved into the trash bin (the Mobj is kept). The
+  /// caller is responsible for removing the timer from whatever list was
+  /// rendering it so there's no GlobalKey collision on the next frame.
+  void playExitAnimation() {
+    if (!mounted || _deleted) return;
+    final renderBox = context.findRenderObject() as RenderBox?;
+    final timerScreen = context.findAncestorStateOfType<TimerScreenState>();
+    timerScreen?.timerWidgetCache.remove(widget.mobj.id);
+    if (renderBox == null || !renderBox.hasSize || timerScreen == null) return;
+    final ephemeralAnimationLayer = timerScreen.backgroundEphemeralAnimationLayer;
+    final tr = boxRectRelativeTo(
+      boring.renderBox(widget.key as GlobalKey),
+      ephemeralAnimationLayer.currentContext?.findRenderObject() as RenderBox?,
+    )!;
+    animatedToDisabled.value = true;
+    _deletionLayoutRect = tr;
+    _deletionAnimation = AnimationController(
+      duration: _deletionAnimationDuration,
+      vsync: this,
+    );
+    _deletionAnimation!.addStatusListener((status) {
+      if (status != AnimationStatus.completed) return;
+      _deletionAnimation?.dispose();
+      _deletionAnimation = null;
+      final timerScreen = context.findAncestorStateOfType<TimerScreenState>();
+      if (_deletionHostChild != null) {
+        timerScreen?.backgroundEphemeralAnimationLayer.currentState?.remove(
+          _deletionHostChild!,
+        );
+        _deletionHostChild = null;
+      }
+    });
+    _deletionHostChild = Positioned(left: tr.left, top: tr.top, child: widget);
+    ephemeralAnimationLayer.currentState!.add(_deletionHostChild!);
+    setState(() {
+      _deleted = true;
+    });
+    _deletionAnimation!.forward();
   }
 
   void enterTitleEditMode() {
@@ -1588,9 +1593,18 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       ),
       (next) => GestureDetector(
         onTap: () {
-          context.findAncestorStateOfType<TimerScreenState>()?.takeActionOn(
-            widget.mobj.id,
-          );
+          // a shelved (inactive) timer lives in the trash bin, where tapping
+          // restores it rather than playing it; an active one takes the
+          // current TimerScreen action (play / pin / delete).
+          if (!widget.mobj.isActive) {
+            context.findAncestorStateOfType<BinScreenState>()?.restoreTimer(
+              widget.mobj.id,
+            );
+          } else {
+            context.findAncestorStateOfType<TimerScreenState>()?.takeActionOn(
+              widget.mobj.id,
+            );
+          }
         },
         behavior: HitTestBehavior.opaque,
         child: next,
@@ -3514,6 +3528,10 @@ class TimerScreenState extends State<TimerScreen>
     timerListID,
     timerListType,
   );
+  final Mobj<List<MobjID<TimerData>>> binListMobj = Mobj.getAlreadyLoaded(
+    binListID,
+    timerListType,
+  );
   // final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
   //     Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
   late final Mobj<double> nextHueMobj = Mobj.getAlreadyLoaded(
@@ -4961,8 +4979,77 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   void deleteTimer(MobjID ki) {
-    // everything is triggered by this and code that responds to it in various places
-    Mobj.getAlreadyLoaded(ki, TimerDataType()).value = null;
+    // everything the user deletes goes to the trash bin so it can be restored;
+    // it's only truly destroyed later by the bin's pruning. (The cascade that
+    // really nulls a composite's children on final deletion lives in
+    // enlivenTimer, not here.)
+    binTimer(ki);
+  }
+
+  /// Shelves a timer into the trash bin: keeps its Mobj (and, for a composite,
+  /// its children) alive but inactive, pulls it off the screen with the usual
+  /// disappearance animation, detaches it from its parent (the timer list, or
+  /// the composite it lived in), and remembers it in [binListMobj] so it can be
+  /// restored. Also prunes anything that's overstayed its welcome.
+  void binTimer(MobjID<TimerData> ki) {
+    final mobj = Mobj.getAlreadyLoaded(ki, TimerDataType());
+    final d = mobj.peek();
+    if (d == null) return;
+    // stop it running so it doesn't keep ticking / fire an alarm while shelved
+    if (d.isRunning) {
+      pauseTimer(mobj, reset: false);
+    }
+    // play the slide-up exit animation on the live widget before it leaves its
+    // tray (it gets lifted into the ephemeral overlay, so detaching it from the
+    // list below won't collide with it)
+    final exiting = timerWidgetCache[ki];
+    final exitingState = (exiting?.key as GlobalKey?)?.currentState;
+    if (exitingState is TimerBaseState) {
+      exitingState.playExitAnimation();
+    }
+    // detach from whatever was holding it — the root timer list or a composite
+    final parent = Mobj.seekTypedsAlreadyLoaded(d.parentId!, [
+      TimerDataType(),
+      ListType(StringType()),
+    ]);
+    if (parent != null && parent.peek() != null) {
+      writeBackChildren(parent, childrenOf(parent).toList()..remove(ki));
+    }
+    if (selectedTimer.peek() == ki) {
+      _selectTimer(null);
+    }
+    // shelve it: kept in the db but not preloaded next launch, and appended to
+    // the bin (newest last, matching how the timer list appends new timers so
+    // the tray lays them out the same way)
+    mobj.isActive = false;
+    binListMobj.value = [...binListMobj.peek()!, ki];
+    cleanBin();
+  }
+
+  /// How long a deleted timer lingers in the trash bin before it's destroyed.
+  static const Duration binRetention = Duration(days: 2);
+
+  /// Destroys binned timers whose deletion (last write-back) was more than
+  /// [binRetention] ago. Runs opportunistically each time something is binned.
+  /// Loads the (inactive) timers from disk to read their timestamps, since
+  /// older ones may not be in memory yet.
+  Future<void> cleanBin() async {
+    final now = DateTime.now();
+    for (final id in binListMobj.peek()!.toList()) {
+      Mobj<TimerData> m;
+      try {
+        m = await Mobj.fetch(id, type: TimerDataType());
+      } catch (_) {
+        // already gone from the db; just drop the dangling reference
+        binListMobj.value = binListMobj.peek()!.toList()..remove(id);
+        continue;
+      }
+      if (now.difference(m.lastTimestamp) > binRetention) {
+        binListMobj.value = binListMobj.peek()!.toList()..remove(id);
+        // a real deletion this time: cascades to children / parent via reactions
+        m.value = null;
+      }
+    }
   }
 
   void removeTimer(MobjID ki) {
@@ -6418,6 +6505,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       },
                     ),
+                    Builder(
+                      builder: (context) {
+                        final GlobalKey iconKey = GlobalKey();
+                        final hereIconKey = GlobalKey();
+                        return ListTile(
+                          title: Text(
+                            'Trash',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          subtitle: Text(
+                            'Restore recently deleted timers',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          trailing: trailing(
+                            SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: Hero(
+                                tag: 'trash-bin-icon',
+                                child: ScalingAspectRatio(
+                                  child: Icon(
+                                    Icons.delete_outline,
+                                    key: hereIconKey,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) => BinScreen(
+                                  iconKey: iconKey,
+                                  flipBackgroundColors:
+                                      !widget.flipBackgroundColors,
+                                ),
+                                buttonCenter: widgetCenter(hereIconKey),
+                                iconOriginKey: iconKey,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
 
                     // abandoned on journey_game branch
                     // ListTile(
@@ -6460,6 +6596,170 @@ class _SettingsScreenState extends State<SettingsScreen> {
             StatusBarScrim(background: headingBackground),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The trash bin: timers the user has deleted, kept around for [binRetention]
+/// so they can be restored. Lays them out the same bottom-cornered wrap the
+/// TimerScreen uses (inlined here rather than via [TimerTray], which assumes a
+/// synchronously-complete widget map and brings drag machinery the bin doesn't
+/// want). Tapping a timer here restores it to the timer list rather than
+/// playing it, because the timers are inactive (see the tap handler in
+/// [TimerBaseState.buildShell] and the restore-vs-play split keyed on
+/// [Mobj.isActive]).
+class BinScreen extends StatefulWidget {
+  final bool flipBackgroundColors;
+  final GlobalKey? iconKey;
+  const BinScreen({
+    super.key,
+    this.iconKey,
+    this.flipBackgroundColors = false,
+  });
+
+  @override
+  State<BinScreen> createState() => BinScreenState();
+}
+
+class BinScreenState extends State<BinScreen> with SignalsMixin {
+  final Map<MobjID<TimerData>, TimerBase> timerWidgetCache = {};
+  late final Mobj<List<MobjID<TimerData>>> binListMobj = Mobj.getAlreadyLoaded(
+    binListID,
+    timerListType,
+  );
+  late final Mobj<List<MobjID<TimerData>>> timerListMobj = Mobj.getAlreadyLoaded(
+    timerListID,
+    timerListType,
+  );
+
+  /// flips once the (inactive) binned timers have been loaded from disk; the
+  /// build reads it so the tray rebuilds once they're available.
+  final Signal<bool> _loaded = Signal(false);
+
+  @override
+  void initState() {
+    super.initState();
+    // binned timers are inactive, so on a fresh launch they aren't preloaded;
+    // pull them in before we try to render them
+    Future.wait(
+      binListMobj.peek()!.map(
+        (id) => Mobj.fetch(
+          id,
+          type: TimerDataType(),
+        ).then<void>((_) {}).catchError((_) {}),
+      ),
+    ).then((_) {
+      if (mounted) _loaded.value = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    _loaded.dispose();
+    super.dispose();
+  }
+
+  void restoreTimer(MobjID<TimerData> ki) {
+    final mobj = Mobj.seekTypedAlreadyLoaded(ki, TimerDataType());
+    if (mobj == null || mobj.peek() == null) return;
+    timerWidgetCache.remove(ki);
+    binListMobj.value = binListMobj.peek()!.toList()..remove(ki);
+    mobj.isActive = true;
+    // re-root it: a binned timer may have been a child of a composite that's
+    // since changed or gone, so it always comes back as a top-level timer.
+    mobj.value = mobj.peek()!.withChanges(parentId: timerListMobj.id);
+    timerListMobj.value = [...timerListMobj.peek()!, ki];
+  }
+
+  /// The binned timers laid out the way the TimerScreen lays out its tray —
+  /// bottom-cornered toward the dominant hand, wrapping upward — but built only
+  /// from the timers that have actually loaded (the bin list can reference ones
+  /// still loading from disk, or that failed to load), so there's no force-
+  /// unwrap to trip over.
+  Widget _buildTray(ThemeData theme) {
+    return Watch((context) {
+      _loaded.value; // rebuild once the binned timers finish loading
+      final isRightHanded =
+          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value ?? true;
+      final binIds = binListMobj.value!;
+      if (binIds.isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'Deleted timers wait here for a couple of days, in case you want them back.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: MakoThemeData.fromTheme(theme).reducedProminenceColor,
+              ),
+            ),
+          ),
+        );
+      }
+      final children = <Widget>[
+        for (final id in binIds)
+          if (Mobj.seekTypedAlreadyLoaded(id, TimerDataType())?.peek() != null)
+            getOrCreateTimerWidget(timerWidgetCache, id, animateIn: false),
+      ];
+      return Align(
+        alignment: isRightHanded
+            ? const FractionalOffset(0.8, 1)
+            : const FractionalOffset(0.2, 1),
+        child: IWrap(
+          textDirection: isRightHanded ? TextDirection.ltr : TextDirection.rtl,
+          clipBehavior: Clip.none,
+          verticalDirection: VerticalDirection.down,
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.start,
+          children: children,
+        ),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final (contentBackground, headingBackground) = maybeFlippedBackgroundColors(
+      theme,
+      widget.flipBackgroundColors,
+    );
+    return Scaffold(
+      backgroundColor: headingBackground,
+      resizeToAvoidBottomInset: false,
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              headingBand(
+                theme: theme,
+                label: headingBandLabel(
+                  theme: theme,
+                  icon: Icons.delete_outline,
+                  heroTag: 'trash-bin-icon',
+                  title: 'Trash',
+                ),
+                height:
+                    halfScreenHeight(context) +
+                    MediaQuery.of(context).viewPadding.top,
+                background: headingBackground,
+              ),
+              Expanded(
+                child: Container(
+                  color: contentBackground,
+                  // AnimoveFrame so the remaining timers slide to fill the gap
+                  // when one is restored, the same way the TimerScreen animates
+                  // (its timers' Animove wrappers need a frame ancestor).
+                  child: AnimoveFrame(child: _buildTray(theme)),
+                ),
+              ),
+              BackNavBottomGutter(background: headingBackground),
+            ],
+          ),
+          CornerBackButton(background: headingBackground),
+          StatusBarScrim(background: headingBackground),
+        ],
       ),
     );
   }

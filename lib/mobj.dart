@@ -463,6 +463,11 @@ class Mobj<T> extends Signal<T?> {
   }
 
   DateTime _lastTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// the timestamp of this Mobj's most recent write-back. For binned (deleted)
+  /// timers this doubles as the time of deletion, since they aren't written to
+  /// again while shelved — see the trash bin pruning logic.
+  DateTime get lastTimestamp => _lastTimestamp;
   int _lastSequenceNumber = 0;
   String _valueEncoded = "";
   late final Function() _systemSubscription;
