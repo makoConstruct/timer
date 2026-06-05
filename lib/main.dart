@@ -1,5 +1,6 @@
 // this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code.
 
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
@@ -946,10 +947,23 @@ bool trivialAndClearable(Mobj<TimerData> mobj, TimerData? prev) {
     return true;
   }
   final parent = Mobj.seekTypedAlreadyLoaded(d.parentId!, TimerDataType());
-  if (parent == null) {
-    return true;
+  // clearing of those with parents is done through the parent.
+  return parent == null;
+}
+
+/// Flips [Mobj.isActive] across a whole timer subtree — a deleted timercule and
+/// all its descendants get shelved (and unshelved on restore) together, so none
+/// of a binned composite's children are preloaded on next launch. Assumes the
+/// subtree is loaded (it is whenever the timer is on screen).
+void setTimerSubtreeActive(Mobj<TimerData> mobj, bool active) {
+  mobj.isActive = active;
+  final d = mobj.peek();
+  if (d != null && d.isComposite) {
+    for (final childId in d.children) {
+      final child = Mobj.seekTypedAlreadyLoaded(childId, TimerDataType());
+      if (child != null) setTimerSubtreeActive(child, active);
+    }
   }
-  return trivialAndClearable(parent, null);
 }
 
 // Global to cache screen corner radius
@@ -1355,12 +1369,19 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   /// called by the reactive effect whenever timer data changes
   void onTimerDataChanged(TimerData d, TimerData? prev) {}
 
+  bool parentIsTimercule() {
+    final parentId = widget.mobj.value!.parentId;
+    return parentId != null &&
+        MobjRegistry.seekTyped(parentId, TimerDataType()) != null;
+  }
+
   @override
   void initState() {
     super.initState();
     whetherPinned = Computed(() => widget.mobj.value?.pinned ?? false);
     _shouldFade = Computed(() {
-      return trivialAndClearable(widget.mobj, previousValue);
+      return (!widget.mobj.isActive && !parentIsTimercule()) ||
+          trivialAndClearable(widget.mobj, previousValue);
     });
     _appearanceAnimation = AnimationController(
       duration: const Duration(milliseconds: 180),
@@ -1427,22 +1448,28 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     hasDisabled = true;
   }
 
-  /// Lifts this widget out of its place in the tray into the TimerScreen's
-  /// background ephemeral layer and plays the slide-up / fuzzy-clip
-  /// disappearance. Used both when the timer is truly deleted (its Mobj goes
-  /// null) and when it's shelved into the trash bin (the Mobj is kept). The
-  /// caller is responsible for removing the timer from whatever list was
-  /// rendering it so there's no GlobalKey collision on the next frame.
+  /// Lifts this widget out of its place in the tray into an ephemeral overlay
+  /// layer and plays the slide-up / fuzzy-clip disappearance. Used when the
+  /// timer is truly deleted (its Mobj goes null), when it's shelved into the
+  /// trash bin (the Mobj is kept), and when it's restored back out of the bin.
+  /// The overlay is the TimerScreen's background layer or, in the trash bin,
+  /// the BinScreen's layer. The caller is responsible for removing the timer
+  /// from whatever list was rendering it so there's no GlobalKey collision on
+  /// the next frame.
   void playExitAnimation() {
     if (!mounted || _deleted) return;
     final renderBox = context.findRenderObject() as RenderBox?;
     final timerScreen = context.findAncestorStateOfType<TimerScreenState>();
     timerScreen?.timerWidgetCache.remove(widget.mobj.id);
-    if (renderBox == null || !renderBox.hasSize || timerScreen == null) return;
-    final ephemeralAnimationLayer = timerScreen.backgroundEphemeralAnimationLayer;
+    final binScreen = context.findAncestorStateOfType<BinScreenState>();
+    binScreen?.timerWidgetCache.remove(widget.mobj.id);
+    final host =
+        timerScreen?.backgroundEphemeralAnimationLayer.currentState ??
+        binScreen?.ephemeralAnimationLayer.currentState;
+    if (renderBox == null || !renderBox.hasSize || host == null) return;
     final tr = boxRectRelativeTo(
       boring.renderBox(widget.key as GlobalKey),
-      ephemeralAnimationLayer.currentContext?.findRenderObject() as RenderBox?,
+      host.context.findRenderObject() as RenderBox?,
     )!;
     animatedToDisabled.value = true;
     _deletionLayoutRect = tr;
@@ -1454,16 +1481,13 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       if (status != AnimationStatus.completed) return;
       _deletionAnimation?.dispose();
       _deletionAnimation = null;
-      final timerScreen = context.findAncestorStateOfType<TimerScreenState>();
       if (_deletionHostChild != null) {
-        timerScreen?.backgroundEphemeralAnimationLayer.currentState?.remove(
-          _deletionHostChild!,
-        );
+        host.remove(_deletionHostChild!);
         _deletionHostChild = null;
       }
     });
     _deletionHostChild = Positioned(left: tr.left, top: tr.top, child: widget);
-    ephemeralAnimationLayer.currentState!.add(_deletionHostChild!);
+    host.add(_deletionHostChild!);
     setState(() {
       _deleted = true;
     });
@@ -1593,13 +1617,12 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       ),
       (next) => GestureDetector(
         onTap: () {
-          // a shelved (inactive) timer lives in the trash bin, where tapping
-          // restores it rather than playing it; an active one takes the
-          // current TimerScreen action (play / pin / delete).
-          if (!widget.mobj.isActive) {
-            context.findAncestorStateOfType<BinScreenState>()?.restoreTimer(
-              widget.mobj.id,
-            );
+          // in the trash bin, tapping anything restores (its root entry) rather
+          // than playing it — note a binned timercule's children are still
+          // active, so we key off being inside the BinScreen, not isActive.
+          final binScreen = context.findAncestorStateOfType<BinScreenState>();
+          if (binScreen != null) {
+            binScreen.restoreTimer(widget.mobj.id);
           } else {
             context.findAncestorStateOfType<TimerScreenState>()?.takeActionOn(
               widget.mobj.id,
@@ -5007,6 +5030,9 @@ class TimerScreenState extends State<TimerScreen>
     if (exitingState is TimerBaseState) {
       exitingState.playExitAnimation();
     }
+    if (selectedTimer.peek() == ki) {
+      _selectTimer(null);
+    }
     // detach from whatever was holding it — the root timer list or a composite
     final parent = Mobj.seekTypedsAlreadyLoaded(d.parentId!, [
       TimerDataType(),
@@ -5015,13 +5041,10 @@ class TimerScreenState extends State<TimerScreen>
     if (parent != null && parent.peek() != null) {
       writeBackChildren(parent, childrenOf(parent).toList()..remove(ki));
     }
-    if (selectedTimer.peek() == ki) {
-      _selectTimer(null);
-    }
-    // shelve it: kept in the db but not preloaded next launch, and appended to
-    // the bin (newest last, matching how the timer list appends new timers so
-    // the tray lays them out the same way)
-    mobj.isActive = false;
+    // shelve the whole subtree: kept in the db but not preloaded next launch,
+    // and append to the bin (newest last, matching how the timer list appends
+    // new timers so the tray lays them out the same way)
+    setTimerSubtreeActive(mobj, false);
     binListMobj.value = [...binListMobj.peek()!, ki];
     cleanBin();
   }
@@ -6612,11 +6635,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 class BinScreen extends StatefulWidget {
   final bool flipBackgroundColors;
   final GlobalKey? iconKey;
-  const BinScreen({
-    super.key,
-    this.iconKey,
-    this.flipBackgroundColors = false,
-  });
+  const BinScreen({super.key, this.iconKey, this.flipBackgroundColors = false});
 
   @override
   State<BinScreen> createState() => BinScreenState();
@@ -6624,14 +6643,17 @@ class BinScreen extends StatefulWidget {
 
 class BinScreenState extends State<BinScreen> with SignalsMixin {
   final Map<MobjID<TimerData>, TimerBase> timerWidgetCache = {};
+
+  /// overlay layer that exiting (restored) timers are lifted into so they can
+  /// play their disappearance animation, mirroring the TimerScreen's
+  /// backgroundEphemeralAnimationLayer.
+  final GlobalKey<SelfRemovalHostState> ephemeralAnimationLayer = GlobalKey();
   late final Mobj<List<MobjID<TimerData>>> binListMobj = Mobj.getAlreadyLoaded(
     binListID,
     timerListType,
   );
-  late final Mobj<List<MobjID<TimerData>>> timerListMobj = Mobj.getAlreadyLoaded(
-    timerListID,
-    timerListType,
-  );
+  late final Mobj<List<MobjID<TimerData>>> timerListMobj =
+      Mobj.getAlreadyLoaded(timerListID, timerListType);
 
   /// flips once the (inactive) binned timers have been loaded from disk; the
   /// build reads it so the tray rebuilds once they're available.
@@ -6640,18 +6662,26 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
   @override
   void initState() {
     super.initState();
-    // binned timers are inactive, so on a fresh launch they aren't preloaded;
-    // pull them in before we try to render them
-    Future.wait(
-      binListMobj.peek()!.map(
-        (id) => Mobj.fetch(
-          id,
-          type: TimerDataType(),
-        ).then<void>((_) {}).catchError((_) {}),
-      ),
-    ).then((_) {
+    // binned timers (and, for a binned timercule, its descendants) are inactive,
+    // so on a fresh launch they aren't preloaded; pull them in before render
+    Future.wait(binListMobj.peek()!.map(_loadBinned)).then((_) {
       if (mounted) _loaded.value = true;
     });
+  }
+
+  /// Loads a binned timer and, if it's a timercule, its descendants — they're
+  /// all inactive now, so none are preloaded. Never throws (a dangling id is
+  /// just skipped; cleanBin will drop it).
+  Future<void> _loadBinned(MobjID id) async {
+    TimerData? d;
+    try {
+      d = (await Mobj.fetch(id, type: TimerDataType())).peek();
+    } catch (_) {
+      return;
+    }
+    if (d != null && d.isComposite) {
+      await Future.wait(d.children.map(_loadBinned));
+    }
   }
 
   @override
@@ -6660,12 +6690,39 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
     super.dispose();
   }
 
-  void restoreTimer(MobjID<TimerData> ki) {
+  void restoreTimer(MobjID<TimerData> tappedId) {
+    // tapping a child of a binned timercule restores the whole timercule, so
+    // walk up to whichever ancestor is actually the bin entry
+    MobjID<TimerData> ki = tappedId;
+    while (!binListMobj.peek()!.contains(ki)) {
+      final parentId = Mobj.seekTypedAlreadyLoaded(
+        ki,
+        TimerDataType(),
+      )?.peek()?.parentId;
+      if (parentId == null) {
+        developer.log(
+          'restoreTimer: hit a timer with a null parentId before finding its bin entry; '
+          'aborting restore for $tappedId',
+          name: 'BinScreen',
+          level: 1000,
+        );
+        return;
+      }
+      ki = parentId;
+    }
     final mobj = Mobj.seekTypedAlreadyLoaded(ki, TimerDataType());
     if (mobj == null || mobj.peek() == null) return;
-    timerWidgetCache.remove(ki);
+    // animate the bin entry out: lift it into the ephemeral overlay (this also
+    // drops it from timerWidgetCache) before it leaves the list, so it plays
+    // the slide-up disappearance instead of just vanishing
+    final exiting = timerWidgetCache[ki];
+    final exitingState = (exiting?.key as GlobalKey?)?.currentState;
+    if (exitingState is TimerBaseState) {
+      exitingState.playExitAnimation();
+    }
     binListMobj.value = binListMobj.peek()!.toList()..remove(ki);
-    mobj.isActive = true;
+    // unshelve the whole subtree
+    setTimerSubtreeActive(mobj, true);
     // re-root it: a binned timer may have been a child of a composite that's
     // since changed or gone, so it always comes back as a top-level timer.
     mobj.value = mobj.peek()!.withChanges(parentId: timerListMobj.id);
@@ -6748,10 +6805,24 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
               Expanded(
                 child: Container(
                   color: contentBackground,
-                  // AnimoveFrame so the remaining timers slide to fill the gap
-                  // when one is restored, the same way the TimerScreen animates
-                  // (its timers' Animove wrappers need a frame ancestor).
-                  child: AnimoveFrame(child: _buildTray(theme)),
+                  // SelfRemovalHost is the overlay a restored timer is lifted
+                  // into to play its exit animation; AnimoveFrame lets the
+                  // remaining timers slide to fill the gap (their Animove
+                  // wrappers need a frame ancestor).
+                  child: SelfRemovalHost(
+                    key: ephemeralAnimationLayer,
+                    builder: (overlay, context) => Stack(
+                      children: [
+                        Padding(
+                          // vertical breathing room around the tray, echoing the
+                          // space the TimerScreen leaves above/below its timers
+                          padding: const EdgeInsets.symmetric(vertical: timerGap),
+                          child: AnimoveFrame(child: _buildTray(theme)),
+                        ),
+                        ...overlay,
+                      ],
+                    ),
+                  ),
                 ),
               ),
               BackNavBottomGutter(background: headingBackground),
