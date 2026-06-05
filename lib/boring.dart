@@ -3746,6 +3746,30 @@ class HintToast extends StatefulWidget {
   State<HintToast> createState() => _HintToastState();
 }
 
+/// Created as a way of producing show conditions for hints that're shown one at a time, in sequence, each one until its underlying show condition is falsified (or, until the user takes the action that demonstrates that they've understood the lesson of the hint, and so don't need to be shown it any more).
+Computed<bool> addToSequence<T>(
+  Signal<int> sequenceCounter,
+  List<Function()> cleanups,
+  int ni,
+  ReadonlySignal<bool> showCondition, {
+  ReadonlySignal<bool>? urgentShow,
+}) {
+  // advance the sequence counter when our condition is complete and the sequence counter is with us
+  cleanups.add(
+    effect(() {
+      if (sequenceCounter.value == ni && !showCondition.value) {
+        sequenceCounter.value += 1;
+      }
+    }),
+  );
+  return Computed(
+    () =>
+        (urgentShow?.value ?? false) ||
+        (sequenceCounter.value == ni && showCondition.value),
+    autoDispose: true,
+  );
+}
+
 class _HintToastState extends State<HintToast>
     with TickerProviderStateMixin, SignalsMixin<HintToast> {
   late AnimationController animation;
@@ -4569,9 +4593,8 @@ class ChevronBackIcon extends StatelessWidget {
 
 /// actually only renders two bars rather than 3
 class HamburgerIcon extends StatelessWidget {
-  const HamburgerIcon({super.key, required this.lineWidth, this.color});
+  const HamburgerIcon({super.key, this.color});
   // todo: remove
-  final double lineWidth;
   final Color? color;
 
   @override
@@ -4582,8 +4605,8 @@ class HamburgerIcon extends StatelessWidget {
             color ??
             IconTheme.of(context).color ??
             Theme.of(context).colorScheme.onSurface,
-        radiusp: 0.33,
-        lineWidthp: 0.75,
+        radiusp: 0.36,
+        lineWidthp: 0.2,
       ),
     );
   }

@@ -2906,7 +2906,7 @@ Path arcDragRingClip(DragRingClipArgs args) {
   // at rest, a thin half-arc whose radial profile matches the old icon (centerline radius and thickness), opening out to straddle the icon ring.
   final restOuterR = 0.2 * args.buttonSpan;
   final restHalfThickness =
-      makoLineThickness / 2 * unlerpUnit(0, 0.4, args.growIn);
+      args.buttonSpan * 0.08 * unlerpUnit(0, 0.4, args.growIn);
   final restRadius = restOuterR - restHalfThickness;
   final handednessSign = args.isRightHanded ? 1 : -1;
 
@@ -3606,21 +3606,21 @@ class TimerScreenState extends State<TimerScreen>
   );
   // emits whenever a drag action ring is created, so that older ones can disable themselves
   late final ChangeNotifier onNewNumeralDragActionRing = ChangeNotifier();
+  late final Signal<int> hintSequence = Signal(0);
   late final Computed<bool> timerculeCurrentlyDeployed = Computed(
     () => timerListMobj.value!.any(
       // we peek, because the type of a timer never changes, so this shouldn't recompute every time a root timerdata changes
       (id) => Mobj.getAlreadyLoaded(id, TimerDataType()).peek()!.isComposite,
     ),
   );
-  late final Computed<bool> userDragActionHintCondition = Computed(() {
+  late final Computed<bool> hasntDoneBothDragActions = Computed(() {
     final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
     return (dagc.value! & 3) != 3;
   }, autoDispose: true);
-  late final Computed<bool> hasUsedMenuTwice = Computed(() {
-    final dagc = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
-    return dagc.value! < 2;
+  late final Computed<bool> hasntUsedMenuTwice = Computed(() {
+    return Mobj.getAlreadyLoaded(usedMenuCountID, IntType()).value! < 2;
   }, autoDispose: true);
-  late final Computed<bool> hintGetsCompositeTimersCondition = Computed(
+  late final Computed<bool> hintDoesntGetCompositeTimersCondition = Computed(
     () =>
         timerculeCurrentlyDeployed.value &&
         !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value ??
@@ -3654,6 +3654,7 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<double> buttonScaleDialAngle = Signal(0.0);
   async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
+  final List<Function()> cleanups = [];
   late final Signal<int> currentlyPressingKey = Signal(0);
   // whether the edit popover (and its pip icons) should be popped up: a plain
   // timer is selected and the user has released the key at least once. Hoisted
@@ -3859,6 +3860,9 @@ class TimerScreenState extends State<TimerScreen>
     modeActivationPulse.close();
     for (final unsub in _timerDeletionSubs.values) {
       unsub();
+    }
+    for (final c in cleanups) {
+      c();
     }
     timerHolm._backgroundedReaction();
     timerHolm._newTimerReaction.cancel();
@@ -4418,10 +4422,7 @@ class TimerScreenState extends State<TimerScreen>
         height: buttonSpan * 0.43,
         child: Hero(
           tag: 'configButton',
-          child: HamburgerIcon(
-            lineWidth: makoLineThickness,
-            color: theme.colorScheme.onSurface,
-          ),
+          child: HamburgerIcon(color: theme.colorScheme.onSurface),
         ),
       ),
       // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
@@ -4621,6 +4622,10 @@ class TimerScreenState extends State<TimerScreen>
       1,
     );
 
+    Computed<bool> addToHintSequence(int ni, ReadonlySignal<bool> s) {
+      return addToSequence(hintSequence, cleanups, ni, s);
+    }
+
     // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
 
     final hintMargin = thumbSpan * 0.2;
@@ -4636,19 +4641,19 @@ class TimerScreenState extends State<TimerScreen>
             builder: (context) {
               final dir = isRightHanded ? "left" : "right";
               return HintToast(
-                showCondition: userDragActionHintCondition,
+                showCondition: addToHintSequence(0, hasntDoneBothDragActions),
                 message:
                     """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)""",
               );
             },
           ),
           HintToast(
-            showCondition: hasUsedMenuTwice,
+            showCondition: addToHintSequence(1, hasntUsedMenuTwice),
             message:
                 "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
           ),
           HintToast(
-            showCondition: hintGetsCompositeTimersCondition,
+            showCondition: hintDoesntGetCompositeTimersCondition,
             message:
                 "'timercules' like 'cycle' and 'series' allow you to drag other timers into them, to build structures. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings. Play around with them.",
           ),
@@ -6356,7 +6361,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final hereIconKey = GlobalKey();
                         return ListTile(
                           title: Text(
-                            'About this app',
+                            'This app',
                             style: theme.textTheme.bodyLarge,
                           ),
                           trailing: trailing(
