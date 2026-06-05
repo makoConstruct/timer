@@ -1307,6 +1307,22 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     with SignalsMixin, TickerProviderStateMixin {
   TimerData get p => widget.mobj.peek()!;
 
+  /// The timer data this widget should render. While the timer is alive this
+  /// tracks the Mobj (via [watchSignal], so the element rebuilds on change);
+  /// once it's deleted — its Mobj nulled, or it's been shelved into / restored
+  /// out of the trash bin — it freezes on the snapshot captured at deletion
+  /// ([previousValue]) and stops touching the Mobj. The data effect that keeps
+  /// [previousValue] current is cancelled then (see [playExitAnimation]), so the
+  /// snapshot never moves again. Only valid to read during build (it watches);
+  /// build methods usually cache it in a local `d`.
+  TimerData get presentData => _deleted
+      ? previousValue!
+      : (watchSignal(context, widget.mobj) ?? previousValue!);
+
+  /// the reactive effect tracking the Mobj; cancelled once the timer is deleted
+  /// so the frozen widget detaches from the Mobj entirely.
+  EffectCleanup? _dataEffect;
+
   late final AnimationController _appearanceAnimation;
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
@@ -1401,9 +1417,9 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       vsync: this,
     );
     onInitState();
-    createEffect(() {
-      final TimerData? d = widget.mobj.value;
-      if (d == null) {
+    _dataEffect = createEffect(() {
+      final TimerData? v = widget.mobj.value;
+      if (v == null) {
         // move this widget into a transient overlay deletion animation, and trust timerHolm to remove this from its parent in time for the next render so that there wont be a globalkey collision.
         // but only do this if its parent was also not deleted, because if the parent was deleted, it will be animating the disappearance instead
         final parent = Mobj.seekTypedsAlreadyLoaded(previousValue!.parentId!, [
@@ -1419,10 +1435,10 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
         disable();
         return;
       }
-      moveAnimationTowardsState(_unpinnedIndicatorShowing, !d.pinned);
-      moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !d.isRunning);
-      onTimerDataChanged(d, previousValue);
-      previousValue = d;
+      moveAnimationTowardsState(_unpinnedIndicatorShowing, !v.pinned);
+      moveAnimationTowardsState(_unpinnedIndicatorFullyShowing, !v.isRunning);
+      onTimerDataChanged(v, previousValue);
+      previousValue = v;
     });
   }
 
@@ -1491,6 +1507,11 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     setState(() {
       _deleted = true;
     });
+    // detach from the Mobj for good: previousValue is now frozen as the snapshot
+    // at deletion, and presentData resolves it from here on. (Safe to dispose
+    // from within the effect's own run on the null path — dispose is idempotent.)
+    _dataEffect?.call();
+    _dataEffect = null;
     _deletionAnimation!.forward();
   }
 
@@ -1786,7 +1807,7 @@ class TimerState extends TimerBaseState<Timer> {
 
   @override
   Widget build(BuildContext context) {
-    final d = watchSignal(context, widget.mobj) ?? previousValue!;
+    final d = presentData;
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
     final moveTextWhenUp = 0.1;
@@ -2167,7 +2188,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
 
   @override
   Widget build(BuildContext context) {
-    final d = watchSignal(context, widget.mobj) ?? previousValue!;
+    final d = presentData;
     final theme = Theme.of(context);
     final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
     final depth = watchSignal(context, this.depth);
@@ -2243,9 +2264,13 @@ class TimerculeState extends TimerBaseState<Timercule> {
     );
 
     // apparently, sometimes Timers have to build in places where TimerScreenState is no longer in the ancestry (probably from the overlay, during dragging), so we have to retain the map and not assume we'll always be able to make the connection and fetch it.
-    timerWidgetCache ??= context
-        .findAncestorStateOfType<TimerScreenState>()
-        ?.timerWidgetCache;
+    // in the trash bin there's no TimerScreenState; without a cache here the
+    // children would be rebuilt fresh (new GlobalKeys) every rebuild and replay
+    // their appear animation each time, so fall back to the BinScreen's cache.
+    // this would be prettier if we had a shared Provider<WidgetCache> instead of fetching these specific hosts, but this is the only code that would be affected by a fix, so not worth doing.
+    timerWidgetCache ??=
+        context.findAncestorStateOfType<TimerScreenState>()?.timerWidgetCache ??
+        context.findAncestorStateOfType<BinScreenState>()?.timerWidgetCache;
 
     final content = buildShell(
       context,
@@ -2286,7 +2311,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
                         (id) => getOrCreateTimerWidget(
                           timerWidgetCache,
                           id,
-                          animateIn: true,
+                          // don't animate children in for a shelved (binned)
+                          // timercule — it appears as a static whole
+                          animateIn: widget.mobj.isActive,
                         ),
                       ),
                       tail,
@@ -6816,7 +6843,9 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
                         Padding(
                           // vertical breathing room around the tray, echoing the
                           // space the TimerScreen leaves above/below its timers
-                          padding: const EdgeInsets.symmetric(vertical: timerGap),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: timerGap,
+                          ),
                           child: AnimoveFrame(child: _buildTray(theme)),
                         ),
                         ...overlay,
