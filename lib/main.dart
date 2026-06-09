@@ -691,12 +691,19 @@ bool toggleRunning(Mobj<TimerData> mobj, {bool reset = false}) {
 
 void pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
   final d = mobj.peek()!;
-  if (d.isComposite && d.children.isNotEmpty) {
-    _pauseRunningChildren(d, reset: reset);
+  // find root ancestor and _pauseTimer from there
+  Mobj<TimerData> a = mobj;
+  while (true) {
+    final d = a.peek()!;
+    if (d.parentId == null) break;
+    final parentMobj = Mobj.seekTypedAlreadyLoaded(
+      d.parentId!,
+      TimerDataType(),
+    );
+    if (parentMobj == null) break;
+    a = parentMobj;
   }
-  _pauseAncestorsIfNeeded(d.parentId);
-
-  mobj.value = d.withRunningState(TimerData.paused, reset: reset);
+  _pauseTimer(a, reset: reset);
 }
 
 /// important, if it returns true, that means it was synchronous and it's done, it wont leave an asynchronous timer or whatever running and then call back in through returnAndContinueParent, so you should continue to run the next one.
@@ -876,19 +883,14 @@ bool _startSingle(Mobj<TimerData> mobj, {Duration? delay}) {
   }
 }
 
-void _pauseRunningChildren(TimerData parent, {required bool reset}) {
-  for (final childId in parent.children) {
-    _pauseSingle(Mobj.getAlreadyLoaded(childId, TimerDataType()), reset: reset);
-  }
-}
-
-void _pauseSingle(Mobj<TimerData> mobj, {required bool reset}) {
+void _pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
   final data = mobj.peek()!;
   // is this incorrect? if reset is on, shouldn't we go from paused to completed? Yes. It's not correct.
-  if (!data.isRunning) return;
-  mobj.value = data.toggleRunning(reset: reset);
-  if (data.isComposite && data.children.isNotEmpty) {
-    _pauseRunningChildren(data, reset: reset);
+  if (data.isRunning) {
+    mobj.value = data.withRunningState(TimerData.paused, reset: reset);
+  }
+  for (final childId in data.children) {
+    _pauseTimer(Mobj.getAlreadyLoaded(childId, TimerDataType()), reset: reset);
   }
 }
 
@@ -902,32 +904,6 @@ void _startAncestors(MobjID? parentId) {
     parentMobj.value = pp.toggleRunning(reset: false);
   }
   _startAncestors(pp.parentId);
-}
-
-void _pauseAncestorsIfNeeded(MobjID? parentId) {
-  if (parentId == null) return;
-  final parentMobj = Mobj.seekTypedAlreadyLoaded(parentId, TimerDataType());
-  if (parentMobj == null) return;
-  final pp = parentMobj.peek();
-  if (pp == null || !pp.isRunning) return;
-
-  switch (pp.kind) {
-    case TimerKind.loop:
-    case TimerKind.series:
-      parentMobj.value = pp.toggleRunning(reset: true);
-      _pauseRunningChildren(pp, reset: true);
-    case TimerKind.parallelStartJustified:
-      if (!pp.children.any(
-        (id) => Mobj.getAlreadyLoaded(id, TimerDataType()).peek()!.isRunning,
-      )) {
-        parentMobj.value = pp.toggleRunning(reset: true);
-      } else {
-        return;
-      }
-    default:
-      return;
-  }
-  _pauseAncestorsIfNeeded(pp.parentId);
 }
 
 /// Whether the timer should be deleted automatically. Note, checks by `value` so will susbcribe if called in an effect.
@@ -1736,7 +1712,7 @@ class TimerState extends TimerBaseState<Timer> {
       vsync: this,
     );
     _selectedUnderlineAnimation = AnimationController(
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 120),
       vsync: this,
     );
     _completedRecentlyAnimation = AnimationController(
@@ -1835,7 +1811,7 @@ class TimerState extends TimerBaseState<Timer> {
     Widget selectionUnderline = AnimatedBuilder(
       animation: _selectedUnderlineAnimation,
       builder: (context, child) {
-        final progress = Curves.easeOut.transform(
+        final progress = Curves.easeInOut.transform(
           _selectedUnderlineAnimation.value,
         );
         final underlineHeight = makoLineThickness;
@@ -1866,14 +1842,16 @@ class TimerState extends TimerBaseState<Timer> {
               vertical: -underlineHeight / 2,
               horizontal: -(underlineHeight / 2 + 3),
             ),
-            child: FractionallySizedBox(
-              alignment: Alignment.centerLeft,
-              widthFactor: progress,
-              child: Container(
-                height: underlineHeight / 2,
-                decoration: BoxDecoration(
-                  color: mt.foreBackColor.withAlpha(128),
-                  borderRadius: BorderRadius.circular(underlineHeight * 1.5),
+            child: Opacity(
+              opacity: progress,
+              child: Transform.scale(
+                scale: lerp(0.7, 1.0, progress),
+                child: Container(
+                  height: underlineHeight / 2,
+                  decoration: BoxDecoration(
+                    color: mt.foreBackColor.withAlpha(128),
+                    borderRadius: BorderRadius.circular(underlineHeight * 1.5),
+                  ),
                 ),
               ),
             ),
@@ -3122,9 +3100,9 @@ class DragActionRingState extends State<DragActionRing>
       widget.radialActivatorPositions.length,
       (_) => LabelSpring(
         vsync: this,
-        kickSpeed: 10,
+        kickSpeed: 18,
         delay: Duration(milliseconds: 300),
-        spring: SpringDescription.withDampingRatio(mass: 1, stiffness: 250),
+        spring: SpringDescription.withDampingRatio(mass: 1, stiffness: 330),
       ),
     );
     selectionAnimations = List.generate(
@@ -5073,6 +5051,7 @@ class TimerScreenState extends State<TimerScreen>
     if (parent != null && parent.peek() != null) {
       writeBackChildren(parent, childrenOf(parent).toList()..remove(ki));
     }
+    mobj.value = mobj.peek()!.withChanges(parentId: binListID);
     // shelve the whole subtree: kept in the db but not preloaded next launch,
     // and append to the bin (newest last, matching how the timer list appends
     // new timers so the tray lays them out the same way)
@@ -5670,7 +5649,7 @@ TextStyle headingTextStyle(ThemeData theme, {bool fade = false}) => TextStyle(
       //     0.3,
       //   )
       : theme.colorScheme.onSurfaceVariant,
-  fontSize: 19,
+  fontSize: 24,
 );
 
 Widget headingBand({
@@ -6817,54 +6796,67 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
     return Scaffold(
       backgroundColor: headingBackground,
       resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              headingBand(
-                theme: theme,
-                label: headingBandLabel(
-                  theme: theme,
-                  icon: Icons.delete_outline,
-                  heroTag: 'trash-bin-icon',
-                  title: 'Trash',
-                ),
-                height:
-                    halfScreenHeight(context) +
-                    MediaQuery.of(context).viewPadding.top,
-                background: headingBackground,
-              ),
-              Expanded(
-                child: Container(
-                  color: contentBackground,
-                  // SelfRemovalHost is the overlay a restored timer is lifted
-                  // into to play its exit animation; AnimoveFrame lets the
-                  // remaining timers slide to fill the gap (their Animove
-                  // wrappers need a frame ancestor).
-                  child: SelfRemovalHost(
-                    key: ephemeralAnimationLayer,
-                    builder: (overlay, context) => Stack(
-                      children: [
-                        Padding(
-                          // vertical breathing room around the tray, echoing the
-                          // space the TimerScreen leaves above/below its timers
-                          padding: const EdgeInsets.symmetric(
-                            vertical: timerGap,
-                          ),
-                          child: AnimoveFrame(child: _buildTray(theme)),
+      body: ConstrainedBox(
+        constraints: BoxConstraints.expand(),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: SingleChildScrollView(
+                reverse: true,
+                child: AnimoveFrame(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      headingBand(
+                        theme: theme,
+                        label: headingBandLabel(
+                          theme: theme,
+                          icon: Icons.delete_outline,
+                          heroTag: 'trash-bin-icon',
+                          title: 'Trash',
                         ),
-                        ...overlay,
-                      ],
-                    ),
+                        height:
+                            halfScreenHeight(context) +
+                            MediaQuery.of(context).viewPadding.top,
+                        background: headingBackground,
+                      ),
+                      // full width so the tray's Align can place the timers
+                      // left/right-handed, but only as tall as its contents — the
+                      // whole page (heading included) is what scrolls.
+                      Container(
+                        width: double.infinity,
+                        color: contentBackground,
+                        // SelfRemovalHost is the overlay a restored timer is lifted
+                        // into to play its exit animation; AnimoveFrame lets the
+                        // remaining timers slide to fill the gap (their Animove
+                        // wrappers need a frame ancestor).
+                        child: SelfRemovalHost(
+                          key: ephemeralAnimationLayer,
+                          builder: (overlay, context) => Stack(
+                            children: [
+                              Padding(
+                                // vertical breathing room around the tray, echoing the
+                                // space the TimerScreen leaves above/below its timers
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: timerGap,
+                                ),
+                                child: _buildTray(theme),
+                              ),
+                              ...overlay,
+                            ],
+                          ),
+                        ),
+                      ),
+                      BackNavBottomGutter(background: headingBackground),
+                    ],
                   ),
                 ),
               ),
-              BackNavBottomGutter(background: headingBackground),
-            ],
-          ),
-          CornerBackButton(background: headingBackground),
-          StatusBarScrim(background: headingBackground),
-        ],
+            ),
+            CornerBackButton(background: headingBackground),
+            StatusBarScrim(background: headingBackground),
+          ],
+        ),
       ),
     );
   }

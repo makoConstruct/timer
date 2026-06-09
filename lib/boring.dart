@@ -19,7 +19,6 @@ import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/size_reporter.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
-import 'package:screen_corner_radius/screen_corner_radius.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:vibration/vibration.dart';
 import 'package:vibration/vibration_presets.dart';
@@ -2054,8 +2053,8 @@ class CircularRevealRoute<T> extends PageRoute<T>
     required this.builder,
     this.buttonCenter,
     this.iconOriginKey,
-    Duration transitionDuration = const Duration(milliseconds: 400),
-    Duration reverseTransitionDuration = const Duration(milliseconds: 300),
+    Duration transitionDuration = const Duration(milliseconds: 300),
+    Duration reverseTransitionDuration = const Duration(milliseconds: 270),
   }) : _transitionDuration = transitionDuration,
        _reverseTransitionDuration = reverseTransitionDuration;
 
@@ -2603,37 +2602,41 @@ class _CircularRevealRouteTransitionState
             },
           ),
         ),
-        AnimatedBuilder(
-          animation: widget.animation,
-          builder: (context, child) {
-            final screenSize = MediaQuery.of(context).size;
-            final fraction = Curves.easeOut.transform(
-              unlerpUnit(0.07, 1.0, widget.animation.value),
-            );
-            if (fraction == 1.0) {
-              return child!;
-            }
-            final centerAlignment = Alignment(
-              (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
-              (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
-            );
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: widget.animation,
+            builder: (context, child) {
+              final screenSize = MediaQuery.of(context).size;
+              final fraction = Curves.easeOut.transform(
+                unlerpUnit(0.07, 1.0, widget.animation.value),
+              );
+              // if (fraction == 1.0) {
+              //   return child!;
+              // }
+              final centerAlignment = Alignment(
+                (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
+                (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
+              );
 
-            return ClipRect(
-              child: ShaderMask(
-                shaderCallback: (Rect bounds) {
-                  return createRadialRevealShader(
-                    bounds: bounds,
-                    center: centerAlignment,
-                    fraction: fraction,
-                    fuzzyEdgeWidth: 20.0,
-                  );
-                },
-                blendMode: BlendMode.dstIn,
-                child: child,
-              ),
-            );
-          },
-          child: widget.child,
+              return ClipRect(
+                child: ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return createRadialRevealShader(
+                      bounds: bounds,
+                      center: centerAlignment,
+                      fraction: fraction,
+                      fuzzyEdgeWidth: 20.0,
+                    );
+                  },
+                  // no shader if complete
+                  // blendMode: fraction == 1.0 ? BlendMode.dst: BlendMode.dstIn,
+                  blendMode: BlendMode.dstIn,
+                  child: child,
+                ),
+              );
+            },
+            child: widget.child,
+          ),
         ),
       ],
     );
@@ -3335,7 +3338,7 @@ class MakoThemeData {
             foreBackColor: theme.colorScheme.surfaceContainerLowest,
             reducedProminenceColor: lightenColor(
               theme.colorScheme.onSurface,
-              0.5,
+              0.66,
             ),
             lowestIndentColor: darkenColor(
               theme.colorScheme.surfaceContainerHighest,
@@ -3746,16 +3749,16 @@ class HintToast extends StatefulWidget {
   State<HintToast> createState() => _HintToastState();
 }
 
-/// Created as a way of producing show conditions for hints that're shown one at a time, in sequence, each one until its underlying show condition is falsified (or, until the user takes the action that demonstrates that they've understood the lesson of the hint, and so don't need to be shown it any more).
-Computed<bool> addToSequence<T>(
+/// A way of producing show conditions for hints that're shown one at a time, in sequence, each one until its underlying show condition turns false (ie, until the user takes the action that demonstrates that they've understood the lesson of the hint, so don't need to be shown it any more).
+Computed<bool> addToSequence(
   Signal<int> sequenceCounter,
-  List<Function()> cleanups,
+  List<Function()> effectDisposers,
   int ni,
   ReadonlySignal<bool> showCondition, {
   ReadonlySignal<bool>? urgentShow,
 }) {
   // advance the sequence counter when our condition is complete and the sequence counter is with us
-  cleanups.add(
+  effectDisposers.add(
     effect(() {
       if (sequenceCounter.value == ni && !showCondition.value) {
         sequenceCounter.value += 1;
@@ -4501,10 +4504,14 @@ class HamburgerIconPainter extends CustomPainter {
     required this.color,
     required this.lineWidthp,
     required this.radiusp,
+    this.hardEdge = false,
   });
   final Color color;
   final double lineWidthp;
   final double radiusp;
+
+  /// Whether the bars use a square cap (true) or a round cap (false).
+  final bool hardEdge;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -4513,7 +4520,7 @@ class HamburgerIconPainter extends CustomPainter {
     final lineWidth = radius * lineWidthp;
     final paint = Paint()
       ..color = color
-      ..strokeCap = StrokeCap.square
+      ..strokeCap = hardEdge ? StrokeCap.square : StrokeCap.round
       ..strokeWidth = lineWidth;
     final x0 = size.width / 2 - radius;
     final x1 = size.width / 2 + radius;
@@ -4528,7 +4535,8 @@ class HamburgerIconPainter extends CustomPainter {
   bool shouldRepaint(covariant HamburgerIconPainter oldDelegate) =>
       oldDelegate.color != color ||
       oldDelegate.lineWidthp != lineWidthp ||
-      oldDelegate.radiusp != radiusp;
+      oldDelegate.radiusp != radiusp ||
+      oldDelegate.hardEdge != hardEdge;
 }
 
 /// A back chevron rendered as line art — a sideways "v" (`<`) of the given
@@ -4593,9 +4601,12 @@ class ChevronBackIcon extends StatelessWidget {
 
 /// actually only renders two bars rather than 3
 class HamburgerIcon extends StatelessWidget {
-  const HamburgerIcon({super.key, this.color});
+  const HamburgerIcon({super.key, this.color, this.hardEdge = false});
   // todo: remove
   final Color? color;
+
+  /// Whether the bars use a square cap (true) or a round cap (false).
+  final bool hardEdge;
 
   @override
   Widget build(BuildContext context) {
@@ -4607,6 +4618,7 @@ class HamburgerIcon extends StatelessWidget {
             Theme.of(context).colorScheme.onSurface,
         radiusp: 0.36,
         lineWidthp: 0.2,
+        hardEdge: hardEdge,
       ),
     );
   }
