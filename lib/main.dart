@@ -17,6 +17,7 @@ import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:improved_wrap/improved_wrap.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -959,6 +960,13 @@ Future<ScreenRadius> _loadCornerRadius() async {
 
 ScreenRadius getCachedCornerRadius() =>
     _cachedCornerRadius ?? defaultCornerRadius;
+
+double getReasonableAestheticBottomCornerRadius() {
+  const double def = 30;
+  double r() =>
+      max(_cachedCornerRadius!.bottomLeft, _cachedCornerRadius!.bottomRight);
+  return _cachedCornerRadius != null && r() > def ? r() : def;
+}
 
 class TimersApp extends StatefulWidget {
   const TimersApp({super.key});
@@ -4409,7 +4417,7 @@ class TimerScreenState extends State<TimerScreen>
         Navigator.push(
           context,
           CircularRevealRoute(
-            builder: (context) => SettingsScreen(flipBackgroundColors: false),
+            builder: (context) => SettingsScreen(),
             iconOriginKey: configButtonKey,
           ),
         );
@@ -4420,7 +4428,8 @@ class TimerScreenState extends State<TimerScreen>
       rect: controlGridBound(
         padLandscape ? Offset(-4, 0) : Offset(-3, 0),
         padLandscape ? Size(4, 3) : Size(3, 4),
-      ).deflate(backingDeflation),
+      ),
+      // ).deflate(backingDeflation),
       child: Container(
         constraints: BoxConstraints.expand(),
         decoration: BoxDecoration(
@@ -4799,17 +4808,16 @@ class TimerScreenState extends State<TimerScreen>
                                   child: SingleChildScrollView(
                                     controller: timersScroller,
                                     reverse: true,
-                                    child: Column(
-                                      children: [
-                                        SizedBox(
-                                          height:
-                                              screenSize.height -
-                                              controlsh -
-                                              timerHeight,
-                                        ),
-                                        timersWidget,
-                                        SizedBox(height: controlsh),
-                                      ],
+                                    child: Padding(
+                                      padding: EdgeInsets.only(
+                                        top:
+                                            screenSize.height -
+                                            controlsh -
+                                            timerHeight -
+                                            timerGap / 2,
+                                        bottom: controlsh + timerGap / 2,
+                                      ),
+                                      child: timersWidget,
                                     ),
                                   ),
                                 ),
@@ -5616,23 +5624,6 @@ double halfScreenHeight(BuildContext context) {
 //   return mq.size.width;
 // }
 
-(Color, Color) maybeFlippedBackgroundColors(
-  ThemeData theme,
-  bool flipBackgroundColors,
-) {
-  if (flipBackgroundColors) {
-    return (
-      theme.colorScheme.surfaceContainerLow,
-      theme.colorScheme.surfaceContainerLowest,
-    );
-  } else {
-    return (
-      theme.colorScheme.surfaceContainerLowest,
-      theme.colorScheme.surfaceContainerLow,
-    );
-  }
-}
-
 // Shared style/structure between the settings top title, the settings section
 // headings, and the info sub-page (About, How it was made) headers. The label
 // sits at the bottom-left of a band of `background`, its left edge aligned with
@@ -5642,14 +5633,17 @@ const headingTitleBottomPadding = 14.0;
 
 TextStyle headingTextStyle(ThemeData theme, {bool fade = false}) => TextStyle(
   color: fade
-      ? MakoThemeData.fromTheme(theme).reducedProminenceColor
+      // ? MakoThemeData.fromTheme(theme).reducedProminenceColor
+      ? theme.colorScheme.onSurface
       // lerpColor(
       //     theme.colorScheme.onSurfaceVariant,
       //     theme.colorScheme.surface,
       //     0.3,
       //   )
+      // : theme.colorScheme.onSurfaceVariant,
       : theme.colorScheme.onSurfaceVariant,
-  fontSize: 24,
+  fontWeight: FontWeight.w800,
+  // fontSize: 24,
 );
 
 Widget headingBand({
@@ -5705,13 +5699,10 @@ class CornerBackButton extends StatelessWidget {
       child: SafeArea(
         child: Watch((context) {
           final isRightHanded = isRightHandedMobj.value ?? true;
-          final corners = getCachedCornerRadius();
+          final screenCorner = getReasonableAestheticBottomCornerRadius();
           // Match the background's nearest corner to the phone's screen
           // corner so they sit concentrically, shrunk by the gap between
           // the screen edge and the background.
-          final screenCorner = isRightHanded
-              ? corners.bottomLeft
-              : corners.bottomRight;
           final backgroundCornerRadius = screenCorner - backNavGap;
           return AnimatedAlign(
             duration: const Duration(milliseconds: 300),
@@ -5876,17 +5867,10 @@ Widget markdownPageSliver(ThemeData theme, String? md) => SliverPadding(
 /// [StatusBarScrim]. The page's own content [slivers] sit between the title band
 /// and the bottom gutter.
 class InfoScaffold extends StatelessWidget {
-  final bool flipBackgroundColors;
-
   /// Heading-band label — usually [headingBandLabel] or a plain [Text].
   final Widget title;
   final List<Widget> slivers;
-  const InfoScaffold({
-    super.key,
-    required this.title,
-    required this.slivers,
-    this.flipBackgroundColors = false,
-  });
+  const InfoScaffold({super.key, required this.title, required this.slivers});
 
   @override
   Widget build(BuildContext context) {
@@ -5894,10 +5878,9 @@ class InfoScaffold extends StatelessWidget {
     // Page / heading band / gutter use the section-header colour (so short
     // pages never reveal a mismatched colour below the gutter); the content
     // sits on the contrasting content colour so it stands out against them.
-    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
-      theme,
-      flipBackgroundColors,
-    );
+    final mako = MakoThemeData.fromTheme(theme);
+    final backgroundColorA = mako.menuSurfaceFore;
+    final backgroundColorB = mako.menuSurfaceBack;
     return Scaffold(
       backgroundColor: backgroundColorB,
       body: Stack(
@@ -5932,8 +5915,7 @@ class InfoScaffold extends StatelessWidget {
 }
 
 class SettingsScreen extends StatefulWidget {
-  final bool flipBackgroundColors;
-  const SettingsScreen({super.key, this.flipBackgroundColors = false});
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -5956,21 +5938,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (contentBackground, headingBackground) = maybeFlippedBackgroundColors(
-      theme,
-      widget.flipBackgroundColors,
-    );
-    final listItemPadding = const EdgeInsets.symmetric(
-      horizontal: 16.0,
-      vertical: 8.0,
-    );
-
-    Widget trailing(Widget child) =>
-        SizedBox(width: 40.0, child: Center(child: child));
+    final mako = MakoThemeData.fromTheme(theme);
+    final contentBackground = mako.menuSurfaceFore;
+    final headingBackground = mako.menuSurfaceBack;
+    // final listItemPadding = const EdgeInsets.symmetric(
+    //   horizontal: 16.0,
+    //   vertical: 8.0,
+    // );
+    final listItemPadding = null;
 
     const sectionHeadingHeight = 80.0;
 
-    Widget setupTile = ListTile(
+    Widget setupTile = MenuTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
       subtitle: Text(
         'Resume setup',
@@ -5992,31 +5971,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       // Page background is the section-header colour (so short content / the
       // area below the bottom gutter never reveals a mismatched colour); the
-      // tiles carry the contrasting content colour instead — see ListTileTheme.
+      // rounded section cards carry the contrasting content colour instead.
       backgroundColor: headingBackground,
       resizeToAvoidBottomInset: false,
-      body: ListTileTheme(
-        data: ListTileThemeData(tileColor: contentBackground),
-        child: Stack(
-          children: [
-            CustomScrollView(
-              controller: _scrollController,
-              slivers: [
-                // Title band. Scrolls away with the content (it is not pinned)
-                // and shares its structure with the section headings below.
-                SliverToBoxAdapter(
-                  child: headingBand(
-                    theme: theme,
-                    label: Text('Settings'),
-                    height:
-                        halfScreenHeight(context) +
-                        MediaQuery.of(context).viewPadding.top,
-                    background: headingBackground,
-                    fade: true,
-                  ),
+      body: Stack(
+        children: [
+          CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              // Title band. Scrolls away with the content (it is not pinned)
+              // and shares its structure with the section headings below.
+              SliverToBoxAdapter(
+                child: headingBand(
+                  theme: theme,
+                  label: Text('Settings'),
+                  height:
+                      halfScreenHeight(context) +
+                      MediaQuery.of(context).viewPadding.top,
+                  background: headingBackground,
+                  fade: true,
                 ),
-                SliverList(
-                  delegate: SliverChildListDelegate([
+              ),
+              RoundedSectionSliver(
+                color: contentBackground,
+                padding: EdgeInsets.zero,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                     Builder(
                       builder: (context) {
                         final padLandscapeMobj = Mobj.getAlreadyLoaded(
@@ -6027,7 +6008,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           () => padLandscapeMobj.value ?? false,
                           autoDispose: true,
                         );
-                        return ListTile(
+                        return MenuTile(
                           title: Text(
                             'Numpad orientation',
                             style: theme.textTheme.bodyLarge,
@@ -6042,81 +6023,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                           ),
-                          trailing: trailing(
-                            BoolSignalTween(
-                              signal: padLandscapeNonNull,
-                              duration: Duration(milliseconds: 600),
-                              // duration: Duration(milliseconds: 190),
-                              builder: (context, progress, _) {
-                                final longDimension = 22 / 4 * 3;
-                                final shortDimension = 22.0;
-                                final hpu = 0.37;
-                                final h = lerp(
-                                  shortDimension,
-                                  longDimension,
-                                  Curves.easeInOutCubic.transform(
-                                    unlerpUnit(0, hpu, progress),
-                                  ),
-                                );
-                                final w = lerp(
-                                  longDimension,
-                                  shortDimension,
-                                  Curves.easeInOutCubic.transform(
-                                    unlerpUnit(1 - hpu, 1, progress),
-                                  ),
-                                );
-                                final movementp = Curves.easeInOutQuad
-                                    .transform(1 - progress);
-                                final centeredInset =
-                                    (longDimension - shortDimension) / 2;
-                                return SizedBox(
-                                  width: longDimension,
-                                  height: longDimension,
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      Positioned(
-                                        width: w,
-                                        height: h,
-                                        top: lerp(0, centeredInset, movementp),
-                                        right: lerp(
-                                          centeredInset,
-                                          0,
-                                          movementp,
-                                        ),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: theme.colorScheme.onSurface,
-                                            borderRadius: BorderRadius.circular(
-                                              4,
-                                            ),
+                          trailing: BoolSignalTween(
+                            signal: padLandscapeNonNull,
+                            duration: Duration(milliseconds: 600),
+                            // duration: Duration(milliseconds: 190),
+                            builder: (context, progress, _) {
+                              final longDimension = 22 / 4 * 3;
+                              final shortDimension = 22.0;
+                              final hpu = 0.37;
+                              final h = lerp(
+                                shortDimension,
+                                longDimension,
+                                Curves.easeInOutCubic.transform(
+                                  unlerpUnit(0, hpu, progress),
+                                ),
+                              );
+                              final w = lerp(
+                                longDimension,
+                                shortDimension,
+                                Curves.easeInOutCubic.transform(
+                                  unlerpUnit(1 - hpu, 1, progress),
+                                ),
+                              );
+                              final movementp = Curves.easeInOutQuad.transform(
+                                1 - progress,
+                              );
+                              final centeredInset =
+                                  (longDimension - shortDimension) / 2;
+                              return SizedBox(
+                                width: longDimension,
+                                height: longDimension,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Positioned(
+                                      width: w,
+                                      height: h,
+                                      top: lerp(0, centeredInset, movementp),
+                                      right: lerp(centeredInset, 0, movementp),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: theme.colorScheme.onSurface,
+                                          borderRadius: BorderRadius.circular(
+                                            4,
                                           ),
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                );
-                                // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
-                                // return SizedBox(
-                                //   width: lerp(
-                                //     longDimension,
-                                //     shortDimension,
-                                //     Curves.easeIn.transform(progress),
-                                //   ),
-                                //   height: lerp(
-                                //     shortDimension,
-                                //     longDimension,
-                                //     Curves.easeOut.transform(progress),
-                                //   ),
-                                //   child: Container(
-                                //     decoration: BoxDecoration(
-                                //       color: theme.colorScheme.primary,
-                                //       borderRadius: BorderRadius.circular(4),
-                                //     ),
-                                //   ),
-                                // );
-                              },
-                            ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
+                              // return SizedBox(
+                              //   width: lerp(
+                              //     longDimension,
+                              //     shortDimension,
+                              //     Curves.easeIn.transform(progress),
+                              //   ),
+                              //   height: lerp(
+                              //     shortDimension,
+                              //     longDimension,
+                              //     Curves.easeOut.transform(progress),
+                              //   ),
+                              //   child: Container(
+                              //     decoration: BoxDecoration(
+                              //       color: theme.colorScheme.primary,
+                              //       borderRadius: BorderRadius.circular(4),
+                              //     ),
+                              //   ),
+                              // );
+                            },
                           ),
                           onTap: () {
                             padLandscapeMobj.value = !padLandscapeMobj.value!;
@@ -6130,7 +6106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (context) {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
-                        return ListTile(
+                        return MenuTile(
                           title: Text(
                             'Alarm sound',
                             style: theme.textTheme.bodyLarge,
@@ -6146,18 +6122,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             );
                           }),
-                          trailing: trailing(
-                            SizedBox(
-                              width: 26,
-                              height: 26,
-                              child: Hero(
-                                tag: 'alarm-sound-icon',
-                                child: ScalingAspectRatio(
-                                  child: Icon(
-                                    Icons.music_note,
-                                    key: hereIconKey,
-                                    color: theme.colorScheme.primary,
-                                  ),
+                          trailing: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'alarm-sound-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.music_note,
+                                  key: hereIconKey,
+                                  color: theme.colorScheme.primary,
                                 ),
                               ),
                             ),
@@ -6166,11 +6140,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.push(
                               context,
                               CircularRevealRoute(
-                                builder: (context) => AlarmSoundPickerScreen(
-                                  iconKey: iconKey,
-                                  flipBackgroundColors:
-                                      !widget.flipBackgroundColors,
-                                ),
+                                builder: (context) =>
+                                    AlarmSoundPickerScreen(iconKey: iconKey),
                                 buttonCenter: widgetCenter(hereIconKey),
                                 iconOriginKey: iconKey,
                               ),
@@ -6213,7 +6184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         buttonScaleDialOnID,
                         BoolType(),
                       );
-                      return ListTile(
+                      return MenuTile(
                         title: Text(
                           'Button size',
                           style: theme.textTheme.bodyLarge,
@@ -6242,7 +6213,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         BoolType(),
                       );
                       final isRightHanded = isRightHandedMobj.value ?? true;
-                      return ListTile(
+                      return MenuTile(
                         title: Text(
                           '${isRightHanded ? 'Right' : 'Left'}-handed mode',
                           style: theme.textTheme.bodyLarge,
@@ -6264,26 +6235,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         // textColor: Colors.red,
                         // hoverColor: Colors.red,
                         // splashColor: Colors.black,
-                        trailing: trailing(
-                          TweenAnimationBuilder<double>(
-                            tween: Tween(
-                              begin: isRightHanded ? -1.0 : 1.0,
-                              end: isRightHanded ? -1.0 : 1.0,
-                            ),
-                            duration: Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                            builder: (context, scaleX, child) {
-                              return Transform.scale(
-                                scaleX: scaleX,
-                                child: child,
-                              );
-                            },
-                            child: Transform.rotate(
-                              angle: 45 * pi / 180, // 45 degrees clockwise
-                              child: Icon(
-                                Icons.back_hand_rounded,
-                                color: theme.colorScheme.onSurface,
-                              ),
+                        trailing: TweenAnimationBuilder<double>(
+                          tween: Tween(
+                            begin: isRightHanded ? -1.0 : 1.0,
+                            end: isRightHanded ? -1.0 : 1.0,
+                          ),
+                          duration: Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          builder: (context, scaleX, child) {
+                            return Transform.scale(
+                              scaleX: scaleX,
+                              child: child,
+                            );
+                          },
+                          child: Transform.rotate(
+                            angle: 45 * pi / 180, // 45 degrees clockwise
+                            child: Icon(
+                              Icons.back_hand_rounded,
+                              color: theme.colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -6300,7 +6269,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                       final padVerticallyAscending =
                           padVerticallyAscendingMobj.value ?? false;
-                      return ListTile(
+                      return MenuTile(
                         title: Text(
                           'Numpad type',
                           style: theme.textTheme.bodyLarge,
@@ -6313,11 +6282,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        trailing: trailing(
-                          NumpadTypeIndicator(
-                            isAscending: padVerticallyAscending,
-                            width: 36,
-                          ),
+                        trailing: NumpadTypeIndicator(
+                          isAscending: padVerticallyAscending,
+                          width: 36,
                         ),
                         onTap: () {
                           padVerticallyAscendingMobj.value =
@@ -6326,36 +6293,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         contentPadding: listItemPadding,
                       );
                     }),
-                    headingBand(
-                      theme: theme,
-                      label: Text('Info'),
-                      height: sectionHeadingHeight,
-                      background: headingBackground,
-                      fade: true,
-                    ),
+                  ],
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: headingBand(
+                  theme: theme,
+                  label: Text('Info'),
+                  height: sectionHeadingHeight,
+                  background: headingBackground,
+                  fade: true,
+                ),
+              ),
+              RoundedSectionSliver(
+                color: contentBackground,
+                padding: EdgeInsets.zero,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                     Builder(
                       builder: (context) {
                         // Need a Builder to get the correct context for finding the icon's position
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
-                        return ListTile(
+                        return MenuTile(
                           title: Text(
                             'This app',
                             style: theme.textTheme.bodyLarge,
                           ),
-                          trailing: trailing(
-                            SizedBox(
-                              width: 26,
-                              height: 26,
-                              child: Hero(
-                                tag: 'about-icon',
-                                child: ScalingAspectRatio(
-                                  child: Icon(
-                                    Icons.info_outline,
-                                    key: hereIconKey,
-                                    size: 10,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
+                          trailing: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'about-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.info_outline,
+                                  key: hereIconKey,
+                                  size: 10,
+                                  color: theme.colorScheme.onSurface,
                                 ),
                               ),
                             ),
@@ -6364,11 +6340,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.push(
                               context,
                               CircularRevealRoute(
-                                builder: (context) => AboutScreen(
-                                  iconKey: iconKey,
-                                  flipBackgroundColors:
-                                      !widget.flipBackgroundColors,
-                                ),
+                                builder: (context) =>
+                                    AboutScreen(iconKey: iconKey),
                                 buttonCenter: widgetCenter(hereIconKey),
                                 iconOriginKey: iconKey,
                               ),
@@ -6382,66 +6355,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (context) {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
-                        return ListTile(
-                          title: Text(
-                            'How it was made',
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                          trailing: trailing(
-                            SizedBox(
-                              width: 26,
-                              height: 26,
-                              child: Hero(
-                                tag: 'how-made-icon',
-                                child: ScalingAspectRatio(
-                                  child: Icon(
-                                    Icons.handyman_outlined,
-                                    key: hereIconKey,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              CircularRevealRoute(
-                                builder: (context) => HowMadeScreen(
-                                  iconKey: iconKey,
-                                  flipBackgroundColors:
-                                      !widget.flipBackgroundColors,
-                                ),
-                                buttonCenter: widgetCenter(hereIconKey),
-                                iconOriginKey: iconKey,
-                              ),
-                            );
-                          },
-                          contentPadding: listItemPadding,
-                        );
-                      },
-                    ),
-                    Builder(
-                      builder: (context) {
-                        final GlobalKey iconKey = GlobalKey();
-                        final hereIconKey = GlobalKey();
-                        return ListTile(
+                        return MenuTile(
                           title: Text(
                             'Thank the author',
                             style: theme.textTheme.bodyLarge,
                           ),
-                          trailing: trailing(
-                            SizedBox(
-                              width: 26,
-                              height: 26,
-                              child: Hero(
-                                tag: 'thank-author-icon',
-                                child: ScalingAspectRatio(
-                                  child: Icon(
-                                    Icons.heart_broken,
-                                    key: hereIconKey,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
+                          trailing: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'thank-author-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.heart_broken,
+                                  key: hereIconKey,
+                                  color: theme.colorScheme.onSurface,
                                 ),
                               ),
                             ),
@@ -6450,11 +6378,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.push(
                               context,
                               CircularRevealRoute(
-                                builder: (context) => ThankAuthorScreen(
-                                  iconKey: iconKey,
-                                  flipBackgroundColors:
-                                      !widget.flipBackgroundColors,
-                                ),
+                                builder: (context) =>
+                                    ThankAuthorScreen(iconKey: iconKey),
                                 buttonCenter: widgetCenter(hereIconKey),
                                 iconOriginKey: iconKey,
                               ),
@@ -6464,78 +6389,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       },
                     ),
-                    headingBand(
-                      theme: theme,
-                      label: Text('Extra'),
-                      height: sectionHeadingHeight,
-                      background: headingBackground,
-                      fade: true,
-                    ),
+                  ],
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: headingBand(
+                  theme: theme,
+                  label: Text('Extra'),
+                  height: sectionHeadingHeight,
+                  background: headingBackground,
+                  fade: true,
+                ),
+              ),
+              RoundedSectionSliver(
+                color: contentBackground,
+                padding: EdgeInsets.zero,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                     Builder(
                       builder: (context) {
                         final GlobalKey iconKey = GlobalKey();
                         Offset? tapPosition;
-                        return GestureDetector(
-                          onTapDown: (details) {
-                            tapPosition = details.globalPosition;
-                          },
-                          child: ListTile(
-                            title: Text(
-                              'Crank game',
-                              style: theme.textTheme.bodyLarge,
-                            ),
-                            subtitle: Text(
-                              "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            trailing: trailing(
-                              SizedBox(
-                                width: 26,
-                                height: 26,
-                                child: Hero(
-                                  tag: 'crank-game-icon',
-                                  child: ScalingAspectRatio(
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.rotate_right_rounded,
-                                          color: theme.colorScheme.onSurface,
-                                          size: 24,
-                                        ),
-                                        Positioned(
-                                          right: 0,
-                                          bottom: 0,
-                                          child: Icon(
-                                            Icons.sports_esports,
-                                            color: theme.colorScheme.onSurface,
-                                            size: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                CircularRevealRoute(
-                                  builder: (context) => CrankGameScreen(
-                                    iconKey: iconKey,
-                                    flipBackgroundColors:
-                                        !widget.flipBackgroundColors,
-                                  ),
-                                  buttonCenter: tapPosition ?? Offset.zero,
-                                  iconOriginKey: iconKey,
-                                ),
-                              );
-                            },
-                            contentPadding: listItemPadding,
+                        return MenuTile(
+                          onTapUpGlobalPosition: (pos) => tapPosition = pos,
+                          title: Text(
+                            'Crank game',
+                            style: theme.textTheme.bodyLarge,
                           ),
+                          subtitle: Text(
+                            "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          trailing: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'crank-game-icon',
+                              child: ScalingAspectRatio(
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.rotate_right_rounded,
+                                      color: theme.colorScheme.onSurface,
+                                      size: 24,
+                                    ),
+                                    Positioned(
+                                      right: 0,
+                                      bottom: 0,
+                                      child: Icon(
+                                        Icons.sports_esports,
+                                        color: theme.colorScheme.onSurface,
+                                        size: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) =>
+                                    CrankGameScreen(iconKey: iconKey),
+                                buttonCenter: tapPosition ?? Offset.zero,
+                                iconOriginKey: iconKey,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
                         );
                       },
                     ),
@@ -6543,7 +6470,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (context) {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
-                        return ListTile(
+                        return MenuTile(
                           title: Text(
                             'Trash',
                             style: theme.textTheme.bodyLarge,
@@ -6554,18 +6481,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                          trailing: trailing(
-                            SizedBox(
-                              width: 26,
-                              height: 26,
-                              child: Hero(
-                                tag: 'trash-bin-icon',
-                                child: ScalingAspectRatio(
-                                  child: Icon(
-                                    Icons.delete_outline,
-                                    key: hereIconKey,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
+                          trailing: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Hero(
+                              tag: 'trash-bin-icon',
+                              child: ScalingAspectRatio(
+                                child: Icon(
+                                  Icons.delete_outline,
+                                  key: hereIconKey,
+                                  color: theme.colorScheme.onSurface,
                                 ),
                               ),
                             ),
@@ -6574,11 +6499,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.push(
                               context,
                               CircularRevealRoute(
-                                builder: (context) => BinScreen(
-                                  iconKey: iconKey,
-                                  flipBackgroundColors:
-                                      !widget.flipBackgroundColors,
-                                ),
+                                builder: (context) =>
+                                    BinScreen(iconKey: iconKey),
                                 buttonCenter: widgetCenter(hereIconKey),
                                 iconOriginKey: iconKey,
                               ),
@@ -6589,47 +6511,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       },
                     ),
 
-                    // abandoned on journey_game branch
-                    // ListTile(
-                    //   title: Text(
-                    //     'Journeying game',
-                    //     style: theme.textTheme.bodyLarge,
-                    //   ),
-                    //   subtitle: Text(
-                    //     "A world to wander.",
-                    //     style: theme.textTheme.bodyMedium?.copyWith(
-                    //       color: theme.colorScheme.onSurfaceVariant,
-                    //     ),
-                    //   ),
-                    //   trailing: trailing(
-                    //     Icon(
-                    //       Icons.explore_rounded,
-                    //       color: theme.colorScheme.onSurface,
-                    //       size: 24,
-                    //     ),
-                    //   ),
-                    //   onTap: () {
-                    //     Navigator.pushReplacement(
-                    //       context,
-                    //       CircularRevealRoute(
-                    //         builder: (context) => const JourneyingGameScreen(),
-                    //       ),
-                    //     );
-                    //   },
-                    //   contentPadding: listItemPadding,
-                    // ),
-
                     // if (!completedSetup) ...[
                     if (true) ...[setupTile],
-                    BackNavBottomGutter(background: headingBackground),
-                  ]),
+                  ],
                 ),
-              ],
-            ),
-            CornerBackButton(background: headingBackground),
-            StatusBarScrim(background: headingBackground),
-          ],
-        ),
+              ),
+              SliverToBoxAdapter(
+                child: BackNavBottomGutter(background: headingBackground),
+              ),
+            ],
+          ),
+          CornerBackButton(background: headingBackground),
+          StatusBarScrim(background: headingBackground),
+        ],
       ),
     );
   }
@@ -6644,9 +6538,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 /// [TimerBaseState.buildShell] and the restore-vs-play split keyed on
 /// [Mobj.isActive]).
 class BinScreen extends StatefulWidget {
-  final bool flipBackgroundColors;
   final GlobalKey? iconKey;
-  const BinScreen({super.key, this.iconKey, this.flipBackgroundColors = false});
+  const BinScreen({super.key, this.iconKey});
 
   @override
   State<BinScreen> createState() => BinScreenState();
@@ -6789,10 +6682,9 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (contentBackground, headingBackground) = maybeFlippedBackgroundColors(
-      theme,
-      widget.flipBackgroundColors,
-    );
+    final mako = MakoThemeData.fromTheme(theme);
+    final contentBackground = mako.menuSurfaceFore;
+    final headingBackground = mako.menuSurfaceBack;
     return Scaffold(
       backgroundColor: headingBackground,
       resizeToAvoidBottomInset: false,
@@ -6863,19 +6755,13 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
 }
 
 class ThankAuthorScreen extends StatelessWidget {
-  final bool flipBackgroundColors;
-  const ThankAuthorScreen({
-    super.key,
-    this.iconKey,
-    this.flipBackgroundColors = false,
-  });
+  const ThankAuthorScreen({super.key, this.iconKey});
   final GlobalKey? iconKey;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InfoScaffold(
-      flipBackgroundColors: flipBackgroundColors,
       title: headingBandLabel(
         theme: theme,
         icon: Icons.heart_broken,
@@ -6901,13 +6787,8 @@ class ThankAuthorScreen extends StatelessWidget {
 }
 
 class AboutScreen extends StatefulWidget {
-  final bool flipBackgroundColors;
   final GlobalKey? iconKey;
-  const AboutScreen({
-    super.key,
-    this.iconKey,
-    this.flipBackgroundColors = false,
-  });
+  const AboutScreen({super.key, this.iconKey});
 
   @override
   State<AboutScreen> createState() => _AboutScreenState();
@@ -6924,30 +6805,72 @@ class _AboutScreenState extends State<AboutScreen> {
     });
   }
 
+  final GlobalKey _howMadeIconKey = GlobalKey();
+  final GlobalKey _seeAlsoLinkKey = GlobalKey();
+  late final TapGestureRecognizer _howMadeRecognizer = TapGestureRecognizer()
+    ..onTap = _openHowMade;
+
+  @override
+  void dispose() {
+    _howMadeRecognizer.dispose();
+    super.dispose();
+  }
+
+  void _openHowMade() {
+    Navigator.push(
+      context,
+      CircularRevealRoute(
+        builder: (context) => HowMadeScreen(iconKey: _howMadeIconKey),
+        buttonCenter: widgetCenter(_seeAlsoLinkKey),
+        iconOriginKey: _howMadeIconKey,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InfoScaffold(
-      flipBackgroundColors: widget.flipBackgroundColors,
       title: headingBandLabel(
         theme: theme,
         icon: Icons.info_outline,
         heroTag: 'about-icon',
         title: "About Mako's Timer",
       ),
-      slivers: [markdownPageSliver(theme, _md)],
+      slivers: [
+        markdownPageSliver(theme, _md),
+        if (_md != null)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 24.0),
+            sliver: SliverToBoxAdapter(
+              child: Text.rich(
+                key: _seeAlsoLinkKey,
+                TextSpan(
+                  style: theme.textTheme.bodyMedium,
+                  children: [
+                    const TextSpan(text: 'See also: '),
+                    TextSpan(
+                      text: 'The Story of The Making of This App',
+                      style: TextStyle(
+                        color: theme.colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                      recognizer: _howMadeRecognizer,
+                    ),
+                    const TextSpan(text: '.'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
 
 class HowMadeScreen extends StatefulWidget {
-  final bool flipBackgroundColors;
   final GlobalKey? iconKey;
-  const HowMadeScreen({
-    super.key,
-    this.iconKey,
-    this.flipBackgroundColors = false,
-  });
+  const HowMadeScreen({super.key, this.iconKey});
 
   @override
   State<HowMadeScreen> createState() => _HowMadeScreenState();
@@ -6968,7 +6891,6 @@ class _HowMadeScreenState extends State<HowMadeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InfoScaffold(
-      flipBackgroundColors: widget.flipBackgroundColors,
       title: headingBandLabel(
         theme: theme,
         icon: Icons.handyman_outlined,
@@ -6981,8 +6903,6 @@ class _HowMadeScreenState extends State<HowMadeScreen> {
 }
 
 class AlarmSoundPickerScreen extends StatefulWidget {
-  final bool flipBackgroundColors;
-
   /// When true, the picker is choosing a per-timer sound override.
   /// It adds a "Default" entry and pops with the selected AudioInfo?
   /// (null = default). When false, it edits the global selectedAudioID Mobj.
@@ -6991,7 +6911,6 @@ class AlarmSoundPickerScreen extends StatefulWidget {
   const AlarmSoundPickerScreen({
     super.key,
     this.iconKey,
-    this.flipBackgroundColors = false,
     this.perTimerMode = false,
     this.initialPerTimerSelection,
   });
@@ -7131,14 +7050,17 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: theme.colorScheme.onSurface),
+          border: Border.all(
+            color: theme.colorScheme.onSurface,
+            width: makoLineThickness,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.add, size: 16, color: theme.colorScheme.onSurface),
             SizedBox(width: 4),
-            Text('Pick file…', style: theme.textTheme.bodyMedium),
+            Text('Pick file', style: theme.textTheme.bodyMedium),
           ],
         ),
       ),
@@ -7151,10 +7073,9 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     // Page background matches the heading band / section-header colour so short
     // lists don't reveal a mismatched content colour below the bottom gutter;
     // the sound chips use the contrasting content colour so they stand out.
-    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
-      theme,
-      widget.flipBackgroundColors,
-    );
+    final mako = MakoThemeData.fromTheme(theme);
+    final backgroundColorA = mako.menuSurfaceFore;
+    final backgroundColorB = mako.menuSurfaceBack;
 
     Widget section(
       String title,
@@ -7217,33 +7138,31 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         );
       }
 
-      return SliverToBoxAdapter(
+      return RoundedSectionSliver(
+        color: backgroundColorA,
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
           duration: totalDuration,
           curve: Interval(delayFraction, 1.0, curve: Curves.linear),
           builder: (context, value, child) =>
               Opacity(opacity: value, child: child!),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (title != null && title.isNotEmpty)
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
-                    child: Text(title, style: headingTextStyle(theme)),
-                  ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ...sounds.map((audio) => radioSelector(audio)),
-                    ...extraChildren,
-                  ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (title != null && title.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                  child: Text(title, style: headingTextStyle(theme)),
                 ),
-              ],
-            ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ...sounds.map((audio) => radioSelector(audio)),
+                  ...extraChildren,
+                ],
+              ),
+            ],
           ),
         ),
       );
@@ -7287,61 +7206,54 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                   ),
                 ),
                 if (!_loading) ...[
-                  // All the sound sections share one backgroundColorA container;
-                  // the chips inside flip to B to contrast against it.
-                  DecoratedSliver(
-                    decoration: BoxDecoration(color: backgroundColorA),
-                    sliver: SliverMainAxisGroup(
-                      slivers: [
-                        if (widget.perTimerMode)
-                          section('', [
-                            null,
-                          ], fadeDelay: Duration(milliseconds: 0)),
-                        if (_assetSounds.isNotEmpty)
-                          section(
-                            "Our Sounds",
-                            _assetSounds,
-                            fadeDelay: Duration(milliseconds: 0),
-                          ),
-                        if (_notificationSounds != null &&
-                            _notificationSounds!.isNotEmpty)
-                          section(
-                            'Phone Notification Sounds',
-                            _notificationSounds!,
-                            fadeDelay: Duration(milliseconds: 200),
-                          ),
-                        if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-                          section(
-                            'Device alarm sounds (long duration)',
-                            _alarmSounds!,
-                            fadeDelay: Duration(milliseconds: 100),
-                          ),
-                        if (_ringtoneSounds != null &&
-                            _ringtoneSounds!.isNotEmpty)
-                          section(
-                            'Device ringtones',
-                            _ringtoneSounds!,
-                            fadeDelay: Duration(milliseconds: 300),
-                          ),
-                        if (Platform.isAndroid)
-                          section(
-                            'From files',
-                            _pickedFiles,
-                            fadeDelay: Duration(milliseconds: 400),
-                            extraChildren: [
-                              _buildPickFileChip(theme, backgroundColorB),
-                            ],
-                          ),
-                        // Bottom breathing room inside the container, matching
-                        // the 16px gap above each section.
-                        SliverToBoxAdapter(
-                          child: Container(
-                            height: 16,
-                            decoration: BoxDecoration(color: backgroundColorA),
-                          ),
+                  // Each sound section is its own rounded card (backgroundColorA)
+                  // inset from the screen edges; the page (backgroundColorB) shows
+                  // between them, and the chips inside flip to B to contrast.
+                  SliverMainAxisGroup(
+                    slivers: [
+                      if (widget.perTimerMode)
+                        section('', [
+                          null,
+                        ], fadeDelay: Duration(milliseconds: 0)),
+                      if (_assetSounds.isNotEmpty)
+                        section(
+                          "Our Sounds",
+                          _assetSounds,
+                          fadeDelay: Duration(milliseconds: 0),
                         ),
-                      ],
-                    ),
+                      if (_notificationSounds != null &&
+                          _notificationSounds!.isNotEmpty)
+                        section(
+                          'Phone Notification Sounds',
+                          _notificationSounds!,
+                          fadeDelay: Duration(milliseconds: 200),
+                        ),
+                      if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+                        section(
+                          'Device alarm sounds (long duration)',
+                          _alarmSounds!,
+                          fadeDelay: Duration(milliseconds: 100),
+                        ),
+                      if (_ringtoneSounds != null &&
+                          _ringtoneSounds!.isNotEmpty)
+                        section(
+                          'Device ringtones',
+                          _ringtoneSounds!,
+                          fadeDelay: Duration(milliseconds: 300),
+                        ),
+                      if (Platform.isAndroid)
+                        section(
+                          'From files',
+                          _pickedFiles,
+                          fadeDelay: Duration(milliseconds: 400),
+                          extraChildren: [
+                            _buildPickFileChip(theme, backgroundColorB),
+                          ],
+                        ),
+                      // Bottom breathing room below the last card, matching the
+                      // 12px margin above each one.
+                      const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                    ],
                   ),
                   if (widget.perTimerMode)
                     SliverToBoxAdapter(

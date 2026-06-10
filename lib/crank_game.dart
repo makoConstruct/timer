@@ -2,8 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
-import 'package:makos_timer/main.dart'
-    show controlPadTextStyle, maybeFlippedBackgroundColors;
+import 'package:makos_timer/main.dart' show controlPadTextStyle;
 import 'package:makos_timer/mobj.dart';
 
 /// Overrides [controlPadTextStyle]’s `height` (1.71, for numeral vertical centering).
@@ -24,13 +23,11 @@ TextStyle _crankGameText(
 
 class CrankGameScreen extends StatefulWidget {
   final GlobalKey? iconKey;
-  final bool flipBackgroundColors;
   final bool byAngularSpeed;
 
   const CrankGameScreen({
     super.key,
     this.iconKey,
-    this.flipBackgroundColors = false,
     this.byAngularSpeed = false,
   });
 
@@ -273,10 +270,9 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final crankGameTheme = CrankGameTheme.fromContext(context);
-    final (backgroundColorA, backgroundColorB) = maybeFlippedBackgroundColors(
-      theme,
-      widget.flipBackgroundColors,
-    );
+    final mako = MakoThemeData.fromTheme(theme);
+    final backgroundColorA = mako.menuSurfaceFore;
+    final backgroundColorB = mako.menuSurfaceBack;
     final mq = MediaQuery.of(context);
     final screenWidth = mq.size.width;
     final screenHeight = mq.size.height;

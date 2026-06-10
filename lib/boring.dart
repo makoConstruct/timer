@@ -25,7 +25,8 @@ import 'package:vibration/vibration_presets.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
 
 import 'platform_audio.dart';
-import 'main.dart' show getCachedCornerRadius;
+import 'main.dart'
+    show getCachedCornerRadius, getReasonableAestheticBottomCornerRadius;
 
 const double tau = 2 * pi;
 const double backingIndicatorGap = 8.0;
@@ -3357,6 +3358,12 @@ class MakoThemeData {
           );
   }
 
+  /// The two background tones menu/settings-style screens use: content sits on
+  /// [menuSurfaceFore], the heading band / page chrome on the slightly raised
+  /// [menuSurfaceBack].
+  Color get menuSurfaceFore => midBackColor;
+  Color get menuSurfaceBack => lowestBackColor;
+
   Color timerculeHighlightBackground(double depth) {
     final highlightLevels = <Color>[foreBackColor, harderForeIndentColor];
     final depthi = depth.floor();
@@ -4617,7 +4624,7 @@ class HamburgerIcon extends StatelessWidget {
             IconTheme.of(context).color ??
             Theme.of(context).colorScheme.onSurface,
         radiusp: 0.36,
-        lineWidthp: 0.2,
+        lineWidthp: 0.3,
         hardEdge: hardEdge,
       ),
     );
@@ -4892,6 +4899,92 @@ class _RoundedCheckboxPainter extends CustomPainter {
       old.borderColor != borderColor;
 }
 
+/// A settings row laid out like a [ListTile] — optional [title] over [subtitle]
+/// on the left, optional [trailing] on the right, vertically centred with a
+/// minimum height — but driven by [InkButton] so the press feedback is our own
+/// [InkWelling] ink rather than Material's. Because that ink is painted by the
+/// InkButton itself (not registered with the nearest [Material] surface), these
+/// rows need no Material ancestor and their feedback can't leak onto the wrong
+/// canvas. [InkButton] wraps its child in an [IgnorePointer], so a [trailing]
+/// widget is display-only; the whole row toggles via [onTap].
+class MenuTile extends StatelessWidget {
+  final Widget? title;
+  final Widget? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  /// Receives the global tap position before [onTap] fires — used where the tap
+  /// point seeds a transition origin (e.g. a [CircularRevealRoute]).
+  final ValueChanged<Offset>? onTapUpGlobalPosition;
+  final EdgeInsetsGeometry? contentPadding;
+  const MenuTile({
+    super.key,
+    this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.onTapUpGlobalPosition,
+    this.contentPadding,
+  });
+
+  /// Side of the fixed, centred slot the [trailing] item is dropped into. Being
+  /// a fixed height it also holds the row open, and callers pass [trailing] bare
+  /// (no need to size or centre it themselves).
+  static const double trailingSlot = 64.0;
+
+  @override
+  Widget build(BuildContext context) {
+    // Vertical breathing room: keep top/bottom at least the horizontal inset so
+    // single-line rows aren't cramped (the [trailingSlot] height also holds the
+    // row open). The trailing item supplies its own end spacing via its slot, so
+    // no right inset is added to the text when a trailing is present.
+    final base = (contentPadding ?? const EdgeInsets.all(16)).resolve(
+      Directionality.of(context),
+    );
+    final side = max(base.left, base.right);
+    final textPadding = EdgeInsets.fromLTRB(
+      base.left,
+      max(base.top, side),
+      trailing == null ? base.right : 0.0,
+      max(base.bottom, side),
+    );
+    return InkButton(
+      backgroundColor: Colors.transparent,
+      // Rectangular clip so the ink stays within this row (matching a
+      // contained ListTile) rather than blooming into its neighbours.
+      borderRadius: BorderRadius.zero,
+      onTap: onTap,
+      onTapUpGlobalPosition: onTapUpGlobalPosition,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: trailingSlot),
+        child: Row(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: textPadding,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (title != null) title!,
+                    if (subtitle != null) subtitle!,
+                  ],
+                ),
+              ),
+            ),
+            if (trailing != null)
+              SizedBox(
+                width: trailingSlot,
+                height: trailingSlot,
+                child: Center(child: trailing!),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class RoundedCheckboxListTile extends StatelessWidget {
   const RoundedCheckboxListTile({
     super.key,
@@ -4910,19 +5003,14 @@ class RoundedCheckboxListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return MenuTile(
       title: title,
       subtitle: subtitle,
       contentPadding: contentPadding,
-      trailing: SizedBox(
-        width: 40.0,
-        child: Center(
-          child: RoundedCheckbox(
-            value: value,
-            onChanged: (v) => onChanged(v),
-            size: 24,
-          ),
-        ),
+      trailing: RoundedCheckbox(
+        value: value,
+        onChanged: (v) => onChanged(v),
+        size: 24,
       ),
       onTap: () => onChanged(!value),
     );
@@ -4965,5 +5053,58 @@ class _FutureSliverState<T> extends State<FutureSliver<T>> {
     final value = _value;
     if (value == null) return widget.loading;
     return widget.builder(context, value);
+  }
+}
+
+/// A section presented as a rounded card inset from the screen edges. The card
+/// is a [Material] with a [borderRadius] and `clipBehavior`, which is what makes
+/// it correct rather than a sliver clip: a [ListTile]'s ink (splash/highlight)
+/// paints on its nearest [Material] ancestor, so the card must *be* that
+/// ancestor for the ink to be clipped to the rounded corners — a sliver-level
+/// clip can't touch ink painted on a Material above it. Because [Material] is a
+/// box, the [child] is a box (wrapped in a [SliverToBoxAdapter] here); these
+/// sections are small, so that costs no meaningful laziness. [color] fills the
+/// card, [padding] insets the content, and [margin] is the gap to the screen
+/// edges and to the card above.
+class RoundedSectionSliver extends StatelessWidget {
+  final Widget child;
+  final Color color;
+
+  /// Corner radius of the card. Defaults to the screen's corner radius minus the
+  /// horizontal [margin], so the card's rounding sits concentric with the
+  /// rounded screen corners it's inset from.
+  final double? radius;
+  final EdgeInsetsGeometry margin;
+  final EdgeInsetsGeometry padding;
+  const RoundedSectionSliver({
+    super.key,
+    required this.child,
+    required this.color,
+    this.radius,
+    this.margin = const EdgeInsets.fromLTRB(12, 0, 12, 0),
+    this.padding = const EdgeInsets.all(16),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final horizontalInset = margin.resolve(Directionality.of(context)).left;
+    final cornerRadius = getReasonableAestheticBottomCornerRadius();
+    final screenRounding = max(
+      max(cornerRadius, cornerRadius),
+      max(cornerRadius, cornerRadius),
+    );
+    final r = radius ?? max(0.0, screenRounding - horizontalInset);
+    return SliverPadding(
+      padding: margin,
+      sliver: SliverToBoxAdapter(
+        child: Material(
+          type: MaterialType.canvas,
+          color: color,
+          borderRadius: BorderRadius.circular(r),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
+    );
   }
 }
