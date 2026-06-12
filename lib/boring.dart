@@ -907,6 +907,7 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   }
 
   /// (rise, fall)
+  @override
   (double, double) get value {
     final now = DateTime.now();
     double riseValue = 0.0;
@@ -2097,7 +2098,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
           scale = 1.0;
         } else {
           scale =
-              1.0 - Curves.easeIn.transform(secondaryAnimation.value) * 0.13;
+              1.0 - 0.13 * Curves.easeIn.transform(secondaryAnimation.value);
         }
 
         final revealOrigin =
@@ -2608,7 +2609,8 @@ class _CircularRevealRouteTransitionState
             animation: widget.animation,
             builder: (context, child) {
               final screenSize = MediaQuery.of(context).size;
-              final fraction = Curves.easeOut.transform(
+
+              final fraction = Curves.linear.transform(
                 unlerpUnit(0.07, 1.0, widget.animation.value),
               );
               // if (fraction == 1.0) {
@@ -3015,9 +3017,9 @@ class InkWelling extends StatefulWidget {
 
   /// Reverse the bloom iff the bloom is still visible (early cancel).
   void cancel() {
-    if (bloomController.value < 0.5) {
-      bloomController.reverse();
-    }
+    // if (bloomController.value < 0.5) {
+    //   bloomController.reverse();
+    // }
     fadeController.forward();
   }
 
@@ -3361,8 +3363,8 @@ class MakoThemeData {
   /// The two background tones menu/settings-style screens use: content sits on
   /// [menuSurfaceFore], the heading band / page chrome on the slightly raised
   /// [menuSurfaceBack].
-  Color get menuSurfaceFore => midBackColor;
-  Color get menuSurfaceBack => lowestBackColor;
+  Color get menuSurfaceFore => foreBackColor;
+  Color get menuSurfaceBack => midBackColor;
 
   Color timerculeHighlightBackground(double depth) {
     final highlightLevels = <Color>[foreBackColor, harderForeIndentColor];
@@ -3514,6 +3516,18 @@ T nesting<T>(List<T Function(T)> nestingLevels, T deepestChild) {
     result = builder(result);
   }
   return result;
+}
+
+List<T> intersperse<T>(T spacer, List<T> between) {
+  List<T> ret = [];
+  for (int i = 0; i < between.length - 1; ++i) {
+    ret.add(between[i]);
+    ret.add(spacer);
+  }
+  if (between.isNotEmpty) {
+    ret.add(between.last);
+  }
+  return ret;
 }
 
 /// Places [container] within padding of [shrunkBy], but positions [child]
@@ -3704,6 +3718,246 @@ class _RenderSignedPadding extends RenderShiftedBox {
     );
     size = c.constrain(Size(inset.horizontal + slotW, inset.vertical + slotH));
   }
+}
+
+/// Tells a child which outer edges of the enclosing [EvenPadColumn]/[EvenPadRow]
+/// it abuts. On the main axis that's position: in a column the leading child
+/// abuts the [top], the trailing child the [bottom]. On the cross axis it's the
+/// same for every child and follows `crossAxisAlignment`: a stretched column
+/// fills both [left] and [right], a `start`-aligned one only the leading side,
+/// a centered one neither.
+///
+/// The point: when you want a list to look evenly spaced, the end items usually
+/// want a little extra space beyond them. The usual fix (padding on the
+/// container) creates dead, unclickable space that looks wrong the moment the
+/// end item is highlighted, and it puts the spacing decision in a different
+/// place than the item. Instead, hand each item its edge-ness and let *it* pad
+/// itself, keeping the padding part of the (clickable, highlightable) item.
+/// Reporting the cross edges too means a child can absorb *all* of what would
+/// have been container padding, not just the end caps.
+@immutable
+class ExtraPadding {
+  final bool top;
+  final bool bottom;
+  final bool left;
+  final bool right;
+
+  const ExtraPadding({
+    this.top = false,
+    this.bottom = false,
+    this.left = false,
+    this.right = false,
+  });
+
+  static const none = ExtraPadding();
+
+  /// The inset for each *abutting* edge, zero elsewhere — handy as the
+  /// `padding` of the item itself. Each edge's amount is the most specific
+  /// param given for it: the per-edge [top]/[bottom]/[left]/[right] win, else
+  /// the per-axis [vertical]/[horizontal], else [all], else `0`. Supplying
+  /// overlapping params is fine — priority decides, no error — so
+  /// `resolve(all: 8, top: 16)` means 16 on top and 8 on the other abutting
+  /// edges, and `resolve(vertical: 8)` is end-caps-only (horizontal falls to 0).
+  EdgeInsets resolve({
+    double? all,
+    double? horizontal,
+    double? vertical,
+    double? top,
+    double? bottom,
+    double? left,
+    double? right,
+  }) => EdgeInsets.only(
+    top: this.top ? (top ?? vertical ?? all ?? 0) : 0,
+    bottom: this.bottom ? (bottom ?? vertical ?? all ?? 0) : 0,
+    left: this.left ? (left ?? horizontal ?? all ?? 0) : 0,
+    right: this.right ? (right ?? horizontal ?? all ?? 0) : 0,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExtraPadding &&
+      other.top == top &&
+      other.bottom == bottom &&
+      other.left == left &&
+      other.right == right;
+
+  @override
+  int get hashCode => Object.hash(top, bottom, left, right);
+}
+
+/// Per-slot scope an [EvenPadFlex] wraps around each child, carrying that
+/// child's [ExtraPadding]. Interior children still get one (with [ExtraPadding.none])
+/// so an [EvenPadBuilder] always reads the *nearest* flex, never a farther
+/// ancestor.
+class _EvenPadScope extends InheritedWidget {
+  final ExtraPadding padding;
+  const _EvenPadScope({required this.padding, required super.child});
+
+  static ExtraPadding of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_EvenPadScope>()?.padding ??
+      ExtraPadding.none;
+
+  @override
+  bool updateShouldNotify(_EvenPadScope oldWidget) =>
+      oldWidget.padding != padding;
+}
+
+/// Reads the [ExtraPadding] from the nearest enclosing [EvenPadColumn]/
+/// [EvenPadRow] and hands it to [builder]. Outside any of those it gets
+/// [ExtraPadding.none].
+class EvenPadBuilder extends StatelessWidget {
+  final Widget Function(BuildContext context, ExtraPadding extraPadding)
+  builder;
+  const EvenPadBuilder(this.builder, {super.key});
+
+  @override
+  Widget build(BuildContext context) =>
+      builder(context, _EvenPadScope.of(context));
+}
+
+/// Pads [child] on every edge that abuts the EvenPadFlex it's inside (a no-op
+/// outside one — it never pads an edge that abuts a neighbour). Takes the same
+/// per-edge/per-axis/[all] amounts, with the same priority, as
+/// [ExtraPadding.resolve]; this is just [EvenPadBuilder] + that call without the
+/// closure.
+class EvenPadding extends StatelessWidget {
+  final double? all;
+  final double? horizontal;
+  final double? vertical;
+  final double? top;
+  final double? bottom;
+  final double? left;
+  final double? right;
+  final Widget child;
+  const EvenPadding({
+    super.key,
+    this.all,
+    this.horizontal,
+    this.vertical,
+    this.top,
+    this.bottom,
+    this.left,
+    this.right,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: _EvenPadScope.of(context).resolve(
+      all: all,
+      horizontal: horizontal,
+      vertical: vertical,
+      top: top,
+      bottom: bottom,
+      left: left,
+      right: right,
+    ),
+    child: child,
+  );
+}
+
+/// A [Flex] whose children can ask (via [EvenPadBuilder]) whether they're the
+/// leading/trailing item, so the ends can pad themselves. See [ExtraPadding].
+/// Prefer the [EvenPadColumn]/[EvenPadRow] aliases.
+///
+/// Children may still be [Expanded]/[Flexible] — the per-slot scope is an
+/// [InheritedWidget] (no render object), so flex parent data still reaches the
+/// [RenderFlex] unchanged.
+class EvenPadFlex extends StatelessWidget {
+  final Axis direction;
+  final List<Widget> children;
+  final MainAxisAlignment mainAxisAlignment;
+  final MainAxisSize mainAxisSize;
+  final CrossAxisAlignment crossAxisAlignment;
+  final TextDirection? textDirection;
+  final VerticalDirection verticalDirection;
+  final TextBaseline? textBaseline;
+
+  const EvenPadFlex({
+    super.key,
+    required this.direction,
+    this.mainAxisAlignment = MainAxisAlignment.start,
+    this.mainAxisSize = MainAxisSize.max,
+    this.crossAxisAlignment = CrossAxisAlignment.center,
+    this.textDirection,
+    this.verticalDirection = VerticalDirection.down,
+    this.textBaseline,
+    this.children = const [],
+  });
+
+  ExtraPadding _edgeFor(int i, int n, TextDirection textDirection) {
+    final isLeading = i == 0;
+    final isTrailing = i == n - 1;
+    final ltr = textDirection == TextDirection.ltr;
+    final down = verticalDirection == VerticalDirection.down;
+
+    if (direction == Axis.vertical) {
+      // main = vertical (position), cross = horizontal (alignment).
+      return ExtraPadding(
+        top: down ? isLeading : isTrailing,
+        bottom: down ? isTrailing : isLeading,
+        left: true,
+        right: true,
+      );
+    }
+    // main = horizontal (position), cross = vertical (alignment).
+    return ExtraPadding(
+      left: ltr ? isLeading : isTrailing,
+      right: ltr ? isTrailing : isLeading,
+      top: true,
+      bottom: true,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final td =
+        textDirection ?? Directionality.maybeOf(context) ?? TextDirection.ltr;
+    final n = children.length;
+    return Flex(
+      direction: direction,
+      mainAxisAlignment: mainAxisAlignment,
+      mainAxisSize: mainAxisSize,
+      crossAxisAlignment: crossAxisAlignment,
+      textDirection: td,
+      verticalDirection: verticalDirection,
+      textBaseline: textBaseline,
+      children: [
+        for (var i = 0; i < n; i++)
+          _EvenPadScope(padding: _edgeFor(i, n, td), child: children[i]),
+      ],
+    );
+  }
+}
+
+/// A [Column] whose leading/trailing children can pad themselves via
+/// [EvenPadBuilder]. See [EvenPadFlex]/[ExtraPadding].
+class EvenPadColumn extends EvenPadFlex {
+  const EvenPadColumn({
+    super.key,
+    super.mainAxisAlignment,
+    super.mainAxisSize,
+    super.crossAxisAlignment,
+    super.textDirection,
+    super.verticalDirection,
+    super.textBaseline,
+    super.children,
+  }) : super(direction: Axis.vertical);
+}
+
+/// A [Row] whose leading/trailing children can pad themselves via
+/// [EvenPadBuilder]. See [EvenPadFlex]/[ExtraPadding].
+class EvenPadRow extends EvenPadFlex {
+  const EvenPadRow({
+    super.key,
+    super.mainAxisAlignment,
+    super.mainAxisSize,
+    super.crossAxisAlignment,
+    super.textDirection,
+    super.verticalDirection,
+    super.textBaseline,
+    super.children,
+  }) : super(direction: Axis.horizontal);
 }
 
 void vibrationSampleBoard() async {
@@ -4014,10 +4268,6 @@ class TimerculeParallelPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
     final contentH = 2 * timerculeRectHeight + timerculeGap;
     final topWidth = rightJustified == null
         ? timerculeRectWidth
@@ -4532,9 +4782,11 @@ class HamburgerIconPainter extends CustomPainter {
     final x0 = size.width / 2 - radius;
     final x1 = size.width / 2 + radius;
     double y = size.height / 2 - radius;
-    for (var i = 0; i < 3; i++) {
+    int n = 3;
+    double ho = md / n;
+    for (var i = 0; i < n; i++) {
       canvas.drawLine(Offset(x0, y), Offset(x1, y), paint);
-      y += radius;
+      y += ho;
     }
   }
 
@@ -4927,10 +5179,13 @@ class MenuTile extends StatelessWidget {
     this.contentPadding,
   });
 
+  static const double defaultPaddingTotal = 16;
+  static const double defaultPaddingInside = 8;
+
   /// Side of the fixed, centred slot the [trailing] item is dropped into. Being
   /// a fixed height it also holds the row open, and callers pass [trailing] bare
   /// (no need to size or centre it themselves).
-  static const double trailingSlot = 64.0;
+  static const double trailingSlotSpan = 40.0;
 
   @override
   Widget build(BuildContext context) {
@@ -4938,15 +5193,19 @@ class MenuTile extends StatelessWidget {
     // single-line rows aren't cramped (the [trailingSlot] height also holds the
     // row open). The trailing item supplies its own end spacing via its slot, so
     // no right inset is added to the text when a trailing is present.
-    final base = (contentPadding ?? const EdgeInsets.all(16)).resolve(
-      Directionality.of(context),
-    );
-    final side = max(base.left, base.right);
+    final base =
+        (contentPadding ??
+                const EdgeInsets.only(
+                  left: defaultPaddingInside,
+                  top: defaultPaddingInside,
+                  bottom: defaultPaddingInside,
+                ))
+            .resolve(Directionality.of(context));
     final textPadding = EdgeInsets.fromLTRB(
       base.left,
-      max(base.top, side),
+      base.top,
       trailing == null ? base.right : 0.0,
-      max(base.bottom, side),
+      base.bottom,
     );
     return InkButton(
       backgroundColor: Colors.transparent,
@@ -4955,30 +5214,40 @@ class MenuTile extends StatelessWidget {
       borderRadius: BorderRadius.zero,
       onTap: onTap,
       onTapUpGlobalPosition: onTapUpGlobalPosition,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: trailingSlot),
-        child: Row(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: textPadding,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (title != null) title!,
-                    if (subtitle != null) subtitle!,
-                  ],
+      // [textPadding] always insets by [defaultPaddingInside]; in an
+      // [EvenPadColumn] this tops that up to [defaultPaddingTotal] on whichever
+      // edges abut the section (the leading tile's top, the trailing tile's
+      // bottom, and — with a stretched column — every tile's sides), so the
+      // section's outer gap matches the inter-tile gap. The top-up sits *inside*
+      // the ink, so the highlight covers it; outside an EvenPad flex it's a
+      // no-op.
+      child: EvenPadding(
+        all: defaultPaddingTotal - defaultPaddingInside,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: trailingSlotSpan),
+          child: Row(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: textPadding,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (title != null) title!,
+                      if (subtitle != null) subtitle!,
+                    ],
+                  ),
                 ),
               ),
-            ),
-            if (trailing != null)
-              SizedBox(
-                width: trailingSlot,
-                height: trailingSlot,
-                child: Center(child: trailing!),
-              ),
-          ],
+              if (trailing != null)
+                SizedBox(
+                  width: trailingSlotSpan + defaultPaddingInside * 2,
+                  height: trailingSlotSpan + defaultPaddingInside * 2,
+                  child: Center(child: trailing!),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -5076,12 +5345,14 @@ class RoundedSectionSliver extends StatelessWidget {
   final double? radius;
   final EdgeInsetsGeometry margin;
   final EdgeInsetsGeometry padding;
+
+  static const double defaultMargin = 12;
   const RoundedSectionSliver({
     super.key,
     required this.child,
     required this.color,
     this.radius,
-    this.margin = const EdgeInsets.fromLTRB(12, 0, 12, 0),
+    this.margin = const EdgeInsets.fromLTRB(defaultMargin, 0, defaultMargin, 0),
     this.padding = const EdgeInsets.all(16),
   });
 
@@ -5105,6 +5376,78 @@ class RoundedSectionSliver extends StatelessWidget {
           child: Padding(padding: padding, child: child),
         ),
       ),
+    );
+  }
+}
+
+class PadStateIcon extends StatelessWidget {
+  final ReadonlySignal<bool> signal;
+  const PadStateIcon({super.key, required this.signal});
+
+  @override
+  Widget build(BuildContext context) {
+    return BoolSignalTween(
+      signal: signal,
+      duration: Duration(milliseconds: 600),
+      // duration: Duration(milliseconds: 190),
+      builder: (context, progress, _) {
+        final theme = Theme.of(context);
+        final longDimension = 22 / 4 * 3;
+        final shortDimension = 22.0;
+        final hpu = 0.37;
+        final h = lerp(
+          shortDimension,
+          longDimension,
+          Curves.easeInOutCubic.transform(unlerpUnit(0, hpu, progress)),
+        );
+        final w = lerp(
+          longDimension,
+          shortDimension,
+          Curves.easeInOutCubic.transform(unlerpUnit(1 - hpu, 1, progress)),
+        );
+        final movementp = Curves.easeInOutQuad.transform(1 - progress);
+        final centeredInset = (longDimension - shortDimension) / 2;
+        return SizedBox(
+          width: longDimension,
+          height: longDimension,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                width: w,
+                height: h,
+                top: lerp(0, centeredInset, movementp),
+                right: lerp(centeredInset, 0, movementp),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.onSurface,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+        // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
+        // return SizedBox(
+        //   width: lerp(
+        //     longDimension,
+        //     shortDimension,
+        //     Curves.easeIn.transform(progress),
+        //   ),
+        //   height: lerp(
+        //     shortDimension,
+        //     longDimension,
+        //     Curves.easeOut.transform(progress),
+        //   ),
+        //   child: Container(
+        //     decoration: BoxDecoration(
+        //       color: theme.colorScheme.primary,
+        //       borderRadius: BorderRadius.circular(4),
+        //     ),
+        //   ),
+        // );
+      },
     );
   }
 }

@@ -1,4 +1,4 @@
-The author is an interaction designer and a home cook, who lives in a hole in the outskirts of auckland, aotearoa. They occasionally go on adventures to further places whenever the loneliness becomes too much.
+The author is an interaction designer and a home cook, who lives in the outskirts of Auckland, Aotearoa.
 
 mako's other works can be viewed here: [aboutmako.makopool.com](https://aboutmako.makopool.com)
 

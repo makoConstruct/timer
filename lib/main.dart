@@ -88,7 +88,7 @@ final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
 
 final GlobalKey configButtonKey = GlobalKey();
 
-const backingCornerRounding = 0.37;
+const backingCornerRounding = 0.45;
 const backingDeflationProportion = 0.07;
 
 /// A common thickness for thick lines
@@ -1039,8 +1039,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         scaffoldMessengerKey: globalScaffoldMessengerKey,
         title: 'timer',
         theme: makeTheme(Brightness.light),
-        darkTheme: makeTheme(Brightness.dark),
-        // darkTheme: makeTheme(Brightness.light),
+        // darkTheme: makeTheme(Brightness.dark),
+        darkTheme: makeTheme(Brightness.light),
         onGenerateRoute: (settings) {
           if (settings.name == '/') {
             return CircularRevealRoute(builder: (context) => TimerScreen());
@@ -1104,6 +1104,11 @@ class TimerMenu extends StatelessWidget {
   final double? estimatedWidth;
   final Animation<double> animation;
   static const double buttonHeight = 40;
+
+  /// Padding around each menu item's content (its icon box spans
+  /// [buttonHeight]). Shared with the menu builder so the corner rounding can be
+  /// derived from it.
+  static const double itemPadding = 8;
   final Color? backgroundColor;
   final double arrowHeight;
   const TimerMenu({
@@ -1148,7 +1153,9 @@ class TimerMenu extends StatelessWidget {
           max(margin, arrowCenter.dx - width / 2),
           constraints.maxWidth - margin - width,
         );
-        final cornerRounding = backingCornerRounding * buttonSpan * 1.2;
+        // Rounds the corners concentric with an item's icon box: half the span
+        // of the icon (buttonHeight) plus its surrounding padding on both sides.
+        final cornerRounding = (buttonHeight + itemPadding * 2) / 2;
         final top = centerOn.bottom - arrowHeight;
         return AnimatedBuilder(
           animation: animation,
@@ -1180,7 +1187,13 @@ class TimerMenu extends StatelessWidget {
                         opacity: Curves.easeInOut.transform(
                           unlerpUnit(0.37, 1, p),
                         ),
-                        child: Column(children: items.toList()),
+                        child: EvenPadColumn(
+                          // stretch so every item abuts the sides, letting each
+                          // menu item's horizontal padding ride the EvenPad
+                          // cross edges (see [menuItem]).
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: items.toList(),
+                        ),
                       ),
                     ),
                   ),
@@ -3881,7 +3894,7 @@ class TimerScreenState extends State<TimerScreen>
     final indentColor = theme.brightness == Brightness.light
         ? theme.colorScheme.onPrimary.withValues(alpha: 0.07)
         : darkenColor(backgroundColor, 0.1);
-    const double menuItemPadding = 8;
+    const double menuItemPadding = TimerMenu.itemPadding;
     TimerData td = Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!;
     Color inkColor = td.isComposite
         ? foregroundColor
@@ -3892,8 +3905,6 @@ class TimerScreenState extends State<TimerScreen>
       Widget icon,
       String label,
       Function(Offset?) action, {
-      bool isFirst = false,
-      bool isLast = false,
       TextStyle? labelStyle,
     }) {
       return InkButton(
@@ -3904,13 +3915,13 @@ class TimerScreenState extends State<TimerScreen>
         onTap: () {
           Navigator.of(context).pop();
         },
-        child: Padding(
-          padding: EdgeInsets.only(
-            top: isFirst ? (menuItemPadding + arrowHeight) : 0,
-            bottom: isLast ? menuItemPadding : 0,
-            left: menuItemPadding,
-            right: menuItemPadding,
-          ),
+        // Edge-ness comes from the enclosing [EvenPadColumn] rather than passed
+        // isFirst/isLast flags. The caps are irregular — the leading item's top
+        // clears the arrow, so it's taller than the others ([all]) — which is
+        // why this overrides just [top] rather than padding uniformly.
+        child: EvenPadding(
+          all: menuItemPadding,
+          top: menuItemPadding + arrowHeight,
           child: Row(
             mainAxisSize: MainAxisSize.max,
             mainAxisAlignment: isRightHanded
@@ -3973,7 +3984,6 @@ class TimerScreenState extends State<TimerScreen>
                 (_) {
                   deleteTimer(timerID);
                 },
-                isFirst: true,
               ),
               SeparatorGradient(color: indentColor),
               menuItem(
@@ -4048,7 +4058,6 @@ class TimerScreenState extends State<TimerScreen>
                           as GlobalKey<TimerBaseState>?;
                   wk?.currentState?.enterTitleEditMode();
                 },
-                isLast: true,
               ),
             ],
           );
@@ -4169,13 +4178,13 @@ class TimerScreenState extends State<TimerScreen>
           // opacity uses it directly, scale curves it (per-direction) below.
           tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
           duration: up
-              ? const Duration(milliseconds: 100) // rise
-              : const Duration(milliseconds: 100), // fall
+              ? const Duration(milliseconds: 125) // rise
+              : const Duration(milliseconds: 125), // fall
           builder: (context, t, child) {
             final p = (up ? Curves.easeInOut : Curves.easeInOut).transform(t);
+            // final double p = 1;
             return Opacity(
-              // a linear ease is correct for opacity
-              opacity: lerp(0.07, 1.0, p),
+              opacity: lerp(0.07, 0.2, p),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
@@ -5068,29 +5077,33 @@ class TimerScreenState extends State<TimerScreen>
     cleanBin();
   }
 
-  /// How long a deleted timer lingers in the trash bin before it's destroyed.
-  static const Duration binRetention = Duration(days: 2);
+  static const Duration binRetention = Duration(days: 12);
+  static const int binMaxRetained = 60;
 
-  /// Destroys binned timers whose deletion (last write-back) was more than
-  /// [binRetention] ago. Runs opportunistically each time something is binned.
-  /// Loads the (inactive) timers from disk to read their timestamps, since
-  /// older ones may not be in memory yet.
+  /// Destroys binned timers that have either been in bin for longer than [binRetention] or fallen outside the [binMaxRetained] most recently deleted. Gets run each time something is binned. Age is estimated from last modification time, which can be messed with if the user drags one timer into another while it's in the bin, but it doesn't really matter.
   Future<void> cleanBin() async {
     final now = DateTime.now();
-    for (final id in binListMobj.peek()!.toList()) {
-      Mobj<TimerData> m;
+    final List<Future<Mobj<TimerData>>> futureEntries = binListMobj
+        .peek()!
+        .map((id) => Mobj.fetch(id, type: TimerDataType()))
+        .toList();
+    List<Mobj<TimerData>> entries = [];
+    for (final f in futureEntries) {
       try {
-        m = await Mobj.fetch(id, type: TimerDataType());
+        final Mobj<TimerData> e = await f;
+        if ((now.difference(e.lastTimestamp).compareTo(binRetention)) < 0) {
+          entries.add(e);
+        }
       } catch (_) {
-        // already gone from the db; just drop the dangling reference
-        binListMobj.value = binListMobj.peek()!.toList()..remove(id);
-        continue;
+        // it got deleted somehow, we'll drop it from the list
       }
-      if (now.difference(m.lastTimestamp) > binRetention) {
-        binListMobj.value = binListMobj.peek()!.toList()..remove(id);
-        // a real deletion this time: cascades to children / parent via reactions
-        m.value = null;
-      }
+    }
+    if (entries.length > binMaxRetained) {
+      entries = entries.slice(0, binMaxRetained);
+    }
+    // no update if nothing was dropped
+    if (entries.length != binListMobj.peek()!.length) {
+      binListMobj.value = entries.map((m) => m.id).toList();
     }
   }
 
@@ -5618,18 +5631,7 @@ double halfScreenHeight(BuildContext context) {
   return screenHeight / 2 - mq.viewPadding.top;
 }
 
-// it would also look nice if you used this to size the app bar, but half is better for now
-// double screenWidth(BuildContext context) {
-//   final mq = MediaQuery.of(context);
-//   return mq.size.width;
-// }
-
-// Shared style/structure between the settings top title, the settings section
-// headings, and the info sub-page (About, How it was made) headers. The label
-// sits at the bottom-left of a band of `background`, its left edge aligned with
-// the list item titles (matches listItemPadding.left).
-const headingBandLeftInset = 16.0;
-const headingTitleBottomPadding = 14.0;
+const headingTitleBottomPadding = 6.0;
 
 TextStyle headingTextStyle(ThemeData theme, {bool fade = false}) => TextStyle(
   color: fade
@@ -5642,7 +5644,7 @@ TextStyle headingTextStyle(ThemeData theme, {bool fade = false}) => TextStyle(
       //   )
       // : theme.colorScheme.onSurfaceVariant,
       : theme.colorScheme.onSurfaceVariant,
-  fontWeight: FontWeight.w800,
+  // fontWeight: FontWeight.w800,
   // fontSize: 24,
 );
 
@@ -5658,7 +5660,7 @@ Widget headingBand({
   color: background,
   alignment: Alignment.bottomLeft,
   padding: const EdgeInsets.only(
-    left: headingBandLeftInset,
+    left: RoundedSectionSliver.defaultMargin + MenuTile.defaultPaddingTotal,
     bottom: headingTitleBottomPadding,
   ),
   child: label != null
@@ -5671,8 +5673,9 @@ Widget headingBand({
 
 // Geometry of the floating corner back button (and the matching gutter band
 // settings leaves for it at the bottom of its list).
-const backNavSpan = 67.0;
-const backNavGap = 15.0;
+const backNavSpan = 64.0;
+const backNavGap =
+    RoundedSectionSliver.defaultMargin + 0.66666 * MenuTile.defaultPaddingTotal;
 const backNavGutterHeight = backNavSpan + backNavGap * 2;
 const chevronSpan = 14.0;
 const arrowBoxLineThickness = 3.0;
@@ -5947,7 +5950,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // );
     final listItemPadding = null;
 
-    const sectionHeadingHeight = 80.0;
+    const sectionHeadingHeight = 45.0;
 
     Widget setupTile = MenuTile(
       title: Text('Setup', style: theme.textTheme.bodyLarge),
@@ -5995,7 +5998,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               RoundedSectionSliver(
                 color: contentBackground,
                 padding: EdgeInsets.zero,
-                child: Column(
+                child: EvenPadColumn(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Builder(
@@ -6023,77 +6026,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                           ),
-                          trailing: BoolSignalTween(
-                            signal: padLandscapeNonNull,
-                            duration: Duration(milliseconds: 600),
-                            // duration: Duration(milliseconds: 190),
-                            builder: (context, progress, _) {
-                              final longDimension = 22 / 4 * 3;
-                              final shortDimension = 22.0;
-                              final hpu = 0.37;
-                              final h = lerp(
-                                shortDimension,
-                                longDimension,
-                                Curves.easeInOutCubic.transform(
-                                  unlerpUnit(0, hpu, progress),
-                                ),
-                              );
-                              final w = lerp(
-                                longDimension,
-                                shortDimension,
-                                Curves.easeInOutCubic.transform(
-                                  unlerpUnit(1 - hpu, 1, progress),
-                                ),
-                              );
-                              final movementp = Curves.easeInOutQuad.transform(
-                                1 - progress,
-                              );
-                              final centeredInset =
-                                  (longDimension - shortDimension) / 2;
-                              return SizedBox(
-                                width: longDimension,
-                                height: longDimension,
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Positioned(
-                                      width: w,
-                                      height: h,
-                                      top: lerp(0, centeredInset, movementp),
-                                      right: lerp(centeredInset, 0, movementp),
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: theme.colorScheme.onSurface,
-                                          borderRadius: BorderRadius.circular(
-                                            4,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              // a far simpler, prettier, but slightly less informational or characterful version, should be run in 200ms:
-                              // return SizedBox(
-                              //   width: lerp(
-                              //     longDimension,
-                              //     shortDimension,
-                              //     Curves.easeIn.transform(progress),
-                              //   ),
-                              //   height: lerp(
-                              //     shortDimension,
-                              //     longDimension,
-                              //     Curves.easeOut.transform(progress),
-                              //   ),
-                              //   child: Container(
-                              //     decoration: BoxDecoration(
-                              //       color: theme.colorScheme.primary,
-                              //       borderRadius: BorderRadius.circular(4),
-                              //     ),
-                              //   ),
-                              // );
-                            },
-                          ),
+                          trailing: PadStateIcon(signal: padLandscapeNonNull),
                           onTap: () {
                             padLandscapeMobj.value = !padLandscapeMobj.value!;
                           },
@@ -6308,7 +6241,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               RoundedSectionSliver(
                 color: contentBackground,
                 padding: EdgeInsets.zero,
-                child: Column(
+                child: EvenPadColumn(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Builder(
@@ -6404,7 +6337,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               RoundedSectionSliver(
                 color: contentBackground,
                 padding: EdgeInsets.zero,
-                child: Column(
+                child: EvenPadColumn(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Builder(
@@ -6693,56 +6626,58 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
         child: Stack(
           children: [
             Positioned.fill(
-              child: SingleChildScrollView(
+              child: CustomScrollView(
+                // reverse:true anchors short content to the bottom of the
+                // viewport (and the tray wraps upward from the bottom), so the
+                // slivers are listed bottom-to-top: gutter, tray, heading.
                 reverse: true,
-                child: AnimoveFrame(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      headingBand(
-                        theme: theme,
-                        label: headingBandLabel(
-                          theme: theme,
-                          icon: Icons.delete_outline,
-                          heroTag: 'trash-bin-icon',
-                          title: 'Trash',
-                        ),
-                        height:
-                            halfScreenHeight(context) +
-                            MediaQuery.of(context).viewPadding.top,
-                        background: headingBackground,
-                      ),
-                      // full width so the tray's Align can place the timers
-                      // left/right-handed, but only as tall as its contents — the
-                      // whole page (heading included) is what scrolls.
-                      Container(
-                        width: double.infinity,
-                        color: contentBackground,
-                        // SelfRemovalHost is the overlay a restored timer is lifted
-                        // into to play its exit animation; AnimoveFrame lets the
-                        // remaining timers slide to fill the gap (their Animove
-                        // wrappers need a frame ancestor).
-                        child: SelfRemovalHost(
-                          key: ephemeralAnimationLayer,
-                          builder: (overlay, context) => Stack(
-                            children: [
-                              Padding(
-                                // vertical breathing room around the tray, echoing the
-                                // space the TimerScreen leaves above/below its timers
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: timerGap,
-                                ),
-                                child: _buildTray(theme),
-                              ),
-                              ...overlay,
-                            ],
-                          ),
-                        ),
-                      ),
-                      BackNavBottomGutter(background: headingBackground),
-                    ],
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: BackNavBottomGutter(background: headingBackground),
                   ),
-                ),
+                  RoundedSectionSliver(
+                    color: contentBackground,
+                    padding: EdgeInsets.zero,
+                    // AnimoveFrame lets the remaining timers slide to fill the
+                    // gap when one is restored (their Animove wrappers need a
+                    // frame ancestor); SelfRemovalHost is the overlay a restored
+                    // timer is lifted into to play its exit animation.
+                    child: AnimoveFrame(
+                      child: SelfRemovalHost(
+                        key: ephemeralAnimationLayer,
+                        builder: (overlay, context) => Stack(
+                          children: [
+                            Padding(
+                              // vertical breathing room around the tray, echoing
+                              // the space the TimerScreen leaves above/below its
+                              // timers
+                              padding: const EdgeInsets.symmetric(
+                                vertical: timerGap,
+                              ),
+                              child: _buildTray(theme),
+                            ),
+                            ...overlay,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: headingBand(
+                      theme: theme,
+                      label: headingBandLabel(
+                        theme: theme,
+                        icon: Icons.delete_outline,
+                        heroTag: 'trash-bin-icon',
+                        title: 'Trash',
+                      ),
+                      height:
+                          halfScreenHeight(context) +
+                          MediaQuery.of(context).viewPadding.top,
+                      background: headingBackground,
+                    ),
+                  ),
+                ],
               ),
             ),
             CornerBackButton(background: headingBackground),
@@ -7050,10 +6985,6 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: theme.colorScheme.onSurface,
-            width: makoLineThickness,
-          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -7151,7 +7082,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             children: [
               if (title != null && title.isNotEmpty)
                 Padding(
-                  padding: EdgeInsets.fromLTRB(0, 0, 0, 7),
+                  padding: EdgeInsets.only(bottom: 7),
                   child: Text(title, style: headingTextStyle(theme)),
                 ),
               Wrap(
@@ -7210,50 +7141,50 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                   // inset from the screen edges; the page (backgroundColorB) shows
                   // between them, and the chips inside flip to B to contrast.
                   SliverMainAxisGroup(
-                    slivers: [
-                      if (widget.perTimerMode)
-                        section('', [
-                          null,
-                        ], fadeDelay: Duration(milliseconds: 0)),
-                      if (_assetSounds.isNotEmpty)
-                        section(
-                          "Our Sounds",
-                          _assetSounds,
-                          fadeDelay: Duration(milliseconds: 0),
-                        ),
-                      if (_notificationSounds != null &&
-                          _notificationSounds!.isNotEmpty)
-                        section(
-                          'Phone Notification Sounds',
-                          _notificationSounds!,
-                          fadeDelay: Duration(milliseconds: 200),
-                        ),
-                      if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-                        section(
-                          'Device alarm sounds (long duration)',
-                          _alarmSounds!,
-                          fadeDelay: Duration(milliseconds: 100),
-                        ),
-                      if (_ringtoneSounds != null &&
-                          _ringtoneSounds!.isNotEmpty)
-                        section(
-                          'Device ringtones',
-                          _ringtoneSounds!,
-                          fadeDelay: Duration(milliseconds: 300),
-                        ),
-                      if (Platform.isAndroid)
-                        section(
-                          'From files',
-                          _pickedFiles,
-                          fadeDelay: Duration(milliseconds: 400),
-                          extraChildren: [
-                            _buildPickFileChip(theme, backgroundColorB),
-                          ],
-                        ),
-                      // Bottom breathing room below the last card, matching the
-                      // 12px margin above each one.
+                    slivers: intersperse(
                       const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                    ],
+                      [
+                        if (widget.perTimerMode)
+                          section('', [
+                            null,
+                          ], fadeDelay: Duration(milliseconds: 0)),
+                        if (_assetSounds.isNotEmpty)
+                          section(
+                            "Our Sounds",
+                            _assetSounds,
+                            fadeDelay: Duration(milliseconds: 0),
+                          ),
+                        if (_notificationSounds != null &&
+                            _notificationSounds!.isNotEmpty)
+                          section(
+                            'Phone Notification Sounds',
+                            _notificationSounds!,
+                            fadeDelay: Duration(milliseconds: 200),
+                          ),
+                        if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+                          section(
+                            'Device alarm sounds (long duration)',
+                            _alarmSounds!,
+                            fadeDelay: Duration(milliseconds: 100),
+                          ),
+                        if (_ringtoneSounds != null &&
+                            _ringtoneSounds!.isNotEmpty)
+                          section(
+                            'Device ringtones',
+                            _ringtoneSounds!,
+                            fadeDelay: Duration(milliseconds: 300),
+                          ),
+                        if (Platform.isAndroid)
+                          section(
+                            'From files',
+                            _pickedFiles,
+                            fadeDelay: Duration(milliseconds: 400),
+                            extraChildren: [
+                              _buildPickFileChip(theme, backgroundColorB),
+                            ],
+                          ),
+                      ],
+                    ),
                   ),
                   if (widget.perTimerMode)
                     SliverToBoxAdapter(
