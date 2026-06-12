@@ -1818,9 +1818,17 @@ class TimerState extends TimerBaseState<Timer> {
     double dt = d.transpired;
     double pieCompletion = dt / totalDuration;
     final durationDigits = d.digits;
-    bool timeIsNegative = dt < 0;
+    // timers count down (show time remaining); stopwatches count up (elapsed).
+    // round the remaining time up so it reads 0 exactly when the timer
+    // completes, rather than a second early. (negative/overrun is left raw —
+    // durationToDigits already rounds its magnitude up via isNegative.)
+    final double remaining = totalDuration - dt;
+    final double displayTime = d.kind == TimerKind.timer
+        ? (remaining > 0 ? remaining.ceilToDouble() : remaining)
+        : dt;
+    bool timeIsNegative = displayTime < 0;
     final timeDigits = durationToDigits(
-      dt.abs(),
+      displayTime.abs(),
       isNegative: timeIsNegative,
       padLevel: padLevelFor(durationDigits.length),
     );
