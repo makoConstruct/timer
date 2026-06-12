@@ -695,7 +695,10 @@ Mobj<TimerData> rootTimer(Mobj<TimerData> mobj) {
   while (true) {
     final d = a.peek()!;
     if (d.parentId == null) break;
-    final parentMobj = Mobj.seekTypedAlreadyLoaded(d.parentId!, TimerDataType());
+    final parentMobj = Mobj.seekTypedAlreadyLoaded(
+      d.parentId!,
+      TimerDataType(),
+    );
     if (parentMobj == null) break;
     a = parentMobj;
   }
@@ -5486,6 +5489,8 @@ const controlPadTextStyle = TextStyle(
   fontFamily: 'DongleLatin',
 );
 
+const double controlPadNumeralLineHeight = 1.25;
+
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
   final Object label;
@@ -5568,7 +5573,18 @@ class TimersButtonState extends State<TimersButton> {
           final Widget labelWidget;
           if (widget.label is String) {
             labelWidget = Center(
-              child: Text(widget.label as String, style: controlPadTextStyle),
+              // FittedBox.scaleDown keeps the numeral at its natural size until
+              // the button shrinks below it, then scales the glyph down to fit.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  widget.label as String,
+                  style: controlPadTextStyle.copyWith(
+                    height: controlPadNumeralLineHeight,
+                    leadingDistribution: TextLeadingDistribution.even,
+                  ),
+                ),
+              ),
             );
           } else {
             labelWidget = widget.label as Widget;
