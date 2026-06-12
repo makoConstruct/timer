@@ -674,37 +674,41 @@ class TimerTrack {
 /// Toggle this timer and propagate to children and parents via Mobj graph.
 /// Returns whether the timer is now running.
 bool toggleRunning(Mobj<TimerData> mobj, {bool reset = false}) {
-  final data = mobj.peek()!;
-  final wasRunning = data.isRunning;
+  // decide based on the rootmost ancestor's state, not the clicked timer's,
+  // so play/pause act on the whole structure coherently
+  final root = rootTimer(mobj);
+  final wasRunning = root.peek()!.isRunning;
   final nowRunning = !wasRunning;
 
   if (nowRunning) {
-    bool instantlyComplete = startTimer(mobj, reset: reset);
-    if (instantlyComplete) {
-      TimerHolm.returnAndContinueParent(mobj);
-    }
+    playTimer(root, reset: reset);
   } else {
-    pauseTimer(mobj, reset: reset);
+    pauseTimer(root, reset: reset);
   }
 
   return nowRunning;
 }
 
-void pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
-  final d = mobj.peek()!;
-  // find root ancestor and _pauseTimer from there
+/// walk up to the rootmost ancestor (the topmost loaded timer with no parent)
+Mobj<TimerData> rootTimer(Mobj<TimerData> mobj) {
   Mobj<TimerData> a = mobj;
   while (true) {
     final d = a.peek()!;
     if (d.parentId == null) break;
-    final parentMobj = Mobj.seekTypedAlreadyLoaded(
-      d.parentId!,
-      TimerDataType(),
-    );
+    final parentMobj = Mobj.seekTypedAlreadyLoaded(d.parentId!, TimerDataType());
     if (parentMobj == null) break;
     a = parentMobj;
   }
-  _pauseTimer(a, reset: reset);
+  return a;
+}
+
+void playTimer(Mobj<TimerData> mobj, {required bool reset}) {
+  // ignores return value because there's no parent to return and continue within
+  startTimer(rootTimer(mobj), reset: reset);
+}
+
+void pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
+  _pauseTimer(rootTimer(mobj), reset: reset);
 }
 
 /// important, if it returns true, that means it was synchronous and it's done, it wont leave an asynchronous timer or whatever running and then call back in through returnAndContinueParent, so you should continue to run the next one.
@@ -2410,6 +2414,10 @@ class TimerculeState extends TimerBaseState<Timercule> {
             parentId: widget.mobj.id,
             selected: false,
           );
+          // a timer must not keep running on its own once it's part of a
+          // timercule — the parent's play/pause now governs it, so pause the
+          // moved subtree (no-op if it wasn't running)
+          _pauseTimer(cm, reset: false);
         }
       },
     );
