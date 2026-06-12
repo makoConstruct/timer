@@ -5707,7 +5707,7 @@ Widget headingBand({
 // settings leaves for it at the bottom of its list).
 const backNavSpan = 64.0;
 const backNavGap =
-    RoundedSectionSliver.defaultMargin + 0.66666 * MenuTile.defaultPaddingTotal;
+    RoundedSectionSliver.defaultMargin + 0.33333 * MenuTile.defaultPaddingTotal;
 const backNavGutterHeight = backNavSpan + backNavGap * 2;
 const chevronSpan = 14.0;
 const arrowBoxLineThickness = 3.0;
