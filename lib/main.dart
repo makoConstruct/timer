@@ -2704,32 +2704,69 @@ class _DragRingPathClipper extends CustomClipper<Path> {
       oldClipper.path != path;
 }
 
-/// Reveal clip for a drag ring label pill: a fully-rounded rect that grows from a point at one end, lengthening with the constant-change-in-area math of the crank game progress bar.
+/// Reveal clip for a drag ring label pill: a fully-rounded rect whose line
+/// lengthens away from the menu handle (so the bar's origin end is the pill's
+/// inner end, the pinned [anchor] corner), while its circle grows out of the
+/// pill point facing this item's icon, with the constant-change-in-area math of
+/// the crank game progress bar.
+///
+/// The pill is a wide box pinned by its inner [anchor] corner, so its body sits
+/// off to the side of the radial ray — the icon's bearing from the pill is not
+/// the radial (menu centre -> label) bearing. [iconOffset] is the icon centre
+/// measured from that pinned corner; since the bearing depends on the pill's
+/// (text-dependent) width and height, the circleOrigin is resolved here, with
+/// [size] in hand.
 class _FluidPillClipper extends CustomClipper<Path> {
   final double progress;
-  final bool growFromLeft;
-  const _FluidPillClipper({required this.progress, required this.growFromLeft});
+  final Offset iconOffset;
+  final Alignment anchor;
+  const _FluidPillClipper({
+    required this.progress,
+    required this.iconOffset,
+    required this.anchor,
+  });
 
   @override
   Path getClip(Size size) {
-    final (radius, length) = fluidBarRadiusAndHeightForProgress(
-      size.height,
-      size.width,
+    // The line lengthens away from the handle: its origin end is the inner end,
+    // the pinned [anchor] corner. (Cross axis ignored by the geometry.)
+    final lineOrigin = anchor;
+
+    // The circle grows out of the pill point facing the icon. Locate the disc's
+    // full-radius centre (the inner end, cross-centred) and aim circleOrigin from
+    // there toward the icon (whose centre, in pill-local coords, is the pinned
+    // [anchor] corner plus [iconOffset]).
+    final bool horiz = size.width >= size.height;
+    final double maxR = (horiz ? size.height : size.width) / 2;
+    final double larger = horiz ? size.width : size.height;
+    final double lineLong = horiz ? lineOrigin.x : lineOrigin.y;
+    final double cLong = maxR + (lineLong + 1) / 2 * (larger - 2 * maxR);
+    final Offset discCentre = horiz
+        ? Offset(cLong, size.height / 2)
+        : Offset(size.width / 2, cLong);
+    final Offset iconLocal =
+        Offset((anchor.x + 1) / 2 * size.width, (anchor.y + 1) / 2 * size.height) +
+        iconOffset;
+    final Offset dir = iconLocal - discCentre;
+    final Alignment circleOrigin = dir.distance == 0
+        ? Alignment.center
+        : Alignment(dir.dx / dir.distance, dir.dy / dir.distance);
+
+    final (rect, radius) = fluidBarGeometry(
+      size,
       progress,
+      lineOrigin: lineOrigin,
+      circleOrigin: circleOrigin,
     );
-    final left = growFromLeft ? 0.0 : size.width - length;
-    return Path()..addRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(left, size.height / 2 - radius, length, radius * 2),
-        Radius.circular(radius),
-      ),
-    );
+    return Path()
+      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
   }
 
   @override
   bool shouldReclip(covariant _FluidPillClipper oldClipper) =>
       oldClipper.progress != progress ||
-      oldClipper.growFromLeft != growFromLeft;
+      oldClipper.iconOffset != iconOffset ||
+      oldClipper.anchor != anchor;
 }
 
 /// A selected item's highlight disc, as a multiple of the icon disc radius — a touch bigger than the resting dot it grows out of.
@@ -3444,8 +3481,12 @@ class DragActionRingState extends State<DragActionRing>
       }
       final m = max(rawTx.abs(), rawTy.abs());
       final double fontSize = 30;
-      // the pill grows from its edge nearest the ring: for a right-side label that's its left edge.
-      final growFromLeft = rawTx > 0;
+      // The FractionalTranslation above pins the box's inner corner,
+      // -(rawTx/m, rawTy/m), at [labelPos]. That inner corner is both the line's
+      // origin end (toward the handle) and the reference for locating the icon,
+      // which sits actionRadiusMax * 0.27 further in along the radial ray.
+      final anchor = Alignment(-rawTx / m, -rawTy / m);
+      final iconOffset = Offset.fromDirection(angle, -actionRadiusMax * 0.27);
       return nesting([
         (w) => Positioned(left: labelPos.dx, top: labelPos.dy, child: w),
         (w) => FractionalTranslation(
@@ -3455,7 +3496,8 @@ class DragActionRingState extends State<DragActionRing>
         (w) => ClipPath(
           clipper: _FluidPillClipper(
             progress: progress,
-            growFromLeft: growFromLeft,
+            iconOffset: iconOffset,
+            anchor: anchor,
           ),
           child: w,
         ),

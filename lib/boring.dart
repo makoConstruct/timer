@@ -4175,62 +4175,76 @@ class SeparatorGradient extends StatelessWidget {
   return (radius, rectHeight);
 }
 
-/// alignment only really pays attention to the taller dimension, it's always centered on the other
+/// Geometry of a fluid bar: a rounded bar that first grows as a circle, then
+/// lengthens along its longer axis into a line. Returns the bar's rounded-rect
+/// and its corner radius.
+///
+/// Two independent alignments shape it:
+///   * [lineOrigin] — its component along the longer axis
+///     picks which end the circle sits at, and so which way the bar lengthens
+///     from there. Its cross-axis component is ignored; the bar is always
+///     centred on the cross axis.
+///   * [circleOrigin] — a direction, within the circle's own radius, for where
+///     the circle grows *out of*: while still small the circle pins its edge in
+///     that direction and balloons away from it, easing back to concentric as it
+///     reaches full radius. [Alignment.center] gives plain concentric growth.
+(Rect, double) fluidBarGeometry(
+  Size size,
+  double progress, {
+  Alignment lineOrigin = Alignment.center,
+  Alignment circleOrigin = Alignment.center,
+}) {
+  final bool longIsHorizontal = size.width >= size.height;
+  final double smallerDim = longIsHorizontal ? size.height : size.width;
+  final double largerDim = longIsHorizontal ? size.width : size.height;
+  final double maxRadius = smallerDim / 2;
+
+  final (radius, length) = fluidBarRadiusAndHeightForProgress(
+    smallerDim,
+    largerDim,
+    progress,
+  );
+
+  // How far the still-small circle clings off-centre; melts to 0 at full radius,
+  // which keeps its [circleOrigin]-facing edge pinned as it grows.
+  final double bias = maxRadius - radius;
+
+  final double lineLong = longIsHorizontal ? lineOrigin.x : lineOrigin.y;
+  final double circLong = longIsHorizontal ? circleOrigin.x : circleOrigin.y;
+  final double circCross = longIsHorizontal ? circleOrigin.y : circleOrigin.x;
+
+  // Long axis: the disc sits one max-radius in from the [lineOrigin] end, and the
+  // bar lengthens from there toward the far side. [circleOrigin] nudges the small
+  // circle along this axis too.
+  final double dot =
+      maxRadius + (lineLong + 1) / 2 * (largerDim - 2 * maxRadius);
+  final double longTL = (dot - length / 2 + circLong * bias).clamp(
+    0.0,
+    largerDim - length,
+  );
+  // Cross axis: centred, with [circleOrigin]'s cross nudge.
+  final double crossTL = (bias + circCross * bias).clamp(
+    0.0,
+    smallerDim - 2 * radius,
+  );
+
+  final Rect rect = longIsHorizontal
+      ? Rect.fromLTWH(longTL, crossTL, length, 2 * radius)
+      : Rect.fromLTWH(crossTL, longTL, 2 * radius, length);
+  return (rect, radius);
+}
+
 Positioned fluidBar({
   required Size size,
   required double progress,
   required Alignment alignment,
   required Widget child,
 }) {
-  double smallerDim, largerDim;
-  if (size.width < size.height) {
-    smallerDim = size.width;
-    largerDim = size.height;
-  } else {
-    smallerDim = size.height;
-    largerDim = size.width;
-  }
-  final (radius, rectHeight) = fluidBarRadiusAndHeightForProgress(
-    smallerDim,
-    largerDim,
-    progress,
-  );
-  double left, top, width, height;
-  double basePosition(
-    double childSpan,
-    double containerSpan,
-    double alignment,
-  ) {
-    if (alignment == 0) {
-      return containerSpan / 2 - childSpan / 2;
-    } else if (alignment == -1) {
-      return max(0, smallerDim / 2 - childSpan / 2);
-    } else if (alignment == 1) {
-      return containerSpan -
-          smallerDim / 2 -
-          (childSpan / 2 < smallerDim / 2
-              ? childSpan / 2
-              : (childSpan - smallerDim / 2));
-    } else {
-      throw UnimplementedError("Alignment $alignment is not supported");
-    }
-  }
-
-  if (smallerDim == size.width) {
-    left = smallerDim / 2 - radius;
-    top = basePosition(rectHeight, largerDim, alignment.y);
-    width = radius * 2;
-    height = rectHeight;
-  } else {
-    left = basePosition(rectHeight, largerDim, alignment.x);
-    top = smallerDim / 2 - radius;
-    width = rectHeight;
-    height = radius * 2;
-  }
+  final (rect, _) = fluidBarGeometry(size, progress, lineOrigin: alignment);
   return Positioned(
-    left: left,
-    top: top,
-    child: SizedBox(width: width, height: height, child: child),
+    left: rect.left,
+    top: rect.top,
+    child: SizedBox(width: rect.width, height: rect.height, child: child),
   );
 }
 
