@@ -2745,7 +2745,10 @@ class _FluidPillClipper extends CustomClipper<Path> {
         ? Offset(cLong, size.height / 2)
         : Offset(size.width / 2, cLong);
     final Offset iconLocal =
-        Offset((anchor.x + 1) / 2 * size.width, (anchor.y + 1) / 2 * size.height) +
+        Offset(
+          (anchor.x + 1) / 2 * size.width,
+          (anchor.y + 1) / 2 * size.height,
+        ) +
         iconOffset;
     final Offset dir = iconLocal - discCentre;
     final Alignment circleOrigin = dir.distance == 0
@@ -3344,8 +3347,7 @@ class DragActionRingState extends State<DragActionRing>
         // fades a bit immediately on completion, but doesn't fade all the way out
         lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
     final ringColor = lerpColor(
-      theme.colorScheme.onSurface,
-      // mt.reducedProminenceColor,
+      theme.colorScheme.onSurfaceVariant,
       theme.colorScheme.primary,
       baseGrow,
     );
@@ -4478,7 +4480,7 @@ class TimerScreenState extends State<TimerScreen>
         height: buttonSpan * 0.43,
         child: Hero(
           tag: 'configButton',
-          child: HamburgerIcon(color: theme.colorScheme.onSurface),
+          child: HamburgerIcon(color: theme.colorScheme.onSurfaceVariant),
         ),
       ),
       // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
@@ -4565,7 +4567,7 @@ class TimerScreenState extends State<TimerScreen>
     final numeralPartAnchor = Offset(-3, 0);
     final outerPaletteAnchor = Offset(-4, 0);
     final innerPaletteAnchor = Offset(0, 0);
-    final numeralColor = theme.colorScheme.onSurface;
+    final numeralColor = theme.colorScheme.onSurfaceVariant;
 
     final controls = [
       modalHighlightBacking,
@@ -5531,7 +5533,7 @@ const controlPadTextStyle = TextStyle(
   fontFamily: 'DongleLatin',
 );
 
-const double controlPadNumeralLineHeight = 1.25;
+const double controlPadNumeralLineHeight = 1.42;
 
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
@@ -5624,6 +5626,7 @@ class TimersButtonState extends State<TimersButton> {
                   style: controlPadTextStyle.copyWith(
                     height: controlPadNumeralLineHeight,
                     leadingDistribution: TextLeadingDistribution.even,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
