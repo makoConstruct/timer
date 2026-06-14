@@ -342,6 +342,26 @@ void onDataReceived(Object data) {
 
 final Signal<bool> isBackgrounded = Signal(false);
 
+/// The ids of timers that are currently counting down or going off — i.e. the
+/// timers that give the foreground service a reason to exist. Maintained
+/// reactively by [TimerHolm.enlivenTimer], so it works identically over the
+/// main isolate's [globalTimerHolm] and over the service isolate's own
+/// TimerHolm (each isolate has its own copy of these statics).
+///
+/// A list rather than a set: it's expected to stay small (linear scans win on
+/// cache coherence at this size), and keeping insertion order is mildly nice.
+final Signal<List<MobjID<TimerData>>> activeTimers = Signal([]);
+final Computed<bool> someTimerActive =
+    Computed(() => activeTimers.value.isNotEmpty);
+
+/// Whether the persistent foreground-service notification should be open.
+/// It's only pointless when the app is hidden (alive but not in front of the
+/// user) and nothing is running, so: open iff the app is in the foreground OR a
+/// timer is active. Driven into the actual service by an effect in the main
+/// isolate (starts/stops it) and a stop-only effect in the service isolate.
+final Computed<bool> foregroundOpen =
+    Computed(() => !isBackgrounded.value || someTimerActive.value);
+
 TimerHolm? globalTimerHolm;
 
 /// this is in charge of running timer sounds in response to changes to the timer list
@@ -558,6 +578,16 @@ class TimerHolm {
     TimerData? prev;
     return effect(() {
       final TimerData? d = mobj.value;
+      // Keep the global active-timer list in sync so `someTimerActive` /
+      // `foregroundOpen` stay reactive. peek() (not value) avoids subscribing
+      // this effect to its own writes; the contains-guard keeps it idempotent.
+      final active = d != null && (d.isRunning || d.isGoingOff);
+      final present = activeTimers.peek().contains(mobj.id);
+      if (active && !present) {
+        activeTimers.value = [...activeTimers.peek(), mobj.id];
+      } else if (!active && present) {
+        activeTimers.value = [...activeTimers.peek()]..remove(mobj.id);
+      }
       if (d == null) {
         // delete its children too if it has any
         if (prev?.isComposite ?? false) {
@@ -651,6 +681,10 @@ class TimerHolm {
       tt.vibrationRepeatTimer?.cancel();
       tt.subscription?.call();
     }
+    // Drop this holm's timers from the global active list (the subscriptions
+    // are gone, so their enlivenTimer effects won't clean themselves up).
+    activeTimers.value = [...activeTimers.peek()]
+      ..removeWhere(tracking.containsKey);
     tracking.clear();
   }
 }
@@ -3882,8 +3916,18 @@ class TimerScreenState extends State<TimerScreen>
     // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
     // android will support repeat timers via the foreground service
     // assuming that all permissions are granted by now.
-    // this is async, but we don't have to wait for it since all interaction with it is async and buffered
-    graspForegroundService();
+    // Open/close the foreground service (and its persistent notification)
+    // reactively: it should exist whenever the app is in the foreground or a
+    // timer is active, and otherwise go away. graspForegroundService is async
+    // but we don't await it — all interaction with the service is async/buffered
+    // — and both calls are idempotent so re-running this effect is harmless.
+    createEffect(() {
+      if (foregroundOpen.value) {
+        graspForegroundService();
+      } else {
+        stopForegroundService();
+      }
+    });
 
     // make sure the mode indicator follows the current mode
     createEffect(() {

@@ -10,7 +10,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart'
-    show mainNotificationPortName, isBackgrounded, TimerHolm;
+    show mainNotificationPortName, isBackgrounded, foregroundOpen, TimerHolm;
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
@@ -168,16 +168,12 @@ class PersistentNotificationTask extends TaskHandler {
   }
 
   void _startTimerHolm(Mobj<List<MobjID<TimerData>>> timerListMobj) {
-    final timerIds = timerListMobj.peek()!;
-    final anyActive = timerIds.any((id) {
-      final d = Mobj.seekAlreadyLoaded(id, TimerDataType())?.peek();
-      return d?.isRunning == true || d?.isGoingOff == true;
-    });
-    if (!anyActive) {
-      FlutterForegroundTask.stopService();
-      return;
-    }
-    _timerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox, dismissOnForeground: false);
+    // Just start tracking; building the TimerHolm populates `activeTimers`
+    // (via enlivenTimer), which feeds `foregroundOpen`. The stop effect wired
+    // up in onStart will tear the service down if nothing turns out to be
+    // active — no need to special-case the idle case here.
+    _timerHolm = TimerHolm(
+        list: timerListMobj, jukeBox: jukeBox, dismissOnForeground: false);
     _notificationTimer = Timer.periodic(
         const Duration(seconds: 1), (_) => updateRunningTimersNotification());
   }
@@ -247,6 +243,18 @@ class PersistentNotificationTask extends TaskHandler {
     if (!appActive.peek()) {
       _startTimerHolm(Mobj.getAlreadyLoaded(timerListID, ListType(StringType())));
     }
+
+    // The service can't start itself (that's the main isolate's job), but it
+    // can notice when it's no longer needed and shut down. This is what removes
+    // the notification when the last timer finishes while the app is hidden:
+    // appActive is false, the last active timer drops out of `activeTimers`, so
+    // `foregroundOpen` goes false and we stop. Registered after the holm above
+    // so `activeTimers` already reflects reality on first evaluation.
+    cleanups.add(effect(() {
+      if (!foregroundOpen.value) {
+        FlutterForegroundTask.stopService();
+      }
+    }));
   }
 
   @override
@@ -341,10 +349,13 @@ void flushBufferedTaskMessages() {
   }
 }
 
-Future<bool> graspForegroundService() async {
-  if (!Platform.isAndroid) {
-    return false;
-  }
+bool _foregroundServiceSetUp = false;
+
+/// One-time setup: communication port, permissions, and notification/task
+/// options. Returns whether all permissions were granted. Safe to call more
+/// than once (it only does the work the first time).
+Future<bool> _setUpForegroundService() async {
+  if (_foregroundServiceSetUp) return true;
 
   FlutterForegroundTask.initCommunicationPort();
 
@@ -404,6 +415,28 @@ Future<bool> graspForegroundService() async {
       allowWakeLock: true,
     ),
   );
+
+  _foregroundServiceSetUp = true;
+  return permissionsGranted;
+}
+
+/// Stops the foreground service and removes its persistent notification. Safe
+/// to call when the service isn't running (or off Android).
+Future<void> stopForegroundService() async {
+  if (!Platform.isAndroid) return;
+  _serviceRunning = false;
+  await FlutterForegroundTask.stopService();
+}
+
+/// Ensures the foreground service (and its persistent notification) is running,
+/// starting it if necessary. Idempotent, so it's cheap to call on every app
+/// resume to bring the notification back after a backgrounded-and-idle close.
+Future<bool> graspForegroundService() async {
+  if (!Platform.isAndroid) {
+    return false;
+  }
+
+  final bool permissionsGranted = await _setUpForegroundService();
 
   if (await FlutterForegroundTask.isRunningService) {
     // in the example, they restart the service here, we're not gonna restart
