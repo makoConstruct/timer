@@ -7477,6 +7477,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   final GlobalKey skipKey = GlobalKey();
   final GlobalKey padKey = GlobalKey();
   final GlobalKey ringModeKey = GlobalKey();
+  final GlobalKey ackButtonKey = GlobalKey();
   late List<GlobalKey> allKeys = [
     handednessKey,
     padKey,
@@ -7636,10 +7637,19 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final backgroundColor = theme.colorScheme.surfaceContainerLow;
+    final mt = MakoThemeData.fromTheme(theme);
+    final contentBackground = mt.menuSurfaceFore;
+    final headingBackground = mt.menuSurfaceBack;
     final isRightHanded = Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
     const buttonAnimationDuration = Duration(milliseconds: 270);
+    const sectionHeadingHeight = 45.0;
+    // Cards are flush under their heading band but spaced from each other.
+    const sectionMargin = EdgeInsets.fromLTRB(
+      RoundedSectionSliver.defaultMargin,
+      0,
+      RoundedSectionSliver.defaultMargin,
+      standardSpacing,
+    );
 
     Widget handButton({required bool isRight}) {
       return Expanded(
@@ -7723,62 +7733,86 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
     }
 
     return Scaffold(
-      backgroundColor: backgroundColor,
+      // Page background is the section-header colour; the rounded section cards
+      // carry the contrasting content colour instead. Mirrors SettingsScreen.
+      backgroundColor: headingBackground,
       body: Stack(
         children: [
-          CustomScrollView(
+          AnimoveSliverFrame(
             controller: _scrollController,
-            slivers: [
-              // Handedness selection - full screen
-              SliverToBoxAdapter(
-                key: handednessKey,
-                child: Container(
-                  height: screenHeight,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHigh,
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(standardSpacing),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHigh,
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                // First screenful: the "Setup" title fills the space above and
+                // the first choice (handedness) rests at the bottom. This keeps
+                // the full screen of top space the original full-height
+                // handedness section had, so the screen opens already showing
+                // the top choice section rather than just a title band.
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: MediaQuery.of(context).size.height,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Expanded gives the title band tight constraints, so its
+                        // own height is ignored and it fills the gap above the
+                        // first card while keeping "Setup" bottom-left aligned.
+                        Expanded(
+                          child: headingBand(
+                            theme: theme,
+                            label: Text('Setup'),
+                            height: double.infinity,
+                            background: headingBackground,
+                            fade: true,
+                          ),
                         ),
-                        child: Text("Setup", style: theme.textTheme.titleLarge),
-                      ),
-                      Container(
-                        padding: EdgeInsets.all(standardSpacing),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerLow,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Are you left or right-handed?',
-                              style: theme.textTheme.bodyMedium!,
+                        // Handedness selection — same rounded card as the sliver
+                        // sections below, but laid out in a box so it can sit at
+                        // the bottom of this first screen.
+                        Padding(
+                          key: handednessKey,
+                          padding: sectionMargin,
+                          child: Material(
+                            type: MaterialType.canvas,
+                            color: contentBackground,
+                            borderRadius: BorderRadius.circular(
+                              max(
+                                0.0,
+                                getReasonableAestheticBottomCornerRadius() -
+                                    RoundedSectionSliver.defaultMargin,
+                              ),
                             ),
-                            SizedBox(height: standardSpacing),
-                            Row(
-                              children: [
-                                handButton(isRight: false),
-                                spacer,
-                                handButton(isRight: true),
-                              ],
+                            clipBehavior: Clip.antiAlias,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Are you left or right-handed?',
+                                    style: theme.textTheme.bodyMedium!,
+                                  ),
+                                  SizedBox(height: standardSpacing),
+                                  Row(
+                                    children: [
+                                      handButton(isRight: false),
+                                      spacer,
+                                      handButton(isRight: true),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                key: padKey,
-                child: Container(
-                  padding: EdgeInsets.all(standardSpacing),
+                RoundedSectionSliver(
+                  key: padKey,
+                  color: contentBackground,
+                  margin: sectionMargin,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -7825,11 +7859,10 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                     ],
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                key: ringModeKey,
-                child: Padding(
-                  padding: EdgeInsets.all(standardSpacing),
+                RoundedSectionSliver(
+                  key: ringModeKey,
+                  color: contentBackground,
+                  margin: sectionMargin,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -7838,64 +7871,151 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                         style: theme.textTheme.bodyMedium!,
                       ),
                       SizedBox(height: standardSpacing),
-                      Row(
-                        children: [
-                          Flexible(flex: 20, child: Container()),
-                          Flexible(
-                            flex: 50,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                RadioItem<bool?>(
-                                  selection: ringMode,
-                                  duration: buttonAnimationDuration,
-                                  me: true,
-                                  onTap: () => inputCompleted(ringModeKey),
-                                  builder: (context, isOn) => Container(
-                                    height: standardButtonHeight,
-                                    decoration: BoxDecoration(
-                                      color: backgroundColorFor(theme, isOn),
-                                      borderRadius: BorderRadius.circular(
-                                        buttonCornerRadius,
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 22.0,
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          textAlign: TextAlign.center,
-                                          'require acknowledgement',
-                                          style: theme.textTheme.titleMedium!
-                                              .copyWith(
-                                                color: foregroundColorFor(
-                                                  theme,
-                                                  isOn,
-                                                ),
-                                              ),
+                      Watch(
+                        (context) => Row(
+                          children: reverseIfNot(isRightHanded.value == true, [
+                            Flexible(flex: 20, child: Container()),
+                            Flexible(
+                              flex: 50,
+                              child: Animove(
+                                key: ackButtonKey,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    RadioItem<bool?>(
+                                      selection: ringMode,
+                                      duration: buttonAnimationDuration,
+                                      me: true,
+                                      onTap: () => inputCompleted(ringModeKey),
+                                      builder: (context, isOn) => Container(
+                                        height: standardButtonHeight,
+                                        decoration: BoxDecoration(
+                                          color: backgroundColorFor(
+                                            theme,
+                                            isOn,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            buttonCornerRadius,
+                                          ),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 22.0,
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              textAlign: TextAlign.center,
+                                              'require acknowledgement',
+                                              style: theme
+                                                  .textTheme
+                                                  .titleMedium!
+                                                  .copyWith(
+                                                    color: foregroundColorFor(
+                                                      theme,
+                                                      isOn,
+                                                    ),
+                                                  ),
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                                spacer,
-                                RadioItem<bool?>(
-                                  selection: ringMode,
-                                  duration: buttonAnimationDuration,
-                                  me: false,
-                                  onTap: () => inputCompleted(ringModeKey),
-                                  builder: (context, isOn) => Container(
-                                    height: standardButtonHeight,
-                                    decoration: BoxDecoration(
-                                      color: backgroundColorFor(theme, isOn),
-                                      borderRadius: BorderRadius.circular(
-                                        buttonCornerRadius,
+                                    spacer,
+                                    RadioItem<bool?>(
+                                      selection: ringMode,
+                                      duration: buttonAnimationDuration,
+                                      me: false,
+                                      onTap: () => inputCompleted(ringModeKey),
+                                      builder: (context, isOn) => Container(
+                                        height: standardButtonHeight,
+                                        decoration: BoxDecoration(
+                                          color: backgroundColorFor(
+                                            theme,
+                                            isOn,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            buttonCornerRadius,
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            'ring once',
+                                            style: theme.textTheme.titleMedium!
+                                                .copyWith(
+                                                  color: foregroundColorFor(
+                                                    theme,
+                                                    isOn,
+                                                  ),
+                                                ),
+                                          ),
+                                        ),
                                       ),
                                     ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (Platform.isAndroid) ...[
+                  SliverToBoxAdapter(
+                    child: headingBand(
+                      theme: theme,
+                      label: Text('Permissions'),
+                      height: sectionHeadingHeight,
+                      background: headingBackground,
+                      fade: true,
+                    ),
+                  ),
+                  RoundedSectionSliver(
+                    color: contentBackground,
+                    margin: sectionMargin,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          key: notifKey,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: reverseIfNot(isRightHanded.value ?? true, [
+                            Flexible(
+                              child: Text(
+                                'Enable notifications permission',
+                                style: theme.textTheme.bodyMedium!,
+                              ),
+                            ),
+                            spacer,
+                            Flexible(
+                              child: Watch((context) {
+                                final granted = notifGranted.value;
+                                final isOn = granted == true;
+                                final label = granted == null
+                                    ? 'request'
+                                    : granted
+                                    ? (_notifWasAlreadyGranted
+                                          ? 'already granted'
+                                          : 'granted')
+                                    : 'request';
+                                return InkButton(
+                                  backgroundColor: backgroundColorFor(
+                                    theme,
+                                    isOn,
+                                  ),
+                                  onTap: granted == true
+                                      ? null
+                                      : _requestNotificationPermission,
+                                  borderRadius: BorderRadius.circular(
+                                    buttonCornerRadius,
+                                  ),
+                                  child: SizedBox(
+                                    height: standardButtonHeight,
                                     child: Center(
                                       child: Text(
-                                        'ring once',
+                                        label,
                                         style: theme.textTheme.titleMedium!
                                             .copyWith(
                                               color: foregroundColorFor(
@@ -7906,188 +8026,126 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                );
+                              }),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (Platform.isAndroid)
-                SliverToBoxAdapter(
-                  key: notifKey,
-                  child: Padding(
-                    padding: EdgeInsets.all(standardSpacing),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: reverseIfNot(isRightHanded.value ?? true, [
-                        Flexible(
-                          child: Text(
-                            'Enable notifications permission',
-                            style: theme.textTheme.bodyMedium!,
-                          ),
+                          ]),
                         ),
-                        spacer,
-                        Flexible(
-                          child: Watch((context) {
-                            final granted = notifGranted.value;
-                            final isOn = granted == true;
-                            final label = granted == null
-                                ? 'request'
-                                : granted
-                                ? (_notifWasAlreadyGranted
-                                      ? 'already granted'
-                                      : 'granted')
-                                : 'request';
-                            return InkButton(
-                              backgroundColor: backgroundColorFor(theme, isOn),
-                              onTap: granted == true
-                                  ? null
-                                  : _requestNotificationPermission,
-                              borderRadius: BorderRadius.circular(
-                                buttonCornerRadius,
+                        SizedBox(height: standardSpacing),
+                        Row(
+                          key: batteryOptimKey,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: reverseIfNot(isRightHanded.value ?? true, [
+                            Flexible(
+                              child: Text(
+                                'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
+                                style: theme.textTheme.bodyMedium!,
                               ),
-                              child: SizedBox(
-                                height: standardButtonHeight,
-                                child: Center(
-                                  child: Text(
-                                    label,
-                                    style: theme.textTheme.titleMedium!
-                                        .copyWith(
-                                          color: foregroundColorFor(
-                                            theme,
-                                            isOn,
-                                          ),
-                                        ),
+                            ),
+                            spacer,
+                            Flexible(
+                              child: Watch((context) {
+                                final granted = batteryOptimGranted.value;
+                                final isOn = granted == true;
+                                final label = granted == null
+                                    ? 'request'
+                                    : granted
+                                    ? (_batteryOptimWasAlreadyGranted
+                                          ? 'already granted'
+                                          : 'granted')
+                                    : 'request';
+                                return InkButton(
+                                  backgroundColor: backgroundColorFor(
+                                    theme,
+                                    isOn,
                                   ),
-                                ),
-                              ),
-                            );
-                          }),
+                                  onTap: granted == true
+                                      ? null
+                                      : _requestBatteryOptimization,
+                                  borderRadius: BorderRadius.circular(
+                                    buttonCornerRadius,
+                                  ),
+                                  child: SizedBox(
+                                    height: standardButtonHeight,
+                                    child: Center(
+                                      child: Text(
+                                        label,
+                                        style: theme.textTheme.titleMedium!
+                                            .copyWith(
+                                              color: foregroundColorFor(
+                                                theme,
+                                                isOn,
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ),
+                          ]),
                         ),
-                      ]),
+                      ],
                     ),
                   ),
-                ),
-              if (Platform.isAndroid)
+                ],
+                // Skip / continue button. Sits free of any section card: its
+                // background tweens from transparent (setup incomplete) to the
+                // card colour once every choice is made.
                 SliverToBoxAdapter(
-                  key: batteryOptimKey,
+                  key: skipKey,
                   child: Padding(
-                    padding: EdgeInsets.all(standardSpacing),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: reverseIfNot(isRightHanded.value ?? true, [
-                        Flexible(
-                          child: Text(
-                            'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
-                            style: theme.textTheme.bodyMedium!,
-                          ),
-                        ),
-                        spacer,
-                        Flexible(
-                          child: Watch((context) {
-                            final granted = batteryOptimGranted.value;
-                            final isOn = granted == true;
-                            final label = granted == null
-                                ? 'request'
-                                : granted
-                                ? (_batteryOptimWasAlreadyGranted
-                                      ? 'already granted'
-                                      : 'granted')
-                                : 'request';
-                            return InkButton(
-                              backgroundColor: backgroundColorFor(theme, isOn),
-                              onTap: granted == true
-                                  ? null
-                                  : _requestBatteryOptimization,
-                              borderRadius: BorderRadius.circular(
-                                buttonCornerRadius,
-                              ),
-                              child: SizedBox(
-                                height: standardButtonHeight,
-                                child: Center(
-                                  child: Text(
-                                    label,
-                                    style: theme.textTheme.titleMedium!
-                                        .copyWith(
-                                          color: foregroundColorFor(
-                                            theme,
-                                            isOn,
-                                          ),
-                                        ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                        ),
-                      ]),
+                    padding: const EdgeInsets.fromLTRB(
+                      RoundedSectionSliver.defaultMargin,
+                      0,
+                      RoundedSectionSliver.defaultMargin,
+                      standardSpacing,
                     ),
-                  ),
-                ),
-              // Skip button - full screen
-              SliverToBoxAdapter(
-                key: skipKey,
-                child: Padding(
-                  padding: EdgeInsets.all(standardSpacing),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.max,
-                    children: [
-                      // this looked kinda nice, but it was confusing, and wouldn't feel good for left handers
-                      // if (allChoicesCompleted.value) ...[
-                      //   Text('done'),
-                      //   spacer
-                      // ],
-                      Expanded(
-                        child: InkButton(
+                    child: Watch((context) {
+                      final complete = allChoicesCompleted.value;
+                      return TweenAnimationBuilder<Color?>(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        tween: ColorTween(
+                          end: complete
+                              ? contentBackground
+                              : Colors.transparent,
+                        ),
+                        builder: (context, color, _) => InkButton(
+                          backgroundColor: color ?? Colors.transparent,
                           onTap: () {
                             moveOn();
                           },
                           borderRadius: BorderRadius.circular(
                             buttonCornerRadius,
                           ),
-                          builder: (context, isOn) => Container(
-                            color: backgroundColorFor(Theme.of(context), isOn),
-                            child: SizedBox(
-                              height: standardButtonHeight,
-                              child: Center(
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Watch(
-                                      (context) => Text(
-                                        allChoicesCompleted.value
-                                            ? 'setup complete, click to continue'
-                                            : 'skip setup',
-                                        style: theme.textTheme.titleMedium!
-                                            .copyWith(
-                                              color: foregroundColorFor(
-                                                Theme.of(context),
-                                                isOn,
-                                              ),
-                                            ),
-                                      ),
-                                    ),
-                                  ],
+                          child: SizedBox(
+                            height: standardButtonHeight,
+                            child: Center(
+                              child: Text(
+                                complete
+                                    ? 'setup complete, click to continue'
+                                    : 'skip setup',
+                                style: theme.textTheme.titleMedium!.copyWith(
+                                  color: theme.colorScheme.onSurface,
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      );
+                    }),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: SizedBox(height: MediaQuery.of(context).padding.bottom),
-              ),
-            ],
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: MediaQuery.of(context).padding.bottom,
+                  ),
+                ),
+              ],
+            ),
           ),
-          StatusBarScrim(background: theme.colorScheme.surfaceContainerHigh),
+          StatusBarScrim(background: headingBackground),
         ],
       ),
     );

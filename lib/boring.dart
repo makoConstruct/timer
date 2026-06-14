@@ -3154,6 +3154,11 @@ class _TweenAnimationReplacementStackState
     extends State<TweenAnimationReplacementStack> {
   List<TweenAnimationReplacementStack> stack = [];
 
+  /// The layer present at mount. It represents the resting state, so it must
+  /// not play the entry/reveal animation the first time it appears (otherwise
+  /// every one of these buttons animates in on its first build).
+  TweenAnimationReplacementStack? _initial;
+
   @override
   didUpdateWidget(TweenAnimationReplacementStack oldWidget) {
     if (widget.animation != oldWidget.animation ||
@@ -3166,6 +3171,7 @@ class _TweenAnimationReplacementStackState
   @override
   void initState() {
     super.initState();
+    _initial = widget;
     stack = [widget];
   }
 
@@ -3175,7 +3181,11 @@ class _TweenAnimationReplacementStackState
       children: stack
           .map(
             (e) => TweenAnimationBuilder(
-              tween: e.animation,
+              // The initial layer starts already at its end value so it shows
+              // statically; later layers animate from begin to end as usual.
+              tween: identical(e, _initial)
+                  ? (Tween(begin: e.animation.end, end: e.animation.end))
+                  : e.animation,
               duration: e.duration,
               builder: e.builder,
               child: e.child,
