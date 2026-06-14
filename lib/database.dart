@@ -49,6 +49,11 @@ const MobjID hintGetsCompositeTimersID = 'aa1b4520-d435-41f4-a13f-d5a1b2d617ae';
 /// total count of timers ever created in this install (plain, stopwatch, composite)
 const MobjID numberOfTimersCreatedID = 'f1d7810e-0a88-4a61-b7c3-9ad89604c890';
 
+/// what happens to completed timers when a new one is created — stored as the
+/// index of an `AutodeleteMode`: 0 = send to bin (default), 1 = retain only the
+/// lowest 60, 2 = off (keep everything).
+const MobjID autodeleteModeID = '3f2a9c84-1b6e-4d77-9c0a-5e8f4b21d9aa';
+
 mixin UUIDd on Table {
   TextColumn get id => text()();
 

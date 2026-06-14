@@ -5165,6 +5165,136 @@ class _RoundedCheckboxPainter extends CustomPainter {
       old.borderColor != borderColor;
 }
 
+/// How a [ManyStateCheckbox] is filled. Each state is the inner fill rectangle
+/// expressed as fractions of the inner area (0,0 = top-left, 1,1 =
+/// bottom-right), so transitions between any two states animate as a smooth
+/// rectangle sweep. [none] collapses to the centre point (invisible).
+enum CheckboxFill {
+  none(0.5, 0.5, 0.5, 0.5),
+  on(0.0, 0.0, 1.0, 1.0),
+  smallOn(0.28, 0.28, 0.72, 0.72),
+  topHalf(0.0, 0.0, 1.0, 0.5),
+  bottomHalf(0.0, 0.5, 1.0, 1.0),
+  leftHalf(0.0, 0.0, 0.5, 1.0),
+  rightHalf(0.5, 0.0, 1.0, 1.0);
+
+  const CheckboxFill(this.left, this.top, this.right, this.bottom);
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  Rect get rect => Rect.fromLTRB(left, top, right, bottom);
+}
+
+/// A multi-state sibling of [RoundedCheckbox]: instead of a bool it shows one of
+/// [CheckboxFill] — empty, fully/partly filled, or a half. Purely
+/// presentational; tapping just calls [onTap] and the owner decides the next
+/// state.
+class ManyStateCheckbox extends StatelessWidget {
+  const ManyStateCheckbox({
+    super.key,
+    required this.fill,
+    required this.onTap,
+    this.size = 20.0,
+  });
+
+  final CheckboxFill fill;
+  final VoidCallback onTap;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    final radius = Radius.circular(size * 0.3);
+    final innerInset = size * 0.22;
+    final target = fill.rect;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: TweenAnimationBuilder<Rect?>(
+        tween: RectTween(begin: target, end: target),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutExpo,
+        builder: (context, fillFractions, _) {
+          return SizedBox(
+            width: size,
+            height: size,
+            child: CustomPaint(
+              painter: _ManyStateCheckboxPainter(
+                fillFractions: fillFractions ?? target,
+                color: color,
+                borderColor: color,
+                radius: radius,
+                innerInset: innerInset,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ManyStateCheckboxPainter extends CustomPainter {
+  const _ManyStateCheckboxPainter({
+    required this.fillFractions,
+    required this.color,
+    required this.borderColor,
+    required this.radius,
+    required this.innerInset,
+  });
+
+  /// The fill rectangle in inner-area fractions (see [CheckboxFill]).
+  final Rect fillFractions;
+  final Color color;
+  final Color borderColor;
+  final Radius radius;
+  final double innerInset;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = size.width * 0.1;
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+    final outerRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        strokeWidth / 2,
+        strokeWidth / 2,
+        size.width - strokeWidth,
+        size.height - strokeWidth,
+      ),
+      radius,
+    );
+    canvas.drawRRect(outerRect, borderPaint);
+    if (fillFractions.width > 0.001 && fillFractions.height > 0.001) {
+      final innerW = size.width - innerInset * 2;
+      final innerH = size.height - innerInset * 2;
+      final fillRect = Rect.fromLTRB(
+        innerInset + innerW * fillFractions.left,
+        innerInset + innerH * fillFractions.top,
+        innerInset + innerW * fillFractions.right,
+        innerInset + innerH * fillFractions.bottom,
+      );
+      final fillPaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.fill;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(fillRect, Radius.circular(radius.x * 0.6)),
+        fillPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ManyStateCheckboxPainter old) =>
+      old.fillFractions != fillFractions ||
+      old.color != color ||
+      old.borderColor != borderColor;
+}
+
 /// A settings row laid out like a [ListTile] — optional [title] over [subtitle]
 /// on the left, optional [trailing] on the right, vertically centred with a
 /// minimum height — but driven by [InkButton] so the press feedback is our own

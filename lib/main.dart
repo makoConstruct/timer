@@ -255,6 +255,12 @@ Future<void> initializeDatabase() async {
       initial: () => 0,
       debugLabel: "number of timers created",
     ),
+    Mobj.getOrCreate(
+      autodeleteModeID,
+      type: IntType(),
+      initial: () => AutodeleteMode.bin.index,
+      debugLabel: "autodelete mode",
+    ),
     fversion,
   ]);
 }
@@ -915,6 +921,29 @@ void _startAncestors(MobjID? parentId) {
 }
 
 /// Whether the timer should be deleted automatically. Note, checks by `value` so will susbcribe if called in an effect.
+/// How completed (trivial, clearable) timers are handled when a new timer is
+/// created — see [cleanOldTimers]. Persisted by index under [autodeleteModeID],
+/// so the declaration order is load-bearing; only append.
+enum AutodeleteMode {
+  /// Send completed timers to the bin (the historical behaviour).
+  bin,
+
+  /// Keep completed timers in the list, but no more than
+  /// [TimerScreenState.autoCleanRetentionCap] of them — bin the oldest as new ones
+  /// arrive.
+  retain60,
+
+  /// Never auto-remove; completed timers accumulate indefinitely.
+  off,
+}
+
+AutodeleteMode autoDeleteMode(int? index) {
+  if (index == null || index < 0 || index >= AutodeleteMode.values.length) {
+    return AutodeleteMode.bin;
+  }
+  return AutodeleteMode.values[index];
+}
+
 bool trivialAndClearable(Mobj<TimerData> mobj, TimerData? prev) {
   final d = mobj.value ?? prev;
   if (d == null) {
@@ -5030,15 +5059,41 @@ class TimerScreenState extends State<TimerScreen>
     );
   }
 
+  /// The cap honoured by [AutodeleteMode.retain60].
+  static const int autoCleanRetentionCap = 5;
+
   void cleanOldTimers({MobjID<TimerData>? except}) {
-    // remove (previous) unpinned nonplaying timers
-    final curTimers = peekTimers();
-    for (final tid in curTimers) {
-      if (tid == except) continue;
-      final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
-      if (trivialAndClearable(t, null)) {
-        deleteTimer(tid);
-      }
+    switch (autoDeleteMode(
+      Mobj.getAlreadyLoaded(autodeleteModeID, IntType()).peek(),
+    )) {
+      case AutodeleteMode.bin:
+        // bin every (previous) unpinned nonplaying timer
+        for (final tid in peekTimers().toList()) {
+          if (tid == except) continue;
+          final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
+          if (trivialAndClearable(t, null)) {
+            deleteTimer(tid);
+          }
+        }
+      case AutodeleteMode.retain60:
+        // bin the oldest clearable ones (from the beginning (top) of the list) until at most [retainModeCap] remain
+        var overflow = peekTimers().length - autoCleanRetentionCap;
+        if (overflow <= 0) break;
+        final toDelete = [];
+        for (final tid in peekTimers().toList()) {
+          if (overflow <= 0) break;
+          if (tid == except) continue;
+          final t = Mobj.getAlreadyLoaded(tid, TimerDataType());
+          if (trivialAndClearable(t, null)) {
+            toDelete.add(t);
+          }
+          --overflow;
+        }
+        for (final t in toDelete) {
+          deleteTimer(t.id);
+        }
+      case AutodeleteMode.off:
+        break;
     }
   }
 
@@ -6176,8 +6231,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         subtitle: Text(
                           persistentAlarmMode
-                              ? 'On. Alarm loops until you open the app'
-                              : 'Off. Alarm plays once',
+                              ? 'On: Alarm loops until you open the app'
+                              : 'Off: Alarm plays once',
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
@@ -6214,6 +6269,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.of(context).pop();
                           }
                         },
+                      );
+                    }),
+                    // Autodelete mode setting
+                    Watch((context) {
+                      final autodeleteModeMobj = Mobj.getAlreadyLoaded(
+                        autodeleteModeID,
+                        IntType(),
+                      );
+                      // read .value (not .peek) so this Watch rebuilds on change
+                      final mode = autoDeleteMode(autodeleteModeMobj.value);
+                      final (fill, subtitle) = switch (mode) {
+                        AutodeleteMode.bin => (
+                          CheckboxFill.bottomHalf,
+                          'On: Send finished (new) timers to the bin',
+                        ),
+                        AutodeleteMode.retain60 => (
+                          CheckboxFill.topHalf,
+                          'Retain ${TimerScreenState.autoCleanRetentionCap} timers',
+                        ),
+                        AutodeleteMode.off => (
+                          CheckboxFill.none,
+                          'Off: Never auto-delete completed timers',
+                        ),
+                      };
+                      void cycle() {
+                        final next =
+                            AutodeleteMode.values[(mode.index + 1) %
+                                AutodeleteMode.values.length];
+                        autodeleteModeMobj.value = next.index;
+                      }
+
+                      return MenuTile(
+                        title: Text(
+                          'Auto-Clean',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        subtitle: Text(
+                          subtitle,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        trailing: ManyStateCheckbox(
+                          fill: fill,
+                          onTap: cycle,
+                          size: 24,
+                        ),
+                        onTap: cycle,
+                        contentPadding: listItemPadding,
                       );
                     }),
                     // Right-handed mode setting
