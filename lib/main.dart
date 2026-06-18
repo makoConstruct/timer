@@ -5019,7 +5019,7 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   /// The cap honoured by [AutodeleteMode.retain60].
-  static const int autoCleanRetentionCap = 5;
+  static const int autoCleanRetentionCap = 60;
 
   void cleanOldTimers({MobjID<TimerData>? except}) {
     switch (autoDeleteMode(
@@ -6043,14 +6043,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     const sectionHeadingHeight = 45.0;
 
+    // Shared text styles so every settings tile is consistent: titles ("tops")
+    // are onSurface/bodyLarge, subtitles are onSurfaceVariant/bodyMedium.
+    final settingTitleStyle = theme.textTheme.bodyLarge!.copyWith(
+      color: theme.colorScheme.onSurface,
+    );
+    final settingSubtitleStyle = theme.textTheme.bodyMedium!.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    Text settingTitle(String text) => Text(text, style: settingTitleStyle);
+    Text settingSubtitle(String text) =>
+        Text(text, style: settingSubtitleStyle);
+
     Widget setupTile = MenuTile(
-      title: Text('Setup', style: theme.textTheme.bodyLarge),
-      subtitle: Text(
-        'Resume setup',
-        style: theme.textTheme.bodySmall!.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
+      title: settingTitle('Setup'),
+      subtitle: settingSubtitle('Resume setup'),
       onTap: () {
         Navigator.push(
           context,
@@ -6103,18 +6110,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           autoDispose: true,
                         );
                         return MenuTile(
-                          title: Text(
-                            'Numpad orientation',
-                            style: theme.textTheme.bodyLarge,
-                          ),
+                          title: settingTitle('Numpad orientation'),
                           subtitle: Watch(
-                            (context) => Text(
+                            (context) => settingSubtitle(
                               padLandscapeNonNull.value
                                   ? 'landscape'
                                   : 'portrait',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurface,
-                              ),
                             ),
                           ),
                           trailing: PadStateIcon(signal: padLandscapeNonNull),
@@ -6131,19 +6132,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
                         return MenuTile(
-                          title: Text(
-                            'Alarm sound',
-                            style: theme.textTheme.bodyLarge,
-                          ),
+                          title: settingTitle('Alarm sound'),
                           subtitle: Watch((context) {
-                            return Text(
+                            return settingSubtitle(
                               Mobj.getAlreadyLoaded(
                                 selectedAudioID,
                                 AudioInfoType(),
                               ).value!.name,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
                             );
                           }),
                           trailing: SizedBox(
@@ -6184,17 +6179,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final persistentAlarmMode =
                           persistentAlarmModeMobj.value ?? false;
                       return RoundedCheckboxListTile(
-                        title: Text(
-                          'Persistent alarm',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        subtitle: Text(
+                        title: settingTitle('Persistent alarm'),
+                        subtitle: settingSubtitle(
                           persistentAlarmMode
                               ? 'On: Alarm loops until you open the app'
                               : 'Off: Alarm plays once',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
                         ),
                         value: persistentAlarmMode,
                         onChanged: (value) {
@@ -6209,17 +6198,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         BoolType(),
                       );
                       return MenuTile(
-                        title: Text(
-                          'Button size',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        subtitle: Text(
+                        title: settingTitle('Button size'),
+                        subtitle: settingSubtitle(
                           buttonScaleDialOnOn.value!
                               ? "Button scale dial is currently deployed, tap here to turn it off"
                               : 'Introduce a dial by which you can adjust UI scale',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
                         ),
                         onTap: () {
                           buttonScaleDialOnOn.value =
@@ -6241,7 +6224,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final (fill, subtitle) = switch (mode) {
                         AutodeleteMode.bin => (
                           CheckboxFill.bottomHalf,
-                          'On: Send finished (new) timers to the bin',
+                          'On: Send finished timers to the bin when appropriate',
                         ),
                         AutodeleteMode.retain60 => (
                           CheckboxFill.topHalf,
@@ -6260,16 +6243,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       }
 
                       return MenuTile(
-                        title: Text(
-                          'Auto-Clean',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        subtitle: Text(
-                          subtitle,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
+                        title: settingTitle('Auto-Clean'),
+                        subtitle: settingSubtitle(subtitle),
                         trailing: ManyStateCheckbox(
                           fill: fill,
                           onTap: cycle,
@@ -6287,15 +6262,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                       final isRightHanded = isRightHandedMobj.value ?? true;
                       return MenuTile(
-                        title: Text(
+                        title: settingTitle(
                           '${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                          style: theme.textTheme.bodyLarge,
                         ),
-                        subtitle: Text(
+                        subtitle: settingSubtitle(
                           'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
                         ),
 
                         // splashColor: Colors.black,
@@ -6343,17 +6314,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final padVerticallyAscending =
                           padVerticallyAscendingMobj.value ?? false;
                       return MenuTile(
-                        title: Text(
-                          'Numpad type',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        subtitle: Text(
+                        title: settingTitle('Numpad type'),
+                        subtitle: settingSubtitle(
                           padVerticallyAscending
                               ? 'calculator/keyboard style'
                               : 'phone style',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
                         ),
                         trailing: NumpadTypeIndicator(
                           isAscending: padVerticallyAscending,
@@ -6390,10 +6355,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
                         return MenuTile(
-                          title: Text(
-                            'This app',
-                            style: theme.textTheme.bodyLarge,
-                          ),
+                          title: settingTitle('This app'),
                           trailing: SizedBox(
                             width: 26,
                             height: 26,
@@ -6429,10 +6391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
                         return MenuTile(
-                          title: Text(
-                            'Thank the author',
-                            style: theme.textTheme.bodyLarge,
-                          ),
+                          title: settingTitle('Thank the author'),
                           trailing: SizedBox(
                             width: 26,
                             height: 26,
@@ -6486,15 +6445,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Offset? tapPosition;
                         return MenuTile(
                           onTapUpGlobalPosition: (pos) => tapPosition = pos,
-                          title: Text(
-                            'Crank game',
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                          subtitle: Text(
+                          title: settingTitle('Crank game'),
+                          subtitle: settingSubtitle(
                             "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
                           ),
                           trailing: SizedBox(
                             width: 26,
@@ -6544,15 +6497,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
                         return MenuTile(
-                          title: Text(
-                            'Trash',
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                          subtitle: Text(
+                          title: settingTitle('Trash'),
+                          subtitle: settingSubtitle(
                             'Restore recently deleted timers',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
                           ),
                           trailing: SizedBox(
                             width: 26,
