@@ -10,7 +10,11 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart'
-    show mainNotificationPortName, isBackgrounded, TimerHolm;
+    show
+        mainNotificationPortName,
+        isBackgrounded,
+        foregroundServiceOpen,
+        TimerHolm;
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
@@ -28,8 +32,10 @@ void printExceptions(void Function() fn, [String context = ""]) {
   }
 }
 
-Future<void> printExceptionsAsync(Future<void> Function() fn,
-    [String context = ""]) async {
+Future<void> printExceptionsAsync(
+  Future<void> Function() fn, [
+  String context = "",
+]) async {
   try {
     await fn();
   } catch (error, stack) {
@@ -59,26 +65,31 @@ void foregroundTaskStart() {
 
   foregroundTaskHandler = PersistentNotificationTask();
   FlutterForegroundTask.setTaskHandler(
-      ErrorCatchingTaskHandler(foregroundTaskHandler));
+    ErrorCatchingTaskHandler(foregroundTaskHandler),
+  );
 }
 
 void _sendDismissAlarms() {
-  IsolateNameServer.lookupPortByName(mainNotificationPortName)
-      ?.send('dismissAlarms');
-  IsolateNameServer.lookupPortByName(foregroundServicePortName)
-      ?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(
+    mainNotificationPortName,
+  )?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(
+    foregroundServicePortName,
+  )?.send('dismissAlarms');
 }
 
 @pragma('vm:entry-point')
 Future<void> foregroundServiceNotificationActionReceived(
-    ReceivedAction action) async {
+  ReceivedAction action,
+) async {
   print("foregroundServiceNotificationActionReceived: $action");
   _sendDismissAlarms();
 }
 
 @pragma('vm:entry-point')
 Future<void> foregroundServiceNotificationDismissedReceived(
-    ReceivedAction action) async {
+  ReceivedAction action,
+) async {
   print("foregroundServiceNotificationDismissedReceived: $action");
   _sendDismissAlarms();
 }
@@ -94,7 +105,9 @@ class ErrorCatchingTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) =>
       printExceptionsAsync(
-          () => _inner.onDestroy(timestamp, isTimeout), "onDestroy");
+        () => _inner.onDestroy(timestamp, isTimeout),
+        "onDestroy",
+      );
 
   @override
   void onRepeatEvent(DateTime timestamp) =>
@@ -106,12 +119,15 @@ class ErrorCatchingTaskHandler extends TaskHandler {
 
   @override
   void onNotificationPressed() => printExceptions(
-      () => _inner.onNotificationPressed(), "onNotificationPressed");
+    () => _inner.onNotificationPressed(),
+    "onNotificationPressed",
+  );
 
   @override
   void onNotificationButtonPressed(String id) => printExceptions(
-      () => _inner.onNotificationButtonPressed(id),
-      "onNotificationButtonPressed");
+    () => _inner.onNotificationButtonPressed(id),
+    "onNotificationButtonPressed",
+  );
 }
 
 const completionChannelKey = 'timer_completion';
@@ -122,23 +138,33 @@ class PersistentNotificationTask extends TaskHandler {
   final List<Function()> cleanups = [];
   late Signal<bool> appActive;
   late ReceivePort _dismissPort;
-  TimerHolm? _timerHolm;
+  // Non-null only while this isolate's TimerHolm is the live tracker (the app is
+  // gone/backgrounded and we've finished (re)loading timers). The self-stop
+  // effect is gated on it being non-null so it can't fire during the handoff
+  // window: right after the app is dismissed, appActive flips false (so
+  // isBackgrounded/foregroundServiceOpen briefly read "closed") but activeTimers
+  // hasn't been repopulated yet — stopping then would kill the service while a
+  // timer is actually running. A Signal (not a plain field) so that assigning it
+  // re-triggers the effect once tracking is live and activeTimers is correct.
+  final Signal<TimerHolm?> _timerHolm = Signal(null);
   Timer? _notificationTimer;
 
   void dismissAllAlarms() {
     backthreadLog("dismissAllAlarms");
-    if (_timerHolm != null) {
-      _timerHolm!.dismissAlarms();
+    final holm = _timerHolm.peek();
+    if (holm != null) {
+      holm.dismissAlarms();
     } else {
       jukeBox.stopAudio();
       AwesomeNotifications().cancelAll();
     }
   }
 
-  void updatePersistentNotification(
-      {required String title,
-      required String text,
-      required List<NotificationButton> buttons}) {
+  void updatePersistentNotification({
+    required String title,
+    required String text,
+    required List<NotificationButton> buttons,
+  }) {
     FlutterForegroundTask.updateService(
       notificationTitle: title,
       notificationText: text,
@@ -147,39 +173,45 @@ class PersistentNotificationTask extends TaskHandler {
   }
 
   void updateRunningTimersNotification() {
-    final tracking = _timerHolm?.tracking;
+    final tracking = _timerHolm.peek()?.tracking;
     if (tracking == null || tracking.isEmpty) return;
-    final String title =
-        tracking.length == 1 ? "timer running" : "timers running";
+    final String title = tracking.length == 1
+        ? "timer running"
+        : "timers running";
     String body = "";
     for (final tt in tracking.values) {
       final mv = tt.mobj?.value;
       if (mv?.isRunning == true) {
         final dur = mv!.duration - DateTime.now().difference(mv.startTime);
-        final remainingSecs =
-            dur.isNegative ? 0.0 : dur.inMicroseconds / 1000000.0;
+        final remainingSecs = dur.isNegative
+            ? 0.0
+            : dur.inMicroseconds / 1000000.0;
         body += "${formatTime(durationToDigits(remainingSecs))}\n";
       } else {
-        body += "timer completed\n";
+        // actually no, just don't mention them
+        // body += "timer completed\n";
       }
     }
     updatePersistentNotification(
-        title: title, text: body.trimRight(), buttons: []);
+      title: title,
+      text: body.trimRight(),
+      buttons: [],
+    );
   }
 
   void _startTimerHolm(Mobj<List<MobjID<TimerData>>> timerListMobj) {
-    final timerIds = timerListMobj.peek()!;
-    final anyActive = timerIds.any((id) {
-      final d = Mobj.seekAlreadyLoaded(id, TimerDataType())?.peek();
-      return d?.isRunning == true || d?.isGoingOff == true;
-    });
-    if (!anyActive) {
-      FlutterForegroundTask.stopService();
-      return;
-    }
-    _timerHolm = TimerHolm(list: timerListMobj, jukeBox: jukeBox, dismissOnForeground: false);
     _notificationTimer = Timer.periodic(
-        const Duration(seconds: 1), (_) => updateRunningTimersNotification());
+      const Duration(seconds: 1),
+      (_) => updateRunningTimersNotification(),
+    );
+    // Build the holm first (its constructor synchronously populates activeTimers
+    // via enlivenTimer), then publish it — so the self-stop effect this assign
+    // re-triggers sees an accurate activeTimers.
+    _timerHolm.value = TimerHolm(
+      list: timerListMobj,
+      jukeBox: jukeBox,
+      dismissOnForeground: false,
+    );
   }
 
   Future<void> _reinitialize() async {
@@ -206,19 +238,21 @@ class PersistentNotificationTask extends TaskHandler {
     _dismissPort = ReceivePort();
     IsolateNameServer.removePortNameMapping(foregroundServicePortName);
     IsolateNameServer.registerPortWithName(
-        _dismissPort.sendPort, foregroundServicePortName);
+      _dismissPort.sendPort,
+      foregroundServicePortName,
+    );
     _dismissPort.listen((message) {
       if (message == 'dismissAlarms') dismissAllAlarms();
     });
     await AwesomeNotifications()
         .initialize('resource://drawable/res_notification_icon', [
-      NotificationChannel(
-        channelKey: completionChannelKey,
-        channelName: 'Timer Completion',
-        channelDescription: 'Notifications when timers complete',
-        importance: NotificationImportance.High,
-      ),
-    ]);
+          NotificationChannel(
+            channelKey: completionChannelKey,
+            channelName: 'Timer Completion',
+            channelDescription: 'Notifications when timers complete',
+            importance: NotificationImportance.High,
+          ),
+        ]);
     await AwesomeNotifications().setListeners(
       onActionReceivedMethod: foregroundServiceNotificationActionReceived,
       onDismissActionReceivedMethod:
@@ -227,33 +261,55 @@ class PersistentNotificationTask extends TaskHandler {
 
     // isBackgrounded is a global imported from main.dart. In this isolate it's a
     // fresh Signal(false). Wire it to !appActive so TimerHolm works correctly here.
-    cleanups.add(effect(() {
-      isBackgrounded.value = !appActive.value;
-    }));
+    cleanups.add(
+      effect(() {
+        isBackgrounded.value = !appActive.value;
+      }),
+    );
 
     // When the app becomes active, synchronously tear down so it has exclusive access
-    cleanups.add(effect(() {
-      if (appActive.value) {
-        _notificationTimer?.cancel();
-        _notificationTimer = null;
-        _timerHolm?.dispose();
-        _timerHolm = null;
-        MobjRegistry.relinquishAll();
-        updatePersistentNotification(
-            title: appName, text: foregroundNotificationText, buttons: []);
-      }
-    }));
+    cleanups.add(
+      effect(() {
+        if (appActive.value) {
+          _notificationTimer?.cancel();
+          _notificationTimer = null;
+          // Clearing _timerHolm both tears down tracking and (being non-null no
+          // more) disarms the self-stop effect until the next handoff repopulates
+          // activeTimers.
+          _timerHolm.peek()?.dispose();
+          _timerHolm.value = null;
+          MobjRegistry.relinquishAll();
+          updatePersistentNotification(
+            title: appName,
+            text: foregroundNotificationText,
+            buttons: [],
+          );
+        }
+      }),
+    );
 
     if (!appActive.peek()) {
-      _startTimerHolm(Mobj.getAlreadyLoaded(timerListID, ListType(StringType())));
+      _startTimerHolm(
+        Mobj.getAlreadyLoaded(timerListID, ListType(StringType())),
+      );
     }
+
+    cleanups.add(
+      effect(() {
+        // Only stop once we're actually the live tracker (gate avoids the
+        // dismissal handoff race), and only when there's nothing to track.
+        if (_timerHolm.value != null && !foregroundServiceOpen.value) {
+          FlutterForegroundTask.stopService();
+        }
+      }),
+    );
   }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _heartbeatTimeout?.cancel();
     _notificationTimer?.cancel();
-    _timerHolm?.dispose();
+    _timerHolm.peek()?.dispose();
     for (final cleanup in cleanups) {
       cleanup();
     }
@@ -341,10 +397,13 @@ void flushBufferedTaskMessages() {
   }
 }
 
-Future<bool> graspForegroundService() async {
-  if (!Platform.isAndroid) {
-    return false;
-  }
+bool _foregroundServiceSetUp = false;
+
+/// One-time setup: communication port, permissions, and notification/task
+/// options. Returns whether all permissions were granted. Safe to call more
+/// than once (it only does the work the first time).
+Future<bool> _setUpForegroundService() async {
+  if (_foregroundServiceSetUp) return true;
 
   FlutterForegroundTask.initCommunicationPort();
 
@@ -355,7 +414,8 @@ Future<bool> graspForegroundService() async {
   final NotificationPermission notificationPermission =
       await FlutterForegroundTask.checkNotificationPermission();
   if (notificationPermission != NotificationPermission.granted) {
-    bool g = await FlutterForegroundTask.requestNotificationPermission() ==
+    bool g =
+        await FlutterForegroundTask.requestNotificationPermission() ==
         NotificationPermission.granted;
     if (!g) {
       permissionsGranted = false;
@@ -405,6 +465,28 @@ Future<bool> graspForegroundService() async {
     ),
   );
 
+  _foregroundServiceSetUp = true;
+  return permissionsGranted;
+}
+
+/// Stops the foreground service and removes its persistent notification. Safe
+/// to call when the service isn't running (or off Android).
+Future<void> stopForegroundService() async {
+  if (!Platform.isAndroid) return;
+  _serviceRunning = false;
+  await FlutterForegroundTask.stopService();
+}
+
+/// Ensures the foreground service (and its persistent notification) is running,
+/// starting it if necessary. Idempotent, so it's cheap to call on every app
+/// resume to bring the notification back after a backgrounded-and-idle close.
+Future<bool> graspForegroundService() async {
+  if (!Platform.isAndroid) {
+    return false;
+  }
+
+  final bool permissionsGranted = await _setUpForegroundService();
+
   if (await FlutterForegroundTask.isRunningService) {
     // in the example, they restart the service here, we're not gonna restart
     print("service is already running");
@@ -438,8 +520,9 @@ Future<bool> graspForegroundService() async {
   }
 
   // Start an interval timer that sends the heartbeat signal to the foreground task
-  heartbeaterMain ??=
-      Timer.periodic(const Duration(milliseconds: 1200), (timer) {
+  heartbeaterMain ??= Timer.periodic(const Duration(milliseconds: 1200), (
+    timer,
+  ) {
     print("heartbeat sent");
     bufferedSendToForegroundTask({'op': 'heartbeat'});
   });

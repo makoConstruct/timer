@@ -378,6 +378,17 @@ List<T> generatedReverseIfNot<T>(
       : List.generate(length, (i) => generator(length - i - 1));
 }
 
+/// not sure whether this is really faster than [...v]..removeWhere(p). But it could be!
+List<T> copyWithout<T>(List<T> v, bool Function(T) p) {
+  final List<T> ret = [];
+  for (T t in v) {
+    if (!p(t)) {
+      ret.add(t);
+    }
+  }
+  return ret;
+}
+
 void moveAnimationTowardsState(AnimationController animation, bool forward) {
   if (forward) {
     animation.forward();
@@ -3303,6 +3314,7 @@ class MakoThemeData {
   // todo: remove?
   Color harderForeIndentColor;
   Color hintTextColor;
+  Color veryLowProminenceColor;
   bool hardEdges;
   MakoThemeData({
     required this.lowestBackColor,
@@ -3313,6 +3325,7 @@ class MakoThemeData {
     required this.reducedProminenceColor,
     required this.inkColor,
     required this.harderForeIndentColor,
+    required this.veryLowProminenceColor,
     required this.hintTextColor,
     this.hardEdges = false,
   });
@@ -3329,6 +3342,10 @@ class MakoThemeData {
             reducedProminenceColor: darkenColor(
               theme.colorScheme.onSurface,
               0.27,
+            ),
+            veryLowProminenceColor: darkenColor(
+              theme.colorScheme.onSurface,
+              0.67,
             ),
             lowestIndentColor: lightenColor(
               theme.colorScheme.surfaceContainerLowest,
@@ -3352,6 +3369,10 @@ class MakoThemeData {
             reducedProminenceColor: lightenColor(
               theme.colorScheme.onSurface,
               0.66,
+            ),
+            veryLowProminenceColor: lightenColor(
+              theme.colorScheme.onSurface,
+              0.86,
             ),
             lowestIndentColor: darkenColor(
               theme.colorScheme.surfaceContainerHighest,

@@ -88,8 +88,7 @@ final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
 
 final GlobalKey configButtonKey = GlobalKey();
 
-const backingCornerRounding = 0.45;
-const backingDeflationProportion = 0.07;
+const backingCornerRounding = 0.6;
 
 /// A common thickness for thick lines
 const makoLineThickness = 8.0;
@@ -342,6 +341,28 @@ void onDataReceived(Object data) {
 
 final Signal<bool> isBackgrounded = Signal(false);
 
+/// The ids of timers that are currently counting down or going off — i.e. the
+/// timers that give the foreground service a reason to exist. Maintained
+/// reactively by [TimerHolm.enlivenTimer], so it works identically over the
+/// main isolate's [globalTimerHolm] and over the service isolate's own
+/// TimerHolm (each isolate has its own copy of these statics).
+///
+/// A list rather than a set: it's expected to stay small (linear scans win on
+/// cache coherence at this size), and keeping insertion order is mildly nice.
+final Signal<List<MobjID<TimerData>>> activeTimers = Signal([]);
+final Computed<bool> someTimerActive = Computed(
+  () => activeTimers.value.isNotEmpty,
+);
+
+/// Whether the persistent foreground-service notification should be open.
+/// It's only pointless when the app is hidden (alive but not in front of the
+/// user) and nothing is running, so: open iff the app is in the foreground OR a
+/// timer is active. Driven into the actual service by an effect in the main
+/// isolate (starts/stops it) and a stop-only effect in the service isolate.
+final Computed<bool> foregroundServiceOpen = Computed(
+  () => !isBackgrounded.value || someTimerActive.value,
+);
+
 TimerHolm? globalTimerHolm;
 
 /// this is in charge of running timer sounds in response to changes to the timer list
@@ -558,6 +579,16 @@ class TimerHolm {
     TimerData? prev;
     return effect(() {
       final TimerData? d = mobj.value;
+      final active = d != null && (d.isRunning || d.isGoingOff);
+      final present = activeTimers.peek().contains(mobj.id);
+      if (active && !present) {
+        activeTimers.value = [...activeTimers.peek(), mobj.id];
+      } else if (!active && present) {
+        activeTimers.value = copyWithout(
+          activeTimers.peek(),
+          (m) => m == mobj.id,
+        );
+      }
       if (d == null) {
         // delete its children too if it has any
         if (prev?.isComposite ?? false) {
@@ -651,6 +682,10 @@ class TimerHolm {
       tt.vibrationRepeatTimer?.cancel();
       tt.subscription?.call();
     }
+    // Drop this holm's timers from the global active list (the subscriptions
+    // are gone, so their enlivenTimer effects won't clean themselves up).
+    activeTimers.value = [...activeTimers.peek()]
+      ..removeWhere(tracking.containsKey);
     tracking.clear();
   }
 }
@@ -3354,7 +3389,6 @@ class DragActionRingState extends State<DragActionRing>
     double releasep,
   ) {
     final theme = Theme.of(context);
-    final mt = MakoThemeData.fromContext(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded = watchSignal(
       context,
@@ -3375,8 +3409,9 @@ class DragActionRingState extends State<DragActionRing>
         unlerpUnit(0.6, 1, baseGrow) *
         // fades a bit immediately on completion, but doesn't fade all the way out
         lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
+    final mt = MakoThemeData.fromTheme(theme);
     final ringColor = lerpColor(
-      theme.colorScheme.onSurfaceVariant,
+      mt.reducedProminenceColor,
       theme.colorScheme.primary,
       baseGrow,
     );
@@ -3882,8 +3917,18 @@ class TimerScreenState extends State<TimerScreen>
     // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
     // android will support repeat timers via the foreground service
     // assuming that all permissions are granted by now.
-    // this is async, but we don't have to wait for it since all interaction with it is async and buffered
-    graspForegroundService();
+    // Open/close the foreground service (and its persistent notification)
+    // reactively: it should exist whenever the app is in the foreground or a
+    // timer is active, and otherwise go away. graspForegroundService is async
+    // but we don't await it — all interaction with the service is async/buffered
+    // — and both calls are idempotent so re-running this effect is harmless.
+    createEffect(() {
+      if (foregroundServiceOpen.value) {
+        graspForegroundService();
+      } else {
+        stopForegroundService();
+      }
+    });
 
     // make sure the mode indicator follows the current mode
     createEffect(() {
@@ -4256,18 +4301,18 @@ class TimerScreenState extends State<TimerScreen>
         ) ??
         false;
     final int padWidth = padLandscape ? 4 : 3;
-    final controlsh = bottomGutter + 4 * buttonSpan;
+    double backingInflation = timerGap / 2;
+    final controlsh =
+        bottomGutter + 4 * buttonSpan + backingInflation - backingInflation;
     // Calculate the vertical space generally taken by Timer widgets (tallest, including padding).
     final timerHeight = Timer.usualHeight();
     bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
+    Color editActionColor = mt.veryLowProminenceColor;
 
     Widget iconScaledToPip(Widget icon) {
       return Watch((context) {
         final up = editPopoversUp.value;
         return TweenAnimationBuilder<double>(
-          // a transient flip of `up` within one tick coalesces away, so this
-          // never animates toward a target that no longer holds. `t` is linear;
-          // opacity uses it directly, scale curves it (per-direction) below.
           tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
           duration: up
               ? const Duration(milliseconds: 125) // rise
@@ -4276,7 +4321,7 @@ class TimerScreenState extends State<TimerScreen>
             final p = (up ? Curves.easeInOut : Curves.easeInOut).transform(t);
             // final double p = 1;
             return Opacity(
-              opacity: lerp(0.07, 0.2, p),
+              opacity: lerp(0.56, 1, p),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
@@ -4285,7 +4330,7 @@ class TimerScreenState extends State<TimerScreen>
                       width: buttonSpan * 0.12,
                       height: buttonSpan * 0.12,
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.onSurface,
+                        color: editActionColor,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -4329,39 +4374,6 @@ class TimerScreenState extends State<TimerScreen>
         },
       ),
     );
-
-    // todo: animate the play icon out when playing
-    Widget playIcon(Icon otherIcon) {
-      // todo: measure the width of the icons to make this precise
-      double dispf = 0.3;
-      return Stack(
-        children: [
-          FractionalTranslation(
-            translation: Offset(-dispf, 0),
-            child: otherIcon,
-          ),
-          Transform.scale(
-            scale: 0.8,
-            child: FractionalTranslation(
-              translation: Offset(dispf, 0),
-              child: PaintedPlayIcon(),
-            ),
-          ),
-        ],
-      );
-    }
-
-    // final pausePlayButton = TimersButton(
-    //     label: playIcon(Icon(Icons.pause_rounded)),
-    //     onPanDown: (_) {
-    //       pausePlaySelected();
-    //     });
-    // final stopPlayButton = TimersButton(
-    //   label: playIcon(Icon(Icons.restart_alt_rounded)),
-    //   onPanDown: (_) {
-    //     pausePlaySelected(reset: true);
-    //   },
-    // );
 
     final buttonScaleDial = Watch((context) {
       if (buttonScaleDialCenter.value == null) {
@@ -4469,13 +4481,9 @@ class TimerScreenState extends State<TimerScreen>
     // the lower part of the screen
     final buttonSize = Size(buttonSpan, buttonSpan);
     // this code is supposed to nudge things over a little to be perfectly centered if stuff is very close to being centered.
-    // double backingDeflation = backingDeflationProportion * buttonSpan;
     // makes it much easier to keep gaps between timers and gap between bottom timer and control pad backing equal
-    double backingDeflation = timerGap / 2;
-    // positioned to make the space between the number pad backing and the edge of the screen equal
-    double tentativeRightPos =
-        screenSize.width - buttonSpan / 2 - backingDeflation;
-    // double tentativeRightPos = screenSize.width - buttonSpan / 2;
+    // double backingDeflation = timerGap / 2;
+    double tentativeRightPos = screenSize.width - buttonSpan / 2;
     // distance from the anchor (inner-palette column) to the horizontal center of the numeral pad
     final double padCenterOffset = (padWidth + 1) / 2.0 * buttonSpan;
     final imperfection =
@@ -4486,7 +4494,7 @@ class TimerScreenState extends State<TimerScreen>
     }
     final topRightControlAnchor = Offset(
       tentativeRightPos,
-      screenSize.height - controlsh + buttonSpan / 2,
+      screenSize.height - controlsh + buttonSpan / 2 + backingInflation,
     );
 
     // final topLeftPos = topRightPos + Offset(-buttonSpan * 5, 0);
@@ -4509,7 +4517,8 @@ class TimerScreenState extends State<TimerScreen>
         height: buttonSpan * 0.43,
         child: Hero(
           tag: 'configButton',
-          child: HamburgerIcon(color: theme.colorScheme.onSurfaceVariant),
+          child: HamburgerIcon(color: mt.reducedProminenceColor),
+          // child: HamburgerIcon(color: theme.colorScheme.onSurfaceVariant),
         ),
       ),
       // onPanDown feels more responsive of course, but it's inconsistent with usual behavior of touch interfaces, so I'm not sure which is better
@@ -4529,8 +4538,9 @@ class TimerScreenState extends State<TimerScreen>
       rect: controlGridBound(
         padLandscape ? Offset(-4, 0) : Offset(-3, 0),
         padLandscape ? Size(4, 3) : Size(3, 4),
-      ),
-      // ).deflate(backingDeflation),
+        // ),
+        // ).deflate(backingDeflation),
+      ).inflate(backingInflation),
       child: Container(
         constraints: BoxConstraints.expand(),
         decoration: BoxDecoration(
@@ -4542,64 +4552,11 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
-    final double modalHighlightSpan = buttonSpan - 2 * backingDeflation;
-    Widget modalHighlightBacking = Watch((context) {
-      final anchor = modeHighlightAnchor.watch(context);
-      return AnimatedBuilder(
-        animation: modeLivenessAnimation,
-        builder: (context, child) {
-          return positionedAt(
-            anchor,
-            Animove(
-              key: modeHighlightAnimoveKey,
-              enabled: modeLivenessAnimation.value > 0,
-              simulationFactory: (c, t, v) =>
-                  TimelyParabolicSimulation(c, t, v, duration: 0.2),
-              child: FractionalTranslation(
-                translation: Offset(-0.5, -0.5),
-                child: SizedBox(
-                  width: modalHighlightSpan * modeLivenessAnimation.value,
-                  height: modalHighlightSpan * modeLivenessAnimation.value,
-                  child: PulserAnimation(
-                    pulses: modeActivationPulse.stream,
-                    duration: Duration(milliseconds: 440),
-                    builder: (context, child, progresses) {
-                      final p = min(
-                        1.0,
-                        progresses.fold(
-                          0.0,
-                          (a, b) => a + 0.55 * defaultPulserFunction(b),
-                        ),
-                      );
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: lerpColor(
-                            mt.foreBackColor,
-                            theme.colorScheme.primary,
-                            p,
-                          ),
-                          borderRadius: BorderRadius.circular(
-                            backingCornerRounding * buttonSpan,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    });
-
     final numeralPartAnchor = Offset(-3, 0);
-    final outerPaletteAnchor = Offset(-4, 0);
     final innerPaletteAnchor = Offset(0, 0);
     final numeralColor = theme.colorScheme.onSurfaceVariant;
 
     final controls = [
-      modalHighlightBacking,
       numeralBacking,
       ...List.generate(9, (i) {
         int ix = i % 3;
@@ -4686,7 +4643,9 @@ class TimerScreenState extends State<TimerScreen>
       padLandscape ? Offset(-4, 1) : Offset(-2, 3),
       TimersButton(
         label: proportionedIcon(
-          iconScaledToPip(PaintedBackspaceIcon(size: 12, color: numeralColor)),
+          iconScaledToPip(
+            PaintedBackspaceIcon(size: 12, color: editActionColor),
+          ),
         ),
         onPanDown: (_) {
           // without this, currentlyPressingKey going to 1 would briefly close the buttons (and ignore the press) while isFirstPressForSelectedTimer is still true
@@ -4700,7 +4659,7 @@ class TimerScreenState extends State<TimerScreen>
       padLandscape ? Offset(-4, 2) : Offset(-1, 3),
       TimersButton(
         label: proportionedIcon(
-          iconScaledToPip(PaintedPlayIcon(size: 10, color: numeralColor)),
+          iconScaledToPip(PaintedPlayIcon(size: 10, color: editActionColor)),
         ),
         onPanDown: (_) {
           isFirstPressForSelectedTimer.value = false;
@@ -6765,9 +6724,10 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
             child: Text(
               'Deleted timers wait here for a couple of days, in case you want them back.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: MakoThemeData.fromTheme(theme).reducedProminenceColor,
-              ),
+              style: theme.textTheme.bodyMedium,
+              // ?.copyWith(
+              //   color: MakoThemeData.fromTheme(theme).reducedProminenceColor,
+              // ),
             ),
           ),
         );
