@@ -5,11 +5,10 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
 
-import 'package:awesome_notifications/awesome_notifications.dart'
-    hide NotificationPermission;
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:makos_timer/boring.dart';
+import 'package:makos_timer/platform_notifications.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/main.dart'
     show
@@ -80,22 +79,6 @@ void _sendDismissAlarms() {
   )?.send('dismissAlarms');
 }
 
-@pragma('vm:entry-point')
-Future<void> foregroundServiceNotificationActionReceived(
-  ReceivedAction action,
-) async {
-  print("foregroundServiceNotificationActionReceived: $action");
-  _sendDismissAlarms();
-}
-
-@pragma('vm:entry-point')
-Future<void> foregroundServiceNotificationDismissedReceived(
-  ReceivedAction action,
-) async {
-  print("foregroundServiceNotificationDismissedReceived: $action");
-  _sendDismissAlarms();
-}
-
 class ErrorCatchingTaskHandler extends TaskHandler {
   final TaskHandler _inner;
   ErrorCatchingTaskHandler(this._inner);
@@ -158,7 +141,7 @@ class PersistentNotificationTask extends TaskHandler {
       holm.dismissAlarms();
     } else {
       jukeBox.stopAudio();
-      AwesomeNotifications().cancelAll();
+      PlatformNotifications.cancelAll();
     }
   }
 
@@ -246,20 +229,13 @@ class PersistentNotificationTask extends TaskHandler {
     _dismissPort.listen((message) {
       if (message == 'dismissAlarms') dismissAllAlarms();
     });
-    await AwesomeNotifications()
-        .initialize('resource://drawable/res_notification_icon', [
-          NotificationChannel(
-            channelKey: completionChannelKey,
-            channelName: 'Timer Completion',
-            channelDescription: 'Notifications when timers complete',
-            importance: NotificationImportance.High,
-          ),
-        ]);
-    await AwesomeNotifications().setListeners(
-      onActionReceivedMethod: foregroundServiceNotificationActionReceived,
-      onDismissActionReceivedMethod:
-          foregroundServiceNotificationDismissedReceived,
+    await PlatformNotifications.ensureChannel(
+      channelKey: completionChannelKey,
+      channelName: 'Timer Completion',
+      channelDescription: 'Notifications when timers complete',
     );
+    // Dismissing or acting on a completion notification dismisses the alarm.
+    PlatformNotifications.setActionListener(_sendDismissAlarms);
 
     // isBackgrounded is a global imported from main.dart. In this isolate it's a
     // fresh Signal(false). Wire it to !appActive so TimerHolm works correctly here.

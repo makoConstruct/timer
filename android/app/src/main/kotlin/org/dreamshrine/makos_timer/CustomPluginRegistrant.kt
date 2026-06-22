@@ -15,6 +15,7 @@ class CustomPluginRegistrant : FlutterForegroundTaskLifecycleListener {
             // GeneratedPluginRegistrant.registerWith(flutterEngine)
             // Register our custom plugin
             flutterEngine.plugins.add(PlatformAudioPlugin())
+            flutterEngine.plugins.add(PlatformNotificationPlugin())
         }
     }
 

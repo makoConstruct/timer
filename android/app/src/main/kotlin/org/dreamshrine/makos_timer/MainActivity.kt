@@ -12,6 +12,7 @@ class MainActivity : FlutterActivity() {
         // Register plugins for main engine
         GeneratedPluginRegistrant.registerWith(flutterEngine)
         flutterEngine.plugins.add(PlatformAudioPlugin())
+        flutterEngine.plugins.add(PlatformNotificationPlugin())
 
         // Register lifecycle listener for background engine
         FlutterForegroundTaskPlugin.addTaskLifecycleListener(CustomPluginRegistrant())

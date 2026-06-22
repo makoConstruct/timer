@@ -10,9 +10,8 @@ import 'dart:ui';
 
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
-import 'package:awesome_notifications/awesome_notifications.dart'
-    hide NotificationPermission;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:makos_timer/platform_notifications.dart';
 import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:improved_wrap/improved_wrap.dart';
 // imported as because there's a name collision with Column, lmao
@@ -296,19 +295,13 @@ void main() async {
           globalTimerHolm?.dismissAlarms();
         }
       });
-      await AwesomeNotifications()
-          .initialize('resource://drawable/res_notification_icon', [
-            NotificationChannel(
-              channelKey: 'main_notification',
-              channelName: 'Timer Completion',
-              channelDescription: 'Notifications when timers complete',
-              importance: NotificationImportance.High,
-            ),
-          ]);
-      await AwesomeNotifications().setListeners(
-        onActionReceivedMethod: onNotificationActionReceived,
-        onDismissActionReceivedMethod: onNotificationDismissedReceived,
+      await PlatformNotifications.ensureChannel(
+        channelKey: completionChannelKey,
+        channelName: 'Timer Completion',
+        channelDescription: 'Notifications when timers complete',
       );
+      // Dismissing or acting on a completion notification dismisses the alarm.
+      PlatformNotifications.setActionListener(_sendDismissAlarms);
     }),
   ]);
   runApp(const TimersApp());
@@ -321,18 +314,6 @@ void _sendDismissAlarms() {
   IsolateNameServer.lookupPortByName(
     foregroundServicePortName,
   )?.send('dismissAlarms');
-}
-
-@pragma('vm:entry-point')
-Future<void> onNotificationActionReceived(ReceivedAction action) async {
-  print("onNotificationActionReceived: $action");
-  _sendDismissAlarms();
-}
-
-@pragma('vm:entry-point')
-Future<void> onNotificationDismissedReceived(ReceivedAction action) async {
-  print("onNotificationDismissedReceived: $action");
-  _sendDismissAlarms();
 }
 
 void onDataReceived(Object data) {
@@ -402,7 +383,7 @@ class TimerHolm {
   void dismissAlarms() {
     jukeBox.stopAudio();
     print("dismissAlarms");
-    AwesomeNotifications().cancelAll();
+    PlatformNotifications.cancelAll();
     for (final tt in tracking.values) {
       print("dismissing alarm ${tt.mobj?.id}");
       final d = tt.mobj?.peek();
@@ -416,29 +397,11 @@ class TimerHolm {
 
   Future<void> _sendCompletionNotification(TimerTrack tt) async {
     print("_sendCompletionNotification");
-    await AwesomeNotifications().createNotification(
-      content: NotificationContent(
-        id: _notificationIdCounter++,
-        channelKey: completionChannelKey,
-        title: 'timer complete',
-        body: tt.mobj?.peek()?.title ?? 'tap to dismiss',
-        bigPicture: 'resource://drawable/res_large_notification_icon',
-        notificationLayout: NotificationLayout.BigPicture,
-        actionType: ActionType.DismissAction,
-        locked: true,
-        autoDismissible: true,
-        category: NotificationCategory.Alarm,
-        // my phone screen already wakes up for alarms, so maybe we shouldn't override os default, if that's what this does, and if that's not what it does maybe it does nothing. And yes I went trhough the convoluted 5 clicks required to find out whether this is default true and it isn't.
-        // wakeUpScreen: true,
-      ),
-      actionButtons: [
-        NotificationActionButton(
-          key: 'dismiss',
-          label: 'dismiss',
-          actionType: ActionType.DismissAction,
-          autoDismissible: true,
-        ),
-      ],
+    await PlatformNotifications.showCompletion(
+      id: _notificationIdCounter++,
+      channelKey: completionChannelKey,
+      title: 'timer complete',
+      body: tt.mobj?.peek()?.title ?? 'tap to dismiss',
     );
   }
 

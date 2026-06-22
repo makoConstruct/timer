@@ -14,7 +14,10 @@
         android:label="mako's timer"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-         <service 
+         <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false" />
+        <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="specialUse"
             android:stopWithTask="false"
