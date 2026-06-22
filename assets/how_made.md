@@ -1,12 +1,14 @@
 ## Just One Motion
 
-The first design was just one big dial. I started with an intuition that it ought to be possible to create, set, and start a timer with just one interaction. You'd simply turn the dial until you had the number you wanted, and you'd release it, and then it would start winding back, and when it hit 0 the timer would sound.
+Initially, the interface was just one big dial.
 
-We did ultimately succeed at making it possible to create, set and start a timer with just one interaction, but it couldn't be done through the dial design. In practice, there was no way to make the dial feel good. You'd tend to be one to three seconds off from the exact time you wanted, which wouldn't matter on a practical level, but it felt horrible, because in a sense, you would have the wrong timer, not quite the timer you wanted, and you'd smell the wrongness of it hanging in the air.
+I started with an intuition that it ought to be possible to create, set, and start a timer with just one interaction. You'd simply turn the dial until you had the number you wanted, and you'd release it, and then it would start winding back, and when it hit 0 the timer would sound.
 
-I could make the dial clicky, limit it to 30 second increments, but then we'd lose the precision that made a dial interesting to begin with. Ultimately, a dial would always require you to read the screen as you confirmed your final number, you'd never be able to configure a timer *absentmindedly*, let alone without really looking at the screen at all.
+That intuition was right, but through other means. It seemed like there was no way to make the dial feel good. Under the simplest approach, you'd usually land one to three seconds off from the exact time that you wanted, which wouldn't matter on a practical level, but it felt horrible. The timer would be *wrong*, not quite the timer you wanted, and you'd feel the pressure of its wrongness hanging over you.
 
-So I came to appreciate the tactile precision of the number pad. And then I noticed a bunch of optimizations I could try. First came the upward drag to launch, which brought us down to just two interactions per timer-creation. Second came dragging left to add two zeroes and launch, which brought it down to one interaction. At this point, I was excited about the design.
+I could make the dial clicky, limit it to 30 second increments, but then we'd lose the analog qualities that made a dial interesting to begin with.
+
+So I came to appreciate the digital precision of the number pad. I then noticed some optimizations I could apply to a numpad. First came the upward drag to launch, which brought us down to about two interactions per median timer-creation. Then came dragging left, to add two zeroes and launch, which brought it down to about one interaction. At this point, I was excited about the design.
 
 ## Tribulations
 
@@ -16,7 +18,7 @@ There were other morale challenges. Flutter, the UI framework this app was built
 
 ## General Automatic Animation of Layout
 
- No UI framework has a robust approach to the automatic animation of positioning and sizing. I had to develop the very first one.
+No UI framework has a robust approach to the automatic animation of positioning and sizing. I had to develop the very first one.
 
 At the center of the app is a "Wrap" container widget. A wrap takes many widgets, in our case, the timers, and arranges them in a flow, in the same way that a paragraph arranges its words, from left to right in lines and the lines go from top to bottom, or you can flip it so that the lines go up instead of down, or so that they flow from right to left, or it can all be rotated by 90 degrees, and the lines can be aligned with the start or the end, or evenly spread over the page, and they can be splayed or bunched up at the end. (In our case, all we did was flip the line direction to right to left, or not, depending on whether you're right handed). So, a Wrap widget is somewhat complex. Which means that when you add or remove a timer, sometimes the layout can change in somewhat surprising ways, you might not be able to visually understand what happened, especially when wraps are being nested.
 
@@ -34,13 +36,23 @@ At that, a general solution had been found.
 
 My animation framework can be had here: [github:animover](https://github.com/makoConstruct/animover)
 
+## I Hate Graphic Design
+
+It is sickening how much work it takes to make a thing look simple. I'm not sure how to explain this. I'll attempt an abstract explanantion: Human perception/need is itself complex, so to make something simple for a human, you have to produce the compliment of human perception/need, which will match its complexity. That seems a bit speculative to me. How about something concrete examples.
+
+- If you look at a list, in this app, the settings sections, or the drop down timer menu, it will look simply evenly spaced. In order to make it look evenly spaced to your human eyes, I had to introduce a smart padding widget that checks its ancestry for a list, and asks the list whether it's at the very top or at the very bottom, and if it is, it adds extra padding to its top or bottom respectively (*On the web, this could be implemented with margins, but margins introduce unclickable dead zone between items, so I disapprove of them*). If you don't do this, if you implement things the simple way, the padding between the edge of the list and the first item will not appear equal to the padding between the first item and its next sibling, because the simple way just puts equal padding on each side, so there will be two units of padding between the items, the padding of each one, and only one unit of padding at the edges. You will interpret the simple approach as cramped or uneven, and the complex approach as nothing at all.
+
+- The space between the clock dial and the numbers appears equal. If this had been implemented the simple way, it would appear even most of the time nad uneven when a timer is placed into a timercule, because the clockface outline would no longer be visible against the backdrop of the timercule (which is the same color), so it would appear that there's additional extra space. So I programmed the spacer between the clockface and the numbers to shrink to zero when placed into a timercule. This only took the addition of one tween animated watch widget, since the framework is very good, but again, it's a mechanism that exists just to prevent you from noticing its absense.
+
+I would like to move to an industrial culture where none of this is necessary. Where we can expose the guts of the mechanism, where simple things will be seen as simple. Maybe this culture isn't far away.
+
 ## Persisted Signals are Good
 
-Signals are the correct way to do dynamic reactivity. They're like streams, they have a current value and you can subscribe to them and respond to them whenever they change, but unlike streams, you can also subscribe to them lazily, or check the previous value without subscribing, which prevents a major performance issue that long braided chains of streams would sometimes run into.
+Signals are the correct way to do dynamic reactivity. They're like streams, they have a current value and you can subscribe to them and respond to them whenever they change, but unlike streams, you can also subscribe to them lazily, or check the previous value without subscribing, which prevents a critical performance issue that long braided chains of streams would sometimes run into, and often simplifies update logic.
 
-If you take a signal and have it write its state to the database every time it changes, you have a persisted signal, and now you have an utterly minimal way of preserving app state between restarts.
+If you take a signal and have it write its state to the database every time it changes, you have a persisted signal, and now you have an utterly minimal way of preserving app settings and memories between restarts.
 
-This was the first time in my life when I'd been truly satisfied with my medium. Instead of endlessly trudging through *platform bullshit* and persnickety foot-shooting boilerplate, everything was ready, and made sense, I was able to just directly describe the features I wanted in succinct code. I was happy. I enjoyed the work every day. Except when things went wrong on the lower layers and I would be plunged back into the platform bullshit again. But one always makes it out again, eventually.
+This was the first time in my life when I'd been truly satisfied with my medium. Instead of endlessly reworking *platform bullshit* and persnickety foot-shooting boilerplate, everything was ready, and made sense, I was able to just directly describe the features I wanted with utterly succinct code. I was happy. I enjoyed the work every day. Except when things went wrong on the lower layers and I would be plunged back into the platform bullshit again. But one always trudges out of it again, eventually.
 
 It isn't a perfect platform. It has nothing in the way of remote/multiplayer sync.
 

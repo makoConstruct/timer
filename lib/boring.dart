@@ -2066,7 +2066,7 @@ class CircularRevealRoute<T> extends PageRoute<T>
     required this.builder,
     this.buttonCenter,
     this.iconOriginKey,
-    Duration transitionDuration = const Duration(milliseconds: 300),
+    Duration transitionDuration = const Duration(milliseconds: 380),
     Duration reverseTransitionDuration = const Duration(milliseconds: 270),
   }) : _transitionDuration = transitionDuration,
        _reverseTransitionDuration = reverseTransitionDuration;
@@ -2568,14 +2568,23 @@ class _CircularRevealRouteTransition extends StatefulWidget {
       _CircularRevealRouteTransitionState();
 }
 
+/// mostly linear
+double circularRevealRouteCurve(double v) =>
+    lerp(v, Curves.easeOut.transform(v), 0.2);
+
 class _CircularRevealRouteTransitionState
     extends State<_CircularRevealRouteTransition> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final Color backgroundColor = theme.colorScheme.primary;
-    final Color fadedOfBackgroundColor = backgroundColor.withAlpha(24);
+    final Color fadedOfBackgroundColor = backgroundColor.withAlpha(14);
     final Color transparentOfBackgroundColor = backgroundColor.withAlpha(0);
+    // the interior of the reveal starts filled with the highest mako
+    // background color and fades away to expose the new screen.
+    final Color interiorVeilColor = MakoThemeData.fromTheme(
+      theme,
+    ).foreBackColor;
 
     return Stack(
       children: [
@@ -2585,10 +2594,9 @@ class _CircularRevealRouteTransitionState
             animation: widget.animation,
             builder: (context, child) {
               final screenSize = MediaQuery.of(context).size;
-              final progress =
-                  // Curves.easeInOutCubic.transform(
-                  unlerpUnit(0.0, 0.8, widget.animation.value);
-              // );
+              final progress = circularRevealRouteCurve(
+                unlerpUnit(0.0, 0.8, widget.animation.value),
+              );
 
               final c = Alignment(
                 (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
@@ -2621,8 +2629,8 @@ class _CircularRevealRouteTransitionState
             builder: (context, child) {
               final screenSize = MediaQuery.of(context).size;
 
-              final fraction = Curves.linear.transform(
-                unlerpUnit(0.07, 1.0, widget.animation.value),
+              final expansionp = circularRevealRouteCurve(
+                unlerpUnit(0.07, 0.8, widget.animation.value),
               );
               // if (fraction == 1.0) {
               //   return child!;
@@ -2632,20 +2640,42 @@ class _CircularRevealRouteTransitionState
                 (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
               );
 
+              // The revealed interior is initially veiled with the highest
+              // background color, fading down to expose the new screen
+              // gradually at first then quickly by the time expansion ends.
+              final veilOpacity =
+                  1.0 -
+                  Curves.easeIn.transform(
+                    unlerpUnit(0.2, 0.85, widget.animation.value),
+                  );
+
               return ClipRect(
                 child: ShaderMask(
                   shaderCallback: (Rect bounds) {
                     return createRadialRevealShader(
                       bounds: bounds,
                       center: centerAlignment,
-                      fraction: fraction,
+                      fraction: expansionp,
                       fuzzyEdgeWidth: 20.0,
                     );
                   },
                   // no shader if complete
                   // blendMode: fraction == 1.0 ? BlendMode.dst: BlendMode.dstIn,
                   blendMode: BlendMode.dstIn,
-                  child: child,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      child!,
+                      if (veilOpacity > 0.0)
+                        IgnorePointer(
+                          child: ColoredBox(
+                            color: interiorVeilColor.withValues(
+                              alpha: veilOpacity,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -3751,12 +3781,14 @@ class _RenderSignedPadding extends RenderShiftedBox {
   }
 }
 
-/// Tells a child which outer edges of the enclosing [EvenPadColumn]/[EvenPadRow]
-/// it abuts. On the main axis that's position: in a column the leading child
-/// abuts the [top], the trailing child the [bottom]. On the cross axis it's the
-/// same for every child and follows `crossAxisAlignment`: a stretched column
-/// fills both [left] and [right], a `start`-aligned one only the leading side,
-/// a centered one neither.
+/// Tells a child what each of its edges abuts inside the enclosing
+/// [EvenPadColumn]/[EvenPadRow], plus the flex's `padEdge`/`padSibling`
+/// amounts. Each edge either abuts the flex's outer edge (`true`) or a
+/// neighbouring child (`false`). On the main axis that's position: in a column
+/// the leading child's [top] is an edge and its [bottom] a sibling (and vice
+/// versa for the trailing child); interior children are siblings on both. On
+/// the cross axis every child reports edges. With no enclosing flex everything
+/// reads as a sibling.
 ///
 /// The point: when you want a list to look evenly spaced, the end items usually
 /// want a little extra space beyond them. The usual fix (padding on the
@@ -3765,30 +3797,62 @@ class _RenderSignedPadding extends RenderShiftedBox {
 /// place than the item. Instead, hand each item its edge-ness and let *it* pad
 /// itself, keeping the padding part of the (clickable, highlightable) item.
 /// Reporting the cross edges too means a child can absorb *all* of what would
-/// have been container padding, not just the end caps.
+/// have been container padding, not just the end caps. Reporting sibling edges
+/// (with [padSibling]) lets the inter-item gaps live inside the items too.
 @immutable
 class ExtraPadding {
+  /// Whether each edge abuts the flex's outer edge (`true`) rather than a
+  /// neighbouring child (`false`).
   final bool top;
   final bool bottom;
   final bool left;
   final bool right;
+
+  /// Amount applied to edge sides (unless [resolve] overrides it).
+  final double padEdge;
+
+  /// The *full* gap between two neighbours. Each of the two abutting children
+  /// gets half of it (they share the gap), so a [padSibling] equal to [padEdge]
+  /// makes the inter-item gaps match the end caps.
+  final double padSibling;
 
   const ExtraPadding({
     this.top = false,
     this.bottom = false,
     this.left = false,
     this.right = false,
+    this.padEdge = 0,
+    this.padSibling = 0,
   });
 
-  static const none = ExtraPadding();
+  /// The fallback when there's no enclosing flex: every edge a sibling.
+  static const outsideFlex = ExtraPadding();
 
-  /// The inset for each *abutting* edge, zero elsewhere — handy as the
-  /// `padding` of the item itself. Each edge's amount is the most specific
-  /// param given for it: the per-edge [top]/[bottom]/[left]/[right] win, else
-  /// the per-axis [vertical]/[horizontal], else [all], else `0`. Supplying
-  /// overlapping params is fine — priority decides, no error — so
-  /// `resolve(all: 8, top: 16)` means 16 on top and 8 on the other abutting
-  /// edges, and `resolve(vertical: 8)` is end-caps-only (horizontal falls to 0).
+  /// A copy with [padEdge]/[padSibling] swapped in where non-null — the hook an
+  /// [EvenPadding] uses to override the flex's amounts.
+  ExtraPadding withAmounts({double? padEdge, double? padSibling}) =>
+      ExtraPadding(
+        top: top,
+        bottom: bottom,
+        left: left,
+        right: right,
+        padEdge: padEdge ?? this.padEdge,
+        padSibling: padSibling ?? this.padSibling,
+      );
+
+  /// The amount for an edge: a sibling edge takes half of [padSibling] (the gap
+  /// is split between the two neighbours that share it); an edge side takes
+  /// [override] if one was given, else [padEdge]. (Overrides only reach edge
+  /// sides — that's what makes a per-edge `top:` bump the leading item's cap
+  /// without also bumping every interior sibling.)
+  double _amount(bool isEdge, double? override) =>
+      isEdge ? (override ?? padEdge) : padSibling / 2;
+
+  /// The inset for each edge — handy as the `padding` of the item itself.
+  /// Edge sides default to [padEdge] but can be overridden by the most specific
+  /// param given: per-edge [top]/[bottom]/[left]/[right] win, else per-axis
+  /// [vertical]/[horizontal], else [all]. Sibling sides always take half of
+  /// [padSibling].
   EdgeInsets resolve({
     double? all,
     double? horizontal,
@@ -3798,10 +3862,10 @@ class ExtraPadding {
     double? left,
     double? right,
   }) => EdgeInsets.only(
-    top: this.top ? (top ?? vertical ?? all ?? 0) : 0,
-    bottom: this.bottom ? (bottom ?? vertical ?? all ?? 0) : 0,
-    left: this.left ? (left ?? horizontal ?? all ?? 0) : 0,
-    right: this.right ? (right ?? horizontal ?? all ?? 0) : 0,
+    top: _amount(this.top, top ?? vertical ?? all),
+    bottom: _amount(this.bottom, bottom ?? vertical ?? all),
+    left: _amount(this.left, left ?? horizontal ?? all),
+    right: _amount(this.right, right ?? horizontal ?? all),
   );
 
   @override
@@ -3810,23 +3874,25 @@ class ExtraPadding {
       other.top == top &&
       other.bottom == bottom &&
       other.left == left &&
-      other.right == right;
+      other.right == right &&
+      other.padEdge == padEdge &&
+      other.padSibling == padSibling;
 
   @override
-  int get hashCode => Object.hash(top, bottom, left, right);
+  int get hashCode =>
+      Object.hash(top, bottom, left, right, padEdge, padSibling);
 }
 
 /// Per-slot scope an [EvenPadFlex] wraps around each child, carrying that
-/// child's [ExtraPadding]. Interior children still get one (with [ExtraPadding.none])
-/// so an [EvenPadBuilder] always reads the *nearest* flex, never a farther
-/// ancestor.
+/// child's [ExtraPadding]. Interior children get one too so an [EvenPadBuilder]
+/// always reads the *nearest* flex, never a farther ancestor.
 class _EvenPadScope extends InheritedWidget {
   final ExtraPadding padding;
   const _EvenPadScope({required this.padding, required super.child});
 
   static ExtraPadding of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<_EvenPadScope>()?.padding ??
-      ExtraPadding.none;
+      ExtraPadding.outsideFlex;
 
   @override
   bool updateShouldNotify(_EvenPadScope oldWidget) =>
@@ -3835,7 +3901,7 @@ class _EvenPadScope extends InheritedWidget {
 
 /// Reads the [ExtraPadding] from the nearest enclosing [EvenPadColumn]/
 /// [EvenPadRow] and hands it to [builder]. Outside any of those it gets
-/// [ExtraPadding.none].
+/// [ExtraPadding.outsideFlex].
 class EvenPadBuilder extends StatelessWidget {
   final Widget Function(BuildContext context, ExtraPadding extraPadding)
   builder;
@@ -3846,12 +3912,15 @@ class EvenPadBuilder extends StatelessWidget {
       builder(context, _EvenPadScope.of(context));
 }
 
-/// Pads [child] on every edge that abuts the EvenPadFlex it's inside (a no-op
-/// outside one — it never pads an edge that abuts a neighbour). Takes the same
-/// per-edge/per-axis/[all] amounts, with the same priority, as
-/// [ExtraPadding.resolve]; this is just [EvenPadBuilder] + that call without the
-/// closure.
+/// Pads [child] on the edges that abut the EvenPadFlex it's inside: outer edges
+/// by the flex's `padEdge`, edges abutting a neighbour by its `padSibling` (a
+/// no-op outside any flex). [padEdge]/[padSibling] here override the flex's
+/// amounts for this child; the per-edge/per-axis/[all] amounts further override
+/// the edge-side amount, with the same priority as [ExtraPadding.resolve]. This
+/// is just [EvenPadBuilder] + that call without the closure.
 class EvenPadding extends StatelessWidget {
+  final double? padEdge;
+  final double? padSibling;
   final double? all;
   final double? horizontal;
   final double? vertical;
@@ -3862,6 +3931,8 @@ class EvenPadding extends StatelessWidget {
   final Widget child;
   const EvenPadding({
     super.key,
+    this.padEdge,
+    this.padSibling,
     this.all,
     this.horizontal,
     this.vertical,
@@ -3874,15 +3945,17 @@ class EvenPadding extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: _EvenPadScope.of(context).resolve(
-      all: all,
-      horizontal: horizontal,
-      vertical: vertical,
-      top: top,
-      bottom: bottom,
-      left: left,
-      right: right,
-    ),
+    padding: _EvenPadScope.of(context)
+        .withAmounts(padEdge: padEdge, padSibling: padSibling)
+        .resolve(
+          all: all,
+          horizontal: horizontal,
+          vertical: vertical,
+          top: top,
+          bottom: bottom,
+          left: left,
+          right: right,
+        ),
     child: child,
   );
 }
@@ -3904,6 +3977,16 @@ class EvenPadFlex extends StatelessWidget {
   final VerticalDirection verticalDirection;
   final TextBaseline? textBaseline;
 
+  /// [padEdge] is the space beyond each end item (the edges that abut this
+  /// flex's outer edge); [padSibling] is the *full* gap between two neighbours,
+  /// split half to each so it's directly comparable to [padEdge]. Either one
+  /// defaults to the other when null, and both default to `0` — so passing just
+  /// [padEdge] caps the ends only, just [padSibling] spaces between items only,
+  /// and one value for both makes the end caps and inter-item gaps match. A
+  /// child's [EvenPadding] can override these per item.
+  final double? padEdge;
+  final double? padSibling;
+
   const EvenPadFlex({
     super.key,
     required this.direction,
@@ -3913,15 +3996,21 @@ class EvenPadFlex extends StatelessWidget {
     this.textDirection,
     this.verticalDirection = VerticalDirection.down,
     this.textBaseline,
+    this.padEdge,
+    this.padSibling,
     this.children = const [],
   });
+
+  double get _edge => padEdge ?? padSibling ?? 0;
+  double get _sibling => padSibling ?? padEdge ?? 0;
 
   ExtraPadding _edgeFor(int i, int n, TextDirection textDirection) {
     final isLeading = i == 0;
     final isTrailing = i == n - 1;
     final ltr = textDirection == TextDirection.ltr;
     final down = verticalDirection == VerticalDirection.down;
-
+    // A main-axis edge abuts the flex's end when it's the leading/trailing one,
+    // otherwise the next child along; cross edges always abut the flex.
     if (direction == Axis.vertical) {
       // main = vertical (position), cross = horizontal (alignment).
       return ExtraPadding(
@@ -3929,6 +4018,8 @@ class EvenPadFlex extends StatelessWidget {
         bottom: down ? isTrailing : isLeading,
         left: true,
         right: true,
+        padEdge: _edge,
+        padSibling: _sibling,
       );
     }
     // main = horizontal (position), cross = vertical (alignment).
@@ -3937,6 +4028,8 @@ class EvenPadFlex extends StatelessWidget {
       right: ltr ? isTrailing : isLeading,
       top: true,
       bottom: true,
+      padEdge: _edge,
+      padSibling: _sibling,
     );
   }
 
@@ -3972,6 +4065,8 @@ class EvenPadColumn extends EvenPadFlex {
     super.textDirection,
     super.verticalDirection,
     super.textBaseline,
+    super.padEdge,
+    super.padSibling,
     super.children,
   }) : super(direction: Axis.vertical);
 }
@@ -3987,6 +4082,8 @@ class EvenPadRow extends EvenPadFlex {
     super.textDirection,
     super.verticalDirection,
     super.textBaseline,
+    super.padEdge,
+    super.padSibling,
     super.children,
   }) : super(direction: Axis.horizontal);
 }
@@ -5037,29 +5134,52 @@ class PaintedPlayIconPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // Inscribe an equilateral triangle pointing right inside the box.
-    // w = h * sqrt(3/4)
-    final triH = min(size.height, size.width * 2 / sqrt(3));
-    final triW = triH * sqrt(3) / 2;
+    final triH = min(size.height, size.width * playIconDimensionRatio);
+    final triW = triH / playIconDimensionRatio;
+    final strokeSpan = triW * playIconDimensionRoundingp;
+    final innerTriH = triH - strokeSpan;
+    final innerTriW = triW - strokeSpan;
     final cx = size.width / 2;
     final cy = size.height / 2;
-    // Centroid of an equilateral triangle pointing right sits at 1/3 of its width from the base; offset so the centroid lands at the box center.
-    final baseX = cx - triW / 3;
-    final apexX = baseX + triW;
-    final topY = cy - triH / 2;
-    final bottomY = cy + triH / 2;
+    final baseX = cx - innerTriW / 2;
+    final apexX = cx + innerTriW / 2;
+    final topY = cy - innerTriH / 2;
+    final bottomY = cy + innerTriH / 2;
 
     final path = Path()
       ..moveTo(baseX, topY)
       ..lineTo(apexX, cy)
       ..lineTo(baseX, bottomY)
       ..close();
-    _drawRoundedPolygon(canvas, path, color, cornerRadius);
+    // The triangle is inset by strokeSpan/2 per side, so the stroke half-width
+    // must be strokeSpan/2 to fill the box exactly. _drawRoundedPolygon doubles
+    // its last arg into the stroke width, so pass strokeSpan/2 (-> width
+    // strokeSpan) rather than strokeSpan (which bled strokeSpan/2 past each edge).
+    _drawRoundedPolygon(canvas, path, color, strokeSpan / 2);
   }
 
   @override
   bool shouldRepaint(covariant PaintedPlayIconPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.cornerRadius != cornerRadius;
 }
+
+/// h = w * this
+/// strokeWidth = w*roundingp
+double playIconDimensionRatioForRoundingp(double roundingp) {
+  final sr = sqrt(3 / 4);
+  // ret = hp/wp
+  // r = wp * roundingp
+  // wp - r = sr*(hp - r)
+  //   wp = sr*hp + r*(1 - sr)
+  //   wp = hp*sr/(1 - rounding*(1 - sr))
+  // ret = (1 - rounding*(1 - sr))/sr
+  return (1 - roundingp * (1 - sr)) / sr;
+}
+
+double playIconDimensionRoundingp = 0.3;
+double playIconDimensionRatio = playIconDimensionRatioForRoundingp(
+  playIconDimensionRoundingp,
+);
 
 class PaintedPlayIcon extends StatelessWidget {
   const PaintedPlayIcon({super.key, this.size = 24, this.color});
@@ -5074,7 +5194,7 @@ class PaintedPlayIcon extends StatelessWidget {
         Theme.of(context).colorScheme.onSurface;
     return SizedBox(
       width: size,
-      height: size * (sqrt(3) / 2),
+      height: size * playIconDimensionRatio,
       child: CustomPaint(
         painter: PaintedPlayIconPainter(color: c, cornerRadius: size * 0.2),
       ),

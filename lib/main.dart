@@ -922,7 +922,10 @@ bool _startSingle(Mobj<TimerData> mobj, {Duration? delay}) {
     );
     return r;
   } else {
-    if ((delay == null || delay == Duration.zero) &&
+    // stopwatches count up from zero and have no duration, so they must never
+    // be treated as instantly-complete; they start running and count up.
+    if (data.kind != TimerKind.stopwatch &&
+        (delay == null || delay == Duration.zero) &&
         data.duration <= Duration.zero) {
       mobj.value = data.withRunningState(TimerData.completed);
       return true;
@@ -1261,8 +1264,13 @@ class TimerMenu extends StatelessWidget {
                         child: EvenPadColumn(
                           // stretch so every item abuts the sides, letting each
                           // menu item's horizontal padding ride the EvenPad
-                          // cross edges (see [menuItem]).
+                          // cross edges (see [menuItem]). [padEdge] supplies that
+                          // item padding on every edge that abuts the menu, so a
+                          // [menuItem] only overrides its leading top (the arrow).
+                          // [padSibling] 0: the items butt together, no gap.
                           crossAxisAlignment: CrossAxisAlignment.stretch,
+                          padEdge: TimerMenu.itemPadding,
+                          padSibling: 0,
                           children: items.toList(),
                         ),
                       ),
@@ -2235,7 +2243,14 @@ class TimerState extends TimerBaseState<Timer> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               clockDial,
-              SizedBox(width: timerGap * 0.4),
+              // the dial/text spacer collapses to 0 inside a timercule, where
+              // the timer appears as a static part of a larger whole
+              TweenAnimationBuilder<double>(
+                tween: Tween(end: parentIsTimercule() ? 0.0 : timerGap * 0.4),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                builder: (context, width, _) => SizedBox(width: width),
+              ),
               textPart,
             ],
           ),
@@ -2381,7 +2396,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
                   key: frameKey,
                   child: IWrap(
                     key: iWrapKey,
-                    crossAxisAlignment: WrapCrossAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.end,
                     alignment: WrapAlignment.end,
                     children: [
                       SizeFollower(sizeNotifier: _handleSizeNotifier),
@@ -2616,9 +2631,7 @@ class TimerTrayState extends State<TimerTray> with SignalsMixin {
           clipBehavior: Clip.none,
           verticalDirection: VerticalDirection.down,
           alignment: WrapAlignment.end,
-          crossAxisAlignment:
-              // isRightHanded ? WrapCrossAlignment.end : WrapCrossAlignment.start,
-              WrapCrossAlignment.start,
+          crossAxisAlignment: .end,
           children: widget.mobj.value!
               .map((ki) => widget.timerWidgets.value[ki]!)
               .toList(),
@@ -3410,13 +3423,15 @@ class DragActionRingState extends State<DragActionRing>
         // fades a bit immediately on completion, but doesn't fade all the way out
         lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
     final mt = MakoThemeData.fromTheme(theme);
-    final ringColor = lerpColor(
-      mt.reducedProminenceColor,
-      theme.colorScheme.primary,
-      baseGrow,
-    );
-    // final ringColor = mt.reducedProminenceColor;
-    // final ringColor = theme.colorScheme.onSurface;
+    // only the special timer ring (spring expansion) lerps up from the reduced
+    // prominence color as it grows; the numeral rings are just primary.
+    final ringColor = widget.useSpringExpansion
+        ? lerpColor(
+            mt.reducedProminenceColor,
+            theme.colorScheme.primary,
+            baseGrow,
+          )
+        : theme.colorScheme.primary;
 
     // raw per-item selection growth; the clip builder owns any release recede
     // (it keeps the chosen item's highlight crisp while the sweep collapses onto
@@ -3438,7 +3453,10 @@ class DragActionRingState extends State<DragActionRing>
                 style: controlPadTextStyle.merge(
                   TextStyle(color: theme.colorScheme.surface),
                 ),
-                child: FittedBox(fit: BoxFit.scaleDown, child: child),
+                // Center loosens the SizedBox's tight constraints so each icon
+                // can size itself (its Container/CustomPaint size: etc.) rather
+                // than being forced to fill the box.
+                child: Center(child: child),
               ),
             ),
           ),
@@ -3908,6 +3926,16 @@ class TimerScreenState extends State<TimerScreen>
   void initState() {
     super.initState();
 
+    // we're in charge of timer selection, so make sure nothing is selected
+    if (selectedTimer.peek() == null) {
+      for (final id in peekTimers()) {
+        final m = Mobj.getAlreadyLoaded(id, TimerDataType());
+        if (m.peek()?.selected == true) {
+          m.value = m.peek()!.withChanges(selected: false);
+        }
+      }
+    }
+
     timerHolm = globalTimerHolm = TimerHolm(
       list: timerListMobj,
       jukeBox: jukeBox,
@@ -4052,12 +4080,7 @@ class TimerScreenState extends State<TimerScreen>
         onTap: () {
           Navigator.of(context).pop();
         },
-        // Edge-ness comes from the enclosing [EvenPadColumn] rather than passed
-        // isFirst/isLast flags. The caps are irregular — the leading item's top
-        // clears the arrow, so it's taller than the others ([all]) — which is
-        // why this overrides just [top] rather than padding uniformly.
         child: EvenPadding(
-          all: menuItemPadding,
           top: menuItemPadding + arrowHeight,
           child: Row(
             mainAxisSize: MainAxisSize.max,
@@ -4659,7 +4682,7 @@ class TimerScreenState extends State<TimerScreen>
       padLandscape ? Offset(-4, 2) : Offset(-1, 3),
       TimersButton(
         label: proportionedIcon(
-          iconScaledToPip(PaintedPlayIcon(size: 10, color: editActionColor)),
+          iconScaledToPip(PaintedPlayIcon(size: 12, color: editActionColor)),
         ),
         onPanDown: (_) {
           isFirstPressForSelectedTimer.value = false;
@@ -5491,15 +5514,22 @@ class _NumeralButtonState extends State<NumeralButton> {
       ),
       radialActivatorPositions: numericRadialActivatorPositions,
       radialActivatorIcons: [
-        PaintedPlayIcon(size: 16),
-        Row(
+        PaintedPlayIcon(size: 14),
+        Column(
           mainAxisSize: MainAxisSize.min,
-          spacing: 0,
+          spacing: 4,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            PaintedPlayIcon(size: 12),
-            SizedBox(width: 4),
-            Text('+00', style: TextStyle(fontSize: 22)),
+            PaintedPlayIcon(size: 14),
+            // SizedBox(height: 3),
+            Text(
+              '+00',
+              style: TextStyle(
+                fontSize: 22,
+                height: 0.5,
+                leadingDistribution: TextLeadingDistribution.even,
+              ),
+            ),
           ],
         ),
       ],
@@ -6041,7 +6071,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // );
     final listItemPadding = null;
 
-    const sectionHeadingHeight = 45.0;
+    const sectionHeadingHeight = 38.0;
 
     // Shared text styles so every settings tile is consistent: titles ("tops")
     // are onSurface/bodyLarge, subtitles are onSurfaceVariant/bodyMedium.
@@ -6693,7 +6723,6 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
           clipBehavior: Clip.none,
           verticalDirection: VerticalDirection.down,
           alignment: WrapAlignment.end,
-          crossAxisAlignment: WrapCrossAlignment.start,
           children: children,
         ),
       );
@@ -6873,7 +6902,7 @@ class _AboutScreenState extends State<AboutScreen> {
                   children: [
                     const TextSpan(text: 'See also: '),
                     TextSpan(
-                      text: 'The Story of The Making of This App',
+                      text: 'The Full Story of The Making of This App',
                       style: TextStyle(
                         color: theme.colorScheme.primary,
                         decoration: TextDecoration.underline,
@@ -7891,7 +7920,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                           children: reverseIfNot(isRightHanded.value ?? true, [
                             Flexible(
                               child: Text(
-                                'Enable notifications permission',
+                                'Enable notifications permission (we need this to run in the background)',
                                 style: theme.textTheme.bodyMedium!,
                               ),
                             ),
@@ -7945,7 +7974,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                           children: reverseIfNot(isRightHanded.value ?? true, [
                             Flexible(
                               child: Text(
-                                'Give permission to run in background / Prevent android from randomly killing the app even if timers are running',
+                                'Give permission to run in background (without this, android will sometimes kill the app even when timers are running)',
                                 style: theme.textTheme.bodyMedium!,
                               ),
                             ),

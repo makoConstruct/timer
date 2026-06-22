@@ -1,3 +1,5 @@
+/* random info: Background threads are currently enabled by the foreground notification. Background threads wouldn't be necessary if we used exact alarms instead of async.Timers. The background thread isn't doing arbitrary ongoing computation or anything. It's likely we're going to have to move to more of an alarm-style approach for ios */
+
 import 'dart:io';
 import 'dart:async';
 import 'dart:isolate';

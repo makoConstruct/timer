@@ -1,5 +1,5 @@
-The author is an interaction designer and a home cook, who lives in the outskirts of Auckland, Aotearoa.
+The author, mako, is an interaction designer who cooks a lot, and so needs a convenient timer, many times a day.
 
-mako's other works can be viewed here: [aboutmako.makopool.com](https://aboutmako.makopool.com)
+Most of mako's time is spent doing research and development for a better web. Their other works can be viewed here: [aboutmako.makopool.com](https://aboutmako.makopool.com)
 
 This app's website is: [timer.dreamshrine.org](https://timer.dreamshrine.org)
