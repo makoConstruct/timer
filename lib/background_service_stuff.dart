@@ -410,7 +410,6 @@ Future<bool> _setUpForegroundService() async {
       }
     }
 
-    // I don't think this is ever on Android 13+
     assert(await FlutterForegroundTask.canScheduleExactAlarms);
     if (!await FlutterForegroundTask.canScheduleExactAlarms) {
       // // [maybe todo] explain to the user why we need this. wait, it doesn't send the user to the settings page it just opens a tooltip, seems clear enough? Or maybe this permission was already granted and this code doesn't really need to be here? I'll comment this out and replace it with just a check.

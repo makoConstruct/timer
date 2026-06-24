@@ -7937,7 +7937,7 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                           children: reverseIfNot(isRightHanded.value ?? true, [
                             Flexible(
                               child: Text(
-                                'Give permission to run in background (without this, android will sometimes kill the app even when timers are running)',
+                                'Give permission to run in background (without this, android will sometimes kill the app even when timers are running).',
                                 style: theme.textTheme.bodyMedium!,
                               ),
                             ),
