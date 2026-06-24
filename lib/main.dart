@@ -7115,16 +7115,22 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
               setState(() => _hasInteracted = true);
             }
             jukeBox.pauseAudio();
+            // First tap on a not-yet-selected sound only selects it; play/pause
+            // only kicks in on the second and later taps of the selected sound.
             if (_localSelection.value?.url != audio?.url) {
               hasPlayed = false;
+            } else {
+              if (!hasPlayed) {
+                final toPlay =
+                    audio ??
+                    Mobj.getAlreadyLoaded(
+                      selectedAudioID,
+                      AudioInfoType(),
+                    ).value;
+                if (toPlay != null) jukeBox.playAudio(toPlay);
+              }
+              hasPlayed = !hasPlayed;
             }
-            if (!hasPlayed) {
-              final toPlay =
-                  audio ??
-                  Mobj.getAlreadyLoaded(selectedAudioID, AudioInfoType()).value;
-              if (toPlay != null) jukeBox.playAudio(toPlay);
-            }
-            hasPlayed = !hasPlayed;
           },
           builder: (context, isOn) {
             final textTheme = isOn
