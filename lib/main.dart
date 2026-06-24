@@ -3067,6 +3067,17 @@ class DragActionRing extends StatefulWidget {
     this.useSpringExpansion = false,
   });
 
+  /// each activator icon disc's box side, as a fraction of thumbSpan. The arc
+  /// band's half-thickness is half of this.
+  static const double actionRadiusFraction = 0.6;
+
+  /// the arc band's half-thickness — equivalently the radius of its rounded end
+  /// caps (the "nubs"). Since the ring fans out to one side only, this is how
+  /// far the nubs poke past its center on the opposite side, so it's the
+  /// clearance the ring needs from a screen edge it's anchored against.
+  static double nubReach(double thumbSpan) =>
+      thumbSpan * actionRadiusFraction / 2;
+
   @override
   State<DragActionRing> createState() => DragActionRingState();
 }
@@ -3401,7 +3412,7 @@ class DragActionRingState extends State<DragActionRing>
     // it, only shrinking it away at the very end of the dismissal).
     final selections = [for (final c in selectionAnimations) c.value];
 
-    final actionRadiusMax = thumbSpan * 0.6;
+    final actionRadiusMax = thumbSpan * DragActionRing.actionRadiusFraction;
     Widget dragChoiceWidget(Widget child) {
       return SizedBox(
         width: actionRadiusMax,
@@ -4469,7 +4480,9 @@ class TimerScreenState extends State<TimerScreen>
     // this code is supposed to nudge things over a little to be perfectly centered if stuff is very close to being centered.
     // makes it much easier to keep gaps between timers and gap between bottom timer and control pad backing equal
     // double backingDeflation = timerGap / 2;
-    double tentativeRightPos = screenSize.width - buttonSpan / 2;
+    double tentativeRightPos =
+        screenSize.width -
+        max(buttonSpan / 2, DragActionRing.nubReach(thumbSpan) + timerGap);
     // distance from the anchor (inner-palette column) to the horizontal center of the numeral pad
     final double padCenterOffset = (padWidth + 1) / 2.0 * buttonSpan;
     final imperfection =
