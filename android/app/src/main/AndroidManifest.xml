@@ -12,7 +12,7 @@
     <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" /> -->
     <application
         android:label="mako's timer"
-        android:name="${applicationName}"
+        android:name=".MakosTimerApplication"
         android:icon="@mipmap/ic_launcher">
          <receiver
             android:name=".NotificationActionReceiver"
