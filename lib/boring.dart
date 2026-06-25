@@ -31,6 +31,30 @@ import 'main.dart'
 const double tau = 2 * pi;
 const double backingIndicatorGap = 8.0;
 
+/// Lightweight effect-lifecycle helper for [State] objects. Replaces the
+/// effect-tracking half of the now-deprecated `SignalsMixin`: [createEffect]
+/// registers a live `effect()` and the cleanups are disposed automatically when
+/// the State unmounts. (Implicit `.value` build tracking is provided separately
+/// by [SignalStatefulWidget].)
+mixin EffectsMixin<T extends StatefulWidget> on State<T> {
+  final List<EffectCleanup> _effects = [];
+
+  EffectCleanup createEffect(dynamic Function() compute) {
+    final cleanup = effect(compute);
+    _effects.add(cleanup);
+    return cleanup;
+  }
+
+  @override
+  void dispose() {
+    for (final cleanup in _effects) {
+      cleanup();
+    }
+    _effects.clear();
+    super.dispose();
+  }
+}
+
 bool platformIsDesktop() =>
     Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
@@ -3346,6 +3370,11 @@ class MakoThemeData {
   Color hintTextColor;
   Color veryLowProminenceColor;
   bool hardEdges;
+
+  /// Corner radius of a timercule's backing panel. Roughly a quarter of a
+  /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
+  /// control buttons.
+  double timerculeBackingCornerRadius;
   MakoThemeData({
     required this.lowestBackColor,
     required this.lowestIndentColor,
@@ -3358,6 +3387,7 @@ class MakoThemeData {
     required this.veryLowProminenceColor,
     required this.hintTextColor,
     this.hardEdges = false,
+    this.timerculeBackingCornerRadius = 23,
   });
   static MakoThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
@@ -3456,8 +3486,8 @@ class BoolSignalTween extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    return Watch(
-      (context) => TweenAnimationBuilder(
+    return SignalBuilder(
+      builder: (context) => TweenAnimationBuilder(
         tween: Tween<double>(
           begin: signal.value ? 1.0 : 0.0,
           end: signal.value ? 1.0 : 0.0,
@@ -4120,7 +4150,7 @@ void vibrateAlertOnce() async {
   }
 }
 
-class HintToast extends StatefulWidget {
+class HintToast extends SignalStatefulWidget {
   final Widget? child;
   final String? message;
   final ReadonlySignal<bool> showCondition;
@@ -4163,7 +4193,7 @@ Computed<bool> addToSequence(
 }
 
 class _HintToastState extends State<HintToast>
-    with TickerProviderStateMixin, SignalsMixin<HintToast> {
+    with TickerProviderStateMixin, EffectsMixin<HintToast> {
   late AnimationController animation;
 
   @override
@@ -4873,7 +4903,7 @@ class ManyIconPainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.isRightHanded != isRightHanded;
 }
 
-class ManyIcon extends StatelessWidget {
+class ManyIcon extends SignalWidget {
   const ManyIcon({super.key});
 
   @override
@@ -4881,11 +4911,7 @@ class ManyIcon extends StatelessWidget {
     final color =
         IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
     final isRightHanded =
-        watchSignal(
-          context,
-          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()),
-        ) ??
-        true;
+        Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value ?? true;
     return ScalingAspectRatio(
       child: SizedBox(
         width: 50,

@@ -1330,7 +1330,7 @@ class _MenuRevealClipper extends CustomClipper<Path> {
       old.progress != progress || old.origin != origin;
 }
 
-abstract class TimerBase extends StatefulWidget {
+abstract class TimerBase extends SignalStatefulWidget {
   final Mobj<TimerData> mobj;
   final bool animateIn;
   final void Function()? onTap;
@@ -1343,20 +1343,20 @@ abstract class TimerBase extends StatefulWidget {
 }
 
 abstract class TimerBaseState<T extends TimerBase> extends State<T>
-    with SignalsMixin, TickerProviderStateMixin {
+    with TickerProviderStateMixin {
   TimerData get p => widget.mobj.peek()!;
 
   /// The timer data this widget should render. While the timer is alive this
-  /// tracks the Mobj (via [watchSignal], so the element rebuilds on change);
+  /// tracks the Mobj (reads its `.value`, which the SignalStatefulWidget
+  /// element implicitly subscribes to, so the element rebuilds on change);
   /// once it's deleted — its Mobj nulled, or it's been shelved into / restored
   /// out of the trash bin — it freezes on the snapshot captured at deletion
   /// ([previousValue]) and stops touching the Mobj. The data effect that keeps
   /// [previousValue] current is cancelled then (see [playExitAnimation]), so the
   /// snapshot never moves again. Only valid to read during build (it watches);
   /// build methods usually cache it in a local `d`.
-  TimerData get presentData => _deleted
-      ? previousValue!
-      : (watchSignal(context, widget.mobj) ?? previousValue!);
+  TimerData get presentData =>
+      _deleted ? previousValue! : (widget.mobj.value ?? previousValue!);
 
   /// the reactive effect tracking the Mobj; cancelled once the timer is deleted
   /// so the frozen widget detaches from the Mobj entirely.
@@ -1456,7 +1456,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       vsync: this,
     );
     onInitState();
-    _dataEffect = createEffect(() {
+    _dataEffect = effect(() {
       final TimerData? v = widget.mobj.value;
       if (v == null) {
         // move this widget into a transient overlay deletion animation, and trust timerHolm to remove this from its parent in time for the next render so that there wont be a globalkey collision.
@@ -1850,9 +1850,9 @@ class TimerState extends TimerBaseState<Timer> {
     final theme = Theme.of(context);
     final mt = MakoThemeData.fromTheme(theme);
     final moveTextWhenUp = 0.1;
-    final clockRadius = watchSignal(context, timerWidgetRadius);
+    final clockRadius = timerWidgetRadius.value;
     final outerBackground = mt.timerculeHighlightBackground(0);
-    final depth = watchSignal(context, this.depth);
+    final depth = this.depth.value;
 
     // final thumbSpan = Thumbspan.of(context);
 
@@ -2246,15 +2246,11 @@ class TimerculeState extends TimerBaseState<Timercule> {
   Widget build(BuildContext context) {
     final d = presentData;
     final theme = Theme.of(context);
-    final double timerHeight = watchSignal(context, timerWidgetRadius) * 2;
-    final depth = watchSignal(context, this.depth);
+    final double timerHeight = timerWidgetRadius.value * 2;
+    final depth = this.depth.value;
     final mt = MakoThemeData.fromContext(context);
     final backgroundColor = mt.timerculeHighlightBackground(depth);
-    final buttonSpan = watchSignal(
-      context,
-      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
-    )!;
-    final cornerRadius = backingCornerRounding * buttonSpan;
+    final cornerRadius = mt.timerculeBackingCornerRadius;
     Widget? titleWidget;
     if (d.title != null || _titleEditMode) {
       final titleStyle = TextStyle(
@@ -2558,7 +2554,7 @@ class TimerTray extends StatefulWidget {
 
 typedef TimerWidgets = Map<MobjID<TimerData>, TimerBase>;
 
-class TimerTrayState extends State<TimerTray> with SignalsMixin {
+class TimerTrayState extends State<TimerTray> {
   late final GlobalKey wrapKey;
 
   @override
@@ -2571,40 +2567,44 @@ class TimerTrayState extends State<TimerTray> with SignalsMixin {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
-      final isRightHanded = Mobj.getAlreadyLoaded(
-        isRightHandedID,
-        BoolType(),
-      ).value!;
-      return nesting<Widget>(
-        [
-          (child) => Align(
-            alignment: isRightHanded
-                ? FractionalOffset(0.8, 1)
-                : FractionalOffset(0.2, 1),
-            child: child,
+    return SignalBuilder(
+      builder: (context) {
+        final isRightHanded = Mobj.getAlreadyLoaded(
+          isRightHandedID,
+          BoolType(),
+        ).value!;
+        return nesting<Widget>(
+          [
+            (child) => Align(
+              alignment: isRightHanded
+                  ? FractionalOffset(0.8, 1)
+                  : FractionalOffset(0.2, 1),
+              child: child,
+            ),
+            // very minor bug: we can't have this yet, because resizes cause movement discontinuities. This will make scrolling the timertray feel sluggish. Fix animove.
+            // (child) => AnimoveFrame(child: child),
+          ],
+          IWrap(
+            key: wrapKey,
+            textDirection: isRightHanded
+                ? TextDirection.ltr
+                : TextDirection.rtl,
+            // TextDirection.rtl,
+            clipBehavior: Clip.none,
+            verticalDirection: VerticalDirection.down,
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: .end,
+            children: widget.mobj.value!
+                .map((ki) => widget.timerWidgets.value[ki]!)
+                .toList(),
           ),
-          // very minor bug: we can't have this yet, because resizes cause movement discontinuities. This will make scrolling the timertray feel sluggish. Fix animove.
-          // (child) => AnimoveFrame(child: child),
-        ],
-        IWrap(
-          key: wrapKey,
-          textDirection: isRightHanded ? TextDirection.ltr : TextDirection.rtl,
-          // TextDirection.rtl,
-          clipBehavior: Clip.none,
-          verticalDirection: VerticalDirection.down,
-          alignment: WrapAlignment.end,
-          crossAxisAlignment: .end,
-          children: widget.mobj.value!
-              .map((ki) => widget.timerWidgets.value[ki]!)
-              .toList(),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 }
 
-class TimerScreen extends StatefulWidget {
+class TimerScreen extends SignalStatefulWidget {
   const TimerScreen({super.key});
 
   @override
@@ -3018,7 +3018,7 @@ Path arcDragRingClip(DragRingClipArgs args) {
   );
 }
 
-class DragActionRing extends StatefulWidget {
+class DragActionRing extends SignalStatefulWidget {
   final Offset position;
   final Signal<int?> dragEvents;
 
@@ -3083,7 +3083,7 @@ class DragActionRing extends StatefulWidget {
 }
 
 class DragActionRingState extends State<DragActionRing>
-    with TickerProviderStateMixin, SignalsMixin {
+    with TickerProviderStateMixin {
   int numberSelected = -1;
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
@@ -3377,14 +3377,11 @@ class DragActionRingState extends State<DragActionRing>
   ) {
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
-    final isRightHanded = watchSignal(
-      context,
-      Mobj.getAlreadyLoaded(isRightHandedID, BoolType()),
-    )!;
-    final buttonSpan = watchSignal(
-      context,
-      Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()),
-    )!;
+    final isRightHanded = Mobj.getAlreadyLoaded(
+      isRightHandedID,
+      BoolType(),
+    ).value!;
+    final buttonSpan = Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
     // how grown the ring is overall (grow-in, fall-out). selection collapse is handled by the clip builder via swipep / selections, not here.
@@ -3661,7 +3658,7 @@ TimerBase getOrCreateTimerWidget(
 }
 
 class TimerScreenState extends State<TimerScreen>
-    with SignalsMixin, TickerProviderStateMixin {
+    with TickerProviderStateMixin, EffectsMixin {
   late final Signal<MobjID?> selectedTimer = Signal(null);
   late final EffectCleanup watchingForUnselection;
   late final Computed<TimerWidgets> timerWidgets;
@@ -3725,6 +3722,8 @@ class TimerScreenState extends State<TimerScreen>
   // emits whenever a drag action ring is created, so that older ones can disable themselves
   late final ChangeNotifier onNewNumeralDragActionRing = ChangeNotifier();
   late final Signal<int> hintSequence = Signal(0);
+  late final Computed<bool> hasntDoneBothDragActionsHint;
+  late final Computed<bool> hasntUsedMenuTwiceHint;
   late final Computed<bool> timerculeCurrentlyDeployed = Computed(
     () => timerListMobj.value!.any(
       // we peek, because the type of a timer never changes, so this shouldn't recompute every time a root timerdata changes
@@ -3899,6 +3898,19 @@ class TimerScreenState extends State<TimerScreen>
   @override
   void initState() {
     super.initState();
+
+    hasntDoneBothDragActionsHint = addToSequence(
+      hintSequence,
+      cleanups,
+      0,
+      hasntDoneBothDragActions,
+    );
+    hasntUsedMenuTwiceHint = addToSequence(
+      hintSequence,
+      cleanups,
+      1,
+      hasntUsedMenuTwice,
+    );
 
     // we're in charge of timer selection, so make sure nothing is selected
     if (selectedTimer.peek() == null) {
@@ -4099,103 +4111,105 @@ class TimerScreenState extends State<TimerScreen>
       transitionBuilder: (context, animation, secondaryAnimation, child) =>
           child,
       pageBuilder: (context, animation, secondaryAnimation) {
-        return Watch((context) {
-          bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
-          return TimerMenu(
-            timerID: timerID,
-            arrowHeight: arrowHeight,
-            centerOn: p,
-            // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
-            estimatedWidth: totalVisibleMenuItemHeight,
-            backgroundColor: backgroundColor,
-            animation: animation,
-            items: [
-              menuItem(
-                context,
-                isRightHanded,
-                Icon(Icons.delete, color: foregroundColor),
-                'Delete',
-                (_) {
-                  deleteTimer(timerID);
-                },
-              ),
-              SeparatorGradient(color: indentColor),
-              menuItem(
-                context,
-                isRightHanded,
-                Transform.rotate(
-                  angle: -pi / 2,
-                  child: Icon(
-                    Icons.rotate_90_degrees_cw_rounded,
-                    color: foregroundColor,
-                  ),
+        return SignalBuilder(
+          builder: (context) {
+            bool isRightHanded = isRightHandedMobj.value!;
+            return TimerMenu(
+              timerID: timerID,
+              arrowHeight: arrowHeight,
+              centerOn: p,
+              // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
+              estimatedWidth: totalVisibleMenuItemHeight,
+              backgroundColor: backgroundColor,
+              animation: animation,
+              items: [
+                menuItem(
+                  context,
+                  isRightHanded,
+                  Icon(Icons.delete, color: foregroundColor),
+                  'Delete',
+                  (_) {
+                    deleteTimer(timerID);
+                  },
                 ),
-                'Reset',
-                (_) {
-                  resetTimer(timerID);
-                },
-              ),
-              menuItem(
-                context,
-                isRightHanded,
-                Icon(Icons.push_pin, color: foregroundColor),
-                'Pin',
-                (_) {
-                  togglePin(timerID);
-                },
-              ),
-              Builder(
-                builder: (context) {
-                  return menuItem(
-                    context,
-                    isRightHanded,
-                    Icon(Icons.music_note, color: foregroundColor),
-                    td.soundEffect?.name ?? 'default',
-                    (tapPoint) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) async {
-                        final result = await Navigator.push<AudioInfo?>(
-                          this.context,
-                          CircularRevealRoute(
-                            builder: (context) => AlarmSoundPickerScreen(
-                              perTimerMode: true,
-                              initialPerTimerSelection: td.soundEffect,
+                SeparatorGradient(color: indentColor),
+                menuItem(
+                  context,
+                  isRightHanded,
+                  Transform.rotate(
+                    angle: -pi / 2,
+                    child: Icon(
+                      Icons.rotate_90_degrees_cw_rounded,
+                      color: foregroundColor,
+                    ),
+                  ),
+                  'Reset',
+                  (_) {
+                    resetTimer(timerID);
+                  },
+                ),
+                menuItem(
+                  context,
+                  isRightHanded,
+                  Icon(Icons.push_pin, color: foregroundColor),
+                  'Pin',
+                  (_) {
+                    togglePin(timerID);
+                  },
+                ),
+                Builder(
+                  builder: (context) {
+                    return menuItem(
+                      context,
+                      isRightHanded,
+                      Icon(Icons.music_note, color: foregroundColor),
+                      td.soundEffect?.name ?? 'default',
+                      (tapPoint) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) async {
+                          final result = await Navigator.push<AudioInfo?>(
+                            this.context,
+                            CircularRevealRoute(
+                              builder: (context) => AlarmSoundPickerScreen(
+                                perTimerMode: true,
+                                initialPerTimerSelection: td.soundEffect,
+                              ),
+                              buttonCenter: tapPoint,
                             ),
-                            buttonCenter: tapPoint,
-                          ),
-                        );
-                        final mobj = Mobj.getAlreadyLoaded(
-                          timerID,
-                          TimerDataType(),
-                        );
-                        mobj.value = mobj.peek()!.withChanges(
-                          soundEffect: result,
-                          soundEffectNull: result == null,
-                        );
-                      });
-                    },
-                    labelStyle: td.soundEffect == null
-                        ? theme.textTheme.bodyMedium!.copyWith(
-                            color: foregroundColor.withValues(alpha: 0.5),
-                          )
-                        : null,
-                  );
-                },
-              ),
-              menuItem(
-                context,
-                isRightHanded,
-                Icon(Icons.label_outline, color: foregroundColor),
-                'Title',
-                (_) {
-                  final wk =
-                      timerWidgetCache[timerID]?.key
-                          as GlobalKey<TimerBaseState>?;
-                  wk?.currentState?.enterTitleEditMode();
-                },
-              ),
-            ],
-          );
-        });
+                          );
+                          final mobj = Mobj.getAlreadyLoaded(
+                            timerID,
+                            TimerDataType(),
+                          );
+                          mobj.value = mobj.peek()!.withChanges(
+                            soundEffect: result,
+                            soundEffectNull: result == null,
+                          );
+                        });
+                      },
+                      labelStyle: td.soundEffect == null
+                          ? theme.textTheme.bodyMedium!.copyWith(
+                              color: foregroundColor.withValues(alpha: 0.5),
+                            )
+                          : null,
+                    );
+                  },
+                ),
+                menuItem(
+                  context,
+                  isRightHanded,
+                  Icon(Icons.label_outline, color: foregroundColor),
+                  'Title',
+                  (_) {
+                    final wk =
+                        timerWidgetCache[timerID]?.key
+                            as GlobalKey<TimerBaseState>?;
+                    wk?.currentState?.enterTitleEditMode();
+                  },
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -4286,59 +4300,57 @@ class TimerScreenState extends State<TimerScreen>
     MakoThemeData mt = MakoThemeData.fromTheme(theme);
     final thumbSpan = Thumbspan.of(context);
 
-    final buttonSpan = watchSignal(context, buttonSpanMobj)!;
+    final buttonSpan = buttonSpanMobj.value!;
     final bottomGutter = max(
       thumbSpan * 0.3,
       MediaQuery.of(context).padding.bottom,
     );
     final bool padLandscape =
-        watchSignal(
-          context,
-          Mobj.getAlreadyLoaded(padLandscapeID, BoolType()),
-        ) ??
-        false;
+        Mobj.getAlreadyLoaded(padLandscapeID, BoolType()).value ?? false;
     final int padWidth = padLandscape ? 4 : 3;
     double backingInflation = timerGap / 2;
     final controlsh =
         bottomGutter + 4 * buttonSpan + backingInflation - backingInflation;
     // Calculate the vertical space generally taken by Timer widgets (tallest, including padding).
     final timerHeight = Timer.usualHeight();
-    bool isRightHanded = watchSignal(context, isRightHandedMobj)!;
+    bool isRightHanded = isRightHandedMobj.value!;
     Color editActionColor = mt.veryLowProminenceColor;
 
     Widget iconScaledToPip(Widget icon) {
-      return Watch((context) {
-        final up = editPopoversUp.value;
-        return TweenAnimationBuilder<double>(
-          tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
-          duration: up
-              ? const Duration(milliseconds: 125) // rise
-              : const Duration(milliseconds: 125), // fall
-          builder: (context, t, child) {
-            final p = (up ? Curves.easeInOut : Curves.easeInOut).transform(t);
-            // final double p = 1;
-            return Opacity(
-              opacity: lerp(0.56, 1, p),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  if (p != 1)
-                    Container(
-                      width: buttonSpan * 0.12,
-                      height: buttonSpan * 0.12,
-                      decoration: BoxDecoration(
-                        color: editActionColor,
-                        shape: BoxShape.circle,
+      return SignalBuilder(
+        builder: (context) {
+          final up = editPopoversUp.value;
+          return TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
+            duration: up
+                ? const Duration(milliseconds: 125) // rise
+                : const Duration(milliseconds: 125), // fall
+            builder: (context, t, child) {
+              final p = (up ? Curves.easeInOut : Curves.easeInOut).transform(t);
+              // final double p = 1;
+              return Opacity(
+                opacity: lerp(0.56, 1, p),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (p != 1)
+                      Container(
+                        width: buttonSpan * 0.12,
+                        height: buttonSpan * 0.12,
+                        decoration: BoxDecoration(
+                          color: editActionColor,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                  Transform.scale(scale: p, child: child),
-                ],
-              ),
-            );
-          },
-          child: Center(child: icon),
-        );
-      });
+                    Transform.scale(scale: p, child: child),
+                  ],
+                ),
+              );
+            },
+            child: Center(child: icon),
+          );
+        },
+      );
     }
 
     Widget proportionedIcon(Widget icon) {
@@ -4372,94 +4384,96 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
-    final buttonScaleDial = Watch((context) {
-      if (buttonScaleDialCenter.value == null) {
-        // Offset p = Offset(screenSize.width * 0.23, screenSize.height / 2);
-        // if (!isRightHanded) {
-        //   p = Offset(screenSize.width - p.dx, p.dy);
-        // }
-        buttonScaleDialCenter.value = sizeToOffset(screenSize / 2);
-      }
-      return positionedAt(
-        buttonScaleDialCenter.value!,
-        FractionalTranslation(
-          translation: Offset(-0.5, -0.5),
-          child: AnimatedBuilder(
-            animation: Listenable.merge([
-              buttonScaleDialAnimation,
-              buttonScaleFlashAnimation,
-            ]),
-            builder: (context, child) {
-              final fa = buttonScaleFlashAnimation.value;
-              double flashu = fa == 1.0 ? 0 : moduloProperly(-fa, 1.0 / 5.0);
-              return Transform.scale(
-                scale: Curves.easeOutCubic.transform(
-                  buttonScaleDialAnimation.value,
-                ),
-                child: GestureDetector(
-                  onPanDown: (details) {
-                    buttonScaleDialLeavingTimer?.cancel();
-                  },
-                  onPanUpdate: (details) {
-                    final aa = angleFrom(
-                      buttonScaleDialCenter.peek()!,
-                      details.globalPosition - details.delta,
-                    );
-                    final ab = angleFrom(
-                      buttonScaleDialCenter.peek()!,
-                      details.globalPosition,
-                    );
-                    final a = shortestAngleDistance(aa, ab);
-                    buttonScaleDialAngle.value += a;
-                    buttonSpanMobj.value = clampDouble(
-                      buttonSpanMobj.value! + a * 1.2,
-                      12,
-                      screenSize.width / 5,
-                    );
-                  },
-                  onPanEnd: (details) {
-                    buttonScaleDialLeavingTimer = async.Timer(
-                      Duration(milliseconds: 470),
-                      () {
-                        buttonScaleDialOn.value = false;
-                      },
-                    );
-                  },
-                  child: Transform.rotate(
-                    transformHitTests: false,
-                    angle: buttonScaleDialAngle.value,
-                    child: Container(
-                      width: 140,
-                      height: 140,
-                      decoration: BoxDecoration(
-                        color: lerpColor(
-                          mt.midBackColor,
-                          theme.colorScheme.primary,
-                          flashu,
+    final buttonScaleDial = SignalBuilder(
+      builder: (context) {
+        if (buttonScaleDialCenter.value == null) {
+          // Offset p = Offset(screenSize.width * 0.23, screenSize.height / 2);
+          // if (!isRightHanded) {
+          //   p = Offset(screenSize.width - p.dx, p.dy);
+          // }
+          buttonScaleDialCenter.value = sizeToOffset(screenSize / 2);
+        }
+        return positionedAt(
+          buttonScaleDialCenter.value!,
+          FractionalTranslation(
+            translation: Offset(-0.5, -0.5),
+            child: AnimatedBuilder(
+              animation: Listenable.merge([
+                buttonScaleDialAnimation,
+                buttonScaleFlashAnimation,
+              ]),
+              builder: (context, child) {
+                final fa = buttonScaleFlashAnimation.value;
+                double flashu = fa == 1.0 ? 0 : moduloProperly(-fa, 1.0 / 5.0);
+                return Transform.scale(
+                  scale: Curves.easeOutCubic.transform(
+                    buttonScaleDialAnimation.value,
+                  ),
+                  child: GestureDetector(
+                    onPanDown: (details) {
+                      buttonScaleDialLeavingTimer?.cancel();
+                    },
+                    onPanUpdate: (details) {
+                      final aa = angleFrom(
+                        buttonScaleDialCenter.peek()!,
+                        details.globalPosition - details.delta,
+                      );
+                      final ab = angleFrom(
+                        buttonScaleDialCenter.peek()!,
+                        details.globalPosition,
+                      );
+                      final a = shortestAngleDistance(aa, ab);
+                      buttonScaleDialAngle.value += a;
+                      buttonSpanMobj.value = clampDouble(
+                        buttonSpanMobj.value! + a * 1.2,
+                        12,
+                        screenSize.width / 5,
+                      );
+                    },
+                    onPanEnd: (details) {
+                      buttonScaleDialLeavingTimer = async.Timer(
+                        Duration(milliseconds: 470),
+                        () {
+                          buttonScaleDialOn.value = false;
+                        },
+                      );
+                    },
+                    child: Transform.rotate(
+                      transformHitTests: false,
+                      angle: buttonScaleDialAngle.value,
+                      child: Container(
+                        width: 140,
+                        height: 140,
+                        decoration: BoxDecoration(
+                          color: lerpColor(
+                            mt.midBackColor,
+                            theme.colorScheme.primary,
+                            flashu,
+                          ),
+                          shape: BoxShape.circle,
                         ),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Center(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onPanDown: (details) {},
-                          onPanUpdate: (details) {
-                            buttonScaleDialCenter.value =
-                                buttonScaleDialCenter.value! + details.delta;
-                          },
-                          child: Container(
-                            width: 60,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              color: mt.foreBackColor,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Padding(
-                              padding: EdgeInsets.all(6),
-                              child: Text(
-                                "turn me",
-                                textAlign: TextAlign.center,
+                        child: Center(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onPanDown: (details) {},
+                            onPanUpdate: (details) {
+                              buttonScaleDialCenter.value =
+                                  buttonScaleDialCenter.value! + details.delta;
+                            },
+                            child: Container(
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                color: mt.foreBackColor,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Padding(
+                                padding: EdgeInsets.all(6),
+                                child: Text(
+                                  "turn me",
+                                  textAlign: TextAlign.center,
+                                ),
                               ),
                             ),
                           ),
@@ -4467,13 +4481,13 @@ class TimerScreenState extends State<TimerScreen>
                       ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
     // the lower part of the screen
     final buttonSize = Size(buttonSpan, buttonSpan);
@@ -4560,10 +4574,10 @@ class TimerScreenState extends State<TimerScreen>
       ...List.generate(9, (i) {
         int ix = i % 3;
         int iy = i ~/ 3;
-        if (watchSignal(
-          context,
-          Mobj.getAlreadyLoaded(padVerticallyAscendingID, BoolType()),
-        )!) {
+        if (Mobj.getAlreadyLoaded(
+          padVerticallyAscendingID,
+          BoolType(),
+        ).value!) {
           iy = 2 - iy;
         }
         if (!isRightHanded) {
@@ -4631,8 +4645,8 @@ class TimerScreenState extends State<TimerScreen>
     Widget editFadeButton(Offset gridPos, Widget button, int i) {
       return Positioned.fromRect(
         rect: controlGridBound(gridPos, Size(1, 1)),
-        child: Watch(
-          (context) =>
+        child: SignalBuilder(
+          builder: (context) =>
               IgnorePointer(ignoring: !editPopoversUp.value, child: button),
         ),
       );
@@ -4662,15 +4676,13 @@ class TimerScreenState extends State<TimerScreen>
         ),
         onPanDown: (_) {
           isFirstPressForSelectedTimer.value = false;
+        },
+        onPanEnd: () {
           pausePlaySelected();
         },
       ),
       1,
     );
-
-    Computed<bool> addToHintSequence(int ni, ReadonlySignal<bool> s) {
-      return addToSequence(hintSequence, cleanups, ni, s);
-    }
 
     // I considered adding another hint text (suggesting that the user go into settings and choose a preferred audio) but to do this properly we should have like a toast behavior, and it was such a bizarre feature and not worth it yet.
 
@@ -4687,14 +4699,14 @@ class TimerScreenState extends State<TimerScreen>
             builder: (context) {
               final dir = isRightHanded ? "left" : "right";
               return HintToast(
-                showCondition: addToHintSequence(0, hasntDoneBothDragActions),
+                showCondition: hasntDoneBothDragActionsHint,
                 message:
                     """when you press a number, you can drag up or to the $dir. this will activate the new timer. (dragging $dir adds a pair of zeroes to it before activating it.)""",
               );
             },
           ),
           HintToast(
-            showCondition: addToHintSequence(1, hasntUsedMenuTwice),
+            showCondition: hasntUsedMenuTwiceHint,
             message:
                 "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
           ),
@@ -5797,45 +5809,47 @@ class CornerBackButton extends StatelessWidget {
     );
     return Positioned.fill(
       child: SafeArea(
-        child: Watch((context) {
-          final isRightHanded = isRightHandedMobj.value ?? true;
-          final screenCorner = getReasonableAestheticBottomCornerRadius();
-          // Match the background's nearest corner to the phone's screen
-          // corner so they sit concentrically, shrunk by the gap between
-          // the screen edge and the background.
-          final backgroundCornerRadius = screenCorner - backNavGap;
-          return AnimatedAlign(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            alignment: isRightHanded
-                ? Alignment.bottomLeft
-                : Alignment.bottomRight,
-            child: Padding(
-              padding: const EdgeInsets.all(backNavGap),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(backgroundCornerRadius),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: InkButton(
-                  backgroundColor: background,
-                  onTap: () => Navigator.of(context).maybePop(),
-                  child: SizedBox(
-                    width: backNavSpan,
-                    height: backNavSpan,
-                    child: Center(
-                      child: ChevronBackIcon(
-                        size: Size(chevronSpan, chevronSpan),
-                        lineWidth: arrowBoxLineThickness,
-                        color: theme.colorScheme.onSurfaceVariant,
+        child: SignalBuilder(
+          builder: (context) {
+            final isRightHanded = isRightHandedMobj.value ?? true;
+            final screenCorner = getReasonableAestheticBottomCornerRadius();
+            // Match the background's nearest corner to the phone's screen
+            // corner so they sit concentrically, shrunk by the gap between
+            // the screen edge and the background.
+            final backgroundCornerRadius = screenCorner - backNavGap;
+            return AnimatedAlign(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              alignment: isRightHanded
+                  ? Alignment.bottomLeft
+                  : Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.all(backNavGap),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(backgroundCornerRadius),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkButton(
+                    backgroundColor: background,
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: SizedBox(
+                      width: backNavSpan,
+                      height: backNavSpan,
+                      child: Center(
+                        child: ChevronBackIcon(
+                          size: Size(chevronSpan, chevronSpan),
+                          lineWidth: arrowBoxLineThickness,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          );
-        }),
+            );
+          },
+        ),
       ),
     );
   }
@@ -6117,8 +6131,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                         return MenuTile(
                           title: settingTitle('Numpad orientation'),
-                          subtitle: Watch(
-                            (context) => settingSubtitle(
+                          subtitle: SignalBuilder(
+                            builder: (context) => settingSubtitle(
                               padLandscapeNonNull.value
                                   ? 'landscape'
                                   : 'portrait',
@@ -6139,14 +6153,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final hereIconKey = GlobalKey();
                         return MenuTile(
                           title: settingTitle('Alarm sound'),
-                          subtitle: Watch((context) {
-                            return settingSubtitle(
-                              Mobj.getAlreadyLoaded(
-                                selectedAudioID,
-                                AudioInfoType(),
-                              ).value!.name,
-                            );
-                          }),
+                          subtitle: SignalBuilder(
+                            builder: (context) {
+                              return settingSubtitle(
+                                Mobj.getAlreadyLoaded(
+                                  selectedAudioID,
+                                  AudioInfoType(),
+                                ).value!.name,
+                              );
+                            },
+                          ),
                           trailing: SizedBox(
                             width: 26,
                             height: 26,
@@ -6177,166 +6193,177 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       },
                     ),
                     // Persistent alarm mode setting
-                    Watch((context) {
-                      final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
-                        persistentAlarmModeID,
-                        BoolType(),
-                      );
-                      final persistentAlarmMode =
-                          persistentAlarmModeMobj.value ?? false;
-                      return RoundedCheckboxListTile(
-                        title: settingTitle('Persistent alarm'),
-                        subtitle: settingSubtitle(
-                          persistentAlarmMode
-                              ? 'On: Alarm loops until you open the app'
-                              : 'Off: Alarm plays once',
-                        ),
-                        value: persistentAlarmMode,
-                        onChanged: (value) {
-                          persistentAlarmModeMobj.value = value;
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    }),
-                    Watch((context) {
-                      final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
-                        buttonScaleDialOnID,
-                        BoolType(),
-                      );
-                      return MenuTile(
-                        title: settingTitle('Button size'),
-                        subtitle: settingSubtitle(
-                          buttonScaleDialOnOn.value!
-                              ? "Button scale dial is currently deployed, tap here to turn it off"
-                              : 'Introduce a dial by which you can adjust UI scale',
-                        ),
-                        onTap: () {
-                          buttonScaleDialOnOn.value =
-                              !buttonScaleDialOnOn.value!;
-                          if (buttonScaleDialOnOn.value!) {
-                            Navigator.of(context).pop();
-                          }
-                        },
-                      );
-                    }),
-                    // Autodelete mode setting
-                    Watch((context) {
-                      final autodeleteModeMobj = Mobj.getAlreadyLoaded(
-                        autodeleteModeID,
-                        IntType(),
-                      );
-                      // read .value (not .peek) so this Watch rebuilds on change
-                      final mode = autoDeleteMode(autodeleteModeMobj.value);
-                      final (fill, subtitle) = switch (mode) {
-                        AutodeleteMode.bin => (
-                          CheckboxFill.bottomHalf,
-                          'On: Send finished timers to the bin when appropriate',
-                        ),
-                        AutodeleteMode.retain60 => (
-                          CheckboxFill.topHalf,
-                          'Retain ${TimerScreenState.autoCleanRetentionCap} timers',
-                        ),
-                        AutodeleteMode.off => (
-                          CheckboxFill.none,
-                          'Off: Never auto-delete completed timers',
-                        ),
-                      };
-                      void cycle() {
-                        final next =
-                            AutodeleteMode.values[(mode.index + 1) %
-                                AutodeleteMode.values.length];
-                        autodeleteModeMobj.value = next.index;
-                      }
-
-                      return MenuTile(
-                        title: settingTitle('Auto-Clean'),
-                        subtitle: settingSubtitle(subtitle),
-                        trailing: ManyStateCheckbox(
-                          fill: fill,
-                          onTap: cycle,
-                          size: 24,
-                        ),
-                        onTap: cycle,
-                        contentPadding: listItemPadding,
-                      );
-                    }),
-                    // Right-handed mode setting
-                    Watch((context) {
-                      final isRightHandedMobj = Mobj.getAlreadyLoaded(
-                        isRightHandedID,
-                        BoolType(),
-                      );
-                      final isRightHanded = isRightHandedMobj.value ?? true;
-                      return MenuTile(
-                        title: settingTitle(
-                          '${isRightHanded ? 'Right' : 'Left'}-handed mode',
-                        ),
-                        subtitle: settingSubtitle(
-                          'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
-                        ),
-
-                        // splashColor: Colors.black,
-
-                        // aaargh I can't fix the awful white-grey aspect of the highlight and the splash
-                        // focusColor: Colors.red,
-                        // selectedColor: Colors.red,
-                        // // tileColor: Colors.red,
-                        // selectedTileColor: Colors.red,
-                        // textColor: Colors.red,
-                        // hoverColor: Colors.red,
-                        // splashColor: Colors.black,
-                        trailing: TweenAnimationBuilder<double>(
-                          tween: Tween(
-                            begin: isRightHanded ? -1.0 : 1.0,
-                            end: isRightHanded ? -1.0 : 1.0,
+                    SignalBuilder(
+                      builder: (context) {
+                        final persistentAlarmModeMobj = Mobj.getAlreadyLoaded(
+                          persistentAlarmModeID,
+                          BoolType(),
+                        );
+                        final persistentAlarmMode =
+                            persistentAlarmModeMobj.value ?? false;
+                        return RoundedCheckboxListTile(
+                          title: settingTitle('Persistent alarm'),
+                          subtitle: settingSubtitle(
+                            persistentAlarmMode
+                                ? 'On: Alarm loops until you open the app'
+                                : 'Off: Alarm plays once',
                           ),
-                          duration: Duration(milliseconds: 300),
-                          curve: Curves.easeInOut,
-                          builder: (context, scaleX, child) {
-                            return Transform.scale(
-                              scaleX: scaleX,
-                              child: child,
-                            );
+                          value: persistentAlarmMode,
+                          onChanged: (value) {
+                            persistentAlarmModeMobj.value = value;
                           },
-                          child: Transform.rotate(
-                            angle: 45 * pi / 180, // 45 degrees clockwise
-                            child: Icon(
-                              Icons.back_hand_rounded,
-                              color: theme.colorScheme.onSurface,
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    SignalBuilder(
+                      builder: (context) {
+                        final buttonScaleDialOnOn = Mobj.getAlreadyLoaded(
+                          buttonScaleDialOnID,
+                          BoolType(),
+                        );
+                        return MenuTile(
+                          title: settingTitle('Button size'),
+                          subtitle: settingSubtitle(
+                            buttonScaleDialOnOn.value!
+                                ? "Button scale dial is currently deployed, tap here to turn it off"
+                                : 'Introduce a dial by which you can adjust UI scale',
+                          ),
+                          onTap: () {
+                            buttonScaleDialOnOn.value =
+                                !buttonScaleDialOnOn.value!;
+                            if (buttonScaleDialOnOn.value!) {
+                              Navigator.of(context).pop();
+                            }
+                          },
+                        );
+                      },
+                    ),
+                    // Autodelete mode setting
+                    SignalBuilder(
+                      builder: (context) {
+                        final autodeleteModeMobj = Mobj.getAlreadyLoaded(
+                          autodeleteModeID,
+                          IntType(),
+                        );
+                        // read .value (not .peek) so this Watch rebuilds on change
+                        final mode = autoDeleteMode(autodeleteModeMobj.value);
+                        final (fill, subtitle) = switch (mode) {
+                          AutodeleteMode.bin => (
+                            CheckboxFill.bottomHalf,
+                            'On: Send finished timers to the bin when appropriate',
+                          ),
+                          AutodeleteMode.retain60 => (
+                            CheckboxFill.topHalf,
+                            'Retain ${TimerScreenState.autoCleanRetentionCap} timers',
+                          ),
+                          AutodeleteMode.off => (
+                            CheckboxFill.none,
+                            'Off: Never auto-delete completed timers',
+                          ),
+                        };
+                        void cycle() {
+                          final next =
+                              AutodeleteMode.values[(mode.index + 1) %
+                                  AutodeleteMode.values.length];
+                          autodeleteModeMobj.value = next.index;
+                        }
+
+                        return MenuTile(
+                          title: settingTitle('Auto-Clean'),
+                          subtitle: settingSubtitle(subtitle),
+                          trailing: ManyStateCheckbox(
+                            fill: fill,
+                            onTap: cycle,
+                            size: 24,
+                          ),
+                          onTap: cycle,
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    // Right-handed mode setting
+                    SignalBuilder(
+                      builder: (context) {
+                        final isRightHandedMobj = Mobj.getAlreadyLoaded(
+                          isRightHandedID,
+                          BoolType(),
+                        );
+                        final isRightHanded = isRightHandedMobj.value ?? true;
+                        return MenuTile(
+                          title: settingTitle(
+                            '${isRightHanded ? 'Right' : 'Left'}-handed mode',
+                          ),
+                          subtitle: settingSubtitle(
+                            'optimize for ${isRightHanded ? 'right' : 'left'}-handed use',
+                          ),
+
+                          // splashColor: Colors.black,
+
+                          // aaargh I can't fix the awful white-grey aspect of the highlight and the splash
+                          // focusColor: Colors.red,
+                          // selectedColor: Colors.red,
+                          // // tileColor: Colors.red,
+                          // selectedTileColor: Colors.red,
+                          // textColor: Colors.red,
+                          // hoverColor: Colors.red,
+                          // splashColor: Colors.black,
+                          trailing: TweenAnimationBuilder<double>(
+                            tween: Tween(
+                              begin: isRightHanded ? -1.0 : 1.0,
+                              end: isRightHanded ? -1.0 : 1.0,
+                            ),
+                            duration: Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            builder: (context, scaleX, child) {
+                              return Transform.scale(
+                                scaleX: scaleX,
+                                child: child,
+                              );
+                            },
+                            child: Transform.rotate(
+                              angle: 45 * pi / 180, // 45 degrees clockwise
+                              child: Icon(
+                                Icons.back_hand_rounded,
+                                color: theme.colorScheme.onSurface,
+                              ),
                             ),
                           ),
-                        ),
-                        onTap: () {
-                          isRightHandedMobj.value = !isRightHanded;
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    }),
-                    Watch((context) {
-                      final padVerticallyAscendingMobj = Mobj.getAlreadyLoaded(
-                        padVerticallyAscendingID,
-                        BoolType(),
-                      );
-                      final padVerticallyAscending =
-                          padVerticallyAscendingMobj.value ?? false;
-                      return MenuTile(
-                        title: settingTitle('Numpad type'),
-                        subtitle: settingSubtitle(
-                          padVerticallyAscending
-                              ? 'calculator/keyboard style'
-                              : 'phone style',
-                        ),
-                        trailing: NumpadTypeIndicator(
-                          isAscending: padVerticallyAscending,
-                          width: 36,
-                        ),
-                        onTap: () {
-                          padVerticallyAscendingMobj.value =
-                              !padVerticallyAscending;
-                        },
-                        contentPadding: listItemPadding,
-                      );
-                    }),
+                          onTap: () {
+                            isRightHandedMobj.value = !isRightHanded;
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    SignalBuilder(
+                      builder: (context) {
+                        final padVerticallyAscendingMobj =
+                            Mobj.getAlreadyLoaded(
+                              padVerticallyAscendingID,
+                              BoolType(),
+                            );
+                        final padVerticallyAscending =
+                            padVerticallyAscendingMobj.value ?? false;
+                        return MenuTile(
+                          title: settingTitle('Numpad type'),
+                          subtitle: settingSubtitle(
+                            padVerticallyAscending
+                                ? 'calculator/keyboard style'
+                                : 'phone style',
+                          ),
+                          trailing: NumpadTypeIndicator(
+                            isAscending: padVerticallyAscending,
+                            width: 36,
+                          ),
+                          onTap: () {
+                            padVerticallyAscendingMobj.value =
+                                !padVerticallyAscending;
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -6571,7 +6598,7 @@ class BinScreen extends StatefulWidget {
   State<BinScreen> createState() => BinScreenState();
 }
 
-class BinScreenState extends State<BinScreen> with SignalsMixin {
+class BinScreenState extends State<BinScreen> {
   final Map<MobjID<TimerData>, TimerBase> timerWidgetCache = {};
 
   /// overlay layer that exiting (restored) timers are lifted into so they can
@@ -6665,44 +6692,49 @@ class BinScreenState extends State<BinScreen> with SignalsMixin {
   /// still loading from disk, or that failed to load), so there's no force-
   /// unwrap to trip over.
   Widget _buildTray(ThemeData theme) {
-    return Watch((context) {
-      _loaded.value; // rebuild once the binned timers finish loading
-      final isRightHanded =
-          Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value ?? true;
-      final binIds = binListMobj.value!;
-      if (binIds.isEmpty) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              'Deleted timers wait here for a couple of days, in case you want them back.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-              // ?.copyWith(
-              //   color: MakoThemeData.fromTheme(theme).reducedProminenceColor,
-              // ),
+    return SignalBuilder(
+      builder: (context) {
+        _loaded.value; // rebuild once the binned timers finish loading
+        final isRightHanded =
+            Mobj.getAlreadyLoaded(isRightHandedID, BoolType()).value ?? true;
+        final binIds = binListMobj.value!;
+        if (binIds.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                'Deleted timers wait here for a couple of days, in case you want them back.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium,
+                // ?.copyWith(
+                //   color: MakoThemeData.fromTheme(theme).reducedProminenceColor,
+                // ),
+              ),
             ),
+          );
+        }
+        final children = <Widget>[
+          for (final id in binIds)
+            if (Mobj.seekTypedAlreadyLoaded(id, TimerDataType())?.peek() !=
+                null)
+              getOrCreateTimerWidget(timerWidgetCache, id, animateIn: false),
+        ];
+        return Align(
+          alignment: isRightHanded
+              ? const FractionalOffset(0.8, 1)
+              : const FractionalOffset(0.2, 1),
+          child: IWrap(
+            textDirection: isRightHanded
+                ? TextDirection.ltr
+                : TextDirection.rtl,
+            clipBehavior: Clip.none,
+            verticalDirection: VerticalDirection.down,
+            alignment: WrapAlignment.end,
+            children: children,
           ),
         );
-      }
-      final children = <Widget>[
-        for (final id in binIds)
-          if (Mobj.seekTypedAlreadyLoaded(id, TimerDataType())?.peek() != null)
-            getOrCreateTimerWidget(timerWidgetCache, id, animateIn: false),
-      ];
-      return Align(
-        alignment: isRightHanded
-            ? const FractionalOffset(0.8, 1)
-            : const FractionalOffset(0.2, 1),
-        child: IWrap(
-          textDirection: isRightHanded ? TextDirection.ltr : TextDirection.rtl,
-          clipBehavior: Clip.none,
-          verticalDirection: VerticalDirection.down,
-          alignment: WrapAlignment.end,
-          children: children,
-        ),
-      );
-    });
+      },
+    );
   }
 
   @override
@@ -6949,7 +6981,7 @@ class AlarmSoundPickerScreen extends StatefulWidget {
 }
 
 class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
-    with SignalsMixin, TickerProviderStateMixin {
+    with TickerProviderStateMixin {
   List<AudioInfo>? _alarmSounds;
   List<AudioInfo>? _notificationSounds;
   List<AudioInfo>? _ringtoneSounds;
@@ -7374,7 +7406,7 @@ Future<bool> hasBackgroundPermission() {
   }
 }
 
-class OnboardScreen extends StatefulWidget {
+class OnboardScreen extends SignalStatefulWidget {
   /// whether it's kind of the root screen, which is the case when it's the first run. in this case, it has to do something special before it pops, creating the TimerScreen. If it's not rootal, then a new timer screen would likely be a duplicate and cause problems.
   final bool isRootal;
   const OnboardScreen({super.key, this.isRootal = false});
@@ -7388,7 +7420,7 @@ const spacer = SizedBox(width: standardSpacing, height: standardSpacing);
 const double standardButtonHeight = 80;
 const double buttonCornerRadius = 16;
 
-class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
+class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
   late ScrollController _scrollController;
   late Signal<bool?> setIsRightHanded = Signal(null);
   final GlobalKey handednessKey = GlobalKey();
@@ -7739,41 +7771,43 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                         style: theme.textTheme.bodyMedium!,
                       ),
                       spacer,
-                      Watch((context) {
-                        return AnimatedAlign(
-                          duration: Duration(milliseconds: 340),
-                          curve: Curves.easeInOutCubic,
-                          alignment: isRightHanded.value == true
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Column(
-                                children: [
-                                  Text(
-                                    "phone style",
-                                    style: theme.textTheme.bodyMedium!,
-                                  ),
-                                  spacer,
-                                  numpadForSetup(false),
-                                ],
-                              ),
-                              spacer,
-                              Column(
-                                children: [
-                                  Text(
-                                    "calculator style",
-                                    style: theme.textTheme.bodyMedium!,
-                                  ),
-                                  spacer,
-                                  numpadForSetup(true),
-                                ],
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
+                      SignalBuilder(
+                        builder: (context) {
+                          return AnimatedAlign(
+                            duration: Duration(milliseconds: 340),
+                            curve: Curves.easeInOutCubic,
+                            alignment: isRightHanded.value == true
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Column(
+                                  children: [
+                                    Text(
+                                      "phone style",
+                                      style: theme.textTheme.bodyMedium!,
+                                    ),
+                                    spacer,
+                                    numpadForSetup(false),
+                                  ],
+                                ),
+                                spacer,
+                                Column(
+                                  children: [
+                                    Text(
+                                      "calculator style",
+                                      style: theme.textTheme.bodyMedium!,
+                                    ),
+                                    spacer,
+                                    numpadForSetup(true),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -7789,8 +7823,8 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                         style: theme.textTheme.bodyMedium!,
                       ),
                       SizedBox(height: standardSpacing),
-                      Watch(
-                        (context) => Row(
+                      SignalBuilder(
+                        builder: (context) => Row(
                           children: reverseIfNot(isRightHanded.value == true, [
                             Flexible(flex: 20, child: Container()),
                             Flexible(
@@ -7908,44 +7942,46 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                             ),
                             spacer,
                             Flexible(
-                              child: Watch((context) {
-                                final granted = notifGranted.value;
-                                final isOn = granted == true;
-                                final label = granted == null
-                                    ? 'request'
-                                    : granted
-                                    ? (_notifWasAlreadyGranted
-                                          ? 'already granted'
-                                          : 'granted')
-                                    : 'request';
-                                return InkButton(
-                                  backgroundColor: backgroundColorFor(
-                                    theme,
-                                    isOn,
-                                  ),
-                                  onTap: granted == true
-                                      ? null
-                                      : _requestNotificationPermission,
-                                  borderRadius: BorderRadius.circular(
-                                    buttonCornerRadius,
-                                  ),
-                                  child: SizedBox(
-                                    height: standardButtonHeight,
-                                    child: Center(
-                                      child: Text(
-                                        label,
-                                        style: theme.textTheme.titleMedium!
-                                            .copyWith(
-                                              color: foregroundColorFor(
-                                                theme,
-                                                isOn,
+                              child: SignalBuilder(
+                                builder: (context) {
+                                  final granted = notifGranted.value;
+                                  final isOn = granted == true;
+                                  final label = granted == null
+                                      ? 'request'
+                                      : granted
+                                      ? (_notifWasAlreadyGranted
+                                            ? 'already granted'
+                                            : 'granted')
+                                      : 'request';
+                                  return InkButton(
+                                    backgroundColor: backgroundColorFor(
+                                      theme,
+                                      isOn,
+                                    ),
+                                    onTap: granted == true
+                                        ? null
+                                        : _requestNotificationPermission,
+                                    borderRadius: BorderRadius.circular(
+                                      buttonCornerRadius,
+                                    ),
+                                    child: SizedBox(
+                                      height: standardButtonHeight,
+                                      child: Center(
+                                        child: Text(
+                                          label,
+                                          style: theme.textTheme.titleMedium!
+                                              .copyWith(
+                                                color: foregroundColorFor(
+                                                  theme,
+                                                  isOn,
+                                                ),
                                               ),
-                                            ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              }),
+                                  );
+                                },
+                              ),
                             ),
                           ]),
                         ),
@@ -7962,44 +7998,46 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                             ),
                             spacer,
                             Flexible(
-                              child: Watch((context) {
-                                final granted = batteryOptimGranted.value;
-                                final isOn = granted == true;
-                                final label = granted == null
-                                    ? 'request'
-                                    : granted
-                                    ? (_batteryOptimWasAlreadyGranted
-                                          ? 'already granted'
-                                          : 'granted')
-                                    : 'request';
-                                return InkButton(
-                                  backgroundColor: backgroundColorFor(
-                                    theme,
-                                    isOn,
-                                  ),
-                                  onTap: granted == true
-                                      ? null
-                                      : _requestBatteryOptimization,
-                                  borderRadius: BorderRadius.circular(
-                                    buttonCornerRadius,
-                                  ),
-                                  child: SizedBox(
-                                    height: standardButtonHeight,
-                                    child: Center(
-                                      child: Text(
-                                        label,
-                                        style: theme.textTheme.titleMedium!
-                                            .copyWith(
-                                              color: foregroundColorFor(
-                                                theme,
-                                                isOn,
+                              child: SignalBuilder(
+                                builder: (context) {
+                                  final granted = batteryOptimGranted.value;
+                                  final isOn = granted == true;
+                                  final label = granted == null
+                                      ? 'request'
+                                      : granted
+                                      ? (_batteryOptimWasAlreadyGranted
+                                            ? 'already granted'
+                                            : 'granted')
+                                      : 'request';
+                                  return InkButton(
+                                    backgroundColor: backgroundColorFor(
+                                      theme,
+                                      isOn,
+                                    ),
+                                    onTap: granted == true
+                                        ? null
+                                        : _requestBatteryOptimization,
+                                    borderRadius: BorderRadius.circular(
+                                      buttonCornerRadius,
+                                    ),
+                                    child: SizedBox(
+                                      height: standardButtonHeight,
+                                      child: Center(
+                                        child: Text(
+                                          label,
+                                          style: theme.textTheme.titleMedium!
+                                              .copyWith(
+                                                color: foregroundColorFor(
+                                                  theme,
+                                                  isOn,
+                                                ),
                                               ),
-                                            ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              }),
+                                  );
+                                },
+                              ),
                             ),
                           ]),
                         ),
@@ -8019,40 +8057,42 @@ class _OnboardScreenState extends State<OnboardScreen> with SignalsMixin {
                       RoundedSectionSliver.defaultMargin,
                       standardSpacing,
                     ),
-                    child: Watch((context) {
-                      final complete = allChoicesCompleted.value;
-                      return TweenAnimationBuilder<Color?>(
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                        tween: ColorTween(
-                          end: complete
-                              ? contentBackground
-                              : Colors.transparent,
-                        ),
-                        builder: (context, color, _) => InkButton(
-                          backgroundColor: color ?? Colors.transparent,
-                          onTap: () {
-                            moveOn();
-                          },
-                          borderRadius: BorderRadius.circular(
-                            buttonCornerRadius,
+                    child: SignalBuilder(
+                      builder: (context) {
+                        final complete = allChoicesCompleted.value;
+                        return TweenAnimationBuilder<Color?>(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          tween: ColorTween(
+                            end: complete
+                                ? contentBackground
+                                : Colors.transparent,
                           ),
-                          child: SizedBox(
-                            height: standardButtonHeight,
-                            child: Center(
-                              child: Text(
-                                complete
-                                    ? 'setup complete, click to continue'
-                                    : 'skip setup',
-                                style: theme.textTheme.titleMedium!.copyWith(
-                                  color: theme.colorScheme.onSurface,
+                          builder: (context, color, _) => InkButton(
+                            backgroundColor: color ?? Colors.transparent,
+                            onTap: () {
+                              moveOn();
+                            },
+                            borderRadius: BorderRadius.circular(
+                              buttonCornerRadius,
+                            ),
+                            child: SizedBox(
+                              height: standardButtonHeight,
+                              child: Center(
+                                child: Text(
+                                  complete
+                                      ? 'setup complete, click to continue'
+                                      : 'skip setup',
+                                  style: theme.textTheme.titleMedium!.copyWith(
+                                    color: theme.colorScheme.onSurface,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    }),
+                        );
+                      },
+                    ),
                   ),
                 ),
                 SliverToBoxAdapter(

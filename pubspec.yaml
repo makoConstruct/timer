@@ -43,7 +43,7 @@ dependencies:
   drift_flutter: ^0.2.7
   path_provider: ^2.1.5
   collection: ^1.19.1
-  signals: ^6.0.2
+  signals: ^7.1.0
   # openhiit_audioplayers: ^1.0.0
   # there's a bug https://github.com/bluefireteam/audioplayers/issues/1749 on linux, random delay when starting playback for the second time, maintainers say they'll get to it.
   audioplayers: ^6.5.1
