@@ -744,78 +744,6 @@ bool startTimer(
   }
 }
 
-/// For a [TimerKind.series]/[TimerKind.loop] host, the index of the child that
-/// play should (re)start from: the in-progress (paused) child if there is one,
-/// otherwise [suggestedStart]. Returns null when a child is already running, so
-/// there's nothing fresh to start. Shared by [_startChildren] and
-/// [firstTimerToPlay] so the "which child goes first" decision lives in one place.
-int? _seriesStartIndex(TimerData host, {int suggestedStart = 0}) {
-  Mobj<TimerData>? firstPausedChild;
-  int firstPausedIndex = -1;
-  for (int i = 0; i < host.children.length; i++) {
-    final child = Mobj.getAlreadyLoaded(host.children[i], TimerDataType());
-    switch (child.peek()!.runningState) {
-      case TimerData.running:
-        // there's nothing to do, already started
-        return null;
-      case TimerData.paused:
-        firstPausedChild = child;
-        firstPausedIndex = i;
-        break;
-      case TimerData.completed:
-        continue;
-      default:
-        throw Exception('Invalid timer state: ${child.peek()!.runningState}');
-    }
-  }
-  if (firstPausedChild != null) {
-    if (firstPausedChild.peek()!.isRunning) {
-      return null;
-    } // otherwise, it's paused, so we should start it
-    return firstPausedIndex;
-  }
-  return suggestedStart;
-}
-
-/// The leaf (non-composite) timer that will begin playing first when [mobj] is
-/// started, mirroring the start-order decisions in [_startChildren]. Returns
-/// null only when there's genuinely nothing to play (e.g. an empty timercule).
-/// Reads via peek, so wrap calls in a reactive touch if you need it to recompute.
-Mobj<TimerData>? firstTimerToPlay(Mobj<TimerData> mobj) {
-  final d = mobj.peek()!;
-  if (!d.isComposite) return mobj;
-  if (d.children.isEmpty) return null;
-  switch (d.kind) {
-    case TimerKind.loop:
-    case TimerKind.series:
-      final n = d.children.length;
-      final start = _seriesStartIndex(d) ?? 0;
-      // from the start index, the first not-yet-completed child is what actually
-      // runs next; if they're all completed (a fresh or finished timercule) a
-      // play would begin again at the start index.
-      for (int off = 0; off < n; off++) {
-        final i = d.kind == TimerKind.loop ? (start + off) % n : start + off;
-        if (i >= n) break;
-        final child = Mobj.getAlreadyLoaded(d.children[i], TimerDataType());
-        if (child.peek()!.runningState != TimerData.completed) {
-          return firstTimerToPlay(child);
-        }
-      }
-      return firstTimerToPlay(
-        Mobj.getAlreadyLoaded(d.children[min(start, n - 1)], TimerDataType()),
-      );
-    case TimerKind.parallelStartJustified:
-    case TimerKind.parallelEndJustified:
-      // parallel timercules fire their children together; the first listed child
-      // stands in as the representative colour.
-      return firstTimerToPlay(
-        Mobj.getAlreadyLoaded(d.children.first, TimerDataType()),
-      );
-    default:
-      return null;
-  }
-}
-
 bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
   bool parallelStartJustified() {
     // then some of them aren't completed, so to continue, only restart those ones
@@ -837,12 +765,36 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
     case TimerKind.loop:
     case TimerKind.series:
       // if any of the timers are paused rather than completed, (ignore suggestedStart and) resume at that point in the chain. (if any of the timers are running, do nothing)
-      final startingIndex = _seriesStartIndex(
-        host,
-        suggestedStart: suggestedStart,
-      );
-      if (startingIndex == null) {
-        return false;
+      // find the first non-complete child
+      Mobj<TimerData>? firstPausedChild;
+      int firstPausedIndex = -1;
+      for (int i = 0; i < host.children.length; i++) {
+        final child = Mobj.getAlreadyLoaded(host.children[i], TimerDataType());
+        switch (child.peek()!.runningState) {
+          case TimerData.running:
+            // there's nothing to do, already started
+            return false;
+          case TimerData.paused:
+            firstPausedChild = child;
+            firstPausedIndex = i;
+            break;
+          case TimerData.completed:
+            continue;
+          default:
+            throw Exception(
+              'Invalid timer state: ${child.peek()!.runningState}',
+            );
+        }
+      }
+
+      final int startingIndex;
+      if (firstPausedChild != null) {
+        if (firstPausedChild.peek()!.isRunning) {
+          return false;
+        } // otherwise, it's paused, so we should start it
+        startingIndex = firstPausedIndex;
+      } else {
+        startingIndex = suggestedStart;
       }
       // execute every already complete until it ends or loops
       int ci = startingIndex;
@@ -1435,7 +1387,6 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   final FocusNode _titleFocusNode = FocusNode();
   late final TextEditingController _titleController = TextEditingController();
 
-  static Color midColor(double hue) => hpluvToRGBColor([hue * 360, 100, 87]);
   static Color backgroundColor(double hue) =>
       hpluvToRGBColor([hue * 360, 100, 90]);
   static Color primaryColor(double hue) =>
@@ -3840,31 +3791,6 @@ class TimerScreenState extends State<TimerScreen>
   late final Computed<bool> playButtonUp = Computed(
     () => timerListMobj.value!.isNotEmpty,
   );
-
-  // the colour the (inflated) pause/play button eases toward: the colour of the
-  // timer it targets — the lowest (last) one — or, for a timercule, the first
-  // leaf timer that's going to play. null when there's nothing to target.
-  late final Computed<Color?> playButtonColor = Computed(() {
-    final lastId = timers().lastOrNull;
-    if (lastId == null) return null;
-    final root = Mobj.getAlreadyLoaded(lastId, TimerDataType());
-    // touch every node in the targeted timer's subtree so the colour re-resolves
-    // as a timercule progresses (children pausing/completing changes which timer
-    // plays next); firstTimerToPlay itself only peeks.
-
-    // we'll try not doing this, I think it only needs to watch the current one, for its change in play state
-    // void touch(Mobj<TimerData> m) {
-    //   final d = m.value!;
-    //   for (final childId in d.children) {
-    //     touch(Mobj.getAlreadyLoaded(childId, TimerDataType()));
-    //   }
-    // }
-    // touch(root);
-
-    final leaf = firstTimerToPlay(root);
-    if (leaf == null) return null;
-    return TimerBaseState.midColor(leaf.value!.hue);
-  });
   late final ScrollController timersScroller = ScrollController();
   late final AnimationController squishPanelController = AnimationController(
     vsync: this,
@@ -4394,19 +4320,10 @@ class TimerScreenState extends State<TimerScreen>
     // Color editActionColor = theme.colorScheme.onSurfaceVariant;
     Color editActionColor = mt.veryLowProminenceColor;
 
-    Widget iconScaledToPip(
-      Widget Function(Color color) iconBuilder, {
-      ReadonlySignal<bool>? upSignal,
-      ReadonlySignal<Color?>? inflateColor,
-    }) {
+    Widget iconScaledToPip(Widget icon, {ReadonlySignal<bool>? upSignal}) {
       return SignalBuilder(
         builder: (context) {
-          bool up = (upSignal ?? editPopoversUp).value;
-          // while inflated, the icon eases toward the targeted timer's colour;
-          // otherwise it rests at the neutral action colour (matching the pip).
-          Color iconTarget = up
-              ? (inflateColor?.value ?? editActionColor)
-              : editActionColor;
+          final up = (upSignal ?? editPopoversUp).value;
           return TweenAnimationBuilder<double>(
             tween: Tween<double>(begin: 0.0, end: up ? 1.0 : 0.0),
             duration: up
@@ -4430,22 +4347,12 @@ class TimerScreenState extends State<TimerScreen>
                           shape: BoxShape.circle,
                         ),
                       ),
-                    Transform.scale(
-                      scale: p,
-                      child: TweenAnimationBuilder<Color?>(
-                        tween: ColorTween(
-                          begin: editActionColor,
-                          end: iconTarget,
-                        ),
-                        duration: const Duration(milliseconds: 200),
-                        builder: (context, color, _) =>
-                            Center(child: iconBuilder(color ?? iconTarget)),
-                      ),
-                    ),
+                    Transform.scale(scale: p, child: child),
                   ],
                 ),
               );
             },
+            child: Center(child: icon),
           );
         },
       );
@@ -4761,8 +4668,7 @@ class TimerScreenState extends State<TimerScreen>
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(
-            (c) => PaintedBackspaceIcon(size: 12, color: c),
-            inflateColor: playButtonColor,
+            PaintedBackspaceIcon(size: 12, color: editActionColor),
           ),
         ),
         onPanDown: (_) {
@@ -4778,9 +4684,8 @@ class TimerScreenState extends State<TimerScreen>
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(
-            (c) => PaintedPlayIcon(size: 12, color: c),
+            PaintedPlayIcon(size: 12, color: editActionColor),
             upSignal: playButtonUp,
-            inflateColor: playButtonColor,
           ),
         ),
         onPanEnd: () {
@@ -7251,9 +7156,9 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     // Page background matches the heading band / section-header colour so short
     // lists don't reveal a mismatched content colour below the bottom gutter;
     // the sound chips use the contrasting content colour so they stand out.
-    final mako = MakoThemeData.fromTheme(theme);
-    final backgroundColorA = mako.menuSurfaceFore;
-    final backgroundColorB = mako.menuSurfaceBack;
+    final mt = MakoThemeData.fromTheme(theme);
+    final backgroundColorA = mt.menuSurfaceFore;
+    final backgroundColorB = mt.menuSurfaceBack;
 
     Widget section(
       String title,
