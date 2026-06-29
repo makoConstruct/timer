@@ -259,6 +259,12 @@ Future<void> initializeDatabase() async {
       initial: () => AutodeleteMode.bin.index,
       debugLabel: "autodelete mode",
     ),
+    Mobj.getOrCreate(
+      openedSpecialTimerMenuID,
+      type: IntType(),
+      initial: () => 0,
+      debugLabel: "opened special timer menu",
+    ),
     fversion,
   ]);
 }
@@ -321,6 +327,20 @@ void onDataReceived(Object data) {
 }
 
 final Signal<bool> isBackgrounded = Signal(false);
+
+/// how many times the special-timer menu must be opened before the label
+/// tutorial stops showing. See [openedSpecialTimerMenuID].
+const int specialTimerMenuMaxRequired = 3;
+
+/// Tutorial spring for the special-timer menu: while the user is still learning
+/// it (the [openedSpecialTimerMenuID] counter hasn't yet run out), each open
+/// splays out every item's label. Its value is maxed in with each item's own
+/// label spring in [DragActionRingState] — but only for items that are actually
+/// visible — and it's reversed the moment the user selects an item. Global
+/// because it's driven from the menu button's pan-down (in [TimerScreenState])
+/// yet read by the ring's label rendering. Lazily created with a vsync in
+/// [TimerScreenState.initState].
+LabelSpring? tutorialShowLabelsAnimation;
 
 /// The ids of timers that are currently counting down or going off — i.e. the
 /// timers that give the foreground service a reason to exist. Maintained
@@ -3087,6 +3107,10 @@ class DragActionRingState extends State<DragActionRing>
   int numberSelected = -1;
   // mirrors numberSelected, but not always
   int centeredNumber = -1;
+
+  /// the selection the ring opens with (nothing). Moving off it to a real item
+  /// is what dismisses the [tutorialShowLabelsAnimation] label splay.
+  int initialSelectedItem = -1;
   late final List<LabelSpring> labelAnimations;
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
@@ -3289,6 +3313,10 @@ class DragActionRingState extends State<DragActionRing>
         }
         if (!widget.persistent) dragEventsSubscription?.call();
       } else if (v != -1) {
+        // moving onto a real item ends the tutorial label splay.
+        if (v != initialSelectedItem) {
+          tutorialShowLabelsAnimation?.reverse();
+        }
         if (v != numberSelected) {
           HapticFeedback.heavyImpact();
           final wasNothingSelected = numberSelected == -1;
@@ -3572,6 +3600,13 @@ class DragActionRingState extends State<DragActionRing>
       ], widget.radialActivatorLabels![index]);
     }
 
+    // While the special-timer tutorial is splaying labels, max its progress into
+    // each item's own label spring — but only for items that have actually faded
+    // in (iconFade > 0), so labels don't float over a still-collapsed ring.
+    final tutorialShow = tutorialShowLabelsAnimation?.value ?? 0.0;
+    double labelShowFor(int i) =>
+        max(labelAnimations[i].value, iconFade > 0 ? tutorialShow : 0.0);
+
     return IgnorePointer(
       child: FractionalTranslation(
         translation: Offset(-0.5, -0.5),
@@ -3589,11 +3624,11 @@ class DragActionRingState extends State<DragActionRing>
                     clipBehavior: Clip.none,
                     children: [
                       for (int i = 0; i < labelAnimations.length; i++)
-                        if (labelAnimations[i].value > 0)
+                        if (labelShowFor(i) > 0)
                           labelWidgetAt(
                             i,
                             // cut off the bottom part so that the very slow reduction to zero isn't visible
-                            unlerpUnit(0.06, 1, labelAnimations[i].value) *
+                            unlerpUnit(0.06, 1, labelShowFor(i)) *
                                 (1 - completion),
                           ),
                     ],
@@ -3622,6 +3657,8 @@ class DragActionRingState extends State<DragActionRing>
           ...selectionAnimations,
           _arcStartSpring,
           _arcEndSpring,
+          // null until TimerScreenState wires it up; Listenable.merge skips nulls.
+          tutorialShowLabelsAnimation,
         ]),
         builder: (context, child) {
           return buildWithGivenAnimationParameters(
@@ -3911,6 +3948,20 @@ class TimerScreenState extends State<TimerScreen>
   late final StreamController<void> modeActivationPulse =
       StreamController<void>.broadcast();
 
+  /// Called each time the special-timer menu is opened. While we're still in the
+  /// tutorial window (the counter sits in `[0, specialTimerMenuMaxRequired)`),
+  /// splay out every label and advance the counter — pinning it to -1 once it
+  /// reaches the max so the tutorial never shows again.
+  void _onSpecialTimerMenuOpened() {
+    final m = Mobj.getAlreadyLoaded(openedSpecialTimerMenuID, IntType());
+    final v = m.value ?? 0;
+    if (v < 0) return;
+    tutorialShowLabelsAnimation?.reset();
+    tutorialShowLabelsAnimation?.forward();
+    final next = v + 1;
+    m.value = next >= specialTimerMenuMaxRequired ? -1 : next;
+  }
+
   void _updateNumeralBackshadow() {
     final scrolledDown = timersScroller.hasClients && timersScroller.offset > 0;
     if (scrolledDown) {
@@ -3923,6 +3974,13 @@ class TimerScreenState extends State<TimerScreen>
   @override
   void initState() {
     super.initState();
+
+    tutorialShowLabelsAnimation = LabelSpring(
+      vsync: this,
+      kickSpeed: 18,
+      delay: const Duration(milliseconds: 300),
+      spring: SpringDescription.withDampingRatio(mass: 1, stiffness: 330),
+    );
 
     timersScroller.addListener(_updateNumeralBackshadow);
 
@@ -4045,6 +4103,8 @@ class TimerScreenState extends State<TimerScreen>
     }
     timerHolm._backgroundedReaction();
     timerHolm._newTimerReaction.cancel();
+    tutorialShowLabelsAnimation?.dispose();
+    tutorialShowLabelsAnimation = null;
     super.dispose();
   }
 
@@ -4400,6 +4460,7 @@ class TimerScreenState extends State<TimerScreen>
         // phase); this keeps the button's footprint for hit testing only.
         label: const ScalingAspectRatio(child: SizedBox(width: 50, height: 50)),
         onPanDown: (Offset p) {
+          _onSpecialTimerMenuOpened();
           specialTimerCreateDragRingController.onPanDown(
             context,
             p,

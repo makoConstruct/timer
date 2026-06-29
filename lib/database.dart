@@ -54,6 +54,12 @@ const MobjID numberOfTimersCreatedID = 'f1d7810e-0a88-4a61-b7c3-9ad89604c890';
 /// lowest 60, 2 = off (keep everything).
 const MobjID autodeleteModeID = '3f2a9c84-1b6e-4d77-9c0a-5e8f4b21d9aa';
 
+/// how many times the special-timer menu has been opened, used to gate the
+/// label tutorial. While it's in `[0, specialTimerMenuMaxRequired)`, each open
+/// splays out every item's label; it increments per open and is pinned to -1
+/// once it reaches the max, after which the tutorial never shows again.
+const MobjID openedSpecialTimerMenuID = 'd79a742a-0894-4035-a9a5-4c5eab31f83b';
+
 mixin UUIDd on Table {
   TextColumn get id => text()();
 

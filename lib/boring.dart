@@ -4451,13 +4451,13 @@ Positioned extrudedPositioned({
 }
 
 /// Shared layout for [TimerculeParallelPainter] and [TimerculeSerialPainter].
-/// [TimerculeCyclePainter] uses [timerculeRectHeight] as ring thickness.
-const double timerculeCornerRadius = 4;
-const double timerculeRectHeight = 11;
-const double timerculeRectWidth = 15;
-const double timerculeGap = 3;
+/// [TimerculeCyclePainter] uses [timerculeIconRectHeight] as ring thickness.
+const double timerculeIconRounding = 3;
+const double timerculeIconRectHeight = 11;
+const double timerculeIconRectWidth = 15;
+const double timerculeIconGap = 3;
 void timerculeIconScaling(Canvas canvas, Size size) {
-  final parallelHeight = 2 * timerculeRectHeight + timerculeGap;
+  final parallelHeight = 2 * timerculeIconRectHeight + timerculeIconGap;
   final scale = min(size.width, size.height) / parallelHeight;
   canvas.translate(size.width / 2, size.height / 2);
   canvas.scale(scale, scale);
@@ -4471,22 +4471,22 @@ class TimerculeParallelPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final contentH = 2 * timerculeRectHeight + timerculeGap;
+    final contentH = 2 * timerculeIconRectHeight + timerculeIconGap;
     final topWidth = rightJustified == null
-        ? timerculeRectWidth
-        : timerculeRectHeight * 2 + timerculeGap;
+        ? timerculeIconRectWidth
+        : timerculeIconRectHeight * 2 + timerculeIconGap;
     final bottomWidth = rightJustified == null ? topWidth : topWidth * 2 / 3;
     final bottomOffset = (rightJustified == null || !rightJustified!)
         ? -topWidth / 2
         : topWidth / 2 - bottomWidth;
-    final cr = timerculeCornerRadius;
+    final cr = timerculeIconRounding;
 
     timerculeIconScaling(canvas, size);
     _drawRoundedPolygon(
       canvas,
       rightwardsArrowBox(
         Offset(-topWidth / 2, -contentH / 2),
-        Size(topWidth, timerculeRectHeight),
+        Size(topWidth, timerculeIconRectHeight),
         cr,
       ),
       color,
@@ -4495,8 +4495,8 @@ class TimerculeParallelPainter extends CustomPainter {
     _drawRoundedPolygon(
       canvas,
       rightwardsArrowBox(
-        Offset(bottomOffset, timerculeGap / 2),
-        Size(bottomWidth, timerculeRectHeight),
+        Offset(bottomOffset, timerculeIconGap / 2),
+        Size(bottomWidth, timerculeIconRectHeight),
         cr,
       ),
       color,
@@ -4543,27 +4543,27 @@ class TimerculeSerialPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // decided we want them to be square
-    double w = timerculeRectHeight;
+    double w = timerculeIconRectHeight;
     timerculeIconScaling(canvas, size);
     _drawRoundedPolygon(
       canvas,
       rightwardsArrowBox(
-        Offset(-w - timerculeGap / 2, -timerculeRectHeight / 2),
-        Size(w, timerculeRectHeight),
-        timerculeCornerRadius,
+        Offset(-w - timerculeIconGap / 2, -timerculeIconRectHeight / 2),
+        Size(w, timerculeIconRectHeight),
+        timerculeIconRounding,
       ),
       color,
-      timerculeCornerRadius,
+      timerculeIconRounding,
     );
     _drawRoundedPolygon(
       canvas,
       rightwardsArrowBox(
-        Offset(timerculeGap / 2, -timerculeRectHeight / 2),
-        Size(w, timerculeRectHeight),
-        timerculeCornerRadius,
+        Offset(timerculeIconGap / 2, -timerculeIconRectHeight / 2),
+        Size(w, timerculeIconRectHeight),
+        timerculeIconRounding,
       ),
       color,
-      timerculeCornerRadius,
+      timerculeIconRounding,
     );
   }
 
@@ -4630,14 +4630,14 @@ class TimerculeCyclePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cr = timerculeCornerRadius;
+    final cr = timerculeIconRounding;
     final cr2 = cr * 2;
     // parameters
-    final innerR = timerculeGap * 1.6 + cr;
+    final innerR = timerculeIconGap * 1.6 + cr;
     final topThickness = 0;
-    final trs = timerculeRectHeight - cr2;
+    final trs = 0.95 * timerculeIconRectHeight - cr2;
     final outerR = (topThickness + innerR * 2 + trs) / 2;
-    final slotSpan = timerculeGap * 1.6 + cr2;
+    final slotSpan = timerculeIconGap * 1.6 + cr2;
 
     final arrowProjection = sqrt(trs * trs / 3);
     final innerCenter = Offset(0, -outerR + topThickness + innerR);
