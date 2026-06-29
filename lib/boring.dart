@@ -1137,12 +1137,31 @@ class SpringExpansionController extends Animation<double>
 }
 
 /// A label's fade, a spring that runs 0↔1 with a velocity kick on forward-from-rest. [forward] waits [delay] before launching the rise (a real timer — the spring just sits at 0 until it fires), modelling the old delayed entrance without rescaling reads. [reverse] cancels any pending rise and falls immediately; if the rise was still waiting, the spring never left 0 so it just stays shut.
+/// the same spring at [factor] of its speed, preserving its damping character
+/// (over/under/critically damped stays the same). Frequency scales with
+/// sqrt(stiffness/mass) and the damping ratio with damping/sqrt(stiffness), so
+/// scaling stiffness by factor² and damping by factor stretches the timescale
+/// without changing the shape of the response.
+SpringDescription defaultReverseSpringFor(
+  SpringDescription spring, {
+  double factor = 1.6,
+}) => SpringDescription(
+  mass: spring.mass,
+  stiffness: spring.stiffness * factor * factor,
+  damping: spring.damping * factor,
+);
+
 class LabelSpring extends Animation<double>
     with
         AnimationLazyListenerMixin,
         AnimationLocalListenersMixin,
         AnimationLocalStatusListenersMixin {
   final SpringDescription spring;
+
+  /// the spring used for the fall toward 0. Defaults to
+  /// [defaultReverseSpringFor] of [spring] (1.6 the speed). Pass it explicitly
+  /// to give the reverse a different feel.
+  final SpringDescription reverseSpring;
   final double kickSpeed;
 
   /// how long [forward] waits before the rise actually launches.
@@ -1153,10 +1172,16 @@ class LabelSpring extends Animation<double>
 
   LabelSpring({
     required TickerProvider vsync,
-    this.spring = const SpringDescription(mass: 1, stiffness: 625, damping: 40),
+    SpringDescription spring = const SpringDescription(
+      mass: 1,
+      stiffness: 625,
+      damping: 40,
+    ),
+    SpringDescription? reverseSpring,
     this.kickSpeed = 0.0,
     this.delay = Duration.zero,
-  }) {
+  }) : spring = spring,
+       reverseSpring = reverseSpring ?? defaultReverseSpringFor(spring) {
     _controller = AnimationController.unbounded(vsync: vsync);
     _controller.addListener(notifyListeners);
   }
@@ -1167,7 +1192,13 @@ class LabelSpring extends Animation<double>
         ? kickSpeed
         : _controller.velocity;
     _controller.animateWith(
-      SpringSimulation(spring, _controller.value, target, v, snapToEnd: true),
+      SpringSimulation(
+        target == 0 ? reverseSpring : spring,
+        _controller.value,
+        target,
+        v,
+        snapToEnd: true,
+      ),
     );
   }
 
@@ -5223,6 +5254,132 @@ class PaintedPlayIcon extends StatelessWidget {
       height: size * playIconDimensionRatio,
       child: CustomPaint(
         painter: PaintedPlayIconPainter(color: c, cornerRadius: size * 0.2),
+      ),
+    );
+  }
+}
+
+Path _closedPolygon(List<Offset> points) {
+  final path = Path()..moveTo(points.first.dx, points.first.dy);
+  for (final p in points.skip(1)) {
+    path.lineTo(p.dx, p.dy);
+  }
+  return path..close();
+}
+
+/// Morphs between a right-pointing play triangle ([t] == 0) and a two-bar
+/// pause icon ([t] == 1) sharing the play icon's exact resting geometry, so at
+/// [t] == 0 it is pixel-identical to [PaintedPlayIconPainter].
+///
+/// The triangle is split down the middle into two pieces that pull apart into
+/// the two pause bars. The left piece is a 4-corner trapezoid that flattens
+/// into the left bar. The right piece is the triangle's tip and carries five
+/// vertices: its right side keeps the apex as a (stationary) midpoint, while
+/// the two vertices that sit partway down the hypotenuse slide up to become the
+/// right bar's top-right and bottom-right corners. The pieces overlap slightly
+/// at the seam in the play state so the rounded stroke leaves no notch where it
+/// crosses the hypotenuse.
+class PausePlayIconPainter extends CustomPainter {
+  PausePlayIconPainter({required this.color, required this.t});
+  final Color color;
+
+  /// 0 = play triangle, 1 = pause bars.
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final triH = min(size.height, size.width * playIconDimensionRatio);
+    final triW = triH / playIconDimensionRatio;
+    final strokeSpan = triW * playIconDimensionRoundingp;
+    final innerTriH = triH - strokeSpan;
+    final innerTriW = triW - strokeSpan;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final baseX = cx - innerTriW / 2;
+    final apexX = cx + innerTriW / 2;
+    final topY = cy - innerTriH / 2;
+    final bottomY = cy + innerTriH / 2;
+    final apex = Offset(apexX, cy);
+
+    // seam down the middle of the triangle, where the two halves meet
+    final splitX = baseX + innerTriW * 0.37;
+    double hypoTopY(double x) => lerp(topY, cy, (x - baseX) / innerTriW);
+    double hypoBotY(double x) => lerp(bottomY, cy, (x - baseX) / innerTriW);
+    final splitTopY = hypoTopY(splitX);
+    final splitBotY = hypoBotY(splitX);
+
+    // pause bar width (two bars + gap = three equal thirds of the box width)
+    final barW = innerTriW * 0.16;
+    // in the play state the left half reaches slightly past the seam so the
+    // right half covers its rounded seam corner (and vice versa).
+    final seamOverlap = 0;
+    final leftSeamX = splitX + seamOverlap;
+    // the two "partway down the hypotenuse" vertices, as a fraction from seam
+    // to apex along each slanted edge.
+    const slantFrac = 0.5;
+
+    Offset lp(Offset play, Offset pause) => lerpOffset(play, pause, t);
+
+    final leftPiece = _closedPolygon([
+      lp(Offset(baseX, topY), Offset(baseX, topY)),
+      lp(Offset(leftSeamX, hypoTopY(leftSeamX)), Offset(baseX + barW, topY)),
+      lp(Offset(leftSeamX, hypoBotY(leftSeamX)), Offset(baseX + barW, bottomY)),
+      lp(Offset(baseX, bottomY), Offset(baseX, bottomY)),
+    ]);
+
+    final rightPiece = _closedPolygon([
+      lp(Offset(splitX, splitTopY), Offset(apexX - barW, topY)),
+      lp(
+        lerpOffset(Offset(splitX, splitTopY), apex, slantFrac),
+        Offset(apexX, topY),
+      ),
+      lp(apex, Offset(apexX, cy)),
+      lp(
+        lerpOffset(Offset(splitX, splitBotY), apex, slantFrac),
+        Offset(apexX, bottomY),
+      ),
+      lp(Offset(splitX, splitBotY), Offset(apexX - barW, bottomY)),
+    ]);
+
+    _drawRoundedPolygon(canvas, leftPiece, color, strokeSpan / 2);
+    _drawRoundedPolygon(canvas, rightPiece, color, strokeSpan / 2);
+  }
+
+  @override
+  bool shouldRepaint(covariant PausePlayIconPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.t != t;
+}
+
+/// Play icon that tweens to a pause icon while [playing] is true (and back).
+class PausePlayIcon extends StatelessWidget {
+  const PausePlayIcon({
+    super.key,
+    required this.playing,
+    this.size = 24,
+    this.color,
+    this.duration = const Duration(milliseconds: 125),
+  });
+  final bool playing;
+  final double size;
+  final Color? color;
+  final Duration duration;
+
+  @override
+  Widget build(BuildContext context) {
+    final c =
+        color ??
+        IconTheme.of(context).color ??
+        Theme.of(context).colorScheme.onSurface;
+    return SizedBox(
+      width: size,
+      height: size * playIconDimensionRatio,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: playing ? 1.0 : 0.0),
+        duration: duration,
+        curve: Curves.easeInOut,
+        builder: (context, t, child) => CustomPaint(
+          painter: PausePlayIconPainter(color: c, t: t),
+        ),
       ),
     );
   }

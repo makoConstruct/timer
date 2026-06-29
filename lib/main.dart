@@ -3791,7 +3791,20 @@ class TimerScreenState extends State<TimerScreen>
   late final Computed<bool> playButtonUp = Computed(
     () => timerListMobj.value!.isNotEmpty,
   );
+  late final Computed<bool> lastTimerPlaying = Computed(() {
+    final id = timerListMobj.value!.lastOrNull;
+    if (id == null) return false;
+    return Mobj.getAlreadyLoaded(id, TimerDataType()).value?.isRunning ?? false;
+  });
   late final ScrollController timersScroller = ScrollController();
+
+  /// Fades in a subtle shadow beneath the numeral pad backing while the timer
+  /// tray is scrolled down (content slid under the pad), giving the pad depth.
+  late final AnimationController numeralBackshadowController =
+      AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 700),
+      );
   late final AnimationController squishPanelController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 16000),
@@ -3898,9 +3911,20 @@ class TimerScreenState extends State<TimerScreen>
   late final StreamController<void> modeActivationPulse =
       StreamController<void>.broadcast();
 
+  void _updateNumeralBackshadow() {
+    final scrolledDown = timersScroller.hasClients && timersScroller.offset > 0;
+    if (scrolledDown) {
+      numeralBackshadowController.forward();
+    } else {
+      numeralBackshadowController.reverse();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+
+    timersScroller.addListener(_updateNumeralBackshadow);
 
     hasntDoneBothDragActionsHint = addToSequence(
       hintSequence,
@@ -3997,6 +4021,8 @@ class TimerScreenState extends State<TimerScreen>
   @override
   void dispose() {
     squishPanelController.dispose();
+    timersScroller.removeListener(_updateNumeralBackshadow);
+    numeralBackshadowController.dispose();
     timersScroller.dispose();
     selectedTimer.dispose();
     timerWidgets.dispose();
@@ -4559,14 +4585,31 @@ class TimerScreenState extends State<TimerScreen>
         // ),
         // ).deflate(backingDeflation),
       ).inflate(backingInflation),
-      child: Container(
-        constraints: BoxConstraints.expand(),
-        decoration: BoxDecoration(
-          color: mt.foreBackColor,
-          borderRadius: BorderRadius.circular(
-            backingCornerRounding * buttonSpan,
-          ),
-        ),
+      child: AnimatedBuilder(
+        animation: numeralBackshadowController,
+        builder: (context, child) {
+          final shadowp = Curves.easeInOut.transform(
+            numeralBackshadowController.value,
+          );
+          return Container(
+            constraints: BoxConstraints.expand(),
+            decoration: BoxDecoration(
+              color: mt.foreBackColor,
+              borderRadius: BorderRadius.circular(
+                backingCornerRounding * buttonSpan,
+              ),
+              boxShadow: shadowp <= 0
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.07 * shadowp),
+                        blurRadius: 20,
+                        spreadRadius: 1,
+                      ),
+                    ],
+            ),
+          );
+        },
       ),
     );
 
@@ -4684,7 +4727,13 @@ class TimerScreenState extends State<TimerScreen>
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(
-            PaintedPlayIcon(size: 12, color: editActionColor),
+            SignalBuilder(
+              builder: (context) => PausePlayIcon(
+                playing: lastTimerPlaying.value,
+                size: 12,
+                color: editActionColor,
+              ),
+            ),
             upSignal: playButtonUp,
           ),
         ),
