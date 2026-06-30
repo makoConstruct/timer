@@ -18,4 +18,4 @@ It's also just beautiful. There are no superfluous details. Every change animate
 
 It's available on both android and ios, right now. It's free to try.
 
-The source code is available [here](https://github.com/makoConstruct/timer). If you see any ways the app could be improved, we welcome code contributions with genuine warmth: We will try to bring you into the fold and compensate you in proportion to the contribution.
+The source code is available [here](https://github.com/makoConstruct/timer) under a fair source license. If you see any ways the app could be improved, we welcome code contributions with genuine warmth: We will try to bring you into the fold and compensate you in proportion to the contribution.

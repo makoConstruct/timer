@@ -330,7 +330,8 @@ final Signal<bool> isBackgrounded = Signal(false);
 
 /// how many times the special-timer menu must be opened before the label
 /// tutorial stops showing. See [openedSpecialTimerMenuID].
-const int specialTimerMenuMaxRequired = 3;
+/// disabled for now, looks bad, doesn't contribute much, the amount of work it would require to make it look seamless is quite large, it would have to start labels evenly spaced and lerp when one's selected, and also translate velocity from the global animation to the individual ones
+const int specialTimerMenuMaxRequired = -1;
 
 /// Tutorial spring for the special-timer menu: while the user is still learning
 /// it (the [openedSpecialTimerMenuID] counter hasn't yet run out), each open
@@ -4663,7 +4664,7 @@ class TimerScreenState extends State<TimerScreen>
                   ? null
                   : [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.07 * shadowp),
+                        color: Colors.black.withValues(alpha: 0.17 * shadowp),
                         blurRadius: 20,
                         spreadRadius: 1,
                       ),
@@ -6388,7 +6389,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final (fill, subtitle) = switch (mode) {
                           AutodeleteMode.bin => (
                             CheckboxFill.bottomHalf,
-                            'On: Send finished timers to the bin when appropriate',
+                            'On: Send timers to Trash when appropriate',
                           ),
                           AutodeleteMode.retain60 => (
                             CheckboxFill.topHalf,
