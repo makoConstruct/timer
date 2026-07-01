@@ -3575,7 +3575,11 @@ class DragActionRingState extends State<DragActionRing>
       final rawTy = sin(angle);
       if (widget.shuntRight != null) {
         if (rawTx.abs() < 0.07) {
-          rawTx = widget.shuntRight! ? 1 : -1;
+          // near-vertical (top/bottom) labels: shunt sideways. shuntRight is in
+          // the right-handed frame, so mirror it for left-handed use, the same
+          // way the angle above is flipped — otherwise these labels shunt the
+          // wrong way (toward the screen edge) in left-handed mode.
+          rawTx = (widget.shuntRight! == isRightHanded) ? 1 : -1;
         } else {
           rawTx = rawTx.sign;
         }
