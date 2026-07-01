@@ -69,7 +69,7 @@ void main() {
       flex-wrap: wrap;
       gap: 0.75rem;
       align-items: center;
-      margin: 1.5rem 0 1.5rem;
+      margin: 1rem 0 2.5rem;
     }
     .stores img { height: 52px; width: auto; display: block; }
     .android-text { display: none; font-size: 0.95rem; margin-top: -0.75rem; }

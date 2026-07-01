@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
@@ -43,6 +44,7 @@ class MakosTimerForegroundService : Service() {
     private var flutterEngine: FlutterEngine? = null
     private var taskChannel: MethodChannel? = null
     private var pendingIsApiStart: Boolean = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     companion object {
         const val ACTION_START = "org.dreamshrine.makos_timer.action.START"
@@ -56,6 +58,8 @@ class MakosTimerForegroundService : Service() {
         const val NOTIFICATION_ID = 1
         const val CHANNEL_ID = "foreground_service"
         const val CHANNEL_NAME = "mako timer's persistent notification"
+
+        private const val WAKE_LOCK_TAG = "makos_timer:completion_wakelock"
 
         private const val PREFS = "makos_timer_fgs"
         private const val PREF_CALLBACK_HANDLE = "callback_handle"
@@ -110,6 +114,27 @@ class MakosTimerForegroundService : Service() {
         super.onCreate()
         createNotificationChannel()
         runningInstance = this
+        acquireWakeLock()
+    }
+
+    // Without this, the CPU is free to suspend once the screen's been off for a
+    // while, which stalls the completion Timer (see enlivenTimer in main.dart)
+    // regardless of the timer's duration — it only resumes once something else
+    // happens to wake the CPU. Holding a partial wake lock for the service's
+    // lifetime (mirroring flutter_foreground_task's allowWakeLock, which this
+    // service replaced) keeps completions on schedule.
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -293,6 +318,7 @@ class MakosTimerForegroundService : Service() {
 
     override fun onDestroy() {
         if (runningInstance === this) runningInstance = null
+        releaseWakeLock()
         val engine = flutterEngine
         val channel = taskChannel
         if (engine != null && channel != null) {

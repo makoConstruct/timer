@@ -8,7 +8,8 @@
     <!-- this one is needed for the special use foreground service type. We can't use mediaPlayback because that's forbidden from launching on boot (we have to launch on boot for timers that failed to complete before the device was rebooted), we also don't use media player controls or anything. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" /> <!-- we're currently not using this, but will need it for preventing sleep while any timer is active -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" /> <!-- held by MakosTimerForegroundService for its lifetime, so the CPU can't suspend and stall timer completion -->
+
     <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" /> -->
     <application
         android:label="mako's timer"
