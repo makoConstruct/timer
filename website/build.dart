@@ -5,14 +5,12 @@
 import 'dart:io';
 import 'package:markdown/markdown.dart' as md;
 
-// --- Edit these as the app gets published ---------------------------------
-const appStoreUrl = 'https://apps.apple.com/app/makos-timer/id000000000'; // TODO: real iOS App Store id
-const googlePlayUrl =
-    'https://play.google.com/store/apps/details?id=org.dreamshrine.makos_timer';
+// The store links live in index.md now (so the source-code paragraph can sit
+// below them). Only the footer link and page metadata stay here.
 const dreamshrineUrl = 'https://dreamshrine.org';
 const pageTitle = "mako's timer";
-const pageDescription = 'The most ergonomic timer app. Set and start a timer with a single sweep.';
-// ---------------------------------------------------------------------------
+const pageDescription =
+    'The most ergonomic timer app. Set and start a timer with a single sweep.';
 
 void main() {
   final scriptDir = File.fromUri(Platform.script).parent; // website/
@@ -23,7 +21,8 @@ void main() {
     extensionSet: md.ExtensionSet.gitHubWeb,
   );
 
-  final html = '''<!DOCTYPE html>
+  final html =
+      '''<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -70,7 +69,7 @@ void main() {
       flex-wrap: wrap;
       gap: 0.75rem;
       align-items: center;
-      margin: 2.5rem 0 1.5rem;
+      margin: 1.5rem 0 1.5rem;
     }
     .stores img { height: 52px; width: auto; display: block; }
     .android-text { display: none; font-size: 0.95rem; margin-top: -0.75rem; }
@@ -95,15 +94,6 @@ void main() {
   <main>
     <h1>$pageTitle</h1>
 $body
-    <div class="stores">
-      <a href="$appStoreUrl">
-        <img src="badges/app-store.svg" alt="Download on the App Store">
-      </a>
-      <a class="play" href="$googlePlayUrl">
-        <img src="badges/google-play.svg" alt="Get it on Google Play">
-      </a>
-    </div>
-    <p class="android-text">An <a href="$googlePlayUrl">Android version</a> is also available.</p>
     <footer>
       <a href="$dreamshrineUrl">dreamshrine.org</a>
     </footer>

@@ -18,4 +18,11 @@ It's also just beautiful. There are no superfluous details. Every change animate
 
 It's available on both android and ios, right now. It's free to try.
 
-The source code is available [here](https://github.com/makoConstruct/timer) under a fair source license. If you see any ways the app could be improved, we welcome code contributions with genuine warmth: We will try to bring you into the fold and compensate you in proportion to the contribution.
+<!-- TODO: replace id000000000 with the real iOS App Store id once published -->
+<div class="stores">
+  <a href="https://apps.apple.com/app/makos-timer/id000000000"><img src="badges/app-store.svg" alt="Download on the App Store"></a>
+  <a class="play" href="https://play.google.com/store/apps/details?id=org.dreamshrine.makos_timer"><img src="badges/google-play.svg" alt="Get it on Google Play"></a>
+</div>
+<p class="android-text">An <a href="https://play.google.com/store/apps/details?id=org.dreamshrine.makos_timer">Android version</a> is also available.</p>
+
+The source code is available [here](https://github.com/makoConstruct/timer) under a [fair source](https://fair.io/about/) license. If you see any ways the app could be improved, we welcome code contributions with genuine warmth: We will try to bring you into the fold and compensate you in proportion to the contribution.

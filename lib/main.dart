@@ -3848,7 +3848,10 @@ class TimerScreenState extends State<TimerScreen>
             currentlyPressingKey.value == 0);
   });
   late final Computed<bool> playButtonUp = Computed(
-    () => timerListMobj.value!.isNotEmpty,
+    () =>
+        timerListMobj.value!.isNotEmpty &&
+        (!isFirstPressForSelectedTimer.value ||
+            currentlyPressingKey.value == 0),
   );
   late final Computed<bool> lastTimerPlaying = Computed(() {
     final id = timerListMobj.value!.lastOrNull;
