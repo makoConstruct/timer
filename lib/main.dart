@@ -10,7 +10,6 @@ import 'dart:ui';
 
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:makos_timer/platform_notifications.dart';
 import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:improved_wrap/improved_wrap.dart';
@@ -299,6 +298,10 @@ void main() async {
         if (message == 'dismissAlarms') {
           print("main message to dismissAlarms");
           globalTimerHolm?.dismissAlarms();
+        } else if (message == 'ready') {
+          // The foreground task finished starting and registered its port; send
+          // it anything we buffered while it was coming up.
+          flushBufferedTaskMessages();
         }
       });
       await PlatformNotifications.ensureChannel(
@@ -322,8 +325,17 @@ void _sendDismissAlarms() {
   )?.send('dismissAlarms');
 }
 
-void onDataReceived(Object data) {
-  print("data received: $data");
+/// Drives the persistent notification from the main isolate while the app is
+/// backgrounded-but-alive (see the effect in TimerScreenState). A no-op natively
+/// if the service isn't running.
+async.Timer? _mainBgNotificationTimer;
+void _updateBackgroundedNotification() {
+  final holm = globalTimerHolm;
+  if (holm == null) return;
+  final n = buildTimersNotification(holm);
+  if (n != null) {
+    ForegroundControl.update(title: n.title, text: n.text);
+  }
 }
 
 final Signal<bool> isBackgrounded = Signal(false);
@@ -563,7 +575,12 @@ class TimerHolm {
     TimerData? prev;
     return effect(() {
       final TimerData? d = mobj.value;
-      final active = d != null && (d.isRunning || d.isGoingOff);
+      // completedRecently keeps a timer "active" so the foreground service (and
+      // its notification) sticks around after completion — showing "completed"
+      // and not cutting off the completion sound — until the user revisits the
+      // app, at which point the timer widget acknowledges it (clears the flag).
+      final active =
+          d != null && (d.isRunning || d.isGoingOff || d.completedRecently);
       final present = activeTimers.peek().contains(mobj.id);
       if (active && !present) {
         activeTimers.value = [...activeTimers.peek(), mobj.id];
@@ -3955,12 +3972,18 @@ class TimerScreenState extends State<TimerScreen>
   /// reaches the max so the tutorial never shows again.
   void _onSpecialTimerMenuOpened() {
     final m = Mobj.getAlreadyLoaded(openedSpecialTimerMenuID, IntType());
-    final v = m.value ?? 0;
-    if (v < 0) return;
-    tutorialShowLabelsAnimation?.reset();
-    tutorialShowLabelsAnimation?.forward();
-    final next = v + 1;
-    m.value = next >= specialTimerMenuMaxRequired ? -1 : next;
+    final v = m.value ?? -1;
+    if (v < 0) {
+      return;
+    }
+    if (v >= specialTimerMenuMaxRequired) {
+      m.value = -1;
+    } else {
+      tutorialShowLabelsAnimation?.reset();
+      tutorialShowLabelsAnimation?.forward();
+      final next = v + 1;
+      m.value = next;
+    }
   }
 
   void _updateNumeralBackshadow() {
@@ -4013,7 +4036,6 @@ class TimerScreenState extends State<TimerScreen>
       jukeBox: jukeBox,
     );
 
-    FlutterForegroundTask.addTaskDataCallback(onDataReceived);
     // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
     // android will support repeat timers via the foreground service
     // assuming that all permissions are granted by now.
@@ -4027,6 +4049,32 @@ class TimerScreenState extends State<TimerScreen>
         graspForegroundService();
       } else {
         stopForegroundService();
+      }
+    });
+
+    // While the app is backgrounded but still alive, THIS isolate is the timer
+    // tracker (the service stays in app-active mode as long as heartbeats flow),
+    // so it must drive the persistent notification's countdowns. When the app is
+    // foregrounded the notification goes idle (the user is looking at the app);
+    // when the app is killed the service isolate takes these updates over.
+    createEffect(() {
+      // Only drive updates when backgrounded AND there's something to show — when
+      // backgrounded with no timers the service is stopped anyway, so ticking would
+      // be pointless.
+      if (isBackgrounded.value && someTimerActive.value) {
+        _mainBgNotificationTimer ??= async.Timer.periodic(
+          const Duration(seconds: 1),
+          (_) => _updateBackgroundedNotification(),
+        );
+        _updateBackgroundedNotification();
+      } else {
+        _mainBgNotificationTimer?.cancel();
+        _mainBgNotificationTimer = null;
+        // On foreground the notification goes idle (user's in the app). When
+        // backgrounded with no timers the service is stopped, so this is a no-op.
+        if (!isBackgrounded.value) {
+          ForegroundControl.update(title: null, text: null);
+        }
       }
     });
 
@@ -7534,7 +7582,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
 
 Future<bool> hasBackgroundPermission() {
   if (Platform.isAndroid) {
-    return FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    return ForegroundControl.isIgnoringBatteryOptimizations();
   } else if (Platform.isIOS) {
     // iOS does not allow persistent background execution for timers.
     return Future.value(false);
@@ -7639,29 +7687,27 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
   }
 
   Future<void> _checkNotificationPermission() async {
-    final status = await FlutterForegroundTask.checkNotificationPermission();
-    final granted = status == NotificationPermission.granted;
+    final granted = await ForegroundControl.checkNotificationPermission();
     _notifWasAlreadyGranted = granted;
     notifGranted.value = granted ? true : null;
   }
 
   Future<void> _requestNotificationPermission() async {
-    final result = await FlutterForegroundTask.requestNotificationPermission();
-    notifGranted.value = result == NotificationPermission.granted ? true : null;
-    if (result == NotificationPermission.granted) {
+    final granted = await ForegroundControl.requestNotificationPermission();
+    notifGranted.value = granted ? true : null;
+    if (granted) {
       inputCompleted(notifKey);
     }
   }
 
   Future<void> _checkBatteryOptimization() async {
-    final granted = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    final granted = await ForegroundControl.isIgnoringBatteryOptimizations();
     _batteryOptimWasAlreadyGranted = granted;
     batteryOptimGranted.value = granted ? true : null;
   }
 
   Future<void> _requestBatteryOptimization() async {
-    final granted =
-        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    final granted = await ForegroundControl.requestIgnoreBatteryOptimization();
     batteryOptimGranted.value = granted ? true : null;
     if (granted) {
       inputCompleted(batteryOptimKey);

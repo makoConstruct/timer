@@ -6,7 +6,7 @@ import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/platform_notifications.dart';
 import 'package:makos_timer/database.dart';
@@ -45,12 +45,175 @@ Future<void> printExceptionsAsync(
   }
 }
 
-late final PersistentNotificationTask foregroundTaskHandler;
+const completionChannelKey = 'timer_completion';
 
+/// Port name the service isolate registers so the main isolate can push it
+/// hello/heartbeat/goodbye/dismissAlarms (mirrors [mainNotificationPortName] in
+/// the other direction).
 const foregroundServicePortName = 'foreground_service';
 
+/// Channel the foreground engine uses to talk to [MakosTimerForegroundService]:
+///   Dart -> native: 'ready' (returns isApiStart), 'update' (title/text), 'stop'.
+///   native -> Dart: 'destroy' (run teardown before the engine dies).
+const _taskChannelName = 'makos_timer/foreground_task';
+
+/// Main-isolate control surface for the native foreground service. Mirrors the
+/// MissingPluginException-tolerant style of [PlatformNotifications] so non-Android
+/// builds (and the linux test target) treat everything as a no-op / granted.
+class ForegroundControl {
+  static const MethodChannel _channel = MethodChannel('makos_timer/foreground');
+
+  static Future<void> start({
+    required int callbackHandle,
+    required bool isApiStart,
+  }) async {
+    try {
+      await _channel.invokeMethod('start', {
+        'callbackHandle': callbackHandle,
+        'isApiStart': isApiStart,
+      });
+    } on MissingPluginException {
+      // non-Android — no-op
+    }
+  }
+
+  static Future<void> stop() async {
+    try {
+      await _channel.invokeMethod('stop');
+    } on MissingPluginException {
+      // non-Android — no-op
+    }
+  }
+
+  static Future<bool> isRunning() async {
+    try {
+      return (await _channel.invokeMethod<bool>('isRunning')) ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Updates the persistent notification's title/text (null/empty => idle,
+  /// icon-only). Used by the main isolate while the app is backgrounded; the
+  /// service isolate does the same over its own task channel when it has taken
+  /// over. A no-op natively if the service isn't running.
+  static Future<void> update({String? title, String? text}) async {
+    try {
+      await _channel.invokeMethod('update', {'title': title, 'text': text});
+    } on MissingPluginException {
+      // non-Android — no-op
+    }
+  }
+
+  static Future<bool> checkNotificationPermission() async {
+    try {
+      return (await _channel.invokeMethod<String>('checkNotificationPermission')) ==
+          'granted';
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  static Future<bool> requestNotificationPermission() async {
+    try {
+      return (await _channel.invokeMethod<String>(
+            'requestNotificationPermission',
+          )) ==
+          'granted';
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    try {
+      return (await _channel.invokeMethod<bool>(
+            'isIgnoringBatteryOptimizations',
+          )) ??
+          true;
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  static Future<bool> requestIgnoreBatteryOptimization() async {
+    try {
+      return (await _channel.invokeMethod<bool>(
+            'requestIgnoreBatteryOptimization',
+          )) ??
+          false;
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  static Future<bool> canScheduleExactAlarms() async {
+    try {
+      return (await _channel.invokeMethod<bool>('canScheduleExactAlarms')) ?? true;
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  static Future<bool> openAlarmsAndRemindersSettings() async {
+    try {
+      return (await _channel.invokeMethod<bool>(
+            'openAlarmsAndRemindersSettings',
+          )) ??
+          false;
+    } on MissingPluginException {
+      return true;
+    }
+  }
+}
+
+/// Builds the persistent notification's (title, text) from a holm's tracked
+/// timers, or null when there's nothing worth showing (caller shows idle). Shared
+/// by the main isolate (while backgrounded) and the service isolate (after it
+/// takes over) so the notification looks identical regardless of who's driving it.
+({String title, String text})? buildTimersNotification(TimerHolm holm) {
+  final runningLines = <String>[];
+  bool anyCompleted = false;
+  for (final tt in holm.tracking.values) {
+    final mv = tt.mobj?.value;
+    if (mv == null) continue;
+    if (mv.isRunning) {
+      final remaining = mv.duration - DateTime.now().difference(mv.startTime);
+      // Skip timers that have crossed zero but whose completionTimer hasn't
+      // flipped them to "completed" yet — otherwise they'd render a bogus "00".
+      if (remaining <= Duration.zero) continue;
+      runningLines.add(
+        formatTime(durationToDigits(remaining.inMicroseconds / 1000000.0)),
+      );
+    } else if (mv.completedRecently) {
+      // Completed but not yet acknowledged (the app hasn't been reopened). Keeps
+      // the notification — and the service — around to say "completed".
+      anyCompleted = true;
+    }
+  }
+
+  if (runningLines.isEmpty && !anyCompleted) return null;
+  if (runningLines.isNotEmpty) {
+    return (
+      title: runningLines.length == 1 ? "timer running" : "timers running",
+      text: (anyCompleted ? [...runningLines, "completed"] : runningLines)
+          .join("\n"),
+    );
+  }
+  return (title: "completed", text: "");
+}
+
+/// Entry point executed by [MakosTimerForegroundService] in the foreground
+/// engine. `@pragma('vm:entry-point')` keeps it from being tree-shaken and lets
+/// it be looked up by callback handle (including on reboot).
 @pragma('vm:entry-point')
 void foregroundTaskStart() {
+  // This runs on the foreground engine's own root isolate. Initialize the binding
+  // first (exactly like main()): without it the default binary messenger isn't
+  // wired up, and any MethodChannel.setMethodCallHandler — ours, PlatformAudio,
+  // PlatformNotifications — throws "Cannot set the method call handler before the
+  // binary messenger has been initialized."
+  WidgetsFlutterBinding.ensureInitialized();
   print("mako foregroundTaskStart");
 
   final errorPort = ReceivePort();
@@ -64,11 +227,11 @@ void foregroundTaskStart() {
     }
   });
 
-  foregroundTaskHandler = PersistentNotificationTask();
-  FlutterForegroundTask.setTaskHandler(
-    ErrorCatchingTaskHandler(foregroundTaskHandler),
-  );
+  _foregroundRunner = ForegroundTaskRunner();
+  printExceptionsAsync(() => _foregroundRunner!.start(), "foregroundTaskStart");
 }
+
+ForegroundTaskRunner? _foregroundRunner;
 
 void _sendDismissAlarms() {
   IsolateNameServer.lookupPortByName(
@@ -79,50 +242,22 @@ void _sendDismissAlarms() {
   )?.send('dismissAlarms');
 }
 
-class ErrorCatchingTaskHandler extends TaskHandler {
-  final TaskHandler _inner;
-  ErrorCatchingTaskHandler(this._inner);
+/// The foreground engine's worker. Tracks timers while the app is gone, drives
+/// the persistent notification, and hands tracking back when the app returns —
+/// the same responsibilities the old flutter_foreground_task TaskHandler had,
+/// minus the package.
+class ForegroundTaskRunner {
+  static const MethodChannel _taskChannel = MethodChannel(_taskChannelName);
 
-  @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) =>
-      printExceptionsAsync(() => _inner.onStart(timestamp, starter), "onStart");
-
-  @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) =>
-      printExceptionsAsync(
-        () => _inner.onDestroy(timestamp, isTimeout),
-        "onDestroy",
-      );
-
-  @override
-  void onRepeatEvent(DateTime timestamp) =>
-      printExceptions(() => _inner.onRepeatEvent(timestamp), "onRepeatEvent");
-
-  @override
-  void onReceiveData(Object data) =>
-      printExceptions(() => _inner.onReceiveData(data), "onReceiveData");
-
-  @override
-  void onNotificationPressed() => printExceptions(
-    () => _inner.onNotificationPressed(),
-    "onNotificationPressed",
-  );
-
-  @override
-  void onNotificationButtonPressed(String id) => printExceptions(
-    () => _inner.onNotificationButtonPressed(id),
-    "onNotificationButtonPressed",
-  );
-}
-
-const completionChannelKey = 'timer_completion';
-
-class PersistentNotificationTask extends TaskHandler {
   late JukeBox jukeBox;
   Timer? _heartbeatTimeout;
   final List<Function()> cleanups = [];
-  late Signal<bool> appActive;
-  late ReceivePort _dismissPort;
+
+  // false until the app proves it's alive (developer/API start, or a 'hello').
+  final Signal<bool> appActive = Signal(false);
+
+  ReceivePort? _servicePort;
+
   // Non-null only while this isolate's TimerHolm is the live tracker (the app is
   // gone/backgrounded and we've finished (re)loading timers). The self-stop
   // effect is gated on it being non-null so it can't fire during the handoff
@@ -133,6 +268,9 @@ class PersistentNotificationTask extends TaskHandler {
   // re-triggers the effect once tracking is live and activeTimers is correct.
   final Signal<TimerHolm?> _timerHolm = Signal(null);
   Timer? _notificationTimer;
+  bool _disposed = false;
+
+  ForegroundTaskRunner();
 
   void dismissAllAlarms() {
     backthreadLog("dismissAllAlarms");
@@ -145,43 +283,18 @@ class PersistentNotificationTask extends TaskHandler {
     }
   }
 
-  void updatePersistentNotification({
-    required String title,
-    required String text,
-    required List<NotificationButton> buttons,
-  }) {
-    FlutterForegroundTask.updateService(
-      notificationTitle: title,
-      notificationText: text,
-      notificationButtons: buttons,
-    );
+  void _setIdleNotification() {
+    // null title + text => icon-only, non-expandable notification (see
+    // MakosTimerForegroundService.buildNotification).
+    _taskChannel.invokeMethod('update', {'title': null, 'text': null});
   }
 
   void updateRunningTimersNotification() {
-    final tracking = _timerHolm.peek()?.tracking;
-    if (tracking == null || tracking.isEmpty) return;
-    final String title = tracking.length == 1
-        ? "timer running"
-        : "timers running";
-    String body = "";
-    for (final tt in tracking.values) {
-      final mv = tt.mobj?.value;
-      if (mv?.isRunning == true) {
-        final dur = mv!.duration - DateTime.now().difference(mv.startTime);
-        final remainingSecs = dur.isNegative
-            ? 0.0
-            : dur.inMicroseconds / 1000000.0;
-        body += "${formatTime(durationToDigits(remainingSecs))}\n";
-      } else {
-        // actually no, just don't mention them
-        // body += "timer completed\n";
-      }
-    }
-    updatePersistentNotification(
-      title: title,
-      text: body.trimRight(),
-      buttons: [],
-    );
+    final holm = _timerHolm.peek();
+    if (holm == null) return;
+    final n = buildTimersNotification(holm);
+    if (n == null) return;
+    _taskChannel.invokeMethod('update', {'title': n.title, 'text': n.text});
   }
 
   void _startTimerHolm(Mobj<List<MobjID<TimerData>>> timerListMobj) {
@@ -205,30 +318,42 @@ class PersistentNotificationTask extends TaskHandler {
     _startTimerHolm(Mobj.getAlreadyLoaded(timerListID, ListType(StringType())));
   }
 
-  @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    print("onStart a");
-    appActive = Signal(starter == TaskStarter.developer);
+  Future<void> start() async {
+    print("foreground runner start a");
 
-    // this might be useful for plugin support for background isolate?
-    // [todo] test to see if platform audio works when the isolate is started on reboot. If not, I think we're kinda screwed.
-    // [todo] try removing this
-    final token = RootIsolateToken.instance!;
-    print("onStart b");
-    BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-    FlutterForegroundTask.sendDataToMain({'op': 'onStart Report'});
+    // The binding (and thus the binary messenger) is initialized in
+    // foregroundTaskStart, so method channels are usable from here on.
+    _taskChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'destroy':
+          printExceptions(dispose, "destroy");
+        case 'appKilled':
+          // The service got a direct onTaskRemoved (user swiped the app away) —
+          // take over immediately instead of waiting out the heartbeat timeout.
+          printExceptions(_handleAppGone, "appKilled");
+      }
+      return null;
+    });
+
+    // Pull the start kind from native now that the channel is usable. true when
+    // the app/API started us (app is in front), false for system/boot starts.
+    final bool isApiStart =
+        (await _taskChannel.invokeMethod<bool>('ready')) ?? false;
+    appActive.value = isApiStart;
+
+    print("foreground runner start b");
     jukeBox = JukeBox.create();
-    print("onStart c");
     await MobjRegistry.initialize(TheDatabase(), preload: true);
-    _dismissPort = ReceivePort();
+
+    final servicePort = ReceivePort();
+    _servicePort = servicePort;
     IsolateNameServer.removePortNameMapping(foregroundServicePortName);
     IsolateNameServer.registerPortWithName(
-      _dismissPort.sendPort,
+      servicePort.sendPort,
       foregroundServicePortName,
     );
-    _dismissPort.listen((message) {
-      if (message == 'dismissAlarms') dismissAllAlarms();
-    });
+    servicePort.listen(_onPortMessage);
+
     await PlatformNotifications.ensureChannel(
       channelKey: completionChannelKey,
       channelName: 'Timer Completion',
@@ -257,11 +382,7 @@ class PersistentNotificationTask extends TaskHandler {
           _timerHolm.peek()?.dispose();
           _timerHolm.value = null;
           MobjRegistry.relinquishAll();
-          updatePersistentNotification(
-            title: appName,
-            text: foregroundNotificationText,
-            buttons: [],
-          );
+          _setIdleNotification();
         }
       }),
     );
@@ -277,14 +398,69 @@ class PersistentNotificationTask extends TaskHandler {
         // Only stop once we're actually the live tracker (gate avoids the
         // dismissal handoff race), and only when there's nothing to track.
         if (_timerHolm.value != null && !foregroundServiceOpen.value) {
-          FlutterForegroundTask.stopService();
+          // Stop the per-second 'update' calls before tearing down, so their
+          // replies don't race the engine destroy.
+          _notificationTimer?.cancel();
+          _notificationTimer = null;
+          _taskChannel.invokeMethod('stop');
         }
       }),
     );
+
+    // Tell the main isolate we're up so it flushes any buffered hello/heartbeat.
+    IsolateNameServer.lookupPortByName(mainNotificationPortName)?.send('ready');
   }
 
-  @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+  void _onPortMessage(dynamic message) {
+    switch (message) {
+      case 'dismissAlarms':
+        dismissAllAlarms();
+      case 'hello':
+        appActive.value = true;
+        _resetHeartbeatTimeout();
+        dismissAllAlarms();
+      // there is no way to be reliably notified when a process is killed, so we
+      // do a heartbeat timer as well as relying on lifecycle messages.
+      case 'heartbeat':
+        backthreadLog("heartbeat received");
+        if (appActive.peek()) {
+          _resetHeartbeatTimeout();
+        }
+      case 'goodbye':
+        _handleAppGone();
+    }
+  }
+
+  /// The app process is gone (heartbeat lapsed, lifecycle goodbye, or a direct
+  /// onTaskRemoved): this isolate becomes the live tracker. Guarded on appActive
+  /// (set synchronously) so overlapping triggers — e.g. onTaskRemoved and the
+  /// heartbeat timeout both firing — don't start tracking twice.
+  void _handleAppGone() {
+    if (!appActive.peek()) return;
+    appActive.value = false;
+    _heartbeatTimeout?.cancel();
+    _heartbeatTimeout = null;
+    _reinitialize();
+  }
+
+  void _resetHeartbeatTimeout() {
+    _heartbeatTimeout?.cancel();
+    _heartbeatTimeout = Timer(const Duration(seconds: 2), () {
+      backthreadLog("heartbeat timeout");
+      _heartbeatTimeout = null;
+      _handleAppGone();
+    });
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    backthreadLog("runner dispose");
+    // No method-channel calls here: the engine is about to be destroyed, so any
+    // reply would arrive after FlutterJNI detaches ("Tried to send a platform
+    // message response..."). Stopping audio is handled natively in
+    // PlatformAudioPlugin.onDetachedFromEngine; notification clearing on a user
+    // dismiss is handled natively in ForegroundDismissReceiver.
     _heartbeatTimeout?.cancel();
     _notificationTimer?.cancel();
     _timerHolm.peek()?.dispose();
@@ -292,166 +468,78 @@ class PersistentNotificationTask extends TaskHandler {
       cleanup();
     }
     cleanups.clear();
-    backthreadLog("mako onDestroy $timestamp $isTimeout");
     appActive.dispose();
     IsolateNameServer.removePortNameMapping(foregroundServicePortName);
-    _dismissPort.close();
-    FlutterForegroundTask.sendDataToMain({'op': 'goodbye'});
-  }
-
-  @override
-  void onRepeatEvent(DateTime timestamp) {
-    backthreadLog("onRepeatEvent $timestamp");
-  }
-
-  @override
-  void onNotificationPressed() {
-    backthreadLog("mako onNotificationPressed");
-  }
-
-  @override
-  void onReceiveData(Object data) {
-    Map<String, dynamic> dataMap = data as Map<String, dynamic>;
-    String op = dataMap['op'] as String;
-    resetHeartbeatTimeout() {
-      _heartbeatTimeout?.cancel();
-      _heartbeatTimeout = Timer(Duration(seconds: 2), () {
-        backthreadLog("heartbeat timeout");
-        appActive.value = false;
-        _reinitialize();
-      });
-    }
-
-    switch (op) {
-      case 'hello':
-        appActive.value = true;
-        resetHeartbeatTimeout();
-        dismissAllAlarms();
-        break;
-      // there is no way to be reliably notified when a process is killed, so we do a heartbeat timer as well as the goodbye thing just in case that's killed
-      case 'heartbeat':
-        backthreadLog("heartbeat received");
-        if (appActive.peek()) {
-          resetHeartbeatTimeout();
-        }
-        break;
-      case 'goodbye':
-        appActive.value = false;
-        _heartbeatTimeout?.cancel();
-        _reinitialize();
-        break;
-    }
-  }
-
-  @override
-  void onNotificationButtonPressed(String id) {
-    backthreadLog("notification button pressed $id");
+    _servicePort?.close();
+    _servicePort = null;
   }
 }
 
 Timer? heartbeaterMain;
 
-List<Object>? _pendingTaskMessages;
-bool _serviceRunning = false;
+List<String>? _pendingTaskMessages;
 
-/// Sends data to the foreground task, buffering messages until the service is running.
-void bufferedSendToForegroundTask(Object data) {
-  if (_serviceRunning) {
-    FlutterForegroundTask.sendDataToTask(data);
+/// Sends a message to the foreground task over its IsolateNameServer port,
+/// buffering until the port is registered (it isn't during the brief window
+/// between starting the service and the runner finishing [ForegroundTaskRunner.start]).
+void bufferedSendToForegroundTask(String message) {
+  final port = IsolateNameServer.lookupPortByName(foregroundServicePortName);
+  if (port != null) {
+    port.send(message);
   } else {
-    _pendingTaskMessages ??= [];
-    _pendingTaskMessages!.add(data);
+    (_pendingTaskMessages ??= []).add(message);
   }
 }
 
-/// Flushes any buffered messages to the foreground task.
+/// Flushes buffered messages once the task signals 'ready'. Called from the main
+/// isolate's notification-response port listener.
 void flushBufferedTaskMessages() {
   final pending = _pendingTaskMessages;
   _pendingTaskMessages = null;
-  if (pending != null) {
-    for (final msg in pending) {
-      FlutterForegroundTask.sendDataToTask(msg);
-    }
+  if (pending == null) return;
+  final port = IsolateNameServer.lookupPortByName(foregroundServicePortName);
+  if (port == null) return;
+  for (final msg in pending) {
+    port.send(msg);
   }
 }
 
 bool _foregroundServiceSetUp = false;
 
-/// One-time setup: communication port, permissions, and notification/task
-/// options. Returns whether all permissions were granted. Safe to call more
-/// than once (it only does the work the first time).
+/// One-time permission setup (notifications, battery optimization, exact alarms).
+/// Returns whether all permissions were granted. Safe to call more than once.
 Future<bool> _setUpForegroundService() async {
   if (_foregroundServiceSetUp) return true;
 
-  FlutterForegroundTask.initCommunicationPort();
+  // Android 13+: notification permission is required to show the foreground
+  // service notification. (No-op / granted off Android.)
+  bool permissionsGranted = await ForegroundControl.requestNotificationPermission();
 
-  // permissions
-  // Android 13+, you need to allow notification permission to display foreground service notification.
-  // iOS: If you need notification, ask for permission.
-  bool permissionsGranted = true;
-  final NotificationPermission notificationPermission =
-      await FlutterForegroundTask.checkNotificationPermission();
-  if (notificationPermission != NotificationPermission.granted) {
-    bool g =
-        await FlutterForegroundTask.requestNotificationPermission() ==
-        NotificationPermission.granted;
-    if (!g) {
-      permissionsGranted = false;
-    }
-  }
   if (Platform.isAndroid) {
-    // Android 12+, there are restrictions on starting a foreground service.
-    // To restart the service on device reboot or unexpected problem, you need to allow below permission.
-    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-      // This function requires `android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission.
-      bool g = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-      if (!g) {
+    // Android 12+: restrictions on starting a foreground service / restarting it
+    // on reboot. Ignoring battery optimization keeps us reliable.
+    if (!await ForegroundControl.isIgnoringBatteryOptimizations()) {
+      if (!await ForegroundControl.requestIgnoreBatteryOptimization()) {
         permissionsGranted = false;
       }
     }
 
-    assert(await FlutterForegroundTask.canScheduleExactAlarms);
-    if (!await FlutterForegroundTask.canScheduleExactAlarms) {
-      // // [maybe todo] explain to the user why we need this. wait, it doesn't send the user to the settings page it just opens a tooltip, seems clear enough? Or maybe this permission was already granted and this code doesn't really need to be here? I'll comment this out and replace it with just a check.
-      bool g = await FlutterForegroundTask.openAlarmsAndRemindersSettings();
-      if (!g) {
+    if (!await ForegroundControl.canScheduleExactAlarms()) {
+      if (!await ForegroundControl.openAlarmsAndRemindersSettings()) {
         permissionsGranted = false;
       }
     }
   }
-
-  FlutterForegroundTask.init(
-    androidNotificationOptions: AndroidNotificationOptions(
-      channelId: 'foreground_service',
-      channelName: "mako timer's persistent notification",
-      channelDescription: "mako timer's persistent notification",
-      onlyAlertOnce: true,
-    ),
-    // disabled on ios? well, ios shouldn't do any of it this way, it should do it by scheduling notifications and stuff
-    iosNotificationOptions: const IOSNotificationOptions(
-      showNotification: false,
-      playSound: false,
-    ),
-    foregroundTaskOptions: ForegroundTaskOptions(
-      // [todo] remove
-      eventAction: ForegroundTaskEventAction.nothing(),
-      autoRunOnBoot: true,
-      autoRunOnMyPackageReplaced: true,
-      // is this really right? I would like to let the phone rests when it wants to rest as long as it can start to wake up before we need it, we can plan ahead, we know when we're going to need it, so if it takes time to wake up that's okay.
-      allowWakeLock: true,
-    ),
-  );
 
   _foregroundServiceSetUp = true;
   return permissionsGranted;
 }
 
-/// Stops the foreground service and removes its persistent notification. Safe
-/// to call when the service isn't running (or off Android).
+/// Stops the foreground service and removes its persistent notification. Safe to
+/// call when the service isn't running (or off Android).
 Future<void> stopForegroundService() async {
   if (!Platform.isAndroid) return;
-  _serviceRunning = false;
-  await FlutterForegroundTask.stopService();
+  await ForegroundControl.stop();
 }
 
 /// Ensures the foreground service (and its persistent notification) is running,
@@ -464,44 +552,35 @@ Future<bool> graspForegroundService() async {
 
   final bool permissionsGranted = await _setUpForegroundService();
 
-  if (await FlutterForegroundTask.isRunningService) {
-    // in the example, they restart the service here, we're not gonna restart
-    print("service is already running");
-    _serviceRunning = true;
-    flushBufferedTaskMessages();
-    bufferedSendToForegroundTask({'op': 'hello'});
-  } else {
+  final handle = PluginUtilities.getCallbackHandle(foregroundTaskStart);
+  if (handle == null) {
+    throw StateError('could not resolve foregroundTaskStart callback handle');
+  }
+  final bool alreadyRunning = await ForegroundControl.isRunning();
+  if (!alreadyRunning) {
     print("starting service");
     _pendingTaskMessages = [];
-    final sr = await FlutterForegroundTask.startService(
-      // serviceTypes: [
-      //   ForegroundServiceTypes.dataSync,
-      //   ForegroundServiceTypes.remoteMessaging,
-      // ],
-      serviceId: 1,
-      notificationTitle: appName,
-      notificationText: foregroundNotificationText,
-      notificationIcon: null,
-      // (see manifest for why specialUse)
-      serviceTypes: [ForegroundServiceTypes.specialUse],
-      notificationInitialRoute: '/',
-
-      callback: foregroundTaskStart,
-    );
-    if (sr is ServiceRequestFailure) {
-      _pendingTaskMessages = null;
-      throw sr;
-    }
-    _serviceRunning = true;
-    flushBufferedTaskMessages();
+  } else {
+    print("service is already running; re-issuing start to re-show notification");
   }
+  // Always (re)issue start, even when already running. Android 14+ lets the user
+  // swipe away a foreground-service notification while leaving the service alive;
+  // re-issuing start makes the service call startForeground again and re-post the
+  // notification. When the service isn't running this boots it. The engine only
+  // ever bootstraps once, so this is cheap either way.
+  await ForegroundControl.start(
+    callbackHandle: handle.toRawHandle(),
+    isApiStart: true,
+  );
 
-  // Start an interval timer that sends the heartbeat signal to the foreground task
-  heartbeaterMain ??= Timer.periodic(const Duration(milliseconds: 1200), (
-    timer,
-  ) {
-    print("heartbeat sent");
-    bufferedSendToForegroundTask({'op': 'heartbeat'});
+  // 'hello' confirms the app is in front (resets the heartbeat watchdog and
+  // dismisses any alarms). Buffered if the task isn't registered yet (fresh
+  // start), sent directly if it's already up.
+  bufferedSendToForegroundTask('hello');
+
+  // Interval heartbeat so the task notices when the app process goes away.
+  heartbeaterMain ??= Timer.periodic(const Duration(milliseconds: 1200), (_) {
+    bufferedSendToForegroundTask('heartbeat');
   });
 
   return permissionsGranted;

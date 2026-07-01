@@ -12,7 +12,11 @@ class MainActivity : FlutterActivity() {
         GeneratedPluginRegistrant.registerWith(flutterEngine)
         flutterEngine.plugins.add(PlatformAudioPlugin())
         flutterEngine.plugins.add(PlatformNotificationPlugin())
+        flutterEngine.plugins.add(ForegroundControlPlugin())
 
-        // The background-engine lifecycle listener is registered in  MakosTimerApplication.onCreate (not here), so that it will be present even when the service is started by the boot receiver (via foreground task), which bypasses this activity.
+        // The foreground engine's custom plugins are registered directly in
+        // MakosTimerForegroundService.bootstrapEngine (not here), so they're present
+        // even when the service is started by the boot receiver, which bypasses this
+        // activity.
     }
 }

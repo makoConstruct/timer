@@ -109,6 +109,10 @@ class PlatformAudioPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        // Release the MediaPlayer here so a sounding alarm actually stops when the
+        // engine is destroyed (e.g. the foreground service being torn down on a
+        // notification dismiss). Destroying the engine alone wouldn't free it.
+        stopAudio()
         channel.setMethodCallHandler(null)
         executor.shutdown()
     }

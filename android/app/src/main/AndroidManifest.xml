@@ -12,16 +12,35 @@
     <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" /> -->
     <application
         android:label="mako's timer"
-        android:name=".MakosTimerApplication"
         android:icon="@mipmap/ic_launcher">
+        <!-- Small icon for the foreground-service notification. Must be a
+             white-on-transparent alpha mask (Android uses only the alpha
+             channel); the monochrome layer is exactly that. Pointing
+             flutter_foreground_task at ic_launcher (an opaque adaptive icon)
+             instead renders as a solid white blob/circle. -->
+        <meta-data
+            android:name="org.dreamshrine.makos_timer.NOTIFICATION_ICON"
+            android:resource="@mipmap/ic_launcher_monochrome" />
          <receiver
             android:name=".NotificationActionReceiver"
             android:exported="false" />
         <service
-            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:name=".MakosTimerForegroundService"
             android:foregroundServiceType="specialUse"
             android:stopWithTask="false"
             android:exported="false" />
+        <receiver
+            android:name=".ForegroundDismissReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"
