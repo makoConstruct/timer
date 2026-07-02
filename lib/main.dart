@@ -1526,6 +1526,8 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     _deletionAnimation?.dispose();
     _deletionAnimation = null;
     _appearanceAnimation.dispose();
+    _dataEffect?.call();
+    _dataEffect = null;
     _unpinnedIndicatorShowing.dispose();
     _unpinnedIndicatorFullyShowing.dispose();
     animatedToDisabled.dispose();

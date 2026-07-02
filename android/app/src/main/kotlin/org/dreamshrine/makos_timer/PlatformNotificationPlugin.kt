@@ -45,6 +45,10 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
         const val EVENT_ACTION = "action"
         const val EVENT_DISMISS = "dismiss"
 
+        // Dark green from the logo, used to tint the monochrome small icon's
+        // background circle instead of the system's default accent color.
+        private const val NOTIFICATION_ACCENT_COLOR = 0xFFB7DEA6.toInt()
+
         // Every attached engine's channel. native -> Dart pushes fan out to all of
         // them; each isolate then runs its own dismiss handling.
         private val channels =
@@ -143,6 +147,7 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
 
         val builder = NotificationCompat.Builder(context, channelKey)
             .setSmallIcon(smallIcon)
+            .setColor(NOTIFICATION_ACCENT_COLOR)
             .setContentTitle(title)
             .setContentText(body)
             .setCategory(NotificationCompat.CATEGORY_ALARM)

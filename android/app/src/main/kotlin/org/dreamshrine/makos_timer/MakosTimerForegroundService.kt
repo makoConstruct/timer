@@ -61,6 +61,10 @@ class MakosTimerForegroundService : Service() {
 
         private const val WAKE_LOCK_TAG = "makos_timer:completion_wakelock"
 
+        // Dark green from the logo, used to tint the monochrome small icon's
+        // background circle instead of the system's default accent color.
+        private const val NOTIFICATION_ACCENT_COLOR = 0xFFB7DEA6.toInt()
+
         private const val PREFS = "makos_timer_fgs"
         private const val PREF_CALLBACK_HANDLE = "callback_handle"
         private const val PREF_STOPPED = "stopped_by_user"
@@ -250,6 +254,7 @@ class MakosTimerForegroundService : Service() {
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(resId("res_notification_icon"))
+            .setColor(NOTIFICATION_ACCENT_COLOR)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
