@@ -746,6 +746,16 @@ Color lightenColor(Color c, double amount) {
   return hsl.addLightness(amount * (100 - hsl.lightness)).toColor();
 }
 
+Color saturateColor(Color c, double amount) {
+  final hsl = HSLuvColor.fromColor(c);
+  return hsl.addSaturation(amount * (100 - hsl.saturation)).toColor();
+}
+
+Color desaturateColor(Color c, double amount) {
+  final hsl = HSLuvColor.fromColor(c);
+  return hsl.addSaturation(-amount * hsl.saturation).toColor();
+}
+
 Color grey(double v) {
   final vo = (255 * v).toInt();
   return Color.fromARGB(255, vo, vo, vo);

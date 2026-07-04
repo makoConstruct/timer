@@ -2203,7 +2203,7 @@ class TimerState extends TimerBaseState<Timer> {
                 backgroundColor: TimerBaseState.backgroundColor(d.hue),
                 color: lerpColor(
                   baseColor,
-                  lightenColor(baseColor, 0.65),
+                  desaturateColor(lightenColor(baseColor, 0.65), 0.4),
                   Curves.easeInOut.transform(atRestProgress),
                 ),
                 value: pieCompletion,
@@ -3822,32 +3822,16 @@ class TimerScreenState extends State<TimerScreen>
   late final Computed<bool> hasntDoneBothDragActions = Computed(() {
     final dagc = Mobj.getAlreadyLoaded(usedDragActionRecordID, IntType());
     return (dagc.value! & 3) != 3;
-  }, autoDispose: true);
+  }, options: ComputedOptions(autoDispose: true));
   late final Computed<bool> hasntUsedMenuTwice = Computed(() {
     return Mobj.getAlreadyLoaded(usedMenuCountID, IntType()).value! < 2;
-  }, autoDispose: true);
+  }, options: ComputedOptions(autoDispose: true));
   late final Computed<bool> hintDoesntGetCompositeTimersCondition = Computed(
     () =>
         timerculeCurrentlyDeployed.value &&
         !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value ??
             false),
-    // these were a bunch of conditions that would prevent it from being annoying despite it being shown appropos of nothing. Since we're showing it only appropos of the presence of a timercule, we no longer have to be careful in that way
-    // // doesn't appear until the other two hints are solved
-    // !userDragActionHintCondition.value &&
-    // hasUsedMenuTwice.value &&
-    // // also goes away if the user just uses timers and ignores the timercule feature
-    // (Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType()).value! <
-    //     10) &&
-    // // user has been using the app for less than 7 days. This is an imperfect condition and we should probably track the number of timers they've created instead.
-    // // (DateTime.now()
-    // //         .difference(
-    // //             Mobj.getAlreadyLoaded(timeFirstUsedApp, DateTimeType())
-    // //                 .value!)
-    // //         .inDays <
-    // //     7) &&
-    // !(Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value ??
-    //     false),
-    autoDispose: true,
+    options: ComputedOptions(autoDispose: true),
   );
   late final AnimationController buttonScaleDialAnimation = AnimationController(
     vsync: this,
@@ -4477,13 +4461,14 @@ class TimerScreenState extends State<TimerScreen>
 
     final buttonSpan = buttonSpanMobj.value!;
     final bottomGutter = max(
-      thumbSpan * 0.3,
+      thumbSpan * 0.53,
       MediaQuery.of(context).padding.bottom,
     );
     final bool padLandscape =
         Mobj.getAlreadyLoaded(padLandscapeID, BoolType()).value ?? false;
     final int padWidth = padLandscape ? 4 : 3;
-    double backingInflation = timerGap / 2;
+    double backingInflation = buttonSpan * 0.2;
+    // double backingInflation = timerGap / 2;
     final controlsh =
         bottomGutter + 4 * buttonSpan + backingInflation - backingInflation;
     // Calculate the vertical space generally taken by Timer widgets (tallest, including padding).
@@ -4743,7 +4728,7 @@ class TimerScreenState extends State<TimerScreen>
             decoration: BoxDecoration(
               color: mt.foreBackColor,
               borderRadius: BorderRadius.circular(
-                backingCornerRounding * buttonSpan,
+                backingCornerRounding * buttonSpan + backingInflation,
               ),
               boxShadow: shadowp <= 0
                   ? null
@@ -5788,7 +5773,7 @@ const controlPadTextStyle = TextStyle(
   fontFamily: 'DongleLatin',
 );
 
-const double controlPadNumeralLineHeight = 1.42;
+const double controlPadNumeralLineHeight = 1.32;
 
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
