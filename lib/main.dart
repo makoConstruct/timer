@@ -1762,6 +1762,10 @@ class TimerState extends TimerBaseState<Timer> {
   // in seconds
   double currentTime = 0;
   late final AnimationController _runningAnimation;
+
+  /// true once a paused timer has settled (not just stopped, but also not
+  /// mid-fade toward removal) — the pie eases lighter while this holds.
+  late final Computed<bool> _pieAtRest;
   Offset _slideBounceDirection = Offset(0, -1);
   late final AnimationController _slideActivateBounceAnimation;
   late final AnimationController _selectedUnderlineAnimation;
@@ -1825,6 +1829,9 @@ class TimerState extends TimerBaseState<Timer> {
     _ticker = createTicker((d) {
       setTime(durationToSeconds(DateTime.now().difference(p.startTime)));
     });
+    _pieAtRest = Computed(
+      () => !(widget.mobj.value?.isRunning ?? false) && !_shouldFade.value,
+    );
   }
 
   @override
@@ -1833,6 +1840,7 @@ class TimerState extends TimerBaseState<Timer> {
     _slideActivateBounceAnimation.dispose();
     _selectedUnderlineAnimation.dispose();
     _completedRecentlyAnimation.dispose();
+    _pieAtRest.dispose();
     super.dispose();
   }
 
@@ -2166,59 +2174,79 @@ class TimerState extends TimerBaseState<Timer> {
         },
       ],
       switch (d.kind) {
-        TimerKind.timer => AnimatedBuilder(
-          animation: _completedRecentlyAnimation,
-          builder: (context, child) {
-            var pie = Pie(
-              innerRadp:
-                  (1 -
-                      Curves.easeOutCubic.transform(
-                            unlerpUnit(
-                              0.2,
-                              0.46,
-                              _completedRecentlyAnimation.value,
-                            ),
-                          ) *
-                          ((defaultTimerOutline * 2) / innerTimerSpan)) *
-                  (1 -
-                      unlerpUnit(
+        TimerKind.timer => BoolSignalTween(
+          signal: _pieAtRest,
+          duration: const Duration(milliseconds: 90),
+          builder: (context, atRestProgress, child) => AnimatedBuilder(
+            animation: _completedRecentlyAnimation,
+            builder: (context, child) {
+              final baseColor = TimerBaseState.primaryColor(d.hue);
+              var pie = Pie(
+                innerRadp:
+                    (1 -
+                        Curves.easeOutCubic.transform(
+                              unlerpUnit(
+                                0.2,
+                                0.46,
+                                _completedRecentlyAnimation.value,
+                              ),
+                            ) *
+                            ((defaultTimerOutline * 2) / innerTimerSpan)) *
+                    (1 -
+                        unlerpUnit(
+                          0.5,
+                          1,
+                          Curves.easeInCubic.transform(
+                            _completedRecentlyAnimation.value,
+                          ),
+                        )),
+                backgroundColor: TimerBaseState.backgroundColor(d.hue),
+                color: lerpColor(
+                  baseColor,
+                  lightenColor(baseColor, 0.65),
+                  Curves.easeInOut.transform(atRestProgress),
+                ),
+                value: pieCompletion,
+                size: innerTimerSpan,
+              );
+              return pie;
+            },
+          ),
+        ),
+        TimerKind.stopwatch => BoolSignalTween(
+          signal: _pieAtRest,
+          duration: const Duration(milliseconds: 90),
+          builder: (context, atRestProgress, child) {
+            final baseColor = TimerBaseState.primaryColor(d.hue);
+            return Container(
+              width: innerTimerSpan,
+              height: innerTimerSpan,
+              decoration: containerShape(TimerBaseState.backgroundColor(d.hue)),
+              child: Center(
+                child: Container(
+                  width: stopwatchPulseSize,
+                  height: stopwatchPulseSize,
+                  decoration: ShapeDecoration(
+                    shape: StarBorder.polygon(
+                      sides: 8,
+                      // it should linger in the full roundness for a moment
+                      pointRounding: lerp(
                         0.5,
                         1,
-                        Curves.easeInCubic.transform(
-                          _completedRecentlyAnimation.value,
-                        ),
-                      )),
-              backgroundColor: TimerBaseState.backgroundColor(d.hue),
-              color: TimerBaseState.primaryColor(d.hue),
-              value: pieCompletion,
-              size: innerTimerSpan,
-            );
-            return pie;
-          },
-        ),
-        TimerKind.stopwatch => Container(
-          width: innerTimerSpan,
-          height: innerTimerSpan,
-          decoration: containerShape(TimerBaseState.backgroundColor(d.hue)),
-          child: Center(
-            child: Container(
-              width: stopwatchPulseSize,
-              height: stopwatchPulseSize,
-              decoration: ShapeDecoration(
-                shape: StarBorder.polygon(
-                  sides: 8,
-                  // it should linger in the full roundness for a moment
-                  pointRounding: lerp(
-                    0.5,
-                    1,
-                    unlerpUnit(0.0, 0.8, stopwatchPulseProgress),
+                        unlerpUnit(0.0, 0.8, stopwatchPulseProgress),
+                      ),
+                      rotation: 45 / 2,
+                    ),
+                    color: lerpColor(
+                      baseColor,
+                      lightenColor(baseColor, 0.65),
+                      Curves.easeInOut.transform(atRestProgress),
+                    ),
                   ),
-                  rotation: 45 / 2,
                 ),
-                color: TimerBaseState.primaryColor(d.hue),
               ),
-            ),
-          ),
+            );
+          },
         ),
         _ => throw wrongTimerVariantError(d.kind),
       },
@@ -5756,7 +5784,7 @@ class _NumeralButtonState extends State<NumeralButton> {
 
 const controlPadTextStyle = TextStyle(
   fontSize: 40,
-  fontWeight: FontWeight.normal,
+  fontWeight: FontWeight.bold,
   fontFamily: 'DongleLatin',
 );
 
