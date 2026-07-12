@@ -11,6 +11,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
+import 'package:just_liquid_glass/just_liquid_glass.dart' hide tau;
 // import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:makos_timer/database.dart';
@@ -1194,6 +1195,27 @@ class LabelSpring extends Animation<double>
        reverseSpring = reverseSpring ?? defaultReverseSpringFor(spring) {
     _controller = AnimationController.unbounded(vsync: vsync);
     _controller.addListener(notifyListeners);
+    _controller.addStatusListener(_handleControllerStatus);
+  }
+
+  /// fired whenever the spring comes to rest (either fully open or fully shut).
+  /// Distinct from the status-listener machinery of the mixin (which reflects
+  /// [_target], not settling); used by consumers that need to react only once a
+  /// rise/fall has actually finished playing out.
+  final List<VoidCallback> _settleListeners = [];
+  void addSettleListener(VoidCallback listener) =>
+      _settleListeners.add(listener);
+  void removeSettleListener(VoidCallback listener) =>
+      _settleListeners.remove(listener);
+  void _handleControllerStatus(AnimationStatus status) {
+    // animateWith runs "forward", so every settled simulation reports completed.
+    if (status != AnimationStatus.completed &&
+        status != AnimationStatus.dismissed) {
+      return;
+    }
+    for (final listener in List.of(_settleListeners)) {
+      listener();
+    }
   }
 
   void _launch(double target) {
@@ -1294,6 +1316,23 @@ class TargetSpring extends Animation<double>
     final delta = newTarget - _controller.value;
     final v = _controller.velocity.abs() < restThreshold && delta != 0
         ? kickSpeed * delta.sign
+        : _controller.velocity;
+    _controller.animateWith(
+      SpringSimulation(spring, _controller.value, newTarget, v),
+    );
+  }
+
+  /// Retarget, but when launching from rest use [kickVelocity] for the initial
+  /// velocity instead of the default axis-aligned [kickSpeed] * sign(delta).
+  /// For a single scalar the two are equivalent, but a 2D spring pair needs the
+  /// kick split along the true direction of travel — otherwise each axis kicks
+  /// at full speed and the combined velocity points at the quadrant corner
+  /// (45°), adding an off-axis component whenever the target isn't diagonal.
+  void retargetWithKick(double newTarget, double kickVelocity) {
+    if (newTarget == _target && !_controller.isAnimating) return;
+    _target = newTarget;
+    final v = _controller.velocity.abs() < restThreshold
+        ? kickVelocity
         : _controller.velocity;
     _controller.animateWith(
       SpringSimulation(spring, _controller.value, newTarget, v),
@@ -3416,6 +3455,12 @@ class MakoThemeData {
   /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
   /// control buttons.
   double timerculeBackingCornerRadius;
+
+  /// In liquid-glass mode a tint mixes over the refracted backdrop with
+  /// strength tint.a, so glass fills scale their alpha by this factor to let
+  /// the backdrop read through. In flat mode the tint is the fill and is kept
+  /// solid. See [glassTint].
+  double glassTintOpacity;
   MakoThemeData({
     required this.lowestBackColor,
     required this.lowestIndentColor,
@@ -3429,7 +3474,14 @@ class MakoThemeData {
     required this.hintTextColor,
     this.hardEdges = false,
     this.timerculeBackingCornerRadius = 23,
+    this.glassTintOpacity = 0.65,
   });
+
+  /// Tint for a glass fill: in glass mode the alpha is scaled by
+  /// [glassTintOpacity] so the refracted backdrop reads through; in flat mode
+  /// the solid color is kept as the fill.
+  Color glassTint(Color c, {required bool glassOn}) =>
+      glassOn ? c.withValues(alpha: c.a * glassTintOpacity) : c;
   static MakoThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
   }
@@ -3507,6 +3559,31 @@ class MakoThemeData {
     return lerpColor(firstColor, secondColor, depthp);
   }
 }
+
+/// Our standard [GlassOptions]. Differs from the package defaults only in a
+/// crisper backdrop [blurRadius]; go through this so the app's glass look stays
+/// consistent across the timer menu and drag rings.
+GlassOptions makoGlassOptions({
+  GlassMode mode = GlassMode.glass,
+  double blendRadius = 18,
+  double blurRadius = 13,
+}) => GlassOptions(mode: mode, blendRadius: blendRadius, blurRadius: blurRadius);
+
+/// Eases [options] between a flat fill and full glass: at [glassiness] 0 the
+/// refraction, shine, blur and bevel all vanish, leaving just the blobs' flat
+/// tint color; at 1 it's the full glass in [options]. Lets a reveal solidify
+/// the glass in without callers hand-multiplying each intensity.
+GlassOptions glassLerpedToFlat(GlassOptions options, double glassiness) =>
+    GlassOptions(
+      mode: options.mode,
+      blendRadius: options.blendRadius,
+      shineDirection: options.shineDirection,
+      motionShine: options.motionShine,
+      shineIntensity: options.shineIntensity * glassiness,
+      refractionIntensity: options.refractionIntensity * glassiness,
+      blurRadius: options.blurRadius * glassiness,
+      bevelThickness: options.bevelThickness * glassiness,
+    );
 
 Positioned positionedAt(Offset offset, Widget child) {
   return Positioned(left: offset.dx, top: offset.dy, child: child);

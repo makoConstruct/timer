@@ -17,6 +17,11 @@ const MobjID isRightHandedID = '14513b04-3cbc-478b-b982-a2a17a7aaf29';
 const MobjID padVerticallyAscendingID = 'add21433-a63f-4eec-9786-d1d5959d0dc3';
 const MobjID padLandscapeID = '4cffef06-1ec9-44b6-87d9-2f6ee5b1ce07';
 
+/// whether the liquid-glass rendering path is used for glass widgets (currently
+/// just the numeral drag-action ring). Defaults to true on iOS, false elsewhere;
+/// when off, glass widgets render in flat style instead.
+const MobjID liquidGlassOnID = '25a474bb-c0fa-4f42-9b95-dd7b308885bb';
+
 /// gets set when they set the app up
 const MobjID timeFirstUsedApp = 'f6ba1437-0300-4762-9848-827e71c16099';
 

@@ -24,4 +24,5 @@ It's available on both android and ios, right now. It's free to try.
 </div>
 <p class="android-text">An <a href="https://play.google.com/store/apps/details?id=org.dreamshrine.makos_timer">Android version</a> is also available.</p>
 
-The [source code](https://github.com/makoConstruct/timer) is available under a [fair source](https://fair.io/about/) license. If you see any ways the app could be improved, we will try to materially support code contributions by compensating them in proportion to the contribution.
+<!-- why mention this on a product page? I do kind of want this to be an about page, but idk, we have one inside the app itself, anyone can view it. I will put it in the about page. -->
+<!-- The [source code](https://github.com/makoConstruct/timer) is available under a [fair source](https://fair.io/about/) license. If you see any ways the app could be improved, we will try to materially support code contributions by compensating them in proportion to the contribution.-->
