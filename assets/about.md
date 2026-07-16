@@ -8,4 +8,4 @@ You should share this timer app with everyone you know, since almost everyone ne
 
 ![QR code linking to dreamshrine.org/timer](qr_code)
 
-The [source code](https://github.com/makoConstruct/timer) can be viewed, as it has been published under a [fair source](https://dreamshrine.org/fair_source.html) license. If you see any ways the app could be improved, we will try to materially support code contributions by compensating them in proportion to the contribution.
+The [source code](https://github.com/makoConstruct/timer) can be viewed, as it has been published under a [fair source](https://dreamshrine.org/timer/fair_source.html) license. If you see any ways the app could be improved, we will try to materially support code contributions by compensating them in proportion to the contribution.

@@ -1,4 +1,4 @@
-// Renders website/index.md into website/out/index.html (the deploy dir).
+// Renders website/*.md pages into website/out/*.html (the deploy dir).
 //
 // Run from anywhere:  dart run website/build.dart
 // Uses the `markdown` package, already available via pubspec.
@@ -8,13 +8,37 @@ import 'package:markdown/markdown.dart' as md;
 // The store links live in index.md now (so the source-code paragraph can sit
 // below them). Only the footer link and page metadata stay here.
 const dreamshrineUrl = 'https://dreamshrine.org';
-const pageTitle = "mako's timer";
-const pageDescription =
-    'The most ergonomic timer app. Set and start a timer with a single sweep.';
 
 void main() {
   final scriptDir = File.fromUri(Platform.script).parent; // website/
-  final source = File('${scriptDir.path}/index.md').readAsStringSync();
+
+  renderPage(
+    scriptDir: scriptDir,
+    sourceName: 'index.md',
+    outName: 'index.html',
+    title: "mako's timer",
+    description:
+        'The most ergonomic timer app. Set and start a timer with a single sweep.',
+  );
+
+  renderPage(
+    scriptDir: scriptDir,
+    sourceName: 'fair_source.md',
+    outName: 'fair_source.html',
+    title: 'Fair Source',
+    description:
+        "mako's timer is released under a fair source license.",
+  );
+}
+
+void renderPage({
+  required Directory scriptDir,
+  required String sourceName,
+  required String outName,
+  required String title,
+  required String description,
+}) {
+  final source = File('${scriptDir.path}/$sourceName').readAsStringSync();
 
   final body = md.markdownToHtml(
     source,
@@ -27,8 +51,8 @@ void main() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>$pageTitle</title>
-  <meta name="description" content="$pageDescription">
+  <title>$title</title>
+  <meta name="description" content="$description">
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -92,7 +116,7 @@ void main() {
 </head>
 <body>
   <main>
-    <h1>$pageTitle</h1>
+    <h1>$title</h1>
 $body
     <footer>
       <a href="$dreamshrineUrl">dreamshrine.org</a>
@@ -102,7 +126,7 @@ $body
 </html>
 ''';
 
-  final out = File('${scriptDir.path}/out/index.html');
+  final out = File('${scriptDir.path}/out/$outName');
   out.parent.createSync(recursive: true);
   out.writeAsStringSync(html);
   stdout.writeln('Wrote ${out.path} (${html.length} bytes)');

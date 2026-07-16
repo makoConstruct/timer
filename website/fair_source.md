@@ -1,9 +1,5 @@
-## Why Fair Source
+A fair source license permits all uses of the code except in projects that directly commercially compete with the project that created that code. Four years after release, the license converts to an ordinary permissive FOSS license.
 
-A fair source license behaves like a MIT license for most purposes, it only forbids using the source code to directly compete with the project that feeds it. You can do anything with the source except for harming its creators. Hopefully you didn't want to do that to begin with and this wont affect you. Such an act would be highly dishonorable.
+It protects open projects from some forms of exploitation, and so, it is named "fair". It's not the fairest imaginable thing, but it is fairer than immediately releasing as full foss. Heroic self-sacrifice is not fair. It, you know, results in heroes being sacrificed. We believe that contributing meaningfully to the drivers of progress in computing can and should be sustainable. It shouldn't just be for the tenured professors, it shouldn't just be for retired devs of leisure, it shouldn't just be for those few projects that some underappreciated corner of the government can afford to fund. It should be viable for everyone here and now.
 
-Oh, also, the restriction on competitive use goes away after four years, at which point it will be be an ordinary FOSS permissive license.
-
-We've released lots of permissive source software as well, as it makes sense for foundational infrastructural things that need contributions from many stakeholders, while fair source is more appropriate for discrete products and services.
-
-Further info maybe: [Fair Source according to fair.io](https://fair.io/about/)
+Other material: [*Fair Source according to fair.io*](https://fair.io/about/)

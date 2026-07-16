@@ -5,13 +5,17 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:just_liquid_glass/just_liquid_glass.dart' hide tau;
+import 'package:markdown/markdown.dart' as md;
+import 'package:url_launcher/url_launcher.dart';
 // import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:makos_timer/database.dart';
@@ -53,6 +57,45 @@ mixin EffectsMixin<T extends StatefulWidget> on State<T> {
     }
     _effects.clear();
     super.dispose();
+  }
+}
+
+/// A [Computed] that owns disposable values. [disposer] is run on every value
+/// [compute] produces: on the previous value when a dependency change replaces
+/// it, and on the current value when this cell itself is [dispose]d. The value
+/// is otherwise retained — [compute] only re-runs when a signal it read changes,
+/// so unrelated rebuilds reuse it. Reads of [value] register a dependency, so a
+/// reactive context re-runs when the value is replaced.
+class ComputedWithDisposer<T> {
+  final void Function(T value) _disposer;
+  late final Computed<T> _computed;
+  bool _hasValue = false;
+  late T _value;
+
+  ComputedWithDisposer(this._disposer, T Function() compute) {
+    _computed = Computed(() {
+      if (_hasValue) {
+        _disposer(_value);
+        _hasValue = false;
+      }
+      _value = compute();
+      _hasValue = true;
+      return _value;
+    });
+  }
+
+  T get value => _computed.value;
+
+  /// The current value without registering a dependency (recomputing if a
+  /// dependency changed).
+  T peek() => _computed.peek();
+
+  void dispose() {
+    if (_hasValue) {
+      _disposer(_value);
+      _hasValue = false;
+    }
+    _computed.dispose();
   }
 }
 
@@ -661,10 +704,9 @@ Offset mirrorx(Offset v) {
   return Offset(-v.dx, v.dy);
 }
 
-/// Converts a Size to an Offset by using the width as x and height as y.
-Offset sizeToOffset(Size size) {
-  return Offset(size.width, size.height);
-}
+Offset sizeToOffset(Size size) => Offset(size.width, size.height);
+
+Size offsetToSize(Offset v) => Size(v.dx, v.dy);
 
 /// Calculates the shortest angle distance between two angles in radians.
 double shortestAngleDistance(double from, double to) {
@@ -2686,9 +2728,7 @@ class _CircularRevealRouteTransitionState
     final Color transparentOfBackgroundColor = backgroundColor.withAlpha(0);
     // the interior of the reveal starts filled with the highest mako
     // background color and fades away to expose the new screen.
-    final Color interiorVeilColor = MakoThemeData.fromTheme(
-      theme,
-    ).foreBackColor;
+    final Color interiorVeilColor = OurThemeData.fromTheme(theme).foreBackColor;
 
     return Stack(
       children: [
@@ -3435,7 +3475,7 @@ Color backgroundColorFor(ThemeData theme, bool isOn) {
       : theme.colorScheme.surfaceContainerHigh;
 }
 
-class MakoThemeData {
+class OurThemeData {
   Color lowestBackColor;
 
   /// indent colors are for subtle details like dividers, they don't have to contrast very well, only enough to *acknowledge*.
@@ -3451,17 +3491,34 @@ class MakoThemeData {
   Color veryLowProminenceColor;
   bool hardEdges;
 
+  /// Fill for a liquid-glass surface (the timer menu, drag rings). Already
+  /// carries the translucency a glass tint wants, so it goes straight into a
+  /// [GlassBlob]/fill — no extra alpha juggling. Content on top uses
+  /// [onGlassColor]. When glass is off, use [nonGlassColor] instead; see
+  /// [glassFill].
+  Color glassColor;
+  Color onGlassColor;
+
+  /// Solid fill for those same surfaces when liquid glass is switched off:
+  /// black on light theme, white on dark theme. Content on top uses
+  /// [nonGlassOnSurface].
+  Color nonGlassColor;
+  Color nonGlassOnSurface;
+
   /// Corner radius of a timercule's backing panel. Roughly a quarter of a
   /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
   /// control buttons.
   double timerculeBackingCornerRadius;
 
-  /// In liquid-glass mode a tint mixes over the refracted backdrop with
-  /// strength tint.a, so glass fills scale their alpha by this factor to let
-  /// the backdrop read through. In flat mode the tint is the fill and is kept
-  /// solid. See [glassTint].
-  double glassTintOpacity;
-  MakoThemeData({
+  /// Backdrop blur radius for liquid-glass surfaces; feed into [ourGlassOptions]
+  /// so the app's glass look stays themeable rather than hardcoded per call site.
+  double glassBlurRadius;
+
+  /// Rim-darkening tint for liquid-glass surfaces; feed into [ourGlassOptions]'s
+  /// [GlassOptions.edgeTint].
+  Color edgeTint;
+
+  OurThemeData({
     required this.lowestBackColor,
     required this.lowestIndentColor,
     required this.midBackColor,
@@ -3472,23 +3529,30 @@ class MakoThemeData {
     required this.harderForeIndentColor,
     required this.veryLowProminenceColor,
     required this.hintTextColor,
+    required this.glassColor,
+    required this.onGlassColor,
+    required this.nonGlassColor,
+    required this.nonGlassOnSurface,
     this.hardEdges = false,
     this.timerculeBackingCornerRadius = 23,
-    this.glassTintOpacity = 0.65,
+    this.glassBlurRadius = 13,
+    this.edgeTint = const Color(0x26000000),
   });
 
-  /// Tint for a glass fill: in glass mode the alpha is scaled by
-  /// [glassTintOpacity] so the refracted backdrop reads through; in flat mode
-  /// the solid color is kept as the fill.
-  Color glassTint(Color c, {required bool glassOn}) =>
-      glassOn ? c.withValues(alpha: c.a * glassTintOpacity) : c;
-  static MakoThemeData fromContext(BuildContext context) {
+  /// Fill for a glass-like surface: the translucent [glassColor] when liquid
+  /// glass is on, the solid [nonGlassColor] when it's off.
+  Color glassFill(bool glassOn) => glassOn ? glassColor : nonGlassColor;
+
+  /// Content color to draw on top of [glassFill].
+  Color onGlassFill(bool glassOn) => glassOn ? onGlassColor : nonGlassOnSurface;
+
+  static OurThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
   }
 
-  static MakoThemeData fromTheme(ThemeData theme, {Brightness? brightness}) {
+  static OurThemeData fromTheme(ThemeData theme, {Brightness? brightness}) {
     return (brightness ?? theme.brightness) == Brightness.dark
-        ? MakoThemeData(
+        ? OurThemeData(
             lowestBackColor: theme.colorScheme.surfaceContainerLowest,
             midBackColor: theme.colorScheme.surfaceContainerLow,
             foreBackColor: theme.colorScheme.surfaceContainerHighest,
@@ -3514,8 +3578,16 @@ class MakoThemeData {
             ),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: darkenColor(theme.colorScheme.onSurface, 0.4),
+            glassColor: lightenColor(
+              theme.colorScheme.surfaceContainerHighest,
+              0.1,
+            ).withValues(alpha: 0.65),
+            onGlassColor: theme.colorScheme.onSurface,
+            nonGlassColor: Colors.white,
+            nonGlassOnSurface: Colors.black,
+            edgeTint: Colors.white.withValues(alpha: 0.7),
           )
-        : MakoThemeData(
+        : OurThemeData(
             lowestBackColor: theme.colorScheme.surfaceContainerHighest,
             midBackColor: theme.colorScheme.surfaceContainerHigh,
             foreBackColor: theme.colorScheme.surfaceContainerLowest,
@@ -3541,6 +3613,15 @@ class MakoThemeData {
             ),
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
+            // glassColor: theme.colorScheme.primary.withValues(alpha: 0.8),
+            // glassBlurRadius: 14,
+            // onGlassColor: theme.colorScheme.onPrimary,
+            glassColor: HSLColor.fromAHSL(0.45, 0, 0, 1).toColor(),
+            onGlassColor: theme.colorScheme.onSurfaceVariant,
+            // onGlassColor: theme.colorScheme.onSurface,
+            nonGlassColor: Colors.black,
+            nonGlassOnSurface: Colors.white,
+            edgeTint: HSLColor.fromAHSL(0.2, 0, 0, 0.4).toColor(),
           );
   }
 
@@ -3562,12 +3643,20 @@ class MakoThemeData {
 
 /// Our standard [GlassOptions]. Differs from the package defaults only in a
 /// crisper backdrop [blurRadius]; go through this so the app's glass look stays
-/// consistent across the timer menu and drag rings.
-GlassOptions makoGlassOptions({
+/// consistent across the timer menu and drag rings. [blurRadius] and [edgeTint]
+/// should come from [OurThemeData.glassBlurRadius] and [OurThemeData.edgeTint]
+/// so they stay themeable.
+GlassOptions ourGlassOptions({
+  required double blurRadius,
+  required Color edgeTint,
   GlassMode mode = GlassMode.glass,
   double blendRadius = 18,
-  double blurRadius = 13,
-}) => GlassOptions(mode: mode, blendRadius: blendRadius, blurRadius: blurRadius);
+}) => GlassOptions(
+  mode: mode,
+  blendRadius: blendRadius,
+  blurRadius: blurRadius,
+  edgeTint: edgeTint,
+);
 
 /// Eases [options] between a flat fill and full glass: at [glassiness] 0 the
 /// refraction, shine, blur and bevel all vanish, leaving just the blobs' flat
@@ -3582,6 +3671,9 @@ GlassOptions glassLerpedToFlat(GlassOptions options, double glassiness) =>
       shineIntensity: options.shineIntensity * glassiness,
       refractionIntensity: options.refractionIntensity * glassiness,
       blurRadius: options.blurRadius * glassiness,
+      edgeTint: options.edgeTint.withValues(
+        alpha: options.edgeTint.a * glassiness,
+      ),
       bevelThickness: options.bevelThickness * glassiness,
     );
 
@@ -3636,7 +3728,7 @@ class PinAnimation extends StatelessWidget {
                 builder: (context, constraints) {
                   final r =
                       min(constraints.maxWidth, constraints.maxHeight) / 2;
-                  final mt = MakoThemeData.fromContext(context);
+                  final mt = OurThemeData.fromContext(context);
                   final movementp = Curves.easeOutCubic.transform(
                     unlerpUnit(0.4, 1, progress),
                   );
@@ -4338,7 +4430,7 @@ class _HintToastState extends State<HintToast>
   }
 
   Widget infoText(BuildContext context, String content) {
-    final hintColor = MakoThemeData.fromContext(context).hintTextColor;
+    final hintColor = OurThemeData.fromContext(context).hintTextColor;
     final hintTextStyle = Theme.of(
       context,
     ).textTheme.bodyMedium!.copyWith(color: hintColor);
@@ -4421,7 +4513,7 @@ class SeparatorGradient extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = MakoThemeData.fromContext(context);
+    final theme = OurThemeData.fromContext(context);
     final col = color ?? theme.foreIndentColor;
     return Container(
       height: height,
@@ -4538,7 +4630,7 @@ Positioned extrudedPositioned({
 }
 
 /// Shared layout for [TimerculeParallelPainter] and [TimerculeSerialPainter].
-/// [TimerculeCyclePainter] uses [timerculeIconRectHeight] as ring thickness.
+/// [Timerculedter] uses [timerculeIconRectHeight] as ring thickness.
 const double timerculeIconRounding = 3;
 const double timerculeIconRectHeight = 11;
 const double timerculeIconRectWidth = 15;
@@ -4769,6 +4861,84 @@ class TimerculeCyclePainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
+class TimerculeFlatterCyclePainter extends CustomPainter {
+  TimerculeFlatterCyclePainter({this.color = Colors.black});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset.zero;
+    final cr = timerculeIconRounding;
+    final boxSize = Size(
+      timerculeIconRectWidth * 0.5 - 2 * cr,
+      timerculeIconRectHeight - 2 * cr,
+    );
+    final arcDiameter = 2 * cr + timerculeIconRectHeight / 2;
+    final height = boxSize.height + arcDiameter;
+    final boxPartWidth = boxSize.width + 2 * cr + timerculeIconGap;
+    final boxTop = height / 2 - boxSize.height;
+    // final width = boxPartWidth + arcDiameter/2;
+    final arrowBoxUL =
+        c + Offset(-boxPartWidth / 2, height / 2 - boxSize.height);
+
+    void halfCircle(
+      Path toPath, {
+      required Offset start,
+      required Offset end,
+      required bool clockwise,
+    }) {
+      toPath.arcBetweenOffsets(
+        start: start,
+        end: end,
+        centerPoint: (start + end) / 2,
+        clockwise: clockwise,
+      );
+    }
+
+    final r = Path();
+    r.addPath(
+      rightwardsArrowBoxWithoutCr(arrowBoxUL, boxSize, toClose: false),
+      Offset.zero,
+    );
+    halfCircle(
+      r,
+      start: c + Offset(-boxPartWidth / 2, height / 2),
+      end: c + Offset(-boxPartWidth / 2, -height / 2),
+      clockwise: true,
+    );
+    r.lineToOffset(c + Offset(boxPartWidth / 2, -height / 2));
+    halfCircle(
+      r,
+      start: c + Offset(boxPartWidth / 2, -height / 2),
+      end: c + Offset(boxPartWidth / 2, height / 2),
+      clockwise: true,
+    );
+    r.lineToOffset(c + Offset(boxPartWidth / 2, boxTop));
+    halfCircle(
+      r,
+      start: c + Offset(boxPartWidth / 2, boxTop),
+      end: c + Offset(boxPartWidth / 2, -height / 2),
+      clockwise: false,
+    );
+    r.lineToOffset(c + Offset(-boxPartWidth / 2, -height / 2));
+    halfCircle(
+      r,
+      start: c + Offset(-boxPartWidth / 2, -height / 2),
+      end: c + Offset(-boxPartWidth / 2, boxTop),
+      clockwise: false,
+    );
+    r.close();
+
+    timerculeIconScaling(canvas, size);
+    _drawRoundedPolygon(canvas, r, color, cr);
+  }
+
+  @override
+  bool shouldRepaint(TimerculeFlatterCyclePainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
 Widget timerKindIcon(
   TimerKind kind, {
   Color color = Colors.black,
@@ -4778,7 +4948,7 @@ Widget timerKindIcon(
     case TimerKind.loop:
       return CustomPaint(
         size: Size(size, size),
-        painter: TimerculeCyclePainter(color: color),
+        painter: TimerculeFlatterCyclePainter(color: color),
       );
     case TimerKind.series:
       return CustomPaint(
@@ -4806,7 +4976,7 @@ class SquishBoundaryPlane extends StatelessWidget {
   const SquishBoundaryPlane({super.key, required this.theme, required this.mt});
 
   final ThemeData theme;
-  final MakoThemeData mt;
+  final OurThemeData mt;
 
   @override
   Widget build(BuildContext context) {
@@ -5225,22 +5395,44 @@ Path leftwardsArrowBox(Offset offset, Size size, double cornerRadius) {
     ..close();
 }
 
-Path rightwardsArrowBox(Offset offset, Size size, double cornerRadius) {
-  final left = offset.dx + cornerRadius;
-  final right = offset.dx + size.width - cornerRadius;
-  final top = offset.dy + cornerRadius;
-  final bottom = offset.dy + size.height - cornerRadius;
-  final sh = size.height - cornerRadius * 2;
+Path rightwardsArrowBox(
+  Offset offsetUL,
+  Size size,
+  double cornerRadius, {
+  bool toClose = true,
+}) {
+  return rightwardsArrowBoxWithoutCr(
+    offsetUL + Offset(cornerRadius, cornerRadius),
+    offsetToSize(
+      sizeToOffset(size) - Offset(2 * cornerRadius, 2 * cornerRadius),
+    ),
+    toClose: toClose,
+  );
+}
+
+Path rightwardsArrowBoxWithoutCr(
+  Offset offsetUL,
+  Size size, {
+  bool toClose = true,
+}) {
+  final left = offsetUL.dx;
+  final right = offsetUL.dx + size.width;
+  final top = offsetUL.dy;
+  final bottom = offsetUL.dy + size.height;
+  final sh = size.height;
   // (2*triw)^2 = (sh/2)^2 + triw^2
   final triW = sqrt(sh * sh / 12);
 
-  return Path()
-    ..moveTo(right - triW, top)
-    ..lineTo(right, offset.dy + size.height / 2)
+  final r = Path()
+    ..moveTo(left, top)
+    ..lineTo(right - triW, top)
+    ..lineTo(right, offsetUL.dy + size.height / 2)
     ..lineTo(right - triW, bottom)
-    ..lineTo(left, bottom)
-    ..lineTo(left, top)
-    ..close();
+    ..lineTo(left, bottom);
+  if (toClose) {
+    r.close();
+  }
+  return r;
 }
 
 class PaintedBackspaceIcon extends StatelessWidget {
@@ -6013,6 +6205,121 @@ class PadStateIcon extends StatelessWidget {
         //   ),
         // );
       },
+    );
+  }
+}
+
+/// A single [GestureRecognizer] for an inline [TextSpan] that fires both a tap
+/// and a long press, by forwarding pointers to an inner tap + long-press pair
+/// (a TextSpan only accepts one recognizer, and each detector competes in the
+/// gesture arena as usual).
+class _TapAndLongPressRecognizer extends GestureRecognizer {
+  _TapAndLongPressRecognizer({
+    required VoidCallback onTap,
+    required VoidCallback onLongPress,
+  }) : _tap = (TapGestureRecognizer()..onTap = onTap),
+       _longPress = (LongPressGestureRecognizer()..onLongPress = onLongPress);
+
+  final TapGestureRecognizer _tap;
+  final LongPressGestureRecognizer _longPress;
+
+  @override
+  void addPointer(PointerDownEvent event) {
+    _tap.addPointer(event);
+    _longPress.addPointer(event);
+  }
+
+  @override
+  String get debugDescription => 'tapAndLongPress';
+
+  @override
+  void acceptGesture(int pointer) {}
+
+  @override
+  void rejectGesture(int pointer) {}
+
+  @override
+  void dispose() {
+    _tap.dispose();
+    _longPress.dispose();
+    super.dispose();
+  }
+}
+
+/// Renders markdown links as tap-to-open, long-press-to-copy-URL. Registering
+/// a builder for the 'a' tag replaces flutter_markdown_plus's built-in link
+/// handling entirely (for every link), so tap-to-open is reimplemented here
+/// alongside the long-press addition. The link is emitted as a plain [TextSpan]
+/// (not a widget/WidgetSpan) so it shares the surrounding paragraph's exact text
+/// metrics, wrapping and scaling; [baseStyle] is passed in explicitly rather
+/// than relying on the sometimes-sizeless inherited [parentStyle].
+class LinkElementBuilder extends MarkdownElementBuilder {
+  LinkElementBuilder({required this.baseStyle, required this.linkStyle});
+
+  final TextStyle baseStyle;
+  final TextStyle linkStyle;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final href = element.attributes['href'];
+    final text = element.textContent;
+    if (href == null) return Text(text, style: baseStyle);
+    return Text.rich(
+      TextSpan(
+        text: text,
+        style: baseStyle.merge(linkStyle),
+        recognizer: _TapAndLongPressRecognizer(
+          onTap: () => launchUrl(Uri.parse(href)),
+          onLongPress: () async {
+            await Clipboard.setData(ClipboardData(text: href));
+            HapticFeedback.mediumImpact();
+            if (context.mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('Copied "$href"')));
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+enum InkBand { lowercase, capitals, digits }
+
+/// Ink-band centers above the baseline in em, measured from DongleLatin
+/// (upm 1000). The font's line box (hhea 670/-380) is centered on the
+/// lowercase band, so lowercase needs no correction.
+const _bandCenterEm = {
+  InkBand.lowercase: 0.145,
+  InkBand.capitals: 0.188,
+  InkBand.digits: 0.198,
+};
+const _lineBoxCenterEm = 0.145;
+
+class BandCenteredText extends StatelessWidget {
+  const BandCenteredText(
+    this.data, {
+    super.key,
+    required this.style,
+    this.band = InkBand.lowercase,
+  });
+  final String data;
+  final TextStyle style;
+  final InkBand band;
+
+  @override
+  Widget build(BuildContext context) {
+    final dy =
+        (_bandCenterEm[band]! - _lineBoxCenterEm) * (style.fontSize ?? 14);
+    return Transform.translate(
+      offset: Offset(0, dy), // digits/caps: pushes down ~0.04-0.05 em
+      child: Text(data, style: style),
     );
   }
 }

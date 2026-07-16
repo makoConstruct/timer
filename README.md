@@ -22,15 +22,15 @@ There is going to be a donation nag. In this house we believe that societies gro
 
 ## contributing
 
+### our patterns
+
+Things are generally persisted by setting a Mobj, which is a signal that persists the value to a sqlite db whenever it changes. A signal is like a stream but better, as it can be reacted to lazily. Signal.value gets the current value and subscribes to it if called from the builder of a SignalStatefulWidget or SignalBuilder or the Computed evaluator. Signal.peek() gets the value without subscribing. So, peek is mainly for event handlers.
+
 ### style
 
-Don't spread comments over multiple lines, assume everyones' editors have automatic linewrap and don't require that. If you see a comment spanning multiple lines, assume it was written by claude, who seems to have some weird hangup about this. (We tolerate it partly because it's useful to distinguish the comments written by claude from those written by humans, since they're often kind of bad)
+Don't spread comments over multiple lines, assume everyones' editors have automatic linewrap and don't require that. If you see a comment spanning multiple lines, assume it was written by claude, who seems to have some weird hangup about this. (We tolerate it partly because it's useful to distinguish the comments written by claude from those written by humans)
 
 Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long.
-
-### compensation
-
-If you have a substantial idea for the app, tell us before you start work, and we can make an agreement about how many shares we think it deserves on completion. Contributions submitted without any agreement shouldn't expect compensation, but compensation may be offered anyway.
 
 ## license
 

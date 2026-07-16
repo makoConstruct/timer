@@ -25,11 +25,7 @@ class CrankGameScreen extends StatefulWidget {
   final GlobalKey? iconKey;
   final bool byAngularSpeed;
 
-  const CrankGameScreen({
-    super.key,
-    this.iconKey,
-    this.byAngularSpeed = false,
-  });
+  const CrankGameScreen({super.key, this.iconKey, this.byAngularSpeed = false});
 
   @override
   State<CrankGameScreen> createState() => _CrankGameScreenState();
@@ -270,7 +266,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final crankGameTheme = CrankGameTheme.fromContext(context);
-    final mako = MakoThemeData.fromTheme(theme);
+    final mako = OurThemeData.fromTheme(theme);
     final backgroundColorA = mako.menuSurfaceFore;
     final backgroundColorB = mako.menuSurfaceBack;
     final mq = MediaQuery.of(context);

@@ -10,7 +10,7 @@ If you encounter a task that would benefit much from human help, ask the human t
 
 ## Style
 
-Follow style guides in CONTRIBUTING.md
+Follow style guides in README.md ## contributing
 
 Don't leave excessive comments, if the code is self-explanatory, no comment.
 

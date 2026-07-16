@@ -23,8 +23,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderProxyBox;
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
-import 'package:markdown/markdown.dart' as md;
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/scheduler.dart' hide Priority;
 import 'package:flutter/services.dart';
 import 'package:hsluv/extensions.dart';
@@ -1219,8 +1217,13 @@ class TimerMenu extends StatelessWidget {
       builder: (context, constraints) {
         const double margin = 12;
         final theme = Theme.of(context);
-        final mt = MakoThemeData.fromTheme(theme);
-        final backgroundColor = this.backgroundColor ?? mt.foreBackColor;
+        final mt = OurThemeData.fromTheme(theme);
+        // liquid-glass path: render the menu as merged glass blobs (a body plus
+        // an arrow pill fused into it) instead of the solid clip-path shape.
+        final glassOn =
+            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+            (defaultTargetPlatform == TargetPlatform.iOS);
+        final backgroundColor = this.backgroundColor ?? mt.glassFill(glassOn);
         final buttonSpan = Mobj.getAlreadyLoaded(
           buttonSpanID,
           DoubleType(),
@@ -1249,11 +1252,6 @@ class TimerMenu extends StatelessWidget {
         // of the icon (buttonHeight) plus its surrounding padding on both sides.
         final cornerRounding = (buttonHeight + itemPadding * 2) / 2;
         final top = centerOn.bottom - arrowHeight;
-        // liquid-glass path: render the menu as merged glass blobs (a body plus
-        // an arrow pill fused into it) instead of the solid clip-path shape.
-        final glassOn =
-            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).peek() ??
-            (defaultTargetPlatform == TargetPlatform.iOS);
         return AnimatedBuilder(
           animation: animation,
           builder: (context, child) {
@@ -1485,11 +1483,8 @@ class _GlassMenuBodyState extends State<_GlassMenuBody> {
     // the pill fuses into the body across this bridge (the "viscosity"),
     // reconstructing the speech nub the clip path used to draw.
     final blendRadius = widget.arrowHeight * 1.15;
-    // this body only renders in glass mode, so always drop the tint's alpha to
-    // let the refracted backdrop read through.
-    final tint = MakoThemeData.fromContext(
-      context,
-    ).glassTint(widget.tint, glassOn: true);
+    // widget.tint is the theme's translucent glassColor, so its alpha already
+    // lets the refracted backdrop read through — used as-is.
     final blobs = _menuBlobs(
       size: Size(widget.width, height),
       origin: widget.origin,
@@ -1497,16 +1492,21 @@ class _GlassMenuBodyState extends State<_GlassMenuBody> {
       arrowHeight: widget.arrowHeight,
       progress: widget.progress,
       topInset: widget.topInset,
-      tint: tint,
+      tint: widget.tint,
       blendRadius: blendRadius,
     );
     if (blobs.isEmpty) return faded;
 
     // ease the glass in with the reveal so it solidifies as it grows.
     final glassiness = widget.progress;
+    final mt = OurThemeData.fromContext(context);
     return GlassLayer(
       options: glassLerpedToFlat(
-        makoGlassOptions(blendRadius: blendRadius),
+        ourGlassOptions(
+          blendRadius: blendRadius,
+          blurRadius: mt.glassBlurRadius,
+          edgeTint: mt.edgeTint,
+        ),
         glassiness,
       ),
       blobs: blobs,
@@ -2138,7 +2138,7 @@ class TimerState extends TimerBaseState<Timer> {
   Widget build(BuildContext context) {
     final d = presentData;
     final theme = Theme.of(context);
-    final mt = MakoThemeData.fromTheme(theme);
+    final mt = OurThemeData.fromTheme(theme);
     final moveTextWhenUp = 0.1;
     final clockRadius = timerWidgetRadius.value;
     final outerBackground = mt.timerculeHighlightBackground(0);
@@ -2558,7 +2558,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
     final theme = Theme.of(context);
     final double timerHeight = timerWidgetRadius.value * 2;
     final depth = this.depth.value;
-    final mt = MakoThemeData.fromContext(context);
+    final mt = OurThemeData.fromContext(context);
     final backgroundColor = mt.timerculeHighlightBackground(depth);
     final cornerRadius = mt.timerculeBackingCornerRadius;
     Widget? titleWidget;
@@ -2990,76 +2990,6 @@ final List<Function(TimerScreenState)> numericRadialActivatorFunctions = [
   },
 ];
 
-/// Geometry handed to a [DragRingClipBuilder] so it can shape the colored backdrop of a drag ring. The builder returns a [Path] in the coordinate space of a [totalSpan]-square box whose center sits at [center].
-class DragRingClipArgs {
-  /// grow-in/out only: 0 = collapsed into the button, 1 = fully open. Does not itself account for selection — that's [swipep] and [selections].
-  final double growth;
-
-  /// 0..1 "something is considered selected"; stays raised while a choice is held, so a builder can keep its base collapsed during the commit.
-  final double swipep;
-
-  /// 0..1 release/dismissal commit (the option-activation animation). A builder uses this to finish collapsing onto the chosen item as the ring bows out.
-  final double releasep;
-
-  /// per-item selection amount (eased, with release recede applied). A builder uses this to slide/highlight toward the chosen item.
-  final List<double> selections;
-
-  /// distance of the icon centers from [center].
-  final double radius;
-
-  /// radius of an individual icon disc (half of actionRadiusMax).
-  final double actionRadius;
-
-  /// icon angles, already rectified for handedness.
-  final List<double> angles;
-  final bool isRightHanded;
-  final Offset center;
-
-  /// the button's span; the resting shape is sized off this.
-  final double buttonSpan;
-
-  /// 0..1 scalar on the resting centerline radius, played on every ring's first build. At 0 the rest band collapses to a [halfThickness]-radius filled circle (since the cap discs merge); at 1 it's the normal rest shape. Has no effect once the ring is fully open.
-  final double growIn;
-
-  /// spring-driven angle of the arc's start cap (in the same handedness-rectified space as [angles]). Equals [angles].first at rest, slides to the selected item's angle.
-  final double selectionStartAngle;
-
-  /// spring-driven angle of the arc's end cap. Equals [angles].last at rest, slides to the selected item's angle.
-  final double selectionEndAngle;
-
-  /// spring-driven focal point in [center]'s coordinate space: a 2D spring that
-  /// rests at [center] and is kicked out to the chosen item's slot on selection.
-  /// [circlesDragRingBlobs] hangs the whole figure off it.
-  final Offset focal;
-
-  const DragRingClipArgs({
-    required this.growth,
-    required this.swipep,
-    this.releasep = 0,
-    required this.selections,
-    required this.radius,
-    required this.actionRadius,
-    required this.angles,
-    required this.isRightHanded,
-    required this.center,
-    required this.buttonSpan,
-    required this.selectionStartAngle,
-    required this.selectionEndAngle,
-    required this.focal,
-    this.growIn = 1.0,
-  });
-}
-
-class _DragRingPathClipper extends CustomClipper<Path> {
-  final Path path;
-  const _DragRingPathClipper(this.path);
-  @override
-  Path getClip(Size size) => path;
-  @override
-  bool shouldReclip(covariant _DragRingPathClipper oldClipper) =>
-      oldClipper.path != path;
-}
-
 /// The revealed `(rect, cornerRadius)` of a drag ring label pill at [progress]:
 /// a fully-rounded rect whose line lengthens away from the menu handle (so the
 /// bar's origin end is the pill's inner end, the pinned [anchor] corner), while
@@ -3071,8 +3001,7 @@ class _DragRingPathClipper extends CustomClipper<Path> {
 /// the radial (menu centre -> label) bearing. [iconOffset] is the icon centre
 /// measured from that pinned corner; since the bearing depends on the pill's
 /// (text-dependent) width and height, the circleOrigin is resolved here, with
-/// [size] in hand. Shared by [_FluidPillClipper] (flat/clip path) and the glass
-/// pill blob.
+/// [size] in hand. Used to place the glass pill blob.
 (Rect, double) pillFluidGeometry(
   Size size,
   double progress, {
@@ -3114,379 +3043,8 @@ class _DragRingPathClipper extends CustomClipper<Path> {
   );
 }
 
-/// Reveal clip for a drag ring label pill; see [pillFluidGeometry].
-class _FluidPillClipper extends CustomClipper<Path> {
-  final double progress;
-  final Offset iconOffset;
-  final Alignment anchor;
-  const _FluidPillClipper({
-    required this.progress,
-    required this.iconOffset,
-    required this.anchor,
-  });
-
-  @override
-  Path getClip(Size size) {
-    final (rect, radius) = pillFluidGeometry(
-      size,
-      progress,
-      iconOffset: iconOffset,
-      anchor: anchor,
-    );
-    return Path()
-      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
-  }
-
-  @override
-  bool shouldReclip(covariant _FluidPillClipper oldClipper) =>
-      oldClipper.progress != progress ||
-      oldClipper.iconOffset != iconOffset ||
-      oldClipper.anchor != anchor;
-}
-
 /// A selected item's highlight disc, as a multiple of the icon disc radius — a touch bigger than the resting dot it grows out of.
 const double dragRingSelectedClipScale = 1.12;
-
-/// how far the sweep has collapsed by the time a choice is fully held (before release finishes it off). Just shy of 1 so a sliver of the ring still rides on the chosen item during the hold.
-const double dragRingSweepHoldShrink = 0.9;
-
-/// Drag-to-play style clip. The total surface is
-///   union(selectedItemClips…, intersect(sweep, union(centerRing, unselectedItemClips…)))
-/// The center disc and each item's resting dot live *inside* a big "sweep"
-/// circle that, as a choice is made, collapses down onto the chosen item — its
-/// center eased toward the spring-tracked selection focus — wiping the rest of
-/// the ring away in the direction of the choice (driven by [DragRingClipArgs.swipep]
-/// while held, finished off by [DragRingClipArgs.releasep] on dismissal). Each
-/// selected item's highlight disc is unioned on *top* of the sweep so it stays
-/// crisp while everything else collapses onto it.
-Path circlesDragRingClip(DragRingClipArgs args) {
-  // center + unselected dots: presence follows grow-in/out only. The sweep
-  // (below), not the swipe, is what hides them once a choice is underway.
-  final e = Curves.easeOut.transform(args.growth);
-  final leafp = unlerpUnit(0.7, 1, e);
-
-  // --- inside the sweep: the center ring and the unselected item dots ---
-  Path inner = Path()
-    ..addOval(Rect.fromCircle(center: args.center, radius: args.radius * e));
-  for (final angle in args.angles) {
-    final c = args.center + Offset.fromDirection(angle, args.radius * leafp);
-    inner = Path.combine(
-      PathOperation.union,
-      inner,
-      Path()..addOval(
-        Rect.fromCircle(center: c, radius: args.actionRadius * leafp),
-      ),
-    );
-  }
-
-  // --- the sweep: a circle that collapses onto the selection focus ---
-  final dismiss = max(
-    Curves.easeOut.transform(args.swipep) * dragRingSweepHoldShrink,
-    Curves.easeOut.transform(args.releasep),
-  );
-  final focusAngle = (args.selectionStartAngle + args.selectionEndAngle) / 2;
-  final focusPoint =
-      args.center + Offset.fromDirection(focusAngle, args.radius);
-  // the center stays put while the sweep is still large (easeIn), then rides in
-  // onto the chosen item as it closes, so we never clip the far side early.
-  final sweepCenter = Offset.lerp(
-    args.center,
-    focusPoint,
-    Curves.easeIn.transform(dismiss),
-  )!;
-  final sweepRadius = lerp(args.radius + args.actionRadius * 2.5, 0, dismiss);
-  final sweep = Path()
-    ..addOval(Rect.fromCircle(center: sweepCenter, radius: sweepRadius));
-
-  Path path = Path.combine(PathOperation.intersect, sweep, inner);
-
-  // --- on top of the sweep: the selected item highlight discs ---
-  for (int i = 0; i < args.selections.length; i++) {
-    // hold full through the release, then a quick final shrink so the highlight
-    // doesn't pop out of existence when the ring is removed.
-    final sel =
-        args.selections[i] *
-        (1 - Curves.easeOut.transform(unlerpUnit(0.7, 1, args.releasep)));
-    if (sel <= 0) continue;
-    final c = args.center + Offset.fromDirection(args.angles[i], args.radius);
-    path = Path.combine(
-      PathOperation.union,
-      path,
-      Path()..addOval(
-        Rect.fromCircle(
-          center: c,
-          radius: args.actionRadius * dragRingSelectedClipScale * sel,
-        ),
-      ),
-    );
-  }
-  return path;
-}
-
-/// The liquid-glass counterpart to [circlesDragRingClip]: the numeral ring as a
-/// set of [GlassBlob]s that smooth-min merge into one blobby glass surface.
-///
-/// The whole figure hangs off a single focal point ([DragRingClipArgs.focal]) —
-/// a 2D spring in the host that rests at the ring center and is kicked out to
-/// the chosen item's slot on selection. The central blob sits on the focal at
-/// radius [centerRadius], which grows in with the ring and shrinks to nothing as
-/// a choice commits ([DragRingClipArgs.swipep]/[releasep]). Each item circle
-/// grows out of the focal at distance [centerRadius], in the direction of that
-/// item's slot in the ring — so at rest they sit on the rim of the central blob
-/// at their ring positions, and as the focal springs onto the chosen item and
-/// [centerRadius] collapses, every circle draws into the focal: the chosen one
-/// riding it home and growing to the highlight, the others shrinking away.
-List<GlassBlob> circlesDragRingBlobs(DragRingClipArgs args, Color tint) {
-  final growthp = Curves.easeOut.transform(args.growth);
-  final leafp = unlerpUnit(0.7, 1, growthp);
-  final selectedRadius = args.actionRadius;
-
-  // how committed a choice is: grows the ring in, then collapses it onto the
-  // focal. Driven by swipep/releasep so it stays pinned at 1 while a choice is
-  // held — including across a switch from one item to another.
-  final selectp = max(
-    Curves.easeOut.transform(args.swipep),
-    Curves.easeOut.transform(args.releasep),
-  );
-
-  final focal = args.focal;
-  // the central blob's radius, and the distance the item circles orbit out from
-  // the focal: full when the ring is open and unselected, zero once collapsed.
-  final centerRadius =
-      args.radius * Curves.easeOut.transform(growthp * (1 - selectp));
-
-  final blobs = <GlassBlob>[
-    if (centerRadius > 0.5)
-      GlassBlob(center: focal, radii: Size.square(centerRadius), tint: tint),
-  ];
-  for (int i = 0; i < args.angles.length; i++) {
-    // the chosen circle grows to the highlight; the others shrink away as they
-    // draw into the focal. Release recede is applied to the highlight the same
-    // way circlesDragRingClip's discs do it.
-
-    final allShowingp =
-        Curves.easeOut.transform(leafp) * Curves.easeOut.transform(1 - selectp);
-    // protrudes if all leaves are showing or if this one is showing
-    final protrusion = lerp(
-      0.4,
-      1,
-      1 - (1 - allShowingp) * (1 - args.selections[i]),
-    );
-    final sel =
-        args.selections[i] *
-        (1 - Curves.easeOut.transform(unlerpUnit(0.65, 1, args.releasep)));
-    final r = lerp(args.actionRadius * allShowingp, selectedRadius, sel);
-    // grow out of the focal toward this item's ring slot, at distance
-    // centerRadius (or sitting right on the slot when it's within reach).
-    final slot =
-        args.center + Offset.fromDirection(args.angles[i], args.radius);
-    final toSlot = slot - focal;
-    final d = toSlot.distance;
-    final c = (d == 0)
-        ? slot
-        : focal + toSlot * (centerRadius / d * protrusion);
-    blobs.add(GlassBlob(center: c, radii: Size.square(r), tint: tint));
-  }
-  return blobs;
-}
-
-/// A thick arc band with rounded caps. Built as a single closed contour
-/// (outer arc → end cap semicircle → inner arc → start cap semicircle) so the
-/// caps and band aren't separate `Path.combine` operands — earlier union-based
-/// versions glitched for a frame because each cap disc's diameter coincided
-/// exactly with the band's flat radial edge, which is a known SkPathOps
-/// instability with tangent-sharing curves.
-///
-/// Degenerates: [startAngle] == [endAngle] collapses to a single cap disc; the
-/// sub-thickness regime ([radius] < [halfThickness], hit briefly during the
-/// initial grow-in when the caps cross the center) falls back to a
-/// `Path.combine` of the two cap discs and a pie sector — those operands have
-/// area overlap rather than tangent contact, which Skia handles cleanly.
-Path roundedArcBand({
-  required Offset center,
-  required double radius,
-  required double halfThickness,
-  required double startAngle,
-  required double endAngle,
-}) {
-  if (startAngle == endAngle) {
-    return Path()..addOval(
-      Rect.fromCircle(
-        center: center + Offset.fromDirection(startAngle, radius),
-        radius: halfThickness,
-      ),
-    );
-  }
-
-  if (radius < halfThickness) {
-    final startCapCenter = center + Offset.fromDirection(startAngle, radius);
-    final endCapCenter = center + Offset.fromDirection(endAngle, radius);
-    final ro = radius + halfThickness;
-    final sweep = endAngle - startAngle;
-    Path p = Path()
-      ..addOval(Rect.fromCircle(center: startCapCenter, radius: halfThickness));
-    p = Path.combine(
-      PathOperation.union,
-      p,
-      Path()
-        ..addOval(Rect.fromCircle(center: endCapCenter, radius: halfThickness)),
-    );
-    final sector = Path()
-      ..moveToOffset(center)
-      ..lineTo(
-        center.dx + ro * cos(startAngle),
-        center.dy + ro * sin(startAngle),
-      )
-      ..arcTo(
-        Rect.fromCircle(center: center, radius: ro),
-        startAngle,
-        sweep,
-        false,
-      )
-      ..close();
-    return Path.combine(PathOperation.union, p, sector);
-  }
-
-  final ro = radius + halfThickness;
-  final ri = radius - halfThickness;
-  final sweep = endAngle - startAngle;
-  final dir = sweep.sign;
-  final startOuter = center + Offset.fromDirection(startAngle, ro);
-  final startCapCenter = center + Offset.fromDirection(startAngle, radius);
-  final endCapCenter = center + Offset.fromDirection(endAngle, radius);
-
-  final p = Path()
-    ..moveToOffset(startOuter)
-    ..arcTo(
-      Rect.fromCircle(center: center, radius: ro),
-      startAngle,
-      sweep,
-      false,
-    )
-    ..arcTo(
-      Rect.fromCircle(center: endCapCenter, radius: halfThickness),
-      endAngle,
-      dir * pi,
-      false,
-    );
-  if (ri > 0) {
-    p.arcTo(
-      Rect.fromCircle(center: center, radius: ri),
-      endAngle,
-      -sweep,
-      false,
-    );
-  }
-  p
-    ..arcTo(
-      Rect.fromCircle(center: startCapCenter, radius: halfThickness),
-      startAngle + pi,
-      dir * pi,
-      false,
-    )
-    ..close();
-  return p;
-}
-
-/// The centerline geometry of the special-timer arc band for the current
-/// [args]: it grows out of the button (centerRadius 0 -> radius), and on
-/// selection slides its caps together onto the chosen item (the caps are
-/// spring-tracked by the host and handed in via
-/// [DragRingClipArgs.selectionStartAngle]/[DragRingClipArgs.selectionEndAngle]),
-/// collapsing to a disc that becomes the highlight. Shared by [arcDragRingClip]
-/// and [arcDragRingBlobs].
-({
-  Offset center,
-  double radius,
-  double halfThickness,
-  double startAngle,
-  double endAngle,
-})
-_arcBandGeometry(DragRingClipArgs args) {
-  final g = args.growth;
-  final fullStart = args.angles.first;
-  final fullEnd = args.angles.last;
-  final restArc = lerp(2 * pi, pi, Curves.easeOutCubic.transform(args.growIn));
-  final restFocus = (fullStart + fullEnd) / 2;
-  final fullArc = fullEnd - fullStart;
-  final appearanceSpin = -(1 - args.growIn) * pi * 1.6;
-  final restStart = restFocus - fullArc.sign * restArc / 2 + appearanceSpin;
-  final restEnd = restFocus + fullArc.sign * restArc / 2 + appearanceSpin;
-
-  // at rest, a thin half-arc whose radial profile matches the old icon (centerline radius and thickness), opening out to straddle the icon ring.
-  final restOuterR = 0.2 * args.buttonSpan;
-  final restHalfThickness =
-      args.buttonSpan * 0.08 * unlerpUnit(0, 0.4, args.growIn);
-  final restRadius = restOuterR - restHalfThickness;
-  final handednessSign = args.isRightHanded ? 1 : -1;
-
-  return (
-    center:
-        args.center + Offset(handednessSign * restRadius * 0.34, 0) * (1 - g),
-    radius: lerp(restRadius, args.radius, g),
-    halfThickness: lerp(restHalfThickness, args.actionRadius, g),
-    startAngle: lerp(restStart, args.selectionStartAngle, g),
-    endAngle: lerp(restEnd, args.selectionEndAngle, g),
-  );
-}
-
-/// Special-timer style clip: a rounded-cap arc straddling the icon ring. See
-/// [_arcBandGeometry] for the animated centerline.
-Path arcDragRingClip(DragRingClipArgs args) {
-  final geo = _arcBandGeometry(args);
-  return roundedArcBand(
-    center: geo.center,
-    radius: geo.radius,
-    halfThickness: geo.halfThickness,
-    startAngle: geo.startAngle,
-    endAngle: geo.endAngle,
-  );
-}
-
-/// The liquid-glass counterpart to [arcDragRingClip]: the special-timer arc band
-/// as a single ring-segment [GlassBlob] (annulus via `holeRadius`, sweep via
-/// `startAngle`/`endAngle`; circular ring segments auto-round their caps). As a
-/// choice commits the caps slide together and the segment collapses to a disc —
-/// the selection highlight. The pills are added by the ring's build; this only
-/// yields the arc.
-List<GlassBlob> arcDragRingBlobs(DragRingClipArgs args, Color tint) {
-  final geo = _arcBandGeometry(args);
-  // thinned away to nothing while retiring (completion -> 1).
-  if (geo.halfThickness < 0.5) return const [];
-
-  // caps slid together on a committed choice: a single highlight disc.
-  if ((geo.endAngle - geo.startAngle).abs() < 1e-3) {
-    return [
-      GlassBlob(
-        center: geo.center + Offset.fromDirection(geo.startAngle, geo.radius),
-        radii: Size.square(geo.halfThickness),
-        tint: tint,
-      ),
-    ];
-  }
-
-  // GlassBlob wants an increasing sweep; the segment between the two bounds is
-  // the same set either way (extent stays < tau), so just order them.
-  var s = geo.startAngle;
-  var e = geo.endAngle;
-  if (e < s) {
-    final t = s;
-    s = e;
-    e = t;
-  }
-  return [
-    GlassBlob(
-      center: geo.center,
-      radii: Size.square(geo.radius + geo.halfThickness),
-      // <= 0 (the brief radius < halfThickness grow-in) reads as "no hole" -> a
-      // filled sector, an acceptable stand-in for that transient.
-      holeRadius: geo.radius - geo.halfThickness,
-      startAngle: s,
-      endAngle: e,
-      tint: tint,
-    ),
-  ];
-}
 
 class DragActionRing extends SignalStatefulWidget {
   final Offset position;
@@ -3498,17 +3056,15 @@ class DragActionRing extends SignalStatefulWidget {
   final List<Widget>? radialActivatorLabels;
   final List<double> radialActivatorPositions;
 
-  /// shapes the ring's colored graphic as a [clipBuilder]-clipped [ColoredBox].
-  /// Mutually exclusive with [blobBuilder]; exactly one must be supplied.
-  final Path Function(DragRingClipArgs args)? clipBuilder;
-
-  /// when non-null, the ring's graphic is rendered as a liquid-glass
-  /// [GlassLayer] of these blobs (subject to the [liquidGlassOnID] setting; in
-  /// flat mode the blobs still do the masking) instead of a [clipBuilder]. The
-  /// glass masks its child to the blobs, so no [clipBuilder] is used. Only the
-  /// numeral ring supplies one for now.
-  final List<GlassBlob> Function(DragRingClipArgs args, Color tint)?
-  blobBuilder;
+  /// which graphic this ring renders (see the blob-building branch in
+  /// [buildWithGivenAnimationParameters]): the special-timer menu's sliding arc
+  /// band (true) versus the numeral ring's per-item circles (false). This is the
+  /// single explicit selector for the ring's kind — everything that used to be
+  /// inferred from proxies (which builder was passed in, [useSpringExpansion],
+  /// label presence) keys off it. Either way the blobs render as a liquid-glass
+  /// [GlassLayer] (subject to the [liquidGlassOnID] setting; in flat mode the
+  /// blobs still do the masking).
+  final bool arcModeNotBlobMode;
 
   /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
   final Offset visualPosition;
@@ -3540,17 +3096,13 @@ class DragActionRing extends SignalStatefulWidget {
     required this.radialActivatorIcons,
     this.radialActivatorLabels,
     required this.radialActivatorPositions,
-    this.clipBuilder,
-    this.blobBuilder,
+    required this.arcModeNotBlobMode,
     this.persistent = false,
     this.retiring = false,
     this.onRetire,
     this.onRetireComplete,
     this.useSpringExpansion = false,
-  }) : assert(
-         (clipBuilder != null) != (blobBuilder != null),
-         'DragActionRing needs exactly one of clipBuilder / blobBuilder',
-       );
+  });
 
   /// each activator icon disc's box side, as a fraction of thumbSpan. The arc
   /// band's half-thickness is half of this.
@@ -3576,7 +3128,13 @@ class DragActionRingState extends State<DragActionRing>
   /// the selection the ring opens with (nothing). Moving off it to a real item
   /// is what dismisses the [tutorialShowLabelsAnimation] label splay.
   int initialSelectedItem = -1;
-  late final List<LabelSpring> labelAnimations;
+
+  /// The hint pills' entrance springs, whose kick/stiffness differ between glass
+  /// and flat, so the cell rebuilds (disposing the old springs and re-attaching
+  /// the settle listeners) whenever the glass setting is toggled. Read through
+  /// [labelAnimations].
+  late final ComputedWithDisposer<List<LabelSpring>> _labelAnimationsCell;
+  List<LabelSpring> get labelAnimations => _labelAnimationsCell.value;
 
   /// per-item growth of the selection circle, so the highlight animates as the selection moves between items.
   late final List<AnimationController> selectionAnimations;
@@ -3587,14 +3145,29 @@ class DragActionRingState extends State<DragActionRing>
 
   /// 2D focal point (x/y springs) in normalized ring space — center is the
   /// origin and a selected item's slot is the unit vector at its angle. Rests at
-  /// the center and is kicked out to the chosen item on selection. Read by
-  /// [circlesDragRingBlobs] (scaled to pixels) as the point the whole figure
-  /// hangs off.
+  /// the center and is kicked out to the chosen item on selection. Read by the
+  /// numeral ring's blob building (scaled to pixels) as the point the whole
+  /// figure hangs off.
   late final TargetSpring _focalXSpring;
   late final TargetSpring _focalYSpring;
 
-  UpDownAnimationController? _upDown;
+  /// The up/down expansion controller (when not using spring expansion), whose
+  /// rise duration differs between glass and flat, so the cell rebuilds
+  /// (disposing the old controller and re-wiring its closed listeners) whenever
+  /// the glass setting is toggled. Null while [_spring] is in use. Read through
+  /// [_upDown].
+  ComputedWithDisposer<UpDownAnimationController>? _upDownCell;
+  UpDownAnimationController? get _upDown => _upDownCell?.value;
   SpringExpansionController? _spring;
+
+  /// closed listeners registered via [_addExpansionClosedListener] while [_upDown]
+  /// is in use, kept so a rebuilt controller can be re-wired to them.
+  final List<VoidCallback> _expansionClosedListeners = [];
+  void _wireUpDownClosed(UpDownAnimationController c, VoidCallback listener) {
+    c.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) listener();
+    });
+  }
 
   Listenable get _expansionListenable => _upDown ?? _spring!;
   double get _expansionGrowth =>
@@ -3616,10 +3189,11 @@ class DragActionRingState extends State<DragActionRing>
   }
 
   void _addExpansionClosedListener(VoidCallback listener) {
-    if (_upDown != null) {
-      _upDown!.addStatusListener((status) {
-        if (status == AnimationStatus.dismissed) listener();
-      });
+    final upDown = _upDown;
+    if (upDown != null) {
+      // record it so a glass-toggle rebuild of the controller re-wires it.
+      _expansionClosedListeners.add(listener);
+      _wireUpDownClosed(upDown, listener);
     } else {
       _spring!.addClosedListener(listener);
     }
@@ -3727,16 +3301,30 @@ class DragActionRingState extends State<DragActionRing>
     _retargetFocal();
   }
 
-  /// re-run whenever a hint pill settles: a now-invisible pill no longer bounds
-  /// its cap, so the arc can ease inward to the next still-visible hint.
-  void _onHintSettled() {
-    if (!mounted) return;
-    _retargetArcSprings();
-  }
+  /// once a hint's reveal falls to this it stops holding its cap out, so the cap
+  /// eases on toward the next still-visible hint a little before the pill fully
+  /// vanishes (the fluid clip only bottoms out at 0.06) — the cap anticipates the
+  /// fade rather than waiting for it to finish.
+  static const double _hintVisibleThreshold = 0.2;
 
-  /// below this reveal value a pill has visually collapsed to nothing (its fluid
-  /// clip bottoms out at 0.06), so it no longer counts as a visible hint.
-  static const double _hintVisibleThreshold = 0.06;
+  /// last extent [_reevaluateHintExtent] retargeted for, so it only fires the
+  /// retarget when a hint crosses [_hintVisibleThreshold], not every frame.
+  (int, int)? _lastHintExtent;
+
+  /// Hints hold their caps out while visible, but the caps are only retargeted on
+  /// discrete events (selection changes, hint settle). That's too late for a fade:
+  /// the cap would wait pinned until the hint reaches 0. Called from the per-frame
+  /// build, this re-checks the visible extent as hints animate and retargets the
+  /// moment one drops below [_hintVisibleThreshold]. The retarget is deferred to
+  /// after the frame so springs aren't moved mid-build.
+  void _reevaluateHintExtent() {
+    final extent = _visibleHintExtent();
+    if (extent == _lastHintExtent) return;
+    _lastHintExtent = extent;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _retargetArcSprings();
+    });
+  }
 
   /// how revealed item [i]'s hint pill currently is: its own label spring, or the
   /// tutorial splay once the ring has grown enough for the icon to have faded in.
@@ -3786,7 +3374,7 @@ class DragActionRingState extends State<DragActionRing>
   /// the raw selection-animation value at which a freshly chosen item's
   /// highlight disc exactly matches the unselected dot it grows out of, so the
   /// first selection grows continuously from the still-visible dot. Mirrors the
-  /// dot/disc radius math in [circlesDragRingClip].
+  /// dot/disc radius math in the numeral ring's blob building.
   double _firstSelectionStartValue() {
     final growth = widget.useSpringExpansion
         ? _expansionGrowth.clamp(0.0, 1.0)
@@ -3795,26 +3383,62 @@ class DragActionRingState extends State<DragActionRing>
     return (leafp / dragRingSelectedClipScale).clamp(0.0, 1.0);
   }
 
+  static const int nonGlassBlobRise = 500;
+
   @override
   void initState() {
     super.initState();
     if (widget.useSpringExpansion) {
       _spring = SpringExpansionController(vsync: this);
     } else {
-      _upDown = UpDownAnimationController(
-        vsync: this,
-        riseDuration: Duration(milliseconds: 300),
-        fallDuration: Duration(milliseconds: 200),
+      // rise duration differs by glass, so rebuild the controller when the glass
+      // setting is toggled (re-wiring any registered closed listeners onto it).
+      _upDownCell = ComputedWithDisposer<UpDownAnimationController>(
+        (controller) => controller.dispose(),
+        () {
+          final glassOn =
+              Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+              (defaultTargetPlatform == TargetPlatform.iOS);
+          final controller = UpDownAnimationController(
+            vsync: this,
+            riseDuration: Duration(
+              milliseconds: glassOn ? 1100 : nonGlassBlobRise,
+            ),
+            fallDuration: Duration(milliseconds: 200),
+          );
+          for (final listener in _expansionClosedListeners) {
+            _wireUpDownClosed(controller, listener);
+          }
+          return controller;
+        },
       );
     }
-    labelAnimations = List.generate(
-      widget.radialActivatorPositions.length,
-      (_) => LabelSpring(
-        vsync: this,
-        kickSpeed: 18,
-        delay: Duration(milliseconds: 300),
-        spring: SpringDescription.withDampingRatio(mass: 1, stiffness: 330),
-      ),
+    // kick/stiffness differ by glass, so rebuild the hint springs (disposing the
+    // old ones) when the glass setting is toggled.
+    _labelAnimationsCell = ComputedWithDisposer<List<LabelSpring>>(
+      (springs) {
+        for (final c in springs) {
+          c.dispose();
+        }
+      },
+      () {
+        final glassOn =
+            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+            (defaultTargetPlatform == TargetPlatform.iOS);
+        return List.generate(
+          widget.radialActivatorPositions.length,
+          (_) => LabelSpring(
+            vsync: this,
+            // glass mode wants it luxurious
+            kickSpeed: glassOn ? 0 : 18,
+            delay: Duration(milliseconds: 300),
+            spring: SpringDescription.withDampingRatio(
+              mass: 1,
+              stiffness: glassOn ? 260 : 330,
+            ),
+          ),
+        );
+      },
     );
     selectionAnimations = List.generate(
       widget.radialActivatorPositions.length,
@@ -3828,12 +3452,6 @@ class DragActionRingState extends State<DragActionRing>
     _arcEndSpring = TargetSpring(vsync: this, initial: restEnd);
     _focalXSpring = TargetSpring(vsync: this, initial: 0);
     _focalYSpring = TargetSpring(vsync: this, initial: 0);
-    // each cap holds out to its outermost visible hint, so re-evaluate it as
-    // each pill settles shut (or the tutorial splay recedes).
-    for (final c in labelAnimations) {
-      c.addSettleListener(_onHintSettled);
-    }
-    tutorialShowLabelsAnimation?.addSettleListener(_onHintSettled);
     widget.suppressionBus?.addListener(_onOtherRingOpens);
     if (!widget.persistent) {
       _expansionForward();
@@ -3943,13 +3561,8 @@ class DragActionRingState extends State<DragActionRing>
 
   @override
   void dispose() {
-    // tutorialShowLabelsAnimation outlives us (it's owned by the screen), so
-    // drop our settle listener before we go.
-    tutorialShowLabelsAnimation?.removeSettleListener(_onHintSettled);
-    for (final c in labelAnimations) {
-      c.removeSettleListener(_onHintSettled);
-      c.dispose();
-    }
+    // the cell's disposer disposes each spring.
+    _labelAnimationsCell.dispose();
     for (final c in selectionAnimations) {
       c.dispose();
     }
@@ -3961,7 +3574,7 @@ class DragActionRingState extends State<DragActionRing>
     _arcEndSpring.dispose();
     _focalXSpring.dispose();
     _focalYSpring.dispose();
-    _upDown?.dispose();
+    _upDownCell?.dispose(); // its disposer disposes the current controller.
     _spring?.dispose();
     dragEventsSubscription?.call();
     widget.suppressionBus?.removeListener(_onOtherRingOpens);
@@ -3969,10 +3582,14 @@ class DragActionRingState extends State<DragActionRing>
   }
 
   Widget buildWithGivenAnimationParameters(
+    bool glassOn,
     double growp,
     double swipep,
     double releasep,
   ) {
+    // as hints fade, let a cap ease inward as soon as one drops below the hold
+    // threshold instead of waiting for it to settle at 0.
+    _reevaluateHintExtent();
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded = Mobj.getAlreadyLoaded(
@@ -3982,27 +3599,25 @@ class DragActionRingState extends State<DragActionRing>
     final buttonSpan = Mobj.getAlreadyLoaded(buttonSpanID, DoubleType()).value!;
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
-    // how grown the ring is overall (grow-in, fall-out). selection collapse is handled by the clip builder via swipep / selections, not here.
+    // how grown the ring is overall (grow-in, fall-out). selection collapse is handled by the blob builder via swipep / selections, not here.
     final baseGrow = widget.useSpringExpansion
-        ? growp.clamp(0.0, 1.0)
+        ? growp
         : Curves.easeOut.transform(unlerpUnit(0, 0.6, growp));
     final completion = Curves.easeInCubic.transform(completionAnimation.value);
     final iconFade =
         unlerpUnit(0.6, 1, baseGrow) *
         // fades a bit immediately on completion, but doesn't fade all the way out
         lerp(1, 0.7, unlerpUnit(0, 0.36, completionAnimation.value));
-    final mt = MakoThemeData.fromTheme(theme);
-    // only the special timer ring (spring expansion) lerps up from the reduced
-    // prominence color as it grows; the numeral rings are just primary.
-    final ringColor = widget.useSpringExpansion
-        ? lerpColor(
-            mt.reducedProminenceColor,
-            theme.colorScheme.primary,
-            baseGrow,
-          )
-        : theme.colorScheme.primary;
+    final mt = OurThemeData.fromTheme(theme);
+    final glassFill = mt.glassFill(glassOn);
+    final onGlassFill = mt.onGlassFill(glassOn);
+    // only the special timer (arc) ring lerps up from the reduced prominence
+    // color as it grows; the numeral rings are just the glass fill.
+    final ringColor = widget.arcModeNotBlobMode
+        ? lerpColor(mt.reducedProminenceColor, glassFill, baseGrow)
+        : glassFill;
 
-    // raw per-item selection growth; the clip builder owns any release recede
+    // raw per-item selection growth; the blob builder owns any release recede
     // (it keeps the chosen item's highlight crisp while the sweep collapses onto
     // it, only shrinking it away at the very end of the dismissal).
     final selections = [for (final c in selectionAnimations) c.value];
@@ -4017,11 +3632,9 @@ class DragActionRingState extends State<DragActionRing>
           child: Opacity(
             opacity: iconFade,
             child: IconTheme(
-              data: IconThemeData(color: theme.colorScheme.surface),
+              data: IconThemeData(color: onGlassFill),
               child: DefaultTextStyle(
-                style: controlPadTextStyle.merge(
-                  TextStyle(color: theme.colorScheme.surface),
-                ),
+                style: controlPadTextStyle.merge(TextStyle(color: onGlassFill)),
                 // Center loosens the SizedBox's tight constraints so each icon
                 // can size itself (its Container/CustomPaint size: etc.) rather
                 // than being forced to fill the box.
@@ -4064,11 +3677,16 @@ class DragActionRingState extends State<DragActionRing>
     // and its (unclipped) text. The text is measured directly since a GlassBlob
     // needs the pill's size up front, before layout.
     final pillStyle = controlPadTextStyle.copyWith(
-      color: theme.colorScheme.onPrimary,
+      color: onGlassFill,
       fontWeight: FontWeight.w700,
       fontSize: 30,
     );
-    const pillPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 4);
+    // has to be kept away from the border in glass mode because the glass border is thick chaos
+    double glassAddition = glassOn ? 3 : 0;
+    final pillPadding = EdgeInsets.symmetric(
+      horizontal: 12 + glassAddition,
+      vertical: 4 + glassAddition,
+    );
     ({Offset relTopLeft, Size size, Alignment anchor, Offset iconOffset})
     pillLayout(int index) {
       final angle = conditionallyApplyIf<double>(
@@ -4118,280 +3736,288 @@ class DragActionRingState extends State<DragActionRing>
       );
     }
 
+    // Every pill's geometry (in the ring-centred frame), computed once here and
+    // reused below to size the box and to place the glass blobs/text.
+    final pillLayouts = [
+      if (hasLabels)
+        for (int i = 0; i < widget.radialActivatorLabels!.length; i++)
+          pillLayout(i),
+    ];
+
     // The box the ring lives in. It must symmetrically contain the arc/icons and
     // any label pills (which splay past the ring), otherwise the glass layer clips
     // the longer ones. Pills are measured at full size so the box (and thus the
     // ring's centre) stays put as they animate in and out.
     double halfSpan = radialRadiusMax + actionRadiusMax;
-    if (hasLabels) {
-      for (int i = 0; i < widget.radialActivatorLabels!.length; i++) {
-        final lay = pillLayout(i);
-        final r = lay.relTopLeft & lay.size;
-        halfSpan = max(
-          halfSpan,
-          max(
-            max(r.left.abs(), r.right.abs()),
-            max(r.top.abs(), r.bottom.abs()),
-          ),
-        );
-      }
+    for (final lay in pillLayouts) {
+      final r = lay.relTopLeft & lay.size;
+      halfSpan = max(
+        halfSpan,
+        max(max(r.left.abs(), r.right.abs()), max(r.top.abs(), r.bottom.abs())),
+      );
     }
     final double totalSpan = 2 * halfSpan;
     final center = Offset(halfSpan, halfSpan);
 
-    // the builder shapes the colored backdrop, including its response to
-    // selection (a sliding arc, or per-item circles).
-    final DragRingClipArgs clipArgs = DragRingClipArgs(
-      growth: baseGrow,
-      swipep: swipep,
-      releasep: releasep,
-      selections: selections,
-      radius: radialRadiusMax,
-      // at full growth this is the arc's half-thickness, so playing completion
-      // up to 1 thins the retiring arc down to nothing in place.
-      actionRadius: (actionRadiusMax / 2) * (1 - completion),
-      angles: widget.radialActivatorPositions
-          .map(
-            (a) => conditionallyApplyIf<double>(
-              !isRightHanded,
-              flipAngleHorizontally,
-              a,
-            ),
-          )
-          .toList(),
-      isRightHanded: isRightHanded,
-      center: center,
-      buttonSpan: buttonSpan,
-      growIn: Curves.easeOutCubic.transform(growInAnimation.value),
-      selectionStartAngle: _arcStartSpring.value,
-      selectionEndAngle: _arcEndSpring.value,
-      // normalized focal (unit = radius, center = origin) scaled into the box.
-      focal:
-          center +
-          Offset(_focalXSpring.value, _focalYSpring.value) * radialRadiusMax,
-    );
-
-    // the icons sitting on the ring surface, shared by both render paths.
+    // the icons sitting on the ring surface.
     final Widget ringIcons = Transform.translate(
       offset: center,
       child: Stack(clipBehavior: Clip.none, children: radialActivatorIcons),
     );
 
-    // reveal progress: cut off the very slow tail to zero, and recede on retire.
-    double labelProgress(int i) =>
-        unlerpUnit(0.06, 1, _labelShowFor(i)) * (1 - completion);
+    // render the ring — and, for the special-timer menu, its label pills — as
+    // merged glass blobs, gated by the liquidGlassOn setting. The arc lerps in
+    // via [ringColor]; the pills are the plain glass fill.
+    final Color ringTint = ringColor;
+    final Color pillTint = glassFill;
 
-    final Widget clippedRing;
-    bool labelsFoldedIntoGlass = false;
-    if (widget.blobBuilder != null) {
-      // liquid-glass path: render the ring — and, for the special-timer menu,
-      // its label pills — as merged glass blobs, gated by the liquidGlassOn
-      // setting.
-      final bool glassOn =
-          Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).peek() ??
-          (defaultTargetPlatform == TargetPlatform.iOS);
-      final Color arcTint = mt.glassTint(ringColor, glassOn: glassOn);
-      final Color pillTint = mt.glassTint(
-        theme.colorScheme.primary,
-        glassOn: glassOn,
+    final double blendRadius = actionRadiusMax * (hasLabels ? 0.35 : 0.16);
+
+    final List<GlassBlob> pillBlobs = [];
+    final List<Widget> pillTexts = [];
+    for (int i = 0; i < pillLayouts.length; i++) {
+      final showFor = _labelShowFor(i);
+      if (showFor <= 0) continue;
+      final lay = pillLayouts[i];
+      final topLeft = center + lay.relTopLeft;
+      final (rect, radius) = pillFluidGeometry(
+        lay.size,
+        Curves.easeInCubic.transform(
+          unlerpUnit(0.06, 1, showFor) * (1 - completion),
+        ),
+        iconOffset: lay.iconOffset,
+        anchor: lay.anchor,
       );
-
-      final double blendRadius = actionRadiusMax * (hasLabels ? 0.35 : 0.16);
-
-      final List<GlassBlob> pillBlobs = [];
-      final List<Widget> pillTexts = [];
-      if (hasLabels) {
-        for (int i = 0; i < widget.radialActivatorLabels!.length; i++) {
-          if (_labelShowFor(i) <= 0) continue;
-          final lay = pillLayout(i);
-          final topLeft = center + lay.relTopLeft;
-          final (rect, radius) = pillFluidGeometry(
-            lay.size,
-            labelProgress(i),
-            iconOffset: lay.iconOffset,
-            anchor: lay.anchor,
-          );
-          // blobs have to go a bit negative to fully cease to influence their neighbors
-          final double exitCompletion =
-              (1 - unlerpUnit(0.0, 0.06, _labelShowFor(i))) * (blendRadius + 2);
-          pillBlobs.add(
-            GlassBlob(
-              center: topLeft + rect.center,
-              radii: Size(
-                rect.width / 2 - exitCompletion,
-                rect.height / 2 - exitCompletion,
-              ),
-              cornerRadius: radius,
-              tint: pillTint,
-            ),
-          );
-          pillTexts.add(
-            Positioned(
-              left: topLeft.dx,
-              top: topLeft.dy,
-              child: SizedBox(
-                width: lay.size.width,
-                height: lay.size.height,
-                child: DefaultTextStyle(
-                  style: pillStyle,
-                  child: Padding(
-                    padding: pillPadding,
-                    child: widget.radialActivatorLabels![i],
-                  ),
-                ),
+      // blobs have to go a bit negative to fully cease to influence their neighbors
+      final double exitCompletion =
+          (1 - unlerpUnit(0.0, 0.06, showFor)) * (blendRadius + 2);
+      pillBlobs.add(
+        GlassBlob(
+          center: topLeft + rect.center,
+          radii: Size(
+            rect.width / 2 - exitCompletion,
+            rect.height / 2 - exitCompletion,
+          ),
+          cornerRadius: radius,
+          tint: pillTint,
+        ),
+      );
+      pillTexts.add(
+        Positioned(
+          left: topLeft.dx,
+          top: topLeft.dy,
+          child: SizedBox(
+            width: lay.size.width,
+            height: lay.size.height,
+            child: DefaultTextStyle(
+              style: pillStyle,
+              child: Padding(
+                padding: pillPadding,
+                child: widget.radialActivatorLabels![i],
               ),
             ),
-          );
+          ),
+        ),
+      );
+    }
+
+    // the ring graphic itself: the special-timer menu's sliding arc band, or the
+    // numeral ring's per-item circles. Both respond to selection via swipep /
+    // releasep / the selection springs.
+    final List<double> angles = widget.radialActivatorPositions
+        .map(
+          (a) => conditionallyApplyIf<double>(
+            !isRightHanded,
+            flipAngleHorizontally,
+            a,
+          ),
+        )
+        .toList();
+    // at full growth this is the arc's half-thickness / an item disc's radius, so
+    // playing completion up to 1 thins the retiring ring away in place.
+    final double actionRadius = (actionRadiusMax / 2) * (1 - completion);
+
+    final List<GlassBlob> ringBlobs;
+    if (widget.arcModeNotBlobMode) {
+      // --- special-timer arc band: a single rounded ring-segment GlassBlob ---
+      // centerline geometry: grows out of the button (radius 0 -> radius) and, on
+      // selection, slides its spring-tracked caps together onto the chosen item,
+      // collapsing to a disc that becomes the highlight.
+      final g = baseGrow;
+      final growIn = Curves.easeOutCubic.transform(growInAnimation.value);
+      final fullStart = angles.first;
+      final fullEnd = angles.last;
+      final restArc = lerp(2 * pi, pi, Curves.easeOutCubic.transform(growIn));
+      final restFocus = (fullStart + fullEnd) / 2;
+      final fullArc = fullEnd - fullStart;
+      final appearanceSpin = -(1 - growIn) * pi * 1.6;
+      final restStart = restFocus - fullArc.sign * restArc / 2 + appearanceSpin;
+      final restEnd = restFocus + fullArc.sign * restArc / 2 + appearanceSpin;
+      // at rest, a thin half-arc whose radial profile matches the old icon
+      // (centerline radius and thickness), opening out to straddle the icon ring.
+      final restOuterR = 0.2 * buttonSpan;
+      final restHalfThickness = buttonSpan * 0.08 * unlerpUnit(0, 0.4, growIn);
+      final restRadius = restOuterR - restHalfThickness;
+      final handednessSign = isRightHanded ? 1 : -1;
+      final bandCenter =
+          center + Offset(handednessSign * restRadius * 0.34, 0) * (1 - g);
+      final bandRadius = lerp(restRadius, radialRadiusMax, g);
+      final halfThickness = lerp(restHalfThickness, actionRadius, g);
+      final startAngle = lerp(restStart, _arcStartSpring.value, g);
+      final endAngle = lerp(restEnd, _arcEndSpring.value, g);
+
+      if (halfThickness < 0.5) {
+        // thinned away to nothing while retiring (completion -> 1).
+        ringBlobs = const [];
+      } else if ((endAngle - startAngle).abs() < 1e-3) {
+        // caps slid together on a committed choice: a single highlight disc.
+        ringBlobs = [
+          GlassBlob(
+            center: bandCenter + Offset.fromDirection(startAngle, bandRadius),
+            radii: Size.square(halfThickness),
+            tint: ringTint,
+          ),
+        ];
+      } else {
+        // GlassBlob wants an increasing sweep; the segment between the two bounds
+        // is the same set either way (extent stays < tau), so just order them.
+        var s = startAngle;
+        var e = endAngle;
+        if (e < s) {
+          final t = s;
+          s = e;
+          e = t;
         }
+        ringBlobs = [
+          GlassBlob(
+            center: bandCenter,
+            radii: Size.square(bandRadius + halfThickness),
+            // <= 0 (the brief radius < halfThickness grow-in) reads as "no hole"
+            // -> a filled sector, an acceptable stand-in for that transient.
+            holeRadius: bandRadius - halfThickness,
+            startAngle: s,
+            endAngle: e,
+            tint: ringTint,
+          ),
+        ];
       }
-      labelsFoldedIntoGlass = hasLabels;
-
-      final List<GlassBlob> blobs = [
-        ...widget.blobBuilder!(clipArgs, arcTint),
-        ...pillBlobs,
-      ];
-      final double glassiness = baseGrow;
-      clippedRing = blobs.isEmpty
-          ? const SizedBox.shrink()
-          : GlassLayer(
-              options: glassLerpedToFlat(
-                makoGlassOptions(
-                  mode: glassOn ? GlassMode.glass : GlassMode.flat,
-                  blendRadius: blendRadius,
-                ),
-                glassiness,
-              ),
-              blobs: blobs,
-              child: SizedBox(
-                width: totalSpan,
-                height: totalSpan,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned.fill(child: ringIcons),
-                    ...pillTexts,
-                  ],
-                ),
-              ),
-            );
     } else {
-      clippedRing = ClipPath(
-        clipper: _DragRingPathClipper(widget.clipBuilder!(clipArgs)),
-        child: SizedBox(
-          width: totalSpan,
-          height: totalSpan,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned.fill(child: ColoredBox(color: ringColor)),
-              ringIcons,
-            ],
+      // --- numeral ring: per-item circles hanging off a single focal point ---
+      // The focal is a 2D spring resting at the ring center, kicked out to the
+      // chosen item's slot on selection. The central blob sits on it at
+      // centerRadius (grows in with the ring, collapses to nothing as a choice
+      // commits); each item circle grows out of the focal toward its ring slot,
+      // riding home / shrinking away as the focal lands on the choice.
+      final focal =
+          center +
+          Offset(_focalXSpring.value, _focalYSpring.value) * radialRadiusMax;
+      final growthp = Curves.easeOut.transform(baseGrow);
+      // ensure the rise of the radius is always as fast as it is for non-glass (this also accidentally accelerates fall for glass, but that's okay)
+      // dilate nonGlassBlobRise too, so this normalized breakpoint stays put
+      // (and the blob rise slows with everything else) under devtools' slow-animations.
+      final double adjustedBlobRiseEndp =
+          nonGlassBlobRise *
+          timeDilation /
+          _upDownCell!.peek().riseDuration.inMilliseconds;
+      final leafp = unlerpUnit(adjustedBlobRiseEndp * 0.7, 1, growthp);
+      final selectedRadius = actionRadius;
+      // how committed a choice is: pinned at 1 while a choice is held (including
+      // across a switch between items), driven by swipep/releasep.
+      final selectp = max(
+        Curves.easeOut.transform(swipep),
+        Curves.easeOut.transform(releasep),
+      );
+      final centerRadius =
+          radialRadiusMax *
+          Curves.easeOut.transform(
+            (unlerpUnit(0, adjustedBlobRiseEndp, growthp)) * (1 - selectp),
+          );
+      final circleBlobs = <GlassBlob>[
+        if (centerRadius > 0.5)
+          GlassBlob(
+            center: focal,
+            radii: Size.square(centerRadius),
+            tint: ringTint,
           ),
-        ),
-      );
-    }
+      ];
+      for (int i = 0; i < angles.length; i++) {
+        final allShowingp =
+            Curves.easeOut.transform(leafp) *
+            Curves.easeOut.transform(1 - selectp);
+        // protrudes if all leaves are showing or if this one is showing.
+        final protrusion = lerp(
+          0.4,
+          1,
 
-    Widget labelWidgetAt(int index, double progress) {
-      final angle = conditionallyApplyIf<double>(
-        !isRightHanded,
-        flipAngleHorizontally,
-        widget.radialActivatorPositions[index],
-      );
-      final labelPos = Offset.fromDirection(
-        angle,
-        radialRadiusMax + actionRadiusMax * 0.27,
-      );
-      // alignment parameters are projected to the manhattan unit square
-
-      var rawTx = cos(angle);
-      final rawTy = sin(angle);
-      if (widget.shuntRight != null) {
-        if (rawTx.abs() < 0.07) {
-          // near-vertical (top/bottom) labels: shunt sideways. shuntRight is in
-          // the right-handed frame, so mirror it for left-handed use, the same
-          // way the angle above is flipped — otherwise these labels shunt the
-          // wrong way (toward the screen edge) in left-handed mode.
-          rawTx = (widget.shuntRight! == isRightHanded) ? 1 : -1;
-        } else {
-          rawTx = rawTx.sign;
-        }
+          1 - (1 - allShowingp) * (1 - selections[i]),
+        );
+        // release recede applied to the highlight the same way the discs do it.
+        final sel =
+            selections[i] *
+            (1 - Curves.easeOut.transform(unlerpUnit(0.65, 1, releasep)));
+        final r = lerp(actionRadius * allShowingp, selectedRadius, sel);
+        // grow out of the focal toward this item's ring slot, at distance
+        // centerRadius (or sitting right on the slot when it's within reach).
+        final slot = center + Offset.fromDirection(angles[i], radialRadiusMax);
+        final toSlot = slot - focal;
+        final d = toSlot.distance;
+        final c = (d == 0)
+            ? slot
+            : focal + toSlot * (centerRadius / d * protrusion);
+        circleBlobs.add(
+          GlassBlob(center: c, radii: Size.square(r), tint: ringTint),
+        );
       }
-      final m = max(rawTx.abs(), rawTy.abs());
-      final double fontSize = 30;
-      // The FractionalTranslation above pins the box's inner corner,
-      // -(rawTx/m, rawTy/m), at [labelPos]. That inner corner is both the line's
-      // origin end (toward the handle) and the reference for locating the icon,
-      // which sits actionRadiusMax * 0.27 further in along the radial ray.
-      final anchor = Alignment(-rawTx / m, -rawTy / m);
-      final iconOffset = Offset.fromDirection(angle, -actionRadiusMax * 0.27);
-      return nesting([
-        (w) => Positioned(left: labelPos.dx, top: labelPos.dy, child: w),
-        (w) => FractionalTranslation(
-          translation: (Offset(rawTx / m, rawTy / m) - Offset(1, 1)) / 2,
-          child: w,
-        ),
-        (w) => ClipPath(
-          clipper: _FluidPillClipper(
-            progress: progress,
-            iconOffset: iconOffset,
-            anchor: anchor,
-          ),
-          child: w,
-        ),
-        (w) => ColoredBox(color: theme.colorScheme.primary, child: w),
-        (w) => Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: w,
-        ),
-        (w) => DefaultTextStyle(
-          style: controlPadTextStyle.copyWith(
-            color: theme.colorScheme.onPrimary,
-            fontWeight: FontWeight.w700,
-            fontSize: fontSize,
-          ),
-          child: w,
-        ),
-      ], widget.radialActivatorLabels![index]);
+      ringBlobs = circleBlobs;
     }
 
+    final List<GlassBlob> blobs = [...ringBlobs, ...pillBlobs];
+    final double glassiness = widget.persistent ? baseGrow : 1;
+    final Widget clippedRing = blobs.isEmpty
+        ? const SizedBox.shrink()
+        : GlassLayer(
+            options: glassLerpedToFlat(
+              ourGlassOptions(
+                mode: glassOn ? GlassMode.glass : GlassMode.flat,
+                blendRadius: blendRadius,
+                blurRadius: mt.glassBlurRadius,
+                edgeTint: mt.edgeTint,
+              ),
+              glassiness,
+            ),
+            blobs: blobs,
+            child: SizedBox(
+              width: totalSpan,
+              height: totalSpan,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(child: ringIcons),
+                  ...pillTexts,
+                ],
+              ),
+            ),
+          );
+
+    // label pills are folded into the GlassLayer above (as blobs + text), so
+    // there's nothing more to stack here.
     return IgnorePointer(
       child: FractionalTranslation(
         translation: Offset(-0.5, -0.5),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            clippedRing,
-            // the clip path renders label pills in their own Stack; the glass
-            // path folds them into the GlassLayer above instead.
-            if (widget.radialActivatorLabels != null && !labelsFoldedIntoGlass)
-              SizedBox(
-                width: totalSpan,
-                height: totalSpan,
-                child: Transform.translate(
-                  offset: Offset(totalSpan / 2, totalSpan / 2),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      for (int i = 0; i < labelAnimations.length; i++)
-                        if (_labelShowFor(i) > 0)
-                          labelWidgetAt(
-                            i,
-                            // cut off the bottom part so that the very slow reduction to zero isn't visible
-                            unlerpUnit(0.06, 1, _labelShowFor(i)) *
-                                (1 - completion),
-                          ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
+        child: clippedRing,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Read the glass setting here — in the SignalStatefulElement's own build — so
+    // the ring re-renders when it's toggled. The AnimatedBuilder below builds in
+    // its own element, where a signal read wouldn't be tracked, so we thread the
+    // value in rather than reading it there.
+    final glassOn =
+        Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+        (defaultTargetPlatform == TargetPlatform.iOS);
     return Positioned(
       left: widget.visualPosition.dx,
       top: widget.visualPosition.dy,
@@ -4413,6 +4039,7 @@ class DragActionRingState extends State<DragActionRing>
         ]),
         builder: (context, child) {
           return buildWithGivenAnimationParameters(
+            glassOn,
             _expansionGrowth,
             optionConsiderationAnimation.value,
             optionActivationAnimation.value,
@@ -4450,6 +4077,11 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<MobjID?> selectedTimer = Signal(null);
   late final EffectCleanup watchingForUnselection;
   late final Computed<TimerWidgets> timerWidgets;
+
+  /// Builds the screen-owned tutorial label-splay spring, rebuilt (with the old
+  /// one disposed) when the glass setting toggles so its kick/stiffness match.
+  /// The global [tutorialShowLabelsAnimation] mirrors its current value.
+  late final ComputedWithDisposer<LabelSpring> _tutorialShowLabelsCell;
   final Map<MobjID<TimerData>, TimerBase> timerWidgetCache = {};
 
   TimerBase timerScreenGetOrCreateTimerWidget(
@@ -4614,11 +4246,27 @@ class TimerScreenState extends State<TimerScreen>
   }
 
   static const Size dragActionRingIconSize = Size.square(26);
+
+  /// Scopes a single [Builder] around [build] so it can pull the current
+  /// [OurThemeData.onGlassFill] color — one lookup point shared by every
+  /// special-timer drag-ring icon below, instead of each repeating its own
+  /// context/theme boilerplate.
+  Widget _specialTimerIcon(Widget Function(Color color) build) {
+    return SignalBuilder(
+      builder: (context) {
+        final glassOn =
+            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+            (defaultTargetPlatform == TargetPlatform.iOS);
+        return build(OurThemeData.fromContext(context).onGlassFill(glassOn));
+      },
+    );
+  }
+
   late final specialTimerCreateDragRingController = DragActionRingController(
     shuntRight: false,
     persistent: true,
     useSpringExpansion: true,
-    blobBuilder: arcDragRingBlobs,
+    arcModeNotBlobMode: true,
     radialActivatorFunctions: [
       addNewStopwatch,
       () => addNewCompositeTimer(TimerKind.loop),
@@ -4628,50 +4276,45 @@ class TimerScreenState extends State<TimerScreen>
     ],
     radialActivatorPositions: List.generate(5, decAngleFor),
     radialActivatorIcons: [
-      Container(
-        width: dragActionRingIconSize.width,
-        height: dragActionRingIconSize.height,
-        decoration: ShapeDecoration(
-          shape: StarBorder.polygon(
-            sides: 8,
-            pointRounding: 0.5,
-            rotation: 45 / 2,
+      _specialTimerIcon(
+        (color) => Container(
+          width: dragActionRingIconSize.width * 0.9,
+          height: dragActionRingIconSize.height * 0.9,
+          decoration: ShapeDecoration(
+            shape: StarBorder.polygon(
+              sides: 8,
+              pointRounding: 0.5,
+              rotation: 45 / 2,
+            ),
+            color: color,
           ),
-          color: Theme.of(context).colorScheme.onPrimary,
         ),
       ),
-      Builder(
-        builder: (context) => CustomPaint(
+      _specialTimerIcon(
+        (color) => CustomPaint(
           size: dragActionRingIconSize,
-          painter: TimerculeCyclePainter(
-            color: Theme.of(context).colorScheme.onPrimary,
-          ),
+          painter: TimerculeFlatterCyclePainter(color: color),
         ),
       ),
-      Builder(
-        builder: (context) => CustomPaint(
+      _specialTimerIcon(
+        (color) => CustomPaint(
           size: dragActionRingIconSize,
-          painter: TimerculeSerialPainter(
-            color: Theme.of(context).colorScheme.onPrimary,
-          ),
+          painter: TimerculeSerialPainter(color: color),
         ),
       ),
-      Builder(
-        builder: (context) => CustomPaint(
+      _specialTimerIcon(
+        (color) => CustomPaint(
           size: dragActionRingIconSize,
           painter: TimerculeParallelPainter(
-            color: Theme.of(context).colorScheme.onPrimary,
+            color: color,
             rightJustified: false,
           ),
         ),
       ),
-      Builder(
-        builder: (context) => CustomPaint(
+      _specialTimerIcon(
+        (color) => CustomPaint(
           size: dragActionRingIconSize,
-          painter: TimerculeParallelPainter(
-            color: Theme.of(context).colorScheme.onPrimary,
-            rightJustified: true,
-          ),
+          painter: TimerculeParallelPainter(color: color, rightJustified: true),
         ),
       ),
     ],
@@ -4719,11 +4362,27 @@ class TimerScreenState extends State<TimerScreen>
   void initState() {
     super.initState();
 
-    tutorialShowLabelsAnimation = LabelSpring(
-      vsync: this,
-      kickSpeed: 18,
-      delay: const Duration(milliseconds: 300),
-      spring: SpringDescription.withDampingRatio(mass: 1, stiffness: 330),
+    _tutorialShowLabelsCell = ComputedWithDisposer<LabelSpring>(
+      (spring) => spring.dispose(),
+      () {
+        final glassOn =
+            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+            (defaultTargetPlatform == TargetPlatform.iOS);
+        return LabelSpring(
+          vsync: this,
+          // see the matching hint-pill LabelSprings in _DragActionRingState.initState.
+          kickSpeed: glassOn ? 0 : 18,
+          delay: const Duration(milliseconds: 300),
+          spring: SpringDescription.withDampingRatio(
+            mass: 1,
+            stiffness: glassOn ? 200 : 330,
+          ),
+        );
+      },
+    );
+    // mirror the cell into the screen-owned global, rebuilding it on a glass toggle.
+    createEffect(
+      () => tutorialShowLabelsAnimation = _tutorialShowLabelsCell.value,
     );
 
     timersScroller.addListener(_updateNumeralBackshadow);
@@ -4872,7 +4531,8 @@ class TimerScreenState extends State<TimerScreen>
     }
     timerHolm._backgroundedReaction();
     timerHolm._newTimerReaction.cancel();
-    tutorialShowLabelsAnimation?.dispose();
+    // the cell's disposer disposes the current spring.
+    _tutorialShowLabelsCell.dispose();
     tutorialShowLabelsAnimation = null;
     super.dispose();
   }
@@ -4893,24 +4553,18 @@ class TimerScreenState extends State<TimerScreen>
     Rect p = boxRect(timerKey)!;
     final arrowHeight = TimerMenu.buttonHeight * 0.36;
     final theme = Theme.of(context);
-    final mt = MakoThemeData.fromTheme(theme);
-    final backgroundColor = theme.brightness == Brightness.light
-        ? theme.colorScheme.primary
-        : lightenColor(mt.foreBackColor, 0.1);
-    final foregroundColor = theme.brightness == Brightness.light
-        ? theme.colorScheme.onPrimary
-        : theme.colorScheme.onSurface;
-    final indentColor = theme.brightness == Brightness.light
-        ? theme.colorScheme.onPrimary.withValues(alpha: 0.07)
-        : darkenColor(backgroundColor, 0.1);
+    final mt = OurThemeData.fromTheme(theme);
+    final glassOn =
+        Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+        (defaultTargetPlatform == TargetPlatform.iOS);
+    final backgroundColor = mt.glassFill(glassOn);
+    final foregroundColor = mt.onGlassFill(glassOn);
+    final indentColor = foregroundColor.withValues(alpha: 0.07);
     const double menuItemPadding = TimerMenu.itemPadding;
     TimerData td = Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!;
     Color inkColor = td.isComposite
         ? foregroundColor
         : TimerBaseState.backgroundColor(td.hue);
-    final glassOn =
-        Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).peek() ??
-        (defaultTargetPlatform == TargetPlatform.iOS);
     // in glass mode the glass body supplies the tinted surface, so the tiles
     // themselves stay transparent and let the refraction read through; the solid
     // menu keeps its opaque tile fill.
@@ -4972,7 +4626,8 @@ class TimerScreenState extends State<TimerScreen>
       barrierDismissible: true,
       barrierLabel: 'Timer menu',
       barrierColor: mt.lowestBackColor.withAlpha(0),
-      transitionDuration: Duration(milliseconds: 370),
+      // glass mode reveals the menu body a touch slower.
+      transitionDuration: Duration(milliseconds: glassOn ? 670 : 370),
       transitionBuilder: (context, animation, secondaryAnimation, child) =>
           child,
       pageBuilder: (context, animation, secondaryAnimation) {
@@ -5162,7 +4817,7 @@ class TimerScreenState extends State<TimerScreen>
     print('TimerScreenState build');
     ThemeData theme = Theme.of(context);
     Size screenSize = MediaQuery.sizeOf(context);
-    MakoThemeData mt = MakoThemeData.fromTheme(theme);
+    OurThemeData mt = OurThemeData.fromTheme(theme);
     final thumbSpan = Thumbspan.of(context);
 
     final buttonSpan = buttonSpanMobj.value!;
@@ -6157,14 +5812,9 @@ class DragActionRingController {
   final List<Widget>? radialActivatorLabels;
   final List<Widget> radialActivatorIcons;
 
-  /// forwarded to [DragActionRing.clipBuilder]; mutually exclusive with
-  /// [blobBuilder].
-  final Path Function(DragRingClipArgs args)? clipBuilder;
-
-  /// forwarded to [DragActionRing.blobBuilder]; when set, the ring renders as
-  /// liquid glass (the blobs do the masking) instead of a clipped colored box.
-  final List<GlassBlob> Function(DragRingClipArgs args, Color tint)?
-  blobBuilder;
+  /// forwarded to [DragActionRing.arcModeNotBlobMode]: the sliding arc band
+  /// (true) versus the numeral ring's per-item circles (false).
+  final bool arcModeNotBlobMode;
 
   /// when true, the ring is rendered permanently by [buildPersistentRing]
   /// instead of being added to a SelfRemovalHost on pan-down.
@@ -6181,16 +5831,11 @@ class DragActionRingController {
     required this.radialActivatorPositions,
     this.radialActivatorLabels,
     required this.radialActivatorIcons,
-    this.clipBuilder,
-    this.blobBuilder,
+    required this.arcModeNotBlobMode,
     this.persistent = false,
     this.shuntRight,
     this.useSpringExpansion = false,
   }) {
-    assert(
-      (clipBuilder != null) != (blobBuilder != null),
-      'DragActionRingController needs exactly one of clipBuilder / blobBuilder',
-    );
     assert(
       radialActivatorIcons.length == radialActivatorPositions.length,
       'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length',
@@ -6255,8 +5900,7 @@ class DragActionRingController {
       radialActivatorIcons: radialActivatorIcons,
       radialActivatorLabels: radialActivatorLabels,
       radialActivatorPositions: radialActivatorPositions,
-      clipBuilder: clipBuilder,
-      blobBuilder: blobBuilder,
+      arcModeNotBlobMode: arcModeNotBlobMode,
       useSpringExpansion: useSpringExpansion,
     );
   }
@@ -6285,8 +5929,7 @@ class DragActionRingController {
       radialActivatorIcons: radialActivatorIcons,
       radialActivatorLabels: radialActivatorLabels,
       radialActivatorPositions: radialActivatorPositions,
-      clipBuilder: clipBuilder,
-      blobBuilder: blobBuilder,
+      arcModeNotBlobMode: arcModeNotBlobMode,
       useSpringExpansion: useSpringExpansion,
     );
     getSelfRemovalHostState(context).add(numeralDragActionRing);
@@ -6400,7 +6043,7 @@ class _NumeralButtonState extends State<NumeralButton> {
     super.initState();
     dragActionRingController = DragActionRingController(
       suppressingNotifier: widget.otherDragActionRingStarted,
-      blobBuilder: circlesDragRingBlobs,
+      arcModeNotBlobMode: false,
       radialActivatorFunctions: List.generate(
         numericRadialActivatorFunctions.length,
         (i) => () {
@@ -6870,60 +6513,36 @@ Widget headingBandLabel({
   ],
 );
 
-/// The faded-in markdown body shared by the About / How-it-was-made pages.
-/// Renders markdown links as tap-to-open, long-press-to-copy-URL. Registering
-/// a builder for the 'a' tag replaces flutter_markdown_plus's built-in link
-/// handling entirely (for every link), so tap-to-open is reimplemented here
-/// alongside the long-press addition.
-class _LinkElementBuilder extends MarkdownElementBuilder {
-  @override
-  Widget? visitElementAfterWithContext(
-    BuildContext context,
-    md.Element element,
-    TextStyle? preferredStyle,
-    TextStyle? parentStyle,
-  ) {
-    final href = element.attributes['href'];
-    final text = element.textContent;
-    if (href == null) return Text(text, style: preferredStyle);
-    return GestureDetector(
-      onTap: () => launchUrl(Uri.parse(href)),
-      onLongPress: () async {
-        await Clipboard.setData(ClipboardData(text: href));
-        HapticFeedback.mediumImpact();
-        if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Copied "$href"')));
-        }
-      },
-      child: Text(text, style: preferredStyle),
-    );
-  }
-}
-
 Widget markdownBody(
   ThemeData theme,
   String md, {
   MarkdownImageBuilder? imageBuilder,
-}) => MarkdownBody(
-  data: md,
-  selectable: true,
-  imageBuilder: imageBuilder,
-  builders: {'a': _LinkElementBuilder()},
-  styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
-    h1: theme.textTheme.titleLarge,
-    h1Padding: const EdgeInsets.only(top: 6.0, bottom: 4.0),
-    h2: theme.textTheme.titleMedium,
-    h2Padding: const EdgeInsets.only(top: 6.0, bottom: 4.0),
-    p: theme.textTheme.bodyMedium,
-    pPadding: const EdgeInsets.only(bottom: 12.0),
-    a: TextStyle(
-      color: theme.colorScheme.primary,
-      decoration: TextDecoration.underline,
+}) {
+  final linkStyle = TextStyle(
+    color: theme.colorScheme.primary,
+    decoration: TextDecoration.underline,
+  );
+  return MarkdownBody(
+    data: md,
+    selectable: true,
+    imageBuilder: imageBuilder,
+    builders: {
+      'a': LinkElementBuilder(
+        baseStyle: theme.textTheme.bodyMedium ?? const TextStyle(),
+        linkStyle: linkStyle,
+      ),
+    },
+    styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+      h1: theme.textTheme.titleLarge,
+      h1Padding: const EdgeInsets.only(top: 6.0, bottom: 4.0),
+      h2: theme.textTheme.titleMedium,
+      h2Padding: const EdgeInsets.only(top: 6.0, bottom: 4.0),
+      p: theme.textTheme.bodyMedium,
+      pPadding: const EdgeInsets.only(bottom: 12.0),
+      a: linkStyle,
     ),
-  ),
-);
+  );
+}
 
 Widget markdownPageSliver(
   ThemeData theme,
@@ -6977,7 +6596,7 @@ class InfoScaffold extends StatelessWidget {
     // Page / heading band / gutter use the section-header colour (so short
     // pages never reveal a mismatched colour below the gutter); the content
     // sits on the contrasting content colour so it stands out against them.
-    final mako = MakoThemeData.fromTheme(theme);
+    final mako = OurThemeData.fromTheme(theme);
     final backgroundColorA = mako.menuSurfaceFore;
     final backgroundColorB = mako.menuSurfaceBack;
     return Scaffold(
@@ -7037,7 +6656,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final mako = MakoThemeData.fromTheme(theme);
+    final mako = OurThemeData.fromTheme(theme);
     final contentBackground = mako.menuSurfaceFore;
     final headingBackground = mako.menuSurfaceBack;
     // final listItemPadding = const EdgeInsets.symmetric(
@@ -7767,7 +7386,7 @@ class BinScreenState extends State<BinScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final mako = MakoThemeData.fromTheme(theme);
+    final mako = OurThemeData.fromTheme(theme);
     final contentBackground = mako.menuSurfaceFore;
     final headingBackground = mako.menuSurfaceBack;
     return Scaffold(
@@ -8161,7 +7780,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
     // Page background matches the heading band / section-header colour so short
     // lists don't reveal a mismatched content colour below the bottom gutter;
     // the sound chips use the contrasting content colour so they stand out.
-    final mt = MakoThemeData.fromTheme(theme);
+    final mt = OurThemeData.fromTheme(theme);
     final backgroundColorA = mt.menuSurfaceFore;
     final backgroundColorB = mt.menuSurfaceBack;
 
@@ -8617,7 +8236,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final mt = MakoThemeData.fromTheme(theme);
+    final mt = OurThemeData.fromTheme(theme);
     final contentBackground = mt.menuSurfaceFore;
     final headingBackground = mt.menuSurfaceBack;
     final isRightHanded = Mobj.getAlreadyLoaded(isRightHandedID, BoolType());
