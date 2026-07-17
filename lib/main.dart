@@ -1288,16 +1288,20 @@ class TimerMenu extends StatelessWidget {
             final double topHeadroom = glassOn
                 ? max(0.0, -origin.dy) + _glassMenuTopPad
                 : 0;
+            CornerStyle cornerStyle = glassOn ? .continuous : .circular;
             final Widget body = glassOn
                 ? _GlassMenuBody(
                     progress: revealProgress,
                     opacity: contentOpacity,
                     origin: origin,
-                    cornerRounding: cornerRounding,
+                    cornerRounding:
+                        cornerRounding *
+                        (cornerStyle == .continuous ? 1.62 : 1),
                     arrowHeight: arrowHeight,
                     width: width,
                     topInset: topHeadroom,
                     tint: backgroundColor,
+                    cornerStyle: cornerStyle,
                     child: column,
                   )
                 : ClipPath(
@@ -1434,6 +1438,7 @@ class _GlassMenuBody extends StatefulWidget {
     required this.width,
     required this.topInset,
     required this.tint,
+    required this.cornerStyle,
     required this.child,
   });
 
@@ -1443,6 +1448,11 @@ class _GlassMenuBody extends StatefulWidget {
   final double cornerRounding;
   final double arrowHeight;
   final double width;
+
+  /// Corner curvature for the glass blobs. When null it defaults to the
+  /// platform convention: continuous ("squircle") corners on iOS, circular
+  /// elsewhere.
+  final CornerStyle? cornerStyle;
 
   /// Transparent headroom added above the content so blobs (which reveal from
   /// above y=0) and their glass bevel aren't clipped; blob geometry is shifted
@@ -1485,6 +1495,11 @@ class _GlassMenuBodyState extends State<_GlassMenuBody> {
     final blendRadius = widget.arrowHeight * 1.15;
     // widget.tint is the theme's translucent glassColor, so its alpha already
     // lets the refracted backdrop read through — used as-is.
+    final cornerStyle =
+        widget.cornerStyle ??
+        (defaultTargetPlatform == TargetPlatform.iOS
+            ? CornerStyle.continuous
+            : CornerStyle.circular);
     final blobs = _menuBlobs(
       size: Size(widget.width, height),
       origin: widget.origin,
@@ -1494,11 +1509,12 @@ class _GlassMenuBodyState extends State<_GlassMenuBody> {
       topInset: widget.topInset,
       tint: widget.tint,
       blendRadius: blendRadius,
+      cornerStyle: cornerStyle,
     );
     if (blobs.isEmpty) return faded;
 
-    // ease the glass in with the reveal so it solidifies as it grows.
-    final glassiness = widget.progress;
+    // final glassiness = widget.progress;
+    final glassiness = 1.0;
     final mt = OurThemeData.fromContext(context);
     return GlassLayer(
       options: glassLerpedToFlat(
@@ -1528,6 +1544,7 @@ List<GlassBlob> _menuBlobs({
   required double topInset,
   required Color tint,
   required double blendRadius,
+  required CornerStyle cornerStyle,
 }) {
   // everything is shifted down by [topInset]: the content is padded down by the
   // same amount so the box has headroom above for the reveal excursion and bevel.
@@ -1547,6 +1564,7 @@ List<GlassBlob> _menuBlobs({
       center: body.center,
       radii: Size(body.width / 2, body.height / 2),
       cornerRadius: min(corner, min(body.width, body.height) / 2),
+      cornerStyle: cornerStyle,
       tint: tint,
     ),
   ];
@@ -1565,6 +1583,7 @@ List<GlassBlob> _menuBlobs({
         center: Offset(shiftedOrigin.dx, (tipY + baseY) / 2),
         radii: Size(halfW, (baseY - tipY) / 2),
         cornerRadius: halfW,
+        cornerStyle: cornerStyle,
         tint: tint,
       ),
     );
@@ -2237,9 +2256,10 @@ class TimerState extends TimerBaseState<Timer> {
           );
         }
         final base = boring.formatTime(ds);
-        return Text(
-          overflow: TextOverflow.clip,
+        return BandCenteredText(
           cs == null ? base : '$base.${cs.toString().padLeft(2, '0')}',
+          band: InkBand.digits,
+          overflow: TextOverflow.clip,
         );
       }
 
@@ -2351,7 +2371,12 @@ class TimerState extends TimerBaseState<Timer> {
 
     final Widget textPart = ignoreVerticalHeight(
       DefaultTextStyle.merge(
-        style: TextStyle(height: 0.71, fontSize: 35, fontFamily: 'DongleLatin'),
+        style: TextStyle(
+          height: 0.71,
+          fontSize: 35,
+          fontFamily: 'Dongle',
+          leadingDistribution: TextLeadingDistribution.even,
+        ),
         child: (d.title != null || _titleEditMode)
             ? titledTextPart()
             : switch (d.kind) {
@@ -2566,7 +2591,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
       final titleStyle = TextStyle(
         color: theme.colorScheme.onSurface,
         height: 0.71,
-        fontFamily: 'DongleLatin',
+        fontFamily: 'Dongle',
         fontSize: 26,
       );
       titleWidget = Padding(
@@ -3053,7 +3078,8 @@ class DragActionRing extends SignalStatefulWidget {
   /// used to close the ring if another one opens
   final Listenable? suppressionBus;
   final List<Widget> radialActivatorIcons;
-  final List<Widget>? radialActivatorLabels;
+
+  final List<String>? radialActivatorLabels;
   final List<double> radialActivatorPositions;
 
   /// which graphic this ring renders (see the blob-building branch in
@@ -3434,6 +3460,7 @@ class DragActionRingState extends State<DragActionRing>
             delay: Duration(milliseconds: 300),
             spring: SpringDescription.withDampingRatio(
               mass: 1,
+              // glass mode actually wants this faster because it's so much slower the beginning due to the use of a cubic easein
               stiffness: glassOn ? 260 : 330,
             ),
           ),
@@ -3679,6 +3706,9 @@ class DragActionRingState extends State<DragActionRing>
     final pillStyle = controlPadTextStyle.copyWith(
       color: onGlassFill,
       fontWeight: FontWeight.w700,
+      leadingDistribution: .even,
+      // height: 0.83,
+      height: 1.0,
       fontSize: 30,
     );
     // has to be kept away from the border in glass mode because the glass border is thick chaos
@@ -3710,10 +3740,9 @@ class DragActionRingState extends State<DragActionRing>
       final m = max(rawTx.abs(), rawTy.abs());
       final anchor = Alignment(-rawTx / m, -rawTy / m);
       final iconOffset = Offset.fromDirection(angle, -actionRadiusMax * 0.27);
-      final label = widget.radialActivatorLabels![index];
       final tp = TextPainter(
         text: TextSpan(
-          text: label is Text ? (label.data ?? '') : '',
+          text: widget.radialActivatorLabels![index],
           style: pillStyle,
         ),
         textDirection: TextDirection.ltr,
@@ -3771,7 +3800,13 @@ class DragActionRingState extends State<DragActionRing>
     final Color ringTint = ringColor;
     final Color pillTint = glassFill;
 
-    final double blendRadius = actionRadiusMax * (hasLabels ? 0.35 : 0.16);
+    final double blendRadius =
+        actionRadiusMax *
+        (widget.arcModeNotBlobMode
+            ? 0.35
+            : glassOn
+            ? 0.22
+            : 0.16);
 
     final List<GlassBlob> pillBlobs = [];
     final List<Widget> pillTexts = [];
@@ -3813,7 +3848,7 @@ class DragActionRingState extends State<DragActionRing>
               style: pillStyle,
               child: Padding(
                 padding: pillPadding,
-                child: widget.radialActivatorLabels![i],
+                child: BandCenteredText(widget.radialActivatorLabels![i]),
               ),
             ),
           ),
@@ -4278,12 +4313,12 @@ class TimerScreenState extends State<TimerScreen>
     radialActivatorIcons: [
       _specialTimerIcon(
         (color) => Container(
-          width: dragActionRingIconSize.width * 0.9,
-          height: dragActionRingIconSize.height * 0.9,
+          width: dragActionRingIconSize.width * 0.95,
+          height: dragActionRingIconSize.height * 0.95,
           decoration: ShapeDecoration(
             shape: StarBorder.polygon(
               sides: 8,
-              pointRounding: 0.5,
+              pointRounding: 0.3,
               rotation: 45 / 2,
             ),
             color: color,
@@ -4319,11 +4354,11 @@ class TimerScreenState extends State<TimerScreen>
       ),
     ],
     radialActivatorLabels: const [
-      Text('stopwatch'),
-      Text('cycle'),
-      Text('series'),
-      Text('simultaneous start'),
-      Text('simultaneous end'),
+      'stopwatch',
+      'cycle',
+      'series',
+      'simultaneous start',
+      'simultaneous end',
     ],
   );
   late final StreamController<void> modeActivationPulse =
@@ -5809,7 +5844,7 @@ class DragActionRingController {
   bool dragActionRingDisabled = false;
   final List<Function()> radialActivatorFunctions;
   final List<double> radialActivatorPositions;
-  final List<Widget>? radialActivatorLabels;
+  final List<String>? radialActivatorLabels;
   final List<Widget> radialActivatorIcons;
 
   /// forwarded to [DragActionRing.arcModeNotBlobMode]: the sliding arc band
@@ -6134,10 +6169,13 @@ class _NumeralButtonState extends State<NumeralButton> {
 const controlPadTextStyle = TextStyle(
   fontSize: 40,
   fontWeight: FontWeight.bold,
-  fontFamily: 'DongleLatin',
+  fontFamily: 'Dongle',
 );
 
-const double controlPadNumeralLineHeight = 1.32;
+final TextStyle controlPadNumeralTextStyle = controlPadTextStyle.copyWith(
+  height: 1.32,
+  leadingDistribution: TextLeadingDistribution.even,
+);
 
 class TimersButton extends StatefulWidget {
   /// either a String or a Widget
@@ -6225,11 +6263,10 @@ class TimersButtonState extends State<TimersButton> {
               // the button shrinks below it, then scales the glyph down to fit.
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(
+                child: BandCenteredText(
                   widget.label as String,
-                  style: controlPadTextStyle.copyWith(
-                    height: controlPadNumeralLineHeight,
-                    leadingDistribution: TextLeadingDistribution.even,
+                  band: InkBand.digits,
+                  style: controlPadNumeralTextStyle.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
@@ -6282,7 +6319,7 @@ class NumpadTypeIndicator extends StatelessWidget {
               fontSize: fontSize,
               color: color,
               fontWeight: index == 0 ? FontWeight.w900 : FontWeight.w400,
-              fontFamily: 'DongleLatin',
+              fontFamily: 'Dongle',
             ),
           );
           // : Icon(Icons.circle, size: 3.0, color: theme.colorScheme.primary);

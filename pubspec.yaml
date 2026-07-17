@@ -58,8 +58,7 @@ dependencies:
   vibration: ^3.1.8
   shadow_widget: ^0.1.1
   flutter_svg: ^2.0.9
-  # just_liquid_glass: ^0.1.0
-  just_liquid_glass: ^0.2.0
+  just_liquid_glass: ^0.3.0
   flutter_markdown_plus: ^1.0.3
   markdown: ^7.3.1
   url_launcher: ^6.3.1
@@ -133,9 +132,15 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
   fonts:
-    - family: DongleLatin
+    # - family: DongleLatin
+    #   fonts:
+    #     - asset: assets/fonts/DongleLatin-Regular.ttf
+    #       weight: 400
+    #     - asset: assets/fonts/DongleLatin-Bold.ttf
+    #       weight: 700
+    - family: Dongle
       fonts:
-        - asset: assets/fonts/DongleLatin-Regular.ttf
+        - asset: assets/fonts/Dongle-Regular.ttf
           weight: 400
-        - asset: assets/fonts/DongleLatin-Bold.ttf
+        - asset: assets/fonts/Dongle-Bold.ttf
           weight: 700

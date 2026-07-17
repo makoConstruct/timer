@@ -4874,7 +4874,7 @@ class TimerculeFlatterCyclePainter extends CustomPainter {
       timerculeIconRectWidth * 0.5 - 2 * cr,
       timerculeIconRectHeight - 2 * cr,
     );
-    final arcDiameter = 2 * cr + timerculeIconRectHeight / 2;
+    final arcDiameter = 2 * cr + timerculeIconRectHeight * 0.24;
     final height = boxSize.height + arcDiameter;
     final boxPartWidth = boxSize.width + 2 * cr + timerculeIconGap;
     final boxTop = height / 2 - boxSize.height;
@@ -6292,34 +6292,58 @@ class LinkElementBuilder extends MarkdownElementBuilder {
 
 enum InkBand { lowercase, capitals, digits }
 
-/// Ink-band centers above the baseline in em, measured from DongleLatin
-/// (upm 1000). The font's line box (hhea 670/-380) is centered on the
-/// lowercase band, so lowercase needs no correction.
+/// Ink-band centers above the baseline in em (upm 1000). Dongle and DongleLatin
+/// share identical glyph outlines, so these hold for either font.
+/// Measured from the TTFs (fontTools BoundsPen over each band's charset):
+///   band        Regular   Bold
+///   digits      0.1975    0.2025
+///   capitals    0.1875    0.1875
+///   lowercase   0.1450    0.1465
+/// The constants below are the Regular values; Bold digits run 0.0045 em
+/// hotter, which is sub-pixel at our sizes (0.2px at fontSize 40).
 const _bandCenterEm = {
   InkBand.lowercase: 0.145,
   InkBand.capitals: 0.188,
   InkBand.digits: 0.198,
 };
-const _lineBoxCenterEm = 0.145;
+
+/// The layout-box center above the baseline, in em. With
+/// TextLeadingDistribution.even this equals (ascent - descent) / 2 for any
+/// `height`, so it depends only on the font's metrics:
+///   Dongle       850/-598 (USE_TYPO_METRICS off) -> 0.126
+///   DongleLatin  670/-380 (typo metrics)         -> 0.145
+/// Must match whichever font BandCenteredText renders. Currently Dongle.
+/// Verified empirically (test/font_metrics_probe_test.dart): Flutter reports
+/// 0.126 for Dongle at every height/leadingDistribution combination we use.
+const _lineBoxCenterEm = 0.126;
+
+/// The paint-space nudge (positive = down) that moves [band]'s ink center onto
+/// the line box's center. Use this to band-center a widget that isn't a plain
+/// string (see [BandCenteredText] for those).
+double inkBandDy(InkBand band, double fontSize) =>
+    (_bandCenterEm[band]! - _lineBoxCenterEm) * fontSize;
 
 class BandCenteredText extends StatelessWidget {
   const BandCenteredText(
     this.data, {
     super.key,
-    required this.style,
+    this.style,
     this.band = InkBand.lowercase,
+    this.overflow,
   });
   final String data;
-  final TextStyle style;
+  final TextStyle? style;
   final InkBand band;
+  final TextOverflow? overflow;
 
   @override
   Widget build(BuildContext context) {
-    final dy =
-        (_bandCenterEm[band]! - _lineBoxCenterEm) * (style.fontSize ?? 14);
+    final fontSize =
+        style?.fontSize ?? DefaultTextStyle.of(context).style.fontSize ?? 14;
+    final dy = inkBandDy(band, fontSize);
     return Transform.translate(
       offset: Offset(0, dy), // digits/caps: pushes down ~0.04-0.05 em
-      child: Text(data, style: style),
+      child: Text(data, style: style, overflow: overflow),
     );
   }
 }
