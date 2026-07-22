@@ -1,11 +1,9 @@
-Hello. I'm an interaction designer who cooks a lot. I noticed a whole lot of ergonomic inefficiencies in today's popular timer apps.
-
-Outside of side-projects like this one, I spend most of my time R&Ding social technology. Though I think most of the web's problems are a result of poor infrastructure (). A better web would make it much easier for users to, for instance, build experimental extensions to shared software. This will require new languages, new databases, new protocols. Many other problems with the web are simply interface design problems, which I'm working on today.
+Hello. I'm an interaction designer who cooks a lot. This app was a very satisfying side-project, alas, possibly the last. My main project is R&Ding a better social operating system/web, and the problems with our global dialog are worsening every day, so I had better get back to focusing on that.
 
 My other output can be viewed here: [aboutmako.makopool.com](https://aboutmako.makopool.com)
 
-You should share this timer app with everyone you know, since almost everyone needs a timer app, and this is the best one [↓ dreamshrine.org/timer](https://dreamshrine.org/timer/) 
+This app's site is [dreamshrine.org/timer](https://dreamshrine.org/timer/). The site explains its advantages. You should share it with everyone you know, since almost everyone needs a timer app, and this one is the best.
 
 ![QR code linking to dreamshrine.org/timer](qr_code)
 
-The [source code](https://github.com/makoConstruct/timer) can be viewed and learned from, as it has been published under a [fair source](https://dreamshrine.org/timer/fair_source.html) license. If you see any ways the app could be improved, we will try to materially support code contributions by compensating them in proportion to the contribution.
+The [source code](https://github.com/makoConstruct/timer) is public, under a [fair source](https://dreamshrine.org/timer/fair_source.html) license.

@@ -35,8 +35,6 @@ dependencies:
   # animove:
   #   path: /home/mako/programming/animove/
   improved_wrap: ^2.0.0
-  # I was considering using this without a remote sync provider (ie, no supabase or rest or graphql), but the maintain suggested not using it at all in that case. Which seemed dumb as hell to me since brick has a bunch of other functionality that's good for persisting values to memory and sqlite but okay.
-  # brick_offline_first_with_supabase: ^2.1.0
   uuid: ^4.5.1
   # fixed to a specific older version until they fix https://github.com/simolus3/drift/issues/3682
   drift: ^2.28.2
@@ -58,7 +56,7 @@ dependencies:
   vibration: ^3.1.8
   shadow_widget: ^0.1.1
   flutter_svg: ^2.0.9
-  just_liquid_glass: ^0.3.0
+  just_liquid_glass: ^0.4.0
   flutter_markdown_plus: ^1.0.3
   markdown: ^7.3.1
   url_launcher: ^6.3.1

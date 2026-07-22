@@ -21,7 +21,6 @@ import 'package:drift/drift.dart' as drift;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show RenderProxyBox;
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter/scheduler.dart' hide Priority;
 import 'package:flutter/services.dart';
@@ -85,6 +84,7 @@ final Signal<double> timerWidgetRadius = Signal(25);
 
 const double standardLineWidth = 6;
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> globalScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
@@ -225,7 +225,7 @@ Future<void> initializeDatabase() async {
     Mobj.getOrCreate(
       buttonSpanID,
       type: DoubleType(),
-      initial: () => 64.0,
+      initial: () => 60.0,
       debugLabel: "button span",
     ),
     Mobj.getOrCreate(
@@ -1067,6 +1067,7 @@ class TimersApp extends StatefulWidget {
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late final JukeBox jukeBox;
+  late final PredictiveBackRetractor _backRetractor;
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
     jukeBox = JukeBox.create();
@@ -1080,6 +1081,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     WidgetsBinding.instance.addObserver(this);
+    _backRetractor = PredictiveBackRetractor(rootNavigatorKey);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
   }
@@ -1096,6 +1098,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _backRetractor.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -1126,6 +1129,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         Provider<JukeBox>(create: (_) => jukeBox),
       ],
       child: MaterialApp(
+        navigatorKey: rootNavigatorKey,
         scaffoldMessengerKey: globalScaffoldMessengerKey,
         title: 'timer',
         theme: makeTheme(Brightness.light),
@@ -1187,12 +1191,16 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   }
 }
 
-class TimerMenu extends StatelessWidget {
+class TimerMenu extends StatefulWidget {
   final MobjID<TimerData> timerID;
   final Rect centerOn;
   final List<Widget> items;
   final double? estimatedWidth;
   final Animation<double> animation;
+
+  /// Duration of the upward reveal. The downward (closing) swing is a separate,
+  /// faster shrink — see [_TimerMenuState._reveal] and [_kMenuDownDuration].
+  final Duration revealDuration;
   static const double buttonHeight = 40;
 
   /// Padding around each menu item's content (its icon box spans
@@ -1208,9 +1216,96 @@ class TimerMenu extends StatelessWidget {
     required this.centerOn,
     required this.items,
     required this.animation,
+    required this.revealDuration,
     required this.arrowHeight,
     this.backgroundColor,
   });
+
+  @override
+  State<TimerMenu> createState() => _TimerMenuState();
+}
+
+/// How long the menu's downward (closing) shrink takes — the [fallDuration] of
+/// the reveal's [UpDownAnimationController].
+const Duration _kMenuDownDuration = Duration(milliseconds: 200);
+
+/// A [RawDialogRoute] whose dismissal can be quicker than its entrance.
+/// [showGeneralDialog] doesn't expose [reverseTransitionDuration] (it defaults
+/// to [transitionDuration]), but the timer menu opens slowly and closes fast.
+class _MenuDialogRoute<T> extends RawDialogRoute<T> {
+  _MenuDialogRoute({
+    required super.pageBuilder,
+    required this.reverseTransitionDuration,
+    super.barrierDismissible,
+    super.barrierLabel,
+    super.barrierColor,
+    super.transitionDuration,
+    super.transitionBuilder,
+  });
+
+  @override
+  final Duration reverseTransitionDuration;
+}
+
+/// [showGeneralDialog], but on a [_MenuDialogRoute] so the reverse transition
+/// can be shorter than the forward one.
+Future<T?> _showMenuDialog<T>({
+  required BuildContext context,
+  required RoutePageBuilder pageBuilder,
+  bool barrierDismissible = false,
+  String? barrierLabel,
+  Color barrierColor = const Color(0x80000000),
+  Duration transitionDuration = const Duration(milliseconds: 200),
+  Duration? reverseTransitionDuration,
+  RouteTransitionsBuilder? transitionBuilder,
+}) {
+  return Navigator.of(context, rootNavigator: true).push<T>(
+    _MenuDialogRoute<T>(
+      pageBuilder: pageBuilder,
+      barrierDismissible: barrierDismissible,
+      barrierLabel: barrierLabel,
+      barrierColor: barrierColor,
+      transitionDuration: transitionDuration,
+      reverseTransitionDuration:
+          reverseTransitionDuration ?? transitionDuration,
+      transitionBuilder: transitionBuilder,
+    ),
+  );
+}
+
+class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
+  // The reveal is an up/down animation: the upward component opens the menu,
+  // and once it's up it holds there while the downward component plays a
+  // separate, faster closing shrink. We drive it off the host dialog's own
+  // animation status (the dialog opens on mount and reverses on dismissal).
+  late final UpDownAnimationController _reveal = UpDownAnimationController(
+    riseDuration: widget.revealDuration,
+    fallDuration: _kMenuDownDuration,
+    vsync: this,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _reveal.forward();
+    widget.animation.addStatusListener(_onParentAnimationStatus);
+  }
+
+  void _onParentAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.reverse) {
+      _reveal.reverse();
+    } else if (status == AnimationStatus.forward) {
+      _reveal.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.animation.removeStatusListener(_onParentAnimationStatus);
+    _reveal.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -1218,20 +1313,20 @@ class TimerMenu extends StatelessWidget {
         const double margin = 12;
         final theme = Theme.of(context);
         final mt = OurThemeData.fromTheme(theme);
-        // liquid-glass path: render the menu as merged glass blobs (a body plus
-        // an arrow pill fused into it) instead of the solid clip-path shape.
+        // the menu is always merged glass blobs (a body plus an arrow pill
+        // fused into it); the setting only picks glass vs flat rendering.
         final glassOn =
             Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
             (defaultTargetPlatform == TargetPlatform.iOS);
-        final backgroundColor = this.backgroundColor ?? mt.glassFill(glassOn);
+        final backgroundColor = widget.backgroundColor ?? mt.glassFill(glassOn);
         final buttonSpan = Mobj.getAlreadyLoaded(
           buttonSpanID,
           DoubleType(),
         ).value!;
-        Offset tentativeArrowCenter = topLeftManhattanCenter(centerOn);
+        Offset tentativeArrowCenter = topLeftManhattanCenter(widget.centerOn);
         // correct arrowCenter to make sure it's not too close to either side
         final minDistanceFromSide =
-            margin + backingCornerRounding * buttonSpan + arrowHeight;
+            margin + backingCornerRounding * buttonSpan + widget.arrowHeight;
         final arrowCenter = Offset(
           clampDouble(
             tentativeArrowCenter.dx,
@@ -1241,7 +1336,7 @@ class TimerMenu extends StatelessWidget {
           tentativeArrowCenter.dy,
         );
         final width = min(
-          estimatedWidth ?? buttonSpan * 3.8,
+          widget.estimatedWidth ?? buttonSpan * 3.8,
           constraints.maxWidth - margin * 2,
         );
         final left = min(
@@ -1250,21 +1345,20 @@ class TimerMenu extends StatelessWidget {
         );
         // Rounds the corners concentric with an item's icon box: half the span
         // of the icon (buttonHeight) plus its surrounding padding on both sides.
-        final cornerRounding = (buttonHeight + itemPadding * 2) / 2;
-        final top = centerOn.bottom - arrowHeight;
+        final cornerRounding =
+            (TimerMenu.buttonHeight + TimerMenu.itemPadding * 2) / 2;
+        final top = widget.centerOn.bottom - widget.arrowHeight;
         return AnimatedBuilder(
-          animation: animation,
+          animation: _reveal,
           builder: (context, child) {
-            final curve = animation.status == AnimationStatus.forward
-                ? Curves.easeOutQuart
-                : Curves.easeOut;
-            final p = animation.status == AnimationStatus.forward
-                ? animation.value
-                // so that it's effectively shorter on the reverse traversal
-                : unlerpUnit(0.5, 1, animation.value);
-            final revealProgress = curve.transform(unlerpUnit(0, 0.7, p));
+            final (upp, downp) = _reveal.value;
+            // The upward reveal; it holds fully open (up stays at 1) while the
+            // downward shrink plays, so closing is the shrink rather than an
+            // un-reveal.
+            final revealProgress = unlerpUnit(0, 0.7, upp);
+            final downwardProgress = downp;
             final contentOpacity = Curves.easeInOut.transform(
-              unlerpUnit(0.37, 1, p),
+              unlerpUnit(0.35, 1, upp),
             );
             // happens to make the origin be the center of the clockface
             final origin = arrowCenter - Offset(left, top);
@@ -1277,7 +1371,7 @@ class TimerMenu extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               padEdge: TimerMenu.itemPadding,
               padSibling: 0,
-              children: items.toList(),
+              children: widget.items.toList(),
             );
             // The glass body morphs out of [origin], which sits above the
             // content (roughly the timer's height up), and its arrow tip and
@@ -1285,37 +1379,22 @@ class TimerMenu extends StatelessWidget {
             // its content box. Give the glass box top headroom for that
             // excursion plus the bevel, and lift the box by the same amount so
             // the content still lands at [top].
-            final double topHeadroom = glassOn
-                ? max(0.0, -origin.dy) + _glassMenuTopPad
-                : 0;
-            CornerStyle cornerStyle = glassOn ? .continuous : .circular;
-            final Widget body = glassOn
-                ? _GlassMenuBody(
-                    progress: revealProgress,
-                    opacity: contentOpacity,
-                    origin: origin,
-                    cornerRounding:
-                        cornerRounding *
-                        (cornerStyle == .continuous ? 1.62 : 1),
-                    arrowHeight: arrowHeight,
-                    width: width,
-                    topInset: topHeadroom,
-                    tint: backgroundColor,
-                    cornerStyle: cornerStyle,
-                    child: column,
-                  )
-                : ClipPath(
-                    clipper: _MenuRevealClipper(
-                      progress: revealProgress,
-                      origin: origin,
-                      cornerRounding: cornerRounding,
-                      arrowHeight: arrowHeight,
-                    ),
-                    child: Container(
-                      color: backgroundColor,
-                      child: Opacity(opacity: contentOpacity, child: column),
-                    ),
-                  );
+            final double topHeadroom = max(0.0, -origin.dy) + _glassMenuTopPad;
+            double cornerStyle = glassOn ? 1 : 0;
+            final Widget body = _buildGlassBody(
+              mt: mt,
+              glassOn: glassOn,
+              progress: revealProgress,
+              downwardProgress: downwardProgress,
+              opacity: contentOpacity,
+              origin: origin,
+              cornerRounding: cornerRounding * lerp(1, 1.62, cornerStyle),
+              width: width,
+              topInset: topHeadroom,
+              tint: backgroundColor,
+              cornerStyle: cornerStyle,
+              child: column,
+            );
             return Stack(
               children: [
                 Positioned(
@@ -1331,303 +1410,148 @@ class TimerMenu extends StatelessWidget {
       },
     );
   }
-}
 
-class _MenuRevealClipper extends CustomClipper<Path> {
-  final double progress;
-  final Offset origin;
-  final double cornerRounding;
-  final double arrowHeight;
-
-  _MenuRevealClipper({
-    required this.progress,
-    required this.origin,
-    required this.cornerRounding,
-    required this.arrowHeight,
-  });
-
-  @override
-  Path getClip(Size size) {
-    // morphs from intermediateRect to targetRect
-    // it's complicated because it was arrived at by iterating towards something that felt right
-    Size targetRectSize = Size(size.width, size.height - arrowHeight);
-    // should start already being wide enough to be flush with the arrow bottom
-    final targetRect = RRect.fromRectAndRadius(
-      Offset(0, arrowHeight) & targetRectSize,
-      Radius.circular(cornerRounding),
-    );
-    final arrowProgress = Curves.easeOut.transform(
-      unlerpUnit(0.15, 0.7, progress),
-    );
-
-    final lerpr = RRect.lerp(
-      RRect.fromRectAndRadius(
-        Rect.fromCircle(center: origin, radius: 0),
-        Radius.circular(lerp(size.width / 2, cornerRounding, progress)),
+  /// The menu body: merged [GlassBlob]s revealing out of [origin], rendered as
+  /// liquid glass or (when [glassOn] is false) a flat fill of [tint]. The
+  /// arrow/speech nub is a narrow pill fused into the body across the layer's
+  /// smooth-min bridge (its "viscosity", i.e. [GlassOptions.blendRadius]).
+  Widget _buildGlassBody({
+    required OurThemeData mt,
+    required bool glassOn,
+    required double progress,
+    required double downwardProgress,
+    required double opacity,
+    required Offset origin,
+    required double cornerRounding,
+    required double width,
+    // Transparent headroom added above the content so blobs (which reveal
+    // from above y=0) and their glass bevel aren't clipped; blob geometry is
+    // shifted down by this and the whole box is lifted by it above.
+    required double topInset,
+    required Color tint,
+    required double cornerStyle,
+    required Widget child,
+  }) {
+    Widget result = SizedBox(
+      width: width,
+      // pad the content down by the headroom so the box extends above it; the
+      // content's own height is the layer size minus this padding, recovered in
+      // the blob builder below.
+      child: Padding(
+        padding: EdgeInsets.only(top: topInset),
+        child: child,
       ),
-      targetRect,
-      progress,
-    )!;
+    );
+    result = Opacity(opacity: opacity, child: result);
 
-    Path arrowPath = Path();
-    {
-      final ah = arrowHeight * arrowProgress;
-      final w = arrowHeight * 2 * arrowProgress;
-      final h = ah;
-      final stemw = w * 0.2;
-      final basew = (w - stemw) / 2;
-      final minHeight = basew + stemw / 2;
-      final double additionalHeight = max(h - minHeight, 0);
-      arrowPath.moveTo(origin.dx - w / 2, arrowHeight);
-      arrowPath.relativeArcToPoint(
-        Offset(basew, -basew),
-        radius: Radius.circular(basew),
-        rotation: pi / 2,
-        clockwise: false,
-      );
-      arrowPath.relativeLineTo(0, additionalHeight);
-      arrowPath.relativeArcToPoint(
-        Offset(stemw, 0),
-        radius: Radius.circular(stemw / 2),
-        rotation: pi,
-        clockwise: true,
-      );
-      arrowPath.relativeLineTo(0, -additionalHeight);
-      arrowPath.relativeArcToPoint(
-        Offset(basew, basew),
-        radius: Radius.circular(basew),
-        rotation: pi / 2,
-        clockwise: false,
-      );
-      arrowPath.close();
-    }
+    final p = Curves.easeOut.transform(progress * (1 - downwardProgress));
 
-    return Path.combine(
-      PathOperation.union,
-      Path()..addRRect(lerpr),
-      arrowPath,
+    final deblubbingp = Curves.easeOut.transform(unlerpUnit(0.16, 1, p));
+    final blendRadius = widget.arrowHeight * lerp(4, 1.15, deblubbingp);
+    final bevelThickness = lerp(30, 19, deblubbingp);
+
+    return GlassLayer(
+      options: ourGlassOptions(
+        mode: glassOn ? GlassMode.glass : GlassMode.flat,
+        blendRadius: blendRadius,
+        bevelThickness: bevelThickness,
+        blurRadius: mt.glassBlurRadius,
+        edgeTint: mt.edgeTint,
+      ),
+      blobs: const [],
+      // Blobs are placed in the content's coordinate space, so they need the
+      // content height. The layer sizes itself to [result], so at paint time
+      // its size is (width, topInset + contentHeight) — the height falls out
+      // synchronously, no measure round-trip and no first-frame pop.
+      blobBuilder: (size) {
+        final height = size.height - topInset;
+        final earlyBlubp = Curves.easeOut.transform(unlerpUnit(0, 0.65, p));
+        final shiftedOrigin = origin.translate(
+          0,
+          widget.arrowHeight + topInset,
+        );
+        final target =
+            Offset(0, widget.arrowHeight + topInset) &
+            Size(width, height - widget.arrowHeight);
+        var span = lerpOffset(
+          Offset.zero,
+          lerpOffset(
+            (height * 0.5).offset,
+            Offset(width, height - widget.arrowHeight),
+            unlerpUnit(0.4, 1, p),
+          ),
+          earlyBlubp,
+        );
+        final body = Rect.fromCenter(
+          center: lerpOffset(shiftedOrigin, target.center, earlyBlubp),
+          width: span.dx,
+          height: span.dy,
+        );
+        final (blubArrowPositionBase, blubArrowPositionNorm) = ovalEdgeArrow(
+          body.center,
+          span,
+          origin,
+        );
+        final (rectArrowPositionBase, rectArrowPositionNorm) = rectEdgeArrow(
+          body,
+          origin,
+        );
+        final arrowBase = lerpOffset(
+          blubArrowPositionBase,
+          rectArrowPositionBase,
+          deblubbingp,
+        );
+        final arrowNorm = lerpOffset(
+          blubArrowPositionNorm,
+          rectArrowPositionNorm,
+          deblubbingp,
+        );
+        final blobs = <GlassBlob>[];
+        if (!body.isEmpty) {
+          final corner = lerp(width / 2, cornerRounding, deblubbingp);
+          blobs.add(
+            GlassBlob(
+              center: body.center,
+              radii: Size(body.width / 2, body.height / 2),
+              cornerRadius: corner,
+              cornerContinuity: lerp(0, cornerStyle, deblubbingp),
+              tint: tint,
+            ),
+          );
+          // a narrow vertical pill poking up from the body top toward the
+          // origin; the smooth-min bridge tapers it into the body as the speech
+          // nub.
+          final arrowProgress = Curves.easeOut.transform(
+            unlerpUnit(0.0, 0.3, p),
+          );
+          // the nub tucks away first, over the opening 0.17 of the downswing.
+          final thickness = widget.arrowHeight * 0.52;
+          final ah =
+              (widget.arrowHeight - thickness) *
+              arrowProgress *
+              (1 - unlerpUnit(0, 0.7, downwardProgress));
+          if (ah > 0.5) {
+            blobs.add(
+              GlassBlob.line(
+                arrowBase,
+                arrowBase + arrowNorm * ah,
+                thickness: thickness,
+                cornerContinuity: 0,
+                tint: tint,
+              ),
+            );
+          }
+        }
+        return blobs;
+      },
+      child: result,
     );
   }
-
-  @override
-  bool shouldReclip(_MenuRevealClipper old) =>
-      old.progress != progress || old.origin != origin;
 }
 
-/// The liquid-glass rendering of the timer menu: the same reveal as
-/// [_MenuRevealClipper], but as merged [GlassBlob]s instead of a clip path. The
-/// arrow/speech nub the clip path drew by hand is reproduced here by a narrow
-/// pill fused into the body across the layer's smooth-min bridge (its
-/// "viscosity", i.e. [GlassOptions.blendRadius]).
-///
-/// The blobs are laid out in the content's own coordinate space, so it needs
-/// the content height, which is only known after layout — hence the
-/// [_MeasureSize] one-shot. Until then the child renders unmasked, which is
-/// invisible because the reveal starts fully transparent.
 /// Extra transparent space above the content in the glass menu, on top of the
 /// origin excursion — room for the arrow tip's bevel/shine so it isn't clipped.
 const double _glassMenuTopPad = 32;
-
-class _GlassMenuBody extends StatefulWidget {
-  const _GlassMenuBody({
-    required this.progress,
-    required this.opacity,
-    required this.origin,
-    required this.cornerRounding,
-    required this.arrowHeight,
-    required this.width,
-    required this.topInset,
-    required this.tint,
-    required this.cornerStyle,
-    required this.child,
-  });
-
-  final double progress;
-  final double opacity;
-  final Offset origin;
-  final double cornerRounding;
-  final double arrowHeight;
-  final double width;
-
-  /// Corner curvature for the glass blobs. When null it defaults to the
-  /// platform convention: continuous ("squircle") corners on iOS, circular
-  /// elsewhere.
-  final CornerStyle? cornerStyle;
-
-  /// Transparent headroom added above the content so blobs (which reveal from
-  /// above y=0) and their glass bevel aren't clipped; blob geometry is shifted
-  /// down by this and the whole box is lifted by it in [TimerMenu].
-  final double topInset;
-  final Color tint;
-  final Widget child;
-
-  @override
-  State<_GlassMenuBody> createState() => _GlassMenuBodyState();
-}
-
-class _GlassMenuBodyState extends State<_GlassMenuBody> {
-  double? _contentHeight;
-
-  @override
-  Widget build(BuildContext context) {
-    final content = SizedBox(
-      width: widget.width,
-      // pad the content down by the headroom so the box extends above it; the
-      // measured height stays the content's own (padding is outside the probe).
-      child: Padding(
-        padding: EdgeInsets.only(top: widget.topInset),
-        child: _MeasureSize(
-          onChange: (size) {
-            if (size.height != _contentHeight) {
-              setState(() => _contentHeight = size.height);
-            }
-          },
-          child: widget.child,
-        ),
-      ),
-    );
-    final faded = Opacity(opacity: widget.opacity, child: content);
-    final height = _contentHeight;
-    if (height == null) return faded;
-
-    // the pill fuses into the body across this bridge (the "viscosity"),
-    // reconstructing the speech nub the clip path used to draw.
-    final blendRadius = widget.arrowHeight * 1.15;
-    // widget.tint is the theme's translucent glassColor, so its alpha already
-    // lets the refracted backdrop read through — used as-is.
-    final cornerStyle =
-        widget.cornerStyle ??
-        (defaultTargetPlatform == TargetPlatform.iOS
-            ? CornerStyle.continuous
-            : CornerStyle.circular);
-    final blobs = _menuBlobs(
-      size: Size(widget.width, height),
-      origin: widget.origin,
-      cornerRounding: widget.cornerRounding,
-      arrowHeight: widget.arrowHeight,
-      progress: widget.progress,
-      topInset: widget.topInset,
-      tint: widget.tint,
-      blendRadius: blendRadius,
-      cornerStyle: cornerStyle,
-    );
-    if (blobs.isEmpty) return faded;
-
-    // final glassiness = widget.progress;
-    final glassiness = 1.0;
-    final mt = OurThemeData.fromContext(context);
-    return GlassLayer(
-      options: glassLerpedToFlat(
-        ourGlassOptions(
-          blendRadius: blendRadius,
-          blurRadius: mt.glassBlurRadius,
-          edgeTint: mt.edgeTint,
-        ),
-        glassiness,
-      ),
-      blobs: blobs,
-      child: faded,
-    );
-  }
-}
-
-/// Blobs for the glass menu: a rounded-rect body that morphs out from the origin
-/// (mirroring [_MenuRevealClipper]'s [RRect] lerp) and a narrow arrow pill that
-/// grows up from the body top toward the origin, fused into the body by the
-/// layer's [GlassOptions.blendRadius].
-List<GlassBlob> _menuBlobs({
-  required Size size,
-  required Offset origin,
-  required double cornerRounding,
-  required double arrowHeight,
-  required double progress,
-  required double topInset,
-  required Color tint,
-  required double blendRadius,
-  required CornerStyle cornerStyle,
-}) {
-  // everything is shifted down by [topInset]: the content is padded down by the
-  // same amount so the box has headroom above for the reveal excursion and bevel.
-  final shiftedOrigin = origin.translate(0, topInset);
-  final target =
-      Offset(0, arrowHeight + topInset) &
-      Size(size.width, size.height - arrowHeight);
-  final body = Rect.lerp(
-    Rect.fromCenter(center: shiftedOrigin, width: 0, height: 0),
-    target,
-    progress,
-  )!;
-  if (body.isEmpty) return const [];
-  final corner = lerp(size.width / 2, cornerRounding, progress);
-  final blobs = <GlassBlob>[
-    GlassBlob(
-      center: body.center,
-      radii: Size(body.width / 2, body.height / 2),
-      cornerRadius: min(corner, min(body.width, body.height) / 2),
-      cornerStyle: cornerStyle,
-      tint: tint,
-    ),
-  ];
-  // a narrow vertical pill poking up from the body top toward the origin; the
-  // smooth-min bridge tapers it into the body as the speech nub.
-  final arrowProgress = Curves.easeOut.transform(
-    unlerpUnit(0.15, 0.7, progress),
-  );
-  final ah = arrowHeight * arrowProgress;
-  if (ah > 0.5) {
-    final halfW = arrowHeight * 0.26;
-    final tipY = arrowHeight + topInset - ah; // near the box top at full reveal
-    final baseY = arrowHeight + topInset + halfW; // dip into the body to fuse
-    blobs.add(
-      GlassBlob(
-        center: Offset(shiftedOrigin.dx, (tipY + baseY) / 2),
-        radii: Size(halfW, (baseY - tipY) / 2),
-        cornerRadius: halfW,
-        cornerStyle: cornerStyle,
-        tint: tint,
-      ),
-    );
-  }
-  return blobs;
-}
-
-/// Reports its child's laid-out size (once known and on change) so a parent can
-/// build geometry from it. The callback fires in a post-frame callback since it
-/// drives `setState`.
-class _MeasureSize extends SingleChildRenderObjectWidget {
-  const _MeasureSize({required this.onChange, required Widget super.child});
-
-  final ValueChanged<Size> onChange;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _MeasureSizeRenderObject(onChange);
-
-  @override
-  void updateRenderObject(
-    BuildContext context,
-    _MeasureSizeRenderObject renderObject,
-  ) {
-    renderObject.onChange = onChange;
-  }
-}
-
-class _MeasureSizeRenderObject extends RenderProxyBox {
-  _MeasureSizeRenderObject(this.onChange);
-
-  ValueChanged<Size> onChange;
-  Size? _reported;
-
-  @override
-  void performLayout() {
-    super.performLayout();
-    final s = child?.size ?? Size.zero;
-    if (s != _reported) {
-      _reported = s;
-      SchedulerBinding.instance.addPostFrameCallback((_) => onChange(s));
-    }
-  }
-}
 
 abstract class TimerBase extends SignalStatefulWidget {
   final Mobj<TimerData> mobj;
@@ -2195,7 +2119,6 @@ class TimerState extends TimerBaseState<Timer> {
           _selectedUnderlineAnimation.value,
         );
         final underlineHeight = makoLineThickness;
-        final gap = 3.0;
 
         // the underline form
         // return Positioned(
@@ -2394,7 +2317,7 @@ class TimerState extends TimerBaseState<Timer> {
 
     final playIconRadius = 10;
     Offset playIconPos =
-        Offset(clockRadius, clockRadius) +
+        clockRadius.offset +
         Offset.fromDirection(-pi / 4, clockRadius + 8 + playIconRadius);
 
     final stopwatchPulse = d.transpired % 1;
@@ -2827,7 +2750,7 @@ class FadingDial extends AnimatedWidget {
   Widget build(BuildContext context) {
     final vv = visibility.value;
     return FractionalTranslation(
-      translation: Offset(-0.5, -0.5),
+      translation: (-0.5).offset,
       child: Transform.rotate(
         angle: angle,
         child: Opacity(
@@ -3226,7 +3149,7 @@ class DragActionRingState extends State<DragActionRing>
   }
 
   late final AnimationController optionActivationAnimation =
-      AnimationController(vsync: this, duration: Duration(milliseconds: 200));
+      AnimationController(vsync: this, duration: Duration(milliseconds: 400));
   late final AnimationController optionConsiderationAnimation =
       AnimationController(vsync: this, duration: Duration(milliseconds: 200));
 
@@ -3690,7 +3613,7 @@ class DragActionRingState extends State<DragActionRing>
           left: o.dx,
           top: o.dy,
           child: FractionalTranslation(
-            translation: Offset(-0.5, -0.5),
+            translation: (-0.5).offset,
             child: dragChoiceWidget(widget.radialActivatorIcons[i]),
           ),
         );
@@ -3712,7 +3635,7 @@ class DragActionRingState extends State<DragActionRing>
       fontSize: 30,
     );
     // has to be kept away from the border in glass mode because the glass border is thick chaos
-    double glassAddition = glassOn ? 3 : 0;
+    double glassAddition = glassOn ? 6 : 0;
     final pillPadding = EdgeInsets.symmetric(
       horizontal: 12 + glassAddition,
       vertical: 4 + glassAddition,
@@ -3754,7 +3677,7 @@ class DragActionRingState extends State<DragActionRing>
       );
       // FractionalTranslation pins the box's inner corner at labelPos; recover
       // the box top-left in the ring-centred frame.
-      final frac = (Offset(rawTx / m, rawTy / m) - const Offset(1, 1)) / 2;
+      final frac = (Offset(rawTx / m, rawTy / m) - 1.0.offset) / 2;
       final relTopLeft =
           labelPos + Offset(frac.dx * size.width, frac.dy * size.height);
       return (
@@ -3786,7 +3709,7 @@ class DragActionRingState extends State<DragActionRing>
       );
     }
     final double totalSpan = 2 * halfSpan;
-    final center = Offset(halfSpan, halfSpan);
+    final center = halfSpan.offset;
 
     // the icons sitting on the ring surface.
     final Widget ringIcons = Transform.translate(
@@ -3948,13 +3871,11 @@ class DragActionRingState extends State<DragActionRing>
           Offset(_focalXSpring.value, _focalYSpring.value) * radialRadiusMax;
       final growthp = Curves.easeOut.transform(baseGrow);
       // ensure the rise of the radius is always as fast as it is for non-glass (this also accidentally accelerates fall for glass, but that's okay)
-      // dilate nonGlassBlobRise too, so this normalized breakpoint stays put
-      // (and the blob rise slows with everything else) under devtools' slow-animations.
       final double adjustedBlobRiseEndp =
           nonGlassBlobRise *
           timeDilation /
           _upDownCell!.peek().riseDuration.inMilliseconds;
-      final leafp = unlerpUnit(adjustedBlobRiseEndp * 0.7, 1, growthp);
+      final leafp = unlerpUnit(adjustedBlobRiseEndp * 0.65, 1, growthp);
       final selectedRadius = actionRadius;
       // how committed a choice is: pinned at 1 while a choice is held (including
       // across a switch between items), driven by swipep/releasep.
@@ -3975,21 +3896,20 @@ class DragActionRingState extends State<DragActionRing>
             tint: ringTint,
           ),
       ];
+      final allShowingp =
+          Curves.easeOut.transform(leafp) *
+          Curves.easeOut.transform(1 - selectp);
       for (int i = 0; i < angles.length; i++) {
-        final allShowingp =
-            Curves.easeOut.transform(leafp) *
-            Curves.easeOut.transform(1 - selectp);
         // protrudes if all leaves are showing or if this one is showing.
         final protrusion = lerp(
           0.4,
           1,
-
           1 - (1 - allShowingp) * (1 - selections[i]),
         );
         // release recede applied to the highlight the same way the discs do it.
         final sel =
             selections[i] *
-            (1 - Curves.easeOut.transform(unlerpUnit(0.65, 1, releasep)));
+            (1 - Curves.easeOut.transform(unlerpUnit(0.76, 1, releasep)));
         final r = lerp(actionRadius * allShowingp, selectedRadius, sel);
         // grow out of the focal toward this item's ring slot, at distance
         // centerRadius (or sitting right on the slot when it's within reach).
@@ -4038,7 +3958,7 @@ class DragActionRingState extends State<DragActionRing>
     // there's nothing more to stack here.
     return IgnorePointer(
       child: FractionalTranslation(
-        translation: Offset(-0.5, -0.5),
+        translation: (-0.5).offset,
         child: clippedRing,
       ),
     );
@@ -4600,10 +4520,6 @@ class TimerScreenState extends State<TimerScreen>
     Color inkColor = td.isComposite
         ? foregroundColor
         : TimerBaseState.backgroundColor(td.hue);
-    // in glass mode the glass body supplies the tinted surface, so the tiles
-    // themselves stay transparent and let the refraction read through; the solid
-    // menu keeps its opaque tile fill.
-    final tileBackgroundColor = glassOn ? Colors.transparent : backgroundColor;
     Widget menuItem(
       BuildContext context,
       bool isRightHanded,
@@ -4613,7 +4529,7 @@ class TimerScreenState extends State<TimerScreen>
       TextStyle? labelStyle,
     }) {
       return InkButton(
-        backgroundColor: tileBackgroundColor,
+        backgroundColor: Colors.transparent,
         inkColor: inkColor.withValues(alpha: 0.6),
         inkColorFaded: inkColor.withValues(alpha: 0.3),
         onTapUpGlobalPosition: action,
@@ -4656,13 +4572,16 @@ class TimerScreenState extends State<TimerScreen>
     double totalVisibleMenuItemHeight =
         TimerMenu.buttonHeight * 5 + 14 + menuItemPadding * 2;
 
-    showGeneralDialog(
+    _showMenuDialog(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Timer menu',
       barrierColor: mt.lowestBackColor.withAlpha(0),
       // glass mode reveals the menu body a touch slower.
-      transitionDuration: Duration(milliseconds: glassOn ? 670 : 370),
+      transitionDuration: Duration(milliseconds: glassOn ? 400 : 280),
+      // The downward swing is a quick shrink; keep the dialog (and its barrier)
+      // alive exactly that long so it unmounts as the shrink finishes.
+      reverseTransitionDuration: _kMenuDownDuration,
       transitionBuilder: (context, animation, secondaryAnimation, child) =>
           child,
       pageBuilder: (context, animation, secondaryAnimation) {
@@ -4677,6 +4596,7 @@ class TimerScreenState extends State<TimerScreen>
               estimatedWidth: totalVisibleMenuItemHeight,
               backgroundColor: backgroundColor,
               animation: animation,
+              revealDuration: Duration(milliseconds: glassOn ? 670 : 370),
               items: [
                 menuItem(
                   context,
@@ -4955,7 +4875,7 @@ class TimerScreenState extends State<TimerScreen>
         return positionedAt(
           buttonScaleDialCenter.value!,
           FractionalTranslation(
-            translation: Offset(-0.5, -0.5),
+            translation: (-0.5).offset,
             child: AnimatedBuilder(
               animation: Listenable.merge([
                 buttonScaleDialAnimation,
@@ -5174,7 +5094,7 @@ class TimerScreenState extends State<TimerScreen>
       }),
       Positioned.fromRect(
         rect: controlGridBound(
-          numeralPartAnchor + (padLandscape ? Offset(-1, 0) : Offset(0, 3)),
+          numeralPartAnchor + (padLandscape ? Offset(-1, 2) : Offset(0, 3)),
           Size(1, 1),
         ),
         child: NumeralButton(
@@ -5235,7 +5155,7 @@ class TimerScreenState extends State<TimerScreen>
     }
 
     final editBackspaceButton = editFadeButton(
-      padLandscape ? Offset(-4, 1) : Offset(-2, 3),
+      padLandscape ? Offset(-4, 0) : Offset(-2, 3),
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(
@@ -5251,7 +5171,7 @@ class TimerScreenState extends State<TimerScreen>
       0,
     );
     final editPlayButton = editFadeButton(
-      padLandscape ? Offset(-4, 2) : Offset(-1, 3),
+      padLandscape ? Offset(-4, 1) : Offset(-1, 3),
       TimersButton(
         label: proportionedIcon(
           iconScaledToPip(
@@ -6333,7 +6253,7 @@ class NumpadTypeIndicator extends StatelessWidget {
             left: cellSpan / 2 + x * cellSpan,
             top: cellSpan / 2 + py * cellSpan,
             child: FractionalTranslation(
-              translation: Offset(-0.5, -0.5),
+              translation: (-0.5).offset,
               child: Transform.scale(scale: fontScale, child: widg),
             ),
           );
@@ -7596,7 +7516,9 @@ class _AboutScreenState extends State<AboutScreen> {
                 TextSpan(
                   style: theme.textTheme.bodyMedium,
                   children: [
-                    const TextSpan(text: 'See also: '),
+                    const TextSpan(
+                      text: 'Do you want to know more? If so, you may read: ',
+                    ),
                     TextSpan(
                       text: 'The Full Story of The Making of This App',
                       style: TextStyle(
@@ -8120,27 +8042,30 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
     handednessKey,
     padKey,
     ringModeKey,
-    if (Platform.isAndroid) notifKey,
-    if (Platform.isAndroid) batteryOptimKey,
+    if (Platform.isAndroid) permissionsKey,
     skipKey,
   ];
   late Signal<bool?> numpadOrientation = Signal(null);
   late Signal<bool?> ringMode = Signal(null);
-  late List<Signal<dynamic>> allChoices = [
+  late List<ReadonlySignal<dynamic>> allChoices = [
     setIsRightHanded,
     numpadOrientation,
     ringMode,
-    if (Platform.isAndroid) notifGranted,
-    if (Platform.isAndroid) batteryOptimGranted,
+    if (Platform.isAndroid) permissionsGranted,
   ];
   late Signal<bool> allChoicesCompleted = Signal(false);
   async.Timer? autoMoveOn;
   late Signal<bool?> notifGranted = Signal(null);
   bool _notifWasAlreadyGranted = false;
-  final GlobalKey notifKey = GlobalKey();
   late Signal<bool?> batteryOptimGranted = Signal(null);
   bool _batteryOptimWasAlreadyGranted = false;
-  final GlobalKey batteryOptimKey = GlobalKey();
+  final GlobalKey permissionsKey = GlobalKey();
+  // both permissions must be granted before this onboarding step counts as done
+  late final Computed<bool?> permissionsGranted = Computed(
+    () => notifGranted.value == true && batteryOptimGranted.value == true
+        ? true
+        : null,
+  );
 
   @override
   void initState() {
@@ -8198,7 +8123,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
     final granted = await ForegroundControl.requestNotificationPermission();
     notifGranted.value = granted ? true : null;
     if (granted) {
-      inputCompleted(notifKey);
+      inputCompleted(permissionsKey);
     }
   }
 
@@ -8212,7 +8137,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
     final granted = await ForegroundControl.requestIgnoreBatteryOptimization();
     batteryOptimGranted.value = granted ? true : null;
     if (granted) {
-      inputCompleted(batteryOptimKey);
+      inputCompleted(permissionsKey);
     }
   }
 
@@ -8225,6 +8150,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
     allChoicesCompleted.dispose();
     notifGranted.dispose();
     batteryOptimGranted.dispose();
+    permissionsGranted.dispose();
     super.dispose();
   }
 
@@ -8611,13 +8537,13 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                     ),
                   ),
                   RoundedSectionSliver(
+                    key: permissionsKey,
                     color: contentBackground,
                     margin: sectionMargin,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Row(
-                          key: notifKey,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: reverseIfNot(isRightHanded.value ?? true, [
                             Flexible(
@@ -8673,7 +8599,6 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                         ),
                         SizedBox(height: standardSpacing),
                         Row(
-                          key: batteryOptimKey,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: reverseIfNot(isRightHanded.value ?? true, [
                             Flexible(

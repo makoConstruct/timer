@@ -706,7 +706,24 @@ Offset mirrorx(Offset v) {
 
 Offset sizeToOffset(Size size) => Offset(size.width, size.height);
 
+Offset offsetAbs(Offset v) => Offset(v.dx.abs(), v.dy.abs());
+
 Size offsetToSize(Offset v) => Size(v.dx, v.dy);
+
+extension OffsetBoth on num {
+  Offset get offset => Offset(toDouble(), toDouble());
+}
+
+extension NormableOffset on Offset {
+  Offset? get norm {
+    final l = distance;
+    if (l == 0) {
+      return null;
+    } else {
+      return this / l;
+    }
+  }
+}
 
 /// Calculates the shortest angle distance between two angles in radians.
 double shortestAngleDistance(double from, double to) {
@@ -767,6 +784,61 @@ Offset lerpOffset(Offset a, Offset b, double t) {
 
 double softmax(double a, double b) {
   return 1 - (1 - a) * (1 - b);
+}
+
+/// Point on the oval (centered at [center], full width/height [span]) whose
+/// outward normal points toward [towards], plus that unit normal.
+(Offset, Offset) ovalEdgeArrow(Offset center, Offset span, Offset towards) {
+  final a = span.dx / 2, b = span.dy / 2;
+  final d = towards - center;
+
+  // P(t) = center + (a·cos t, b·sin t); outward normal ∝ (cos t / a, sin t / b).
+  // Want (d − P) ∥ normal, i.e. cross product zero:
+  //   f(t) = a·dx·sin t − b·dy·cos t + (b² − a²)·sin t·cos t = 0
+  // Initial guess is exact when relativeTo is far away, and on the near side.
+  double t = atan2(b * d.dy, a * d.dx);
+  for (var i = 0; i < 8; i++) {
+    final st = sin(t), ct = cos(t);
+    final f = a * d.dx * st - b * d.dy * ct + (b * b - a * a) * st * ct;
+    final df =
+        a * d.dx * ct + b * d.dy * st + (b * b - a * a) * (ct * ct - st * st);
+    if (df == 0) break;
+    final step = f / df;
+    t -= step;
+    if (step.abs() < 1e-7) break;
+  }
+
+  final st = sin(t), ct = cos(t);
+  final point = center + Offset(a * ct, b * st);
+  final normal = Offset(ct / a, st / b);
+  return (point, normal / normal.distance);
+}
+
+(Offset, Offset) rectEdgeArrow(Rect r, Offset towards) {
+  final Offset rs = offsetAbs(sizeToOffset(r.size) / 2);
+  final Offset tr = towards - r.center;
+  if (offsetAbs(tr).dx > rs.dx && offsetAbs(tr).dy > rs.dy) {
+    //then its in the corners
+    final nearestCorner =
+        r.center + Offset(rs.dx * tr.dx.sign, rs.dy * tr.dy.sign);
+    final t = towards - nearestCorner;
+    return (nearestCorner, t.norm ?? tr.norm!);
+  } else {
+    if (tr == Offset.zero) return (r.center, const Offset(1, 0));
+    // How far along tr until we cross each edge pair; the nearer pair wins. A zero
+    // component gives an infinite crossing distance, so the other axis decides.
+    final tx = (r.width / 2) / tr.dx.abs();
+    final ty = (r.height / 2) / tr.dy.abs();
+    return tx <= ty
+        ? (
+            Offset(r.center.dx + rs.dx * tr.dx.sign, towards.dy),
+            Offset(tr.dx.sign, 0),
+          )
+        : (
+            Offset(towards.dx, r.center.dy + rs.dy * tr.dy.sign),
+            Offset(0, tr.dy.sign),
+          );
+  }
 }
 
 /// ceilab is better for interpollation but in most cases it doesn't matter and also the cielab library I tried seemed to have compilation errros in it
@@ -2220,6 +2292,11 @@ class CircularRevealRoute<T> extends PageRoute<T>
   @override
   Widget buildContent(BuildContext context) => builder(context);
 
+  /// The transition controller, re-exposed (it's protected) so
+  /// [PredictiveBackRetractor] can play the reveal backwards during the back
+  /// gesture.
+  AnimationController get transitionController => controller!;
+
   @override
   bool get opaque => animation?.isCompleted ?? false;
 
@@ -2282,6 +2359,113 @@ class CircularRevealRoute<T> extends PageRoute<T>
       },
       child: child,
     );
+  }
+}
+
+/// Android predictive back: once the system back gesture travels past
+/// [_retractionThreshold], the top [CircularRevealRoute]'s pop transition
+/// starts playing at its normal rate — before the finger lifts — and dragging
+/// back below the threshold (toward the screen edge) reverses it, re-revealing
+/// the screen. Committing the gesture then does the actual pop, whose
+/// transition continues from wherever the early animation had gotten
+/// (instantly, if it already finished); cancelling re-reveals.
+///
+/// Doesn't claim the gesture for the root route (the system's back-to-home
+/// animation should play there), for routes a [PopScope] is blocking (their
+/// pop-intercepting callback still runs on commit, as before), or for non-
+/// [CircularRevealRoute]s like dialogs. Requires
+/// `android:enableOnBackInvokedCallback="true"` in the manifest; on platforms
+/// without predictive back the gesture events never arrive and back behaves as
+/// before.
+class PredictiveBackRetractor with WidgetsBindingObserver {
+  final GlobalKey<NavigatorState> navigatorKey;
+  PredictiveBackRetractor(this.navigatorKey) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+  }
+
+  CircularRevealRoute<dynamic>? _route;
+
+  /// The gesture progress past which the retraction plays. Kept small because
+  /// the system's progress only reaches 1.0 with the thumb clear across the
+  /// screen, while real back gestures barely travel.
+  static const double _retractionThreshold = 0.07;
+
+  @override
+  bool handleStartBackGesture(PredictiveBackEvent backEvent) {
+    final navigator = navigatorKey.currentState;
+    if (navigator == null || navigator.userGestureInProgress) return false;
+    // there's no public "top route" accessor; this predicate-peek is the
+    // conventional workaround (popUntil never pops when we return true)
+    Route<dynamic>? top;
+    navigator.popUntil((route) {
+      top = route;
+      return true;
+    });
+    final route = top;
+    if (route is! CircularRevealRoute ||
+        route.isFirst ||
+        !route.transitionController.isCompleted ||
+        route.popDisposition != RoutePopDisposition.pop) {
+      return false;
+    }
+    _route = route;
+    navigator.didStartUserGesture();
+    return true;
+  }
+
+  @override
+  void handleUpdateBackGestureProgress(PredictiveBackEvent backEvent) {
+    final route = _route;
+    if (route == null || route.navigator == null) return;
+    final controller = route.transitionController;
+    final retracting =
+        controller.status == AnimationStatus.reverse ||
+        controller.status == AnimationStatus.dismissed;
+    if (backEvent.progress >= _retractionThreshold) {
+      if (!retracting) controller.reverse();
+    } else {
+      if (retracting) controller.forward();
+    }
+  }
+
+  @override
+  void handleCommitBackGesture() {
+    final route = _route;
+    _route = null;
+    if (route == null || route.navigator == null) return;
+    if (route.isCurrent) route.navigator!.pop();
+    _stopUserGestureWhenSettled(route);
+  }
+
+  @override
+  void handleCancelBackGesture() {
+    final route = _route;
+    _route = null;
+    if (route == null || route.navigator == null) return;
+    route.transitionController.forward();
+    _stopUserGestureWhenSettled(route);
+  }
+
+  /// Only report the gesture over once the transition settles, so the
+  /// navigator doesn't let another gesture grab the route mid-flight
+  /// (mirrors Cupertino's back-swipe controller).
+  void _stopUserGestureWhenSettled(CircularRevealRoute<dynamic> route) {
+    final navigator = route.navigator!;
+    final controller = route.transitionController;
+    if (!controller.isAnimating) {
+      navigator.didStopUserGesture();
+      return;
+    }
+    late final AnimationStatusListener onSettle;
+    onSettle = (status) {
+      navigator.didStopUserGesture();
+      controller.removeStatusListener(onSettle);
+    };
+    controller.addStatusListener(onSettle);
   }
 }
 
@@ -3614,14 +3798,14 @@ class OurThemeData {
             inkColor: theme.colorScheme.primary.withAlpha(30),
             hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
             // glassColor: theme.colorScheme.primary.withValues(alpha: 0.8),
-            // glassBlurRadius: 14,
+            glassBlurRadius: 6,
             // onGlassColor: theme.colorScheme.onPrimary,
-            glassColor: HSLColor.fromAHSL(0.45, 0, 0, 1).toColor(),
+            glassColor: HSLColor.fromAHSL(0.68, 0, 0, 1).toColor(),
             onGlassColor: theme.colorScheme.onSurfaceVariant,
             // onGlassColor: theme.colorScheme.onSurface,
             nonGlassColor: Colors.black,
             nonGlassOnSurface: Colors.white,
-            edgeTint: HSLColor.fromAHSL(0.2, 0, 0, 0.4).toColor(),
+            edgeTint: HSLColor.fromAHSL(0.16, 0, 0, 0.2).toColor(),
           );
   }
 
@@ -3649,10 +3833,12 @@ class OurThemeData {
 GlassOptions ourGlassOptions({
   required double blurRadius,
   required Color edgeTint,
+  double? bevelThickness,
   GlassMode mode = GlassMode.glass,
   double blendRadius = 18,
 }) => GlassOptions(
   mode: mode,
+  bevelThickness: bevelThickness ?? 17,
   blendRadius: blendRadius,
   blurRadius: blurRadius,
   edgeTint: edgeTint,
@@ -3743,7 +3929,7 @@ class PinAnimation extends StatelessWidget {
                   // final pinRetraction =
                   //     unlerpUnit((pinLength + gap) / pinLengthTotal, 1, movementp) *
                   //         pinLength;
-                  final center = Offset(r, r);
+                  final center = r.offset;
                   final distance =
                       (lerp(r + stabDistance, r, movementp) + squareRad + gap) /
                       sqrt(2);
@@ -3754,12 +3940,12 @@ class PinAnimation extends StatelessWidget {
                       clipBehavior: Clip.none,
                       children: [
                         positionedAt(
-                          center + Offset(-distance, -distance),
+                          center + (-distance).offset,
                           // I don't understand why the transforms need to be applied in this order
                           Transform.translate(
-                            offset: Offset(-squareRad, -squareRad),
+                            offset: (-squareRad).offset,
                             child: Transform.rotate(
-                              origin: Offset(0, 0),
+                              origin: Offset.zero,
                               angle: -pi / 4,
                               child: FuzzyLinearClip(
                                 angle: pi / 2,
@@ -4635,9 +4821,13 @@ const double timerculeIconRounding = 3;
 const double timerculeIconRectHeight = 11;
 const double timerculeIconRectWidth = 15;
 const double timerculeIconGap = 3;
-void timerculeIconScaling(Canvas canvas, Size size) {
+void timerculeIconScaling(
+  Canvas canvas,
+  Size size, {
+  double furtherScaling = 1,
+}) {
   final parallelHeight = 2 * timerculeIconRectHeight + timerculeIconGap;
-  final scale = min(size.width, size.height) / parallelHeight;
+  final scale = min(size.width, size.height) / parallelHeight * furtherScaling;
   canvas.translate(size.width / 2, size.height / 2);
   canvas.scale(scale, scale);
 }
@@ -4660,7 +4850,7 @@ class TimerculeParallelPainter extends CustomPainter {
         : topWidth / 2 - bottomWidth;
     final cr = timerculeIconRounding;
 
-    timerculeIconScaling(canvas, size);
+    timerculeIconScaling(canvas, size, furtherScaling: 0.87);
     _drawRoundedPolygon(
       canvas,
       rightwardsArrowBox(
@@ -4681,31 +4871,6 @@ class TimerculeParallelPainter extends CustomPainter {
       color,
       cr,
     );
-
-    // canvas.drawRRect(
-    //   RRect.fromRectAndRadius(
-    //     Rect.fromLTWH(
-    //       -topWidth / 2,
-    //       -contentH / 2,
-    //       topWidth,
-    //       timerculeRectHeight,
-    //     ),
-    //     Radius.circular(timerculeCornerRadius),
-    //   ),
-    //   paint,
-    // );
-    // canvas.drawRRect(
-    //   RRect.fromRectAndRadius(
-    //     Rect.fromLTWH(
-    //       bottomOffset,
-    //       timerculeGap / 2,
-    //       bottomWidth,
-    //       timerculeRectHeight,
-    //     ),
-    //     Radius.circular(timerculeCornerRadius),
-    //   ),
-    //   paint,
-    // );
   }
 
   @override
@@ -4852,7 +5017,7 @@ class TimerculeCyclePainter extends CustomPainter {
         centerPoint: innerCenter,
         clockwise: true,
       );
-    timerculeIconScaling(canvas, size);
+    timerculeIconScaling(canvas, size, furtherScaling: 0.81);
     _drawRoundedPolygon(canvas, path, color, cr);
   }
 
@@ -5402,7 +5567,7 @@ Path rightwardsArrowBox(
   bool toClose = true,
 }) {
   return rightwardsArrowBoxWithoutCr(
-    offsetUL + Offset(cornerRadius, cornerRadius),
+    offsetUL + cornerRadius.offset,
     offsetToSize(
       sizeToOffset(size) - Offset(2 * cornerRadius, 2 * cornerRadius),
     ),
