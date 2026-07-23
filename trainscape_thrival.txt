@@ -82,7 +82,7 @@ rendering the level:
 	The world view should support dragging and zooming gestures, but amplify those gestures by 2x (this may be a subtask of its own)
 
 The process you should follow:
-	take an inventory of utilities and conventions from other files that might be useful here, keep it brief, keep that in context
+	take an inventory of utilities and conventions from other files that might be useful here, keep it brief, keep that in mind
 	we wont think about persisting yet
 	plan, sketching out minimal psuedodart of the types and method signatures and implementation notes that outline completions of all of the design decisions that I've been vague about (eg, icons, initial reasonable parameters for the test level, level parameters I've implied but not named). Have me review it.
 	I'll then ask you to implement.
