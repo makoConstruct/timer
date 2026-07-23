@@ -4646,7 +4646,9 @@ class _HintToastState extends State<HintToast>
         final double opacity;
 
         if (animateHeight) {
-          heightFraction = unlerpUnit(0, 0.5, v);
+          heightFraction = Curves.easeInOutCubic.transform(
+            unlerpUnit(0, 0.5, v),
+          );
           opacity = Curves.easeInOutCubic.transform(unlerpUnit(0.5, 1, v));
         } else {
           heightFraction = 1.0;

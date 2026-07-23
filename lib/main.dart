@@ -1,5 +1,6 @@
 // this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code.
 
+import 'dart:collection';
 import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:isolate';
@@ -678,8 +679,7 @@ class TimerHolm {
           }
         }
 
-        /// check if it's a cycle timer to dismiss that hint
-        if (d.isComposite && d.children.length > 1) {
+        if (d.isComposite && d.children.isNotEmpty) {
           Mobj.getAlreadyLoaded(hintGetsCompositeTimersID, BoolType()).value =
               true;
         }
@@ -3877,8 +3877,6 @@ class DragActionRingState extends State<DragActionRing>
           _upDownCell!.peek().riseDuration.inMilliseconds;
       final leafp = unlerpUnit(adjustedBlobRiseEndp * 0.65, 1, growthp);
       final selectedRadius = actionRadius;
-      // how committed a choice is: pinned at 1 while a choice is held (including
-      // across a switch between items), driven by swipep/releasep.
       final selectp = max(
         Curves.easeOut.transform(swipep),
         Curves.easeOut.transform(releasep),
@@ -3904,6 +3902,7 @@ class DragActionRingState extends State<DragActionRing>
         final protrusion = lerp(
           0.4,
           1,
+          // disappearance animation is expedited if the action was fully revealed already
           1 - (1 - allShowingp) * (1 - selections[i]),
         );
         // release recede applied to the highlight the same way the discs do it.
@@ -4769,7 +4768,7 @@ class TimerScreenState extends State<TimerScreen>
 
   @override
   Widget build(BuildContext context) {
-    print('TimerScreenState build');
+    // print('TimerScreenState build');
     ThemeData theme = Theme.of(context);
     Size screenSize = MediaQuery.sizeOf(context);
     OurThemeData mt = OurThemeData.fromTheme(theme);
@@ -4870,7 +4869,10 @@ class TimerScreenState extends State<TimerScreen>
           // if (!isRightHanded) {
           //   p = Offset(screenSize.width - p.dx, p.dy);
           // }
-          buttonScaleDialCenter.value = sizeToOffset(screenSize / 2);
+          buttonScaleDialCenter.value = Offset(
+            screenSize.width / 2,
+            min(screenSize.height / 2, screenSize.width * 0.63),
+          );
         }
         return positionedAt(
           buttonScaleDialCenter.value!,
@@ -5063,8 +5065,6 @@ class TimerScreenState extends State<TimerScreen>
 
     final numeralPartAnchor = Offset(-3, 0);
     final innerPaletteAnchor = Offset(0, 0);
-    final numeralColor = theme.colorScheme.onSurfaceVariant;
-
     final controls = [
       numeralBacking,
       ...List.generate(9, (i) {
@@ -5222,7 +5222,7 @@ class TimerScreenState extends State<TimerScreen>
           HintToast(
             showCondition: hintDoesntGetCompositeTimersCondition,
             message:
-                "'timercules' like 'cycle' and 'series' allow you to drag other timers into them, to build structures. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings. Play around with them.",
+                "'Timercules' like 'cycle' and 'series' allow you to drag other timers into them. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings.",
           ),
         ],
       ),
@@ -5632,14 +5632,6 @@ class TimerScreenState extends State<TimerScreen>
     }
   }
 
-  void _selectAction(String action) {
-    if (actionMode.peek() != action) {
-      actionMode.value = action;
-    } else {
-      actionMode.value = 'play';
-    }
-  }
-
   void deleteTimer(MobjID ki) {
     // everything the user deletes goes to the trash bin so it can be restored;
     // it's only truly destroyed later by the bin's pruning. (The cascade that
@@ -5699,23 +5691,31 @@ class TimerScreenState extends State<TimerScreen>
         .peek()!
         .map((id) => Mobj.fetch(id, type: TimerDataType()))
         .toList();
-    List<Mobj<TimerData>> entries = [];
+    List<Mobj<TimerData>> nextEntries = [];
+    List<Mobj<TimerData>> removedEntries = [];
     for (final f in futureEntries) {
       try {
         final Mobj<TimerData> e = await f;
         if ((now.difference(e.lastTimestamp).compareTo(binRetention)) < 0) {
-          entries.add(e);
+          nextEntries.add(e);
+        } else {
+          removedEntries.add(e);
         }
       } catch (_) {
-        // it got deleted somehow, we'll drop it from the list
+        // it got deleted somehow already, we'll drop it from the list
       }
     }
-    if (entries.length > binMaxRetained) {
-      entries = entries.slice(0, binMaxRetained);
+    if (nextEntries.length > binMaxRetained) {
+      removedEntries.addAll(nextEntries.slice(binMaxRetained));
+      nextEntries = nextEntries.slice(0, binMaxRetained);
     }
     // no update if nothing was dropped
-    if (entries.length != binListMobj.peek()!.length) {
-      binListMobj.value = entries.map((m) => m.id).toList();
+    if (nextEntries.length != binListMobj.peek()!.length) {
+      binListMobj.value = nextEntries.map((m) => m.id).toList();
+    }
+    // complete the deletion
+    for (Mobj<TimerData> dt in removedEntries) {
+      dt.value = null;
     }
   }
 
@@ -5753,7 +5753,10 @@ class DragActionRingController {
   final ChangeNotifier? suppressingNotifier;
 
   /// -1 means nothing is selected, number means item has been selected, null means dismissed
-  late final Signal<int?> _dragEvents = Signal(null, debugLabel: 'dragEvents');
+  late final Signal<int?> _dragEvents = Signal(
+    null,
+    options: SignalOptions(name: 'dragEvents'),
+  );
   ReadonlySignal<int?> get dragEvents => _dragEvents;
   // UpDownAnimationController? get numeralDragIndicator =>
   //     numeralDragActionRing?.currentState?.widget.upDownAnimation;
