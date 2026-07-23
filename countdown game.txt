@@ -1,0 +1,89 @@
+countdown game
+
+we're going to create a game about time. It primarily orients around a small number of player characters who can be ordered to move around a graph over time and take actions which may take time to complete to gather materials to produce "utility" before the global timer reaches completion. Time passes continuously, but it can be paused, so gameplay events need to be driven by an update(double delta) function. The graphical style will be minimalistic. The player's ultimate goal in each map is to generate a certain amount of eudaimonia before a global timer runs down.
+
+There are many "may or may not" or "some" choices in this design doc. All of these should be controlled by the Parameters object. Different game levels will have different Parameters. I will set the parameters. You will guess at some reasonable default parametization for the first test, but it's okay if they're imperfect, I will have to tune them.
+
+A common base class is Thing. Things can have positions in the graph. They can have move paths scheduled, represented with a List of graph nodes and a departure times (for now only players will move).
+
+Take a look at the old journeying_game commits for the high level UI logic of the game. So, a view onto the graph/world displays at the top of the screen. It centers on the last selected player. At the bottom of the screen, the available players are shown along the right side of the screen. There may be any number of players between 1 and 5. When a player is selected, their controls and inventory are shown in the left part. A player may or may not have the move action, but initially they all will. The move action is controlled by tapping and dragging in the direction of the wire they want to schedule going along. If no edge's angle is within pi/2 of the dragged move, don't move. Actions also include the functionality of the local graph node that they're currently in. Traders, train stations, and trees. Trader actions initiate that trader's trade. Train station actions allow scheduling a move of the train in the same way moves are scheduled for players. Tapping trees takes their current items. Players can only hold 5 items (though this should be a parameter I guess).
+
+items
+	there's a spectrum between basic items and higher items, evenly spread, with some clustering towards the higher end. Some traders trade basic items for other basic items. Most traders trade multiple basic items or higher items for other higher items.
+	utility is generally one of the most high items.
+	basic items are circles, vertical pills, or diamonds, each one can come in different colors. Colors are parameters, and there can be any number of them, but for now the colors will be yellow-orange, cyan, red-magenta, very dark grey, pale grey, and sage.
+	Higher items (except utility) are these shapes combined in various arangements. They should be specified as operator trees, such as Horiz(Nest(Diamond(Sage), Pill(Cyan)), Diamond(Red)). This is just a visual mnemonic, to make it easier to learn how some traders will make them by combining those inputs in that order, but some other traders might make them in a totally different way. No trader should nest an operator inside of the same operator, as this would produce visually ambiguous icons. If an item is nested in an item of the same color, the widget must be passed outlineOn = true.
+	Eudaimonia looks like a blood-red heart.
+
+things in the world:
+	some nodes are "trains" that connect to a station node and can be moved to another station node when triggered, the amount of time they take is shown, they often travel along a shortcut that nothing else can travel along
+		stations
+			some stations can move the train, or not
+			render: 's' then small Icons.train
+			some stations can move the train, some can only move it if the train is at that station. Render respectively 'm' or 'lm'
+				(action shows as a disabled move control if lm and the train isn't present)
+		trains
+			trains may cost an item to activate, but less often
+			trains can be slow (append s), regular (r), fast (f), or very fast (i)
+			trains may move automatically
+				render: if it's auto-reverse, append 'sc(o)', if it's cycle 'sc(<number of seconds>)'
+			otherwise, most can be moved from the inside, render: append 'm'
+			render: Icons.train
+				append m if it can be moved from the inside
+				append <item> if it costs an item to move
+	trees produce a basic item or two. After harvesting, their item regenerates after a certain amount of time.
+		render: Icons.nature <items generated>
+	mugger/toll/threat nodes that require an item to enter or else they incapacitate the character for a time
+		they may or may not take that item, or they may take a different, unrelated item if you have it
+		render: an icon you consider suitable (ideally scary), then if they take and demand the same item, that item, otherwise r(<item required>) c(<item taken>)
+	traders who can convert items into other items
+		sometimes instantly, sometimes taking time
+		sometimes they take multiple items
+		rarely, they return multiple items
+		render: (<take> -> <produce>) [if they take time to produce: the time taken]
+	decomposers
+		traders who can decompose certain item combination operators into their parts
+		render: an icon of your choice next to an item of that operator on a black and light grey item
+
+other things
+	players
+		each one has an inventory of 5 items, as mentioned, they can be temporarily incapacitated
+		there's one selected player, tracked with a signal
+		player names include Rudy, Noel, Geno, Lenny, Carter
+
+level generation:
+	use a seed
+	initialize the graph as a grid of gridSizeN x gridSizeN, nodes are initially 3.5 units apart.
+	apply ciel(gridSizeN*(gridSizeDistortionCountStartp + rng*gridSizeDistortionCountVariancep)) distortions to the grid
+		distortions consist of for either horizontal or vertical, picking a position partway between the two sides of the grid, then pushing the nodes on either side of the line apart by rng*gridSizeDistortionp
+	reposition so that map is centered on (0,0), note map bounds
+	select each line or column and
+		transaction, rattempt 8 times at max, otherwise skip
+			if rng > lineRemovalProb
+				for each node in the line, delete (along with its edges) if rng > pointRemovalProb.
+			if the graph is no longer fully connected, retry the transaction
+	for each edge with length > 3
+		if rng > middleNodeProb
+			split the edge at (where span = max(0, edgeLength - splitNodeMinDistance * 2)), edgeLength/2 + rng * span - span/2, a new node goes there
+	facilities should be generated at a fixed distribution, eg, parameters determine that there will be a certain number of storages, traders, etc, in the world. They're then randomly put into buckets according to a fixed density distribution. Then the buckets are randomly strewn around the world. Trains can contain facilities just like any other node!
+	nTrainSchedules are generated randomly, which can be in the form of Never (which will only move when the player moves it), OneWay (which returns to its initial station two seconds after arrival), or Cycle(seconds) (which also can't be controlled) (seconds should be generated to one decimal place). Trains are assigned these on scheduleDistribution.
+
+rendering the level:
+	you'll want to use hsluv here.
+	background white, edges are light grey. Train edges should be tinted brown. Edges between train nodes and stations should.. i guess be light grey.
+	graph nodes are circles 1 unit wide, thicker than the edges. Same color as their associated edges.
+	render players as colored circles 1.4 units wide with their names over them inside a white container with outline same color as the orb.
+	the map centers on the currently selected player
+	the above all scales down when the map is zoomed out, the below wont.
+	When a player arrives or departs from a node, it rerenders.
+	Nodes render as Row(Column(facilities), Column(players present))
+	So node widgets are naturally repositioned and culled if off-screen whenever zoom level changes.
+	Players only render a positioned if they're moving along an edge, otherwise they'll be seen in their node's widget.
+	The world view should support dragging and zooming gestures, but amplify those gestures by 2x (this may be a subtask of its own)
+
+The process you should follow:
+	create a new file trainscape_thrival.dart
+	take an inventory of utilities and conventions from other files that might be useful here, keep it brief, keep that in context
+	we wont think about persisting yet
+	plan, sketching out minimal psuedodart of the types and method signatures and implementation notes that outline completions of all of the design decisions that I've been vague about (eg, icons, initial reasonable parameters for the test level, level parameters I've implied but not named). Have me review it.
+	I'll then ask you to implement.
