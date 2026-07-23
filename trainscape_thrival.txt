@@ -20,30 +20,31 @@ things in the world:
 		stations
 			some stations can move the train, or not
 			render: 's' then small Icons.train
-			some stations can move the train, some can only move it if the train is at that station. Render respectively 'm' or 'lm'
+			some stations can move the train, some can only move it if the train is at that station. Render respectively Icons.swipe_right_alt or 'l' swipe_right_alt
 				(action shows as a disabled move control if lm and the train isn't present)
 		trains
-			trains may cost an item to activate, but less often
+			render: Icons.train
+			trains may also require an item to be held to activate, without taking it
+				append the item's icon if it has a cost
 			trains can be slow (append s), regular (r), fast (f), or very fast (i)
+			trains may cost an item to activate, but less often
+				it should be a pretty basic item, unless it's a fast or very fast train
 			trains may move automatically
 				render: if it's auto-reverse, append 'sc(o)', if it's cycle 'sc(<number of seconds>)'
-			otherwise, most can be moved from the inside, render: append 'm'
-			render: Icons.train
-				append m if it can be moved from the inside
-				append <item> if it costs an item to move
-	trees produce a basic item or two. After harvesting, their item regenerates after a certain amount of time.
-		render: Icons.nature <items generated>
-	mugger/toll/threat nodes that require an item to enter or else they incapacitate the character for a time
+			otherwise, most can be moved from the inside, render: append Icons.swipe_right_alt
+	trees produce a first or second tier item or two. After harvesting, their item regenerates after a certain amount of time.
+		render: (randomly assign any of Icons.nature, Icons.grass, any others you can think of that're apt) <items generated>
+	mugger/toll/threat nodes that require an item to enter or else they incapacitate the character for a timed
 		they may or may not take that item, or they may take a different, unrelated item if you have it
 		render: an icon you consider suitable (ideally scary), then if they take and demand the same item, that item, otherwise r(<item required>) c(<item taken>)
 	traders who can convert items into other items
 		sometimes instantly, sometimes taking time
+		sometimes they have a cooldown
 		sometimes they take multiple items
 		rarely, they return multiple items
 		render: (<take> -> <produce>) [if they take time to produce: the time taken]
-	decomposers
-		traders who can decompose certain item combination operators into their parts
-		render: an icon of your choice next to an item of that operator on a black and light grey item
+	storage
+		can store 2 to 12 things, with a log distribution
 
 other things
 	players
@@ -65,8 +66,9 @@ level generation:
 	for each edge with length > 3
 		if rng > middleNodeProb
 			split the edge at (where span = max(0, edgeLength - splitNodeMinDistance * 2)), edgeLength/2 + rng * span - span/2, a new node goes there
-	facilities should be generated at a fixed distribution, eg, parameters determine that there will be a certain number of storages, traders, etc, in the world. They're then randomly put into buckets according to a fixed density distribution. Then the buckets are randomly strewn around the world. Trains can contain facilities just like any other node!
+	generate trains and stations first. Position the train path terminus 1.5 units from its randomly chosen station node, at an angle where it's angle distance from the other edges is maximized.
 	nTrainSchedules are generated randomly, which can be in the form of Never (which will only move when the player moves it), OneWay (which returns to its initial station two seconds after arrival), or Cycle(seconds) (which also can't be controlled) (seconds should be generated to one decimal place). Trains are assigned these on scheduleDistribution.
+	a set of facilities should be generated at a fixed distribution, eg, parameters determine that there will be a certain number of storages, traders, etc, in the world. They're then randomly put into buckets according to a fixed distribution of bucket sizes. Then the buckets are randomly strewn around the world onto nodes. Trains can contain facilities just like any other node!
 
 rendering the level:
 	you'll want to use hsluv here.
@@ -78,6 +80,7 @@ rendering the level:
 	When a player arrives or departs from a node, it rerenders.
 	Nodes render as Row(Column(facilities), Column(players present))
 	So node widgets are naturally repositioned and culled if off-screen whenever zoom level changes.
+	many many things need to be able to render an animating cooldown/progress timer shrinking pie, generally, position this at their top right corner. Progress pies should be sage, cooldown should be black and count. Both count down rather than up.
 	Players only render a positioned if they're moving along an edge, otherwise they'll be seen in their node's widget.
 	The world view should support dragging and zooming gestures, but amplify those gestures by 2x (this may be a subtask of its own)
 
@@ -86,3 +89,61 @@ The process you should follow:
 	we wont think about persisting yet
 	plan, sketching out minimal psuedodart of the types and method signatures and implementation notes that outline completions of all of the design decisions that I've been vague about (eg, icons, initial reasonable parameters for the test level, level parameters I've implied but not named). Have me review it.
 	I'll then ask you to implement.
+
+
+I should be more specific about the Item Catalog, or the way we generate Traders. We design the dependency graph as follows: Items will be arranged in nTiers tiers. Items above basic items will initially be defined in terms of their dependent parts, but there will often be other traders that produce them that use different parts. For now, nItemTiers = 5. tierCount = [5, 16, 8, 6, 4].
+Traders are then generated (they're essentially directed hyperedges). We do this by:
+	for each tier
+		thisTierRequired = shuffle(itemTiers[iTier].clone())
+		nextTierRequired = null if no next tier, else shuffle(itemTiers[iTier + 1].clone())
+		while either of the above are still non-empty
+			for each item
+				weighted-pick from a random requiredGenerator of traderGeneratorsPerTier[iTier], where TraderGeneratorsForTier { double totalRequiredWeight; List<(double weight, (rng, iItem, thisTierRequired, iTier, nextTierRequired)-> Trader?))> requiredGenerators, double totalSupplementalWeight; List<(double, (rng, iTier)-> Trader?)> supplementalGenerators; int supplementalRuns}))
+					if it returns null, pick again
+				introduce the new trader into the trader set
+		run supplementalRuns supplementalGenerators. Don't retry if they return null.
+	where
+		int otherItem(rng, iItem, iTier){
+			while(true){
+				var other = rng.nextInt(tierCount[iTier]);
+				if(other != iItem) break;
+			}
+		}
+	for now, we'll use traderGeneratorsPerTier = List.generate(nItemTiers, ()=> TraderGeneratorsFor(
+		required:[
+			// links two items to next tier
+			(15, (rng, thisTierRequired, iTier, nextTierRequired){
+				if(nextTierRequired == null) return null;
+				final requi = thisTierRequired.pop() ?? randomItem(itemTiers[iTier]);
+				return Trader(
+					[Quantity(itemTier[requi], 1), Quantity(itemTier[otherItem(rng, iItem, iTier)], 1)],
+					[Quantity(nextTierRequired.pop() ?? randomItem[itemTiers[iTier + 1]], 1)]
+				);
+			})
+			// links one item to an item in the same tier
+			(3, ...)
+			// links two items to an item from the same tier
+			(1, ...)
+			// links four items of the same type to one item in the next tier
+			(5, ...)
+			// links three items to the next tier and produces one side item from the current tier
+			(6, ...)
+			// links four items to the next tier and produces one side item from the current tier and one from the prior tier
+			(2, ...)
+			// links four items to the next tier and produces one side item from the current tier and one from the prior tier
+			(2, ...)
+			// from four items of the current tier to two items of the next tier
+			(4, ...)
+			// links three items to the next tier
+			(8, ...)
+		],
+		supplementalRuns: 3
+		supplemental: [
+			// takes an item and produces two iTier - 1 items
+			(10, ...)
+			// takes two items and produces one item from iTier - 1 and 2 from iTier - 2
+			(5), ...)
+		]
+	)
+Then add a eudaimonia traders for each final tier item, who trade their final item for one eudaimonia apiece.
+We then assign higher CompositeItems their icons (they're late initialized) by picking a random trader who produces that item (from lower items), taking the inputs, and combining them using random operators distinct from their inputs' top operators. If there are more than 2 inputs, and all of the input operators are not horiz or vert, you can use a single multi horiz or vert, otherwise you'll have to use multiple pairing operators to ensure distinctness.

@@ -3726,7 +3726,9 @@ class DragActionRingState extends State<DragActionRing>
     final double blendRadius =
         actionRadiusMax *
         (widget.arcModeNotBlobMode
-            ? 0.35
+            ? glassOn
+                  ? 0.33
+                  : 0.14
             : glassOn
             ? 0.22
             : 0.16);
@@ -4871,7 +4873,8 @@ class TimerScreenState extends State<TimerScreen>
           // }
           buttonScaleDialCenter.value = Offset(
             screenSize.width / 2,
-            min(screenSize.height / 2, screenSize.width * 0.63),
+            screenSize.height -
+                min(screenSize.height / 2, screenSize.width * 0.63),
           );
         }
         return positionedAt(
