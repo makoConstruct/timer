@@ -31,16 +31,16 @@ class RaiseAnimation extends StatefulWidget {
   /// The child widget.
   final Widget? child;
   const RaiseAnimation({
-    Key? key,
+    super.key,
     required this.animation,
     this.curve = Curves.easeOut,
     this.axis = Axis.vertical,
     this.axisAlignment = -1.0,
     this.child,
-  }) : super(key: key);
+  });
 
   @override
-  _RaiseAnimationState createState() => _RaiseAnimationState();
+  State<RaiseAnimation> createState() => _RaiseAnimationState();
 }
 
 class _RaiseAnimationState extends State<RaiseAnimation> {
@@ -61,7 +61,10 @@ class _RaiseAnimationState extends State<RaiseAnimation> {
       sizeFactor:
           CurvedAnimation(parent: widget.animation, curve: widget.curve),
       axis: widget.axis,
-      axisAlignment: widget.axisAlignment,
+      alignment: switch (widget.axis) {
+        Axis.horizontal => AlignmentDirectional(widget.axisAlignment, -1.0),
+        Axis.vertical => AlignmentDirectional(-1.0, widget.axisAlignment),
+      },
       child: widget.child,
     );
   }

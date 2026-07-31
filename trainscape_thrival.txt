@@ -3,54 +3,83 @@ countdown game
 we're going to create a game about time. It primarily orients around a small number of player characters who can be ordered to move around a graph over time and take actions which may take time to complete to gather materials to produce "utility" before the global timer reaches completion. Time passes continuously, but it can be paused, so gameplay events need to be driven by an update(double delta) function. The graphical style will be minimalistic. The player's ultimate goal in each map is to generate a certain amount of eudaimonia before a global timer runs down.
 
 There are many "may or may not" or "some" choices in this design doc. All of these should be controlled by the Parameters object. Different game levels will have different Parameters. I will set the parameters. You will guess at some reasonable default parametization for the first test, but it's okay if they're imperfect, I will have to tune them.
+Any parameter that divides something up is given as weights with an arbitrary total, never as proportions that have to sum to one — humans can't easily tweak a set of numbers that has to keep summing to one. Normalizing happens in the code.
 
 A common base class is Thing. Things can have positions in the graph. They can have move paths scheduled, represented with a List of graph nodes and a departure times (for now only players will move).
+	though disable scheduling for now, only have one move ongoing. Also disable scheduling while a character is disabled
 
-Take a look at the old journeying_game commits for the high level UI logic of the game. So, a view onto the graph/world displays at the top of the screen. It centers on the last selected player. At the bottom of the screen, the available players are shown along the right side of the screen. There may be any number of players between 1 and 5. When a player is selected, their controls and inventory are shown in the left part. A player may or may not have the move action, but initially they all will. The move action is controlled by tapping and dragging in the direction of the wire they want to schedule going along. If no edge's angle is within pi/2 of the dragged move, don't move. Actions also include the functionality of the local graph node that they're currently in. Traders, train stations, and trees. Trader actions initiate that trader's trade. Train station actions allow scheduling a move of the train in the same way moves are scheduled for players. Tapping trees takes their current items. Players can only hold 5 items (though this should be a parameter I guess).
+Take a look at the old journeying_game commits for the high level UI logic of the game. So, a view onto the graph/world displays at the top of the screen. It centers on the last selected player. At the bottom of the screen, the available players are shown along the right side of the screen. There may be any number of players between 1 and 5. When a player is selected, their controls and inventory are shown in the left part.
+A player may or may not have the move action, but initially they all will.
+	The move action is controlled by tapping and dragging in the direction of the wire they want to schedule going along. If no edge's angle is within pi/2 of the dragged move, don't move.
+	The move pad should display with 'drag to move' at the bottom right and with our move icon (see train moving icons) in the center
+Actions also include the functionality of the local graph node that they're currently in. Traders, train stations, and trees. Trader actions initiate that trader's trade. Train station actions allow scheduling a move of the train in the same way moves are scheduled for players. Tree actions take their current items — tapping a plant on the map only explains it, harvesting is the control panel's job. Players can only hold 5 items (though this should be a parameter I guess).
+
+day and night
+	The level runs on a day cycle of dayLength. The first half of each day is day, the second half is night — night turns to day halfway through the day.
+	Night mode affects all UIs: the whole game is drawn in a night colour scheme, written separately from the day one rather than derived from it by inverting lightness — the dark scheme wants its own contrast, its surfaces lifted clear of the ground instead of held at the day's distance from it, and its blight red washed out less far. Item colours are the exception and don't change: an item is known by its colour.
+	Briefly show NIGHT HAS FALLEN or DAY HAS RISEN when the night/day signal changes.
+	Facilities may only keep half the day. Day-only facilities (at facilityDayOnlyp) have a small day icon, top-aligned, before their main icon, kept visible even in the zoomed out mode. Night-only facilities (muggers, at muggerNightOnlyp) similarly have a small night icon, bottom-aligned. The marker sits inside the badge's own icon flow rather than hanging off the side of it, and it's never faded. The facility's tooltip says the same thing in words ("only active at night"), since the marker is a few pixels of silhouette and the tooltip is where a player goes to find out what it meant. Out of hours the facility's icons fade; the lozenge under them doesn't move, since it's the node's colour and a facility keeping different hours doesn't put it on a different node. The fade is mild enough to still read at a glance. A facility that's out of hours does nothing and offers no actions.
+
+time intervals
+	Intervals come in two types.
+		An arbitrary interval is just a span of time, counted from whenever it was last started — nothing to do with the day.
+		A clock interval is locked to the day: its period is a whole multiple of the day, or a whole fraction of it, and it always fires at the same time(s) of day. Its offset within the period is random.
+	Most cyclic events are clock intervals. Trains have division clock intervals (so many departures a day); blights have multiple-of-a-day ones.
+	Any facility with a clock schedule labels its countdown pie with the clock time it fires at, in place of the seconds remaining rather than as well as them — a countdown carries one label, never two, and the clock time is the more useful of the two when there is one. No day or night icon goes with it: the marker for which half of the day a facility keeps belongs to the facility's badge, not to its timer.
 
 items
 	there's a spectrum between basic items and higher items, evenly spread, with some clustering towards the higher end. Some traders trade basic items for other basic items. Most traders trade multiple basic items or higher items for other higher items.
 	utility is generally one of the most high items.
-	basic items are circles, vertical pills, or diamonds, each one can come in different colors. Colors are parameters, and there can be any number of them, but for now the colors will be yellow-orange, cyan, red-magenta, very dark grey, pale grey, and sage.
-	Higher items (except utility) are these shapes combined in various arangements. They should be specified as operator trees, such as Horiz(Nest(Diamond(Sage), Pill(Cyan)), Diamond(Red)). This is just a visual mnemonic, to make it easier to learn how some traders will make them by combining those inputs in that order, but some other traders might make them in a totally different way. No trader should nest an operator inside of the same operator, as this would produce visually ambiguous icons. If an item is nested in an item of the same color, the widget must be passed outlineOn = true.
-	Eudaimonia looks like a blood-red heart.
+	displaying item icons
+		basic items are circles, vertical pills, diamonds, or squircles. Pills render as capsules — the corner radius is always half the thickness, so the ends are semicircles however long the rod is. A pill at its big size is one grid cell wide and two tall, and its thickness is the radius of a circle drawn in one of those cells; at its small size it's half that, in one cell. Nothing is ever scaled up beyond the footprint it was placed at, so pills nested inside something are smaller only because the cells they sit in are. Each one can come in different colors. Colors are parameters, and there can be any number of them, but for now the colors will be yellow-orange, cyan, red-magenta, very dark grey, and white — white rather than the pale grey it had to be back when items were laid on white, since everything an item sits on is a shade of grey now. Sage was among them and was taken out: against those it was too indistinct to tell an item by. It survives as the progress pie's color, where nothing has to be told apart from it. When assigning the basic items their icons, shapes and colors are each drawn from their own shuffled bag, so every shape and every color is used once before any is used twice — drawing from the cross product instead left whole shapes (squircles especially) never appearing at all.
+		Eudaimonia looks like a blood-red heart.
+		Higher items (except utility) are these shapes combined in various arangements, described in 'item catalogue generation'
+		when rendering an item quantity, the number should be displayed at the bottom right corner in bold.
 
 things in the world:
 	some nodes are "trains" that connect to a station node and can be moved to another station node when triggered, the amount of time they take is shown, they often travel along a shortcut that nothing else can travel along
 		stations
 			some stations can move the train, or not
 			render: 's' then small Icons.train
-			some stations can move the train, some can only move it if the train is at that station. Render respectively Icons.swipe_right_alt or 'l' swipe_right_alt
+			some stations can move the train, some can only move it if the train is at that station. Render respectively Icons.swipe_right_alt or 'L' swipe_right_alt
 				(action shows as a disabled move control if lm and the train isn't present)
 		trains
 			render: Icons.train
-			trains may also require an item to be held to activate, without taking it
+			trains may also require the player moving the train to have a Quantity of an item (usually 1, sometimes 2) to activate. They may or may not take it on activation.
+				If they take the item, it should be a pretty basic item, unless it's a fast or very fast train, in which case it may be a medium icon
 				append the item's icon if it has a cost
 			trains can be slow (append s), regular (r), fast (f), or very fast (i)
-			trains may cost an item to activate, but less often
-				it should be a pretty basic item, unless it's a fast or very fast train
 			trains may move automatically
 				render: if it's auto-reverse, append 'sc(o)', if it's cycle 'sc(<number of seconds>)'
+				cycle trains run on a division clock interval, and show a countdown pie to their next departure
 			otherwise, most can be moved from the inside, render: append Icons.swipe_right_alt
-	trees produce a first or second tier item or two. After harvesting, their item regenerates after a certain amount of time.
-		render: (randomly assign any of Icons.nature, Icons.grass, any others you can think of that're apt) <items generated>
-	mugger/toll/threat nodes that require an item to enter or else they incapacitate the character for a timed
+	trees produce a first or second tier item or two. After harvesting, their item regenerates on an interval — some of them an arbitrary interval running from the moment they were picked, the rest a daily clock interval, so they come back at their own time of day however long ago they were picked. Once a day, not several: dividing the day up further was more schedule than the player could hold.
+		render: Icons.local_florist <items generated>
+	mugger/toll/threat nodes that require an item to enter or else they take everything the character is carrying
 		they may or may not take that item, or they may take a different, unrelated item if you have it
-		render: an icon you consider suitable (ideally scary), then if they take and demand the same item, that item, otherwise r(<item required>) c(<item taken>)
+		render: Icons.savings then explanation of the items it takes or requires, c<item> if it takes that item without requiring it (nonthreatening), r<item> (requiring without taking),  rc<item> (requiring and costing the same thing)
+			it should pulse red when it strikes — including when it's only taking its toll off someone who was never at risk of the robbery, since an item leaving the inventory with no red anywhere is indistinguishable from a bug
+			say MUGGED
+	blights, a danger icon casting a wide dashed circle onto the map around it. The circle is thick and opaque, in the blight's red washed most of the way out to the world background color (blightWash), and the blight's own node gets a filled disc of radius 2 in the same color behind it, so the territory reads as ground rather than as another wire. Dormant and firing blights are that same color mixed further towards the background or back towards red — everything that recedes here recedes by mixing towards the background, never by going transparent, so nothing drawn over it is tinted. All of it paints under the graph, under the edges as well as the nodes. A blight's radius is drawn from a set of discrete sizes (blightRadii, [5, 7, 14]) rather than a range: the player has to judge a blight's reach by eye from across the map, and a few recognisable sizes can be learned where a continuum of them can only be guessed at. On a clock interval of one to three days, taking place during the night, the blight fires: it deletes any items within the radius carried by players or kept in unsecured storage, though not those on plants. If a player is caught in the wave, say BLIGHTSTRUCK.
+		at blightMitigablep the blight can be mitigated by giving it a particular item, uniformly randomly chosen. At blightHungryp (of those) it's hungry, denoted with 'R', meaning it needs another item every cycle. If a blight is satiated and not hungry, stop showing the cycle indicator.
+		render: Icons.dangerous ['R' if hungry] [the item it wants]
+	for both blights and muggings, flash the player's inventory red three times
 	traders who can convert items into other items
 		sometimes instantly, sometimes taking time
 		sometimes they have a cooldown
 		sometimes they take multiple items
 		rarely, they return multiple items
-		render: (<take> -> <produce>) [if they take time to produce: the time taken]
+		render: Icons.swap_vert <take> Icons.navigate_next <produce> [if they take time to produce: the time taken]
 	storage
-		can store 2 to 12 things, with a log distribution
+		some storages (at storageSecurep) are secured, which puts their contents out of the blight's reach. Render with a lock after the storage icon.
+		can store 2 to 12 things, with a log distribution. Display the storage's control as its slots, similar to inventory. The storage is loaded by clicking items in inventory, which causes them to move in. If more than one storage is showing... i guess clicking them repeatedly just rotates them from one to the next. Eventually we'll support dragging. Loading and rotating both skip storages that are out of hours: an out-of-hours facility does nothing, and these are ways into a storage that don't go through its own controls, so they have to check for themselves.
 
 other things
 	players
-		each one has an inventory of 5 items, as mentioned, they can be temporarily incapacitated
+		each one has an inventory of 5 items, as mentioned, they can be temporarily incapacitated (nothing incapacitates them at present — muggers rob instead)
 		there's one selected player, tracked with a signal
 		player names include Rudy, Noel, Geno, Lenny, Carter
+		Render players as colored circles (1.4x the width of a node icon) with their names stacked centered over them inside a white container with outline same color as the orb. They render at node-icon scale even when moving along an edge — they don't scale with zoom.
 
 level generation:
 	use a seed
@@ -67,22 +96,39 @@ level generation:
 		if rng > middleNodeProb
 			split the edge at (where span = max(0, edgeLength - splitNodeMinDistance * 2)), edgeLength/2 + rng * span - span/2, a new node goes there
 	generate trains and stations first. Position the train path terminus 1.5 units from its randomly chosen station node, at an angle where it's angle distance from the other edges is maximized.
-	nTrainSchedules are generated randomly, which can be in the form of Never (which will only move when the player moves it), OneWay (which returns to its initial station two seconds after arrival), or Cycle(seconds) (which also can't be controlled) (seconds should be generated to one decimal place). Trains are assigned these on scheduleDistribution.
-	a set of facilities should be generated at a fixed distribution, eg, parameters determine that there will be a certain number of storages, traders, etc, in the world. They're then randomly put into buckets according to a fixed distribution of bucket sizes. Then the buckets are randomly strewn around the world onto nodes. Trains can contain facilities just like any other node!
+	nTrainSchedules are generated randomly, which can be in the form of Never (which will only move when the player moves it), OneWay (which returns to its initial station two seconds after arrival), or Cycle(seconds) (which also can't be controlled) (seconds are always whole numbers, never fractional). Trains are assigned these on scheduleDistribution.
+	facilities then roll for their active phase: muggers are night-only at muggerNightOnlyp, blights are exempt (they're nocturnal by nature), everything else is day-only at facilityDayOnlyp.
+	as many buckets as there are nodes are generated, with size distribution closely equal to bucketSizeDistribution. Each bucket slot holds one facility. Traders are distributed first — exactly as many as trader generation produced, every one placed. The remaining slots are filled with the other facility types by nonTraderWeights. The buckets are then shuffled over the nodes and that's where each of their facilities go. Buckets aren't a concept in the code after generation has finished. Trains can contain facilities just like any other node!
 
 rendering the level:
 	you'll want to use hsluv here.
-	background white, edges are light grey. Train edges should be tinted brown. Edges between train nodes and stations should.. i guess be light grey.
+	background white, edges are light grey. A train's rail takes its color from the train's node, which takes it from the colour scheme like every other node does — the train's own pair of standard colours, the graph's warmed. There are no per-train liveries: a train is part of the same graph as everything else, and the map already says which line is which by where it goes. Edges between train nodes and stations are ordinary edges, a gradient from the station's colour into the train's — they're a gangway rather than rail.
+	Edges should be 0.4 units wide, with round caps
 	graph nodes are circles 1 unit wide, thicker than the edges. Same color as their associated edges.
-	render players as colored circles 1.4 units wide with their names over them inside a white container with outline same color as the orb.
-	the map centers on the currently selected player
+	the map centers on the currently selected player. When they're moving, it pans straight to the node they're moving to rather than tracking them along the edge. The camera doesn't chase its target, it seeks it: each axis eases in and out over a fixed span (camSeekSeconds, 0.55) as two joined parabola segments — accelerate, then decelerate onto the mark — and a target that moves while the camera is still travelling retargets from the current position and velocity, so the motion never jolts. That's animove's TimelyParabolicSimulation. It runs on wall time, not game time, so the view keeps settling while the game is paused. Only the followed point retargets it. The user's drag doesn't: a drag is the player's own hand on the camera, so it shoves the simulations' end values along under the finger and leaves the segments in flight to keep their shape and their timing. A camera at rest has finished its segments, so its end value is where it is and a drag moves it one to one, which is what a drag should feel like; one still in flight takes up the shift in proportion to how far along it is instead of lurching or re-easing from a standstill.
+	the top of the screen is one wrap the width of the screen, all of it in the same font as the main timer and fully opaque: the close and pause buttons, the global timer, the day clock, then in all caps "<days remaining> DAYS REMAIN. <eudaimonia still owed> <eudaimonia icon> REQUIRED". Days remaining is the floor of the time remaining divided by the day length, and the requirement counts what's still owed, so it falls as they earn eudaimonia. This replaces the old eudaimonia counter in the corner.
 	the above all scales down when the map is zoomed out, the below wont.
+	item icons need to be allowed to grow large enough to be legible, when the player enters their node. Item icons should only shrink to 0.26 of the original size, so items with other items nested in them sometimes need to grow — but that growth is capped, since uncapped it made deep icons enormous. Past the cap they just render small.
+	items need to be rendered with an intrinsic 
 	When a player arrives or departs from a node, it rerenders.
-	Nodes render as Row(Column(facilities), Column(players present))
+	Everything anchored to a node lives in one moving layer: a box the size of the level, laid out in world units scaled by the zoom and shifted whole by the camera.
+	Each facility badge is wrapped in an Animove, so that when things move under it the badge slides rather than jumps. The AnimoveFrame they're measured against is each node's own cluster, not the map: an Animove springs whenever it moves relative to its nearest frame, and a frame around the map would count the camera's every move as the badges moving — panning is survivable, since the moving layer carries the nodes along with it, but zoom moves the nodes within that layer and sends every badge on the map springing to its new place at once. That frame is a fixed-size box with the cluster centred in it rather than the cluster itself: shrink-wrapped, its edges would move whenever the contents changed width, since a box centred on the dot that widens by anything shifts its left edge by half of that, and every badge in it would read the shift as having moved and slide in from one side to land where it already was. The keys the Animoves need are hung off the facilities themselves, weakly, since the badge widgets are rebuilt from scratch on every signal.
+	Past farZoomThreshold the badges start to close over the graph they're standing on, so a second copy of the graph fades in over the top of them, reaching overGraphMaxOpacity (0.5) another overGraphFadeOver of zoom further out. At that size the map is still a map, and what's wanted from it is the shape of the network rather than what's for sale on it. It's a replay of the picture the world painter recorded on its way past, not a second painting: the geometry is identical and building it — a path and a gradient per edge — is the expensive half. It goes down inside one layer, so that it reads as one translucent graph; drawn as translucent parts, every crossing would come out darker than the rest, which is exactly where the structure is hardest to read.
+	Nodes render as Column(facilities) left of the node's dot and Column(players present) right of it, each anchored by its inner edge so neither slides when the other changes width. With only one of the two present there's nothing to make room for, so it sits centred on the dot instead.
 	So node widgets are naturally repositioned and culled if off-screen whenever zoom level changes.
-	many many things need to be able to render an animating cooldown/progress timer shrinking pie, generally, position this at their top right corner. Progress pies should be sage, cooldown should be black and count. Both count down rather than up.
+	many many things need to be able to render an animating cooldown/progress timer shrinking pie, generally, position this at the top right corner of the whole thing it annotates — the pie itself sits on the corner, always in the same place, and its label is laid out beyond it without taking width, so a longer label never shoves the pie inboard. Progress pies should be sage, cooldown should be black and count. Both count down rather than up, with the wedge anchored at twelve o'clock and its free edge travelling clockwise as it empties. No backing disc.
 	Players only render a positioned if they're moving along an edge, otherwise they'll be seen in their node's widget.
-	The world view should support dragging and zooming gestures, but amplify those gestures by 2x (this may be a subtask of its own)
+	 The world view should support dragging and zooming gestures, but amplify those gestures by 3x
+	Pass node display widgets an enum describing the zoom level. Values are { Selected: when a player is in this node, item icons display at full size, Normal: Icons are shrunk to a standard width, Small: badges collapse to just their leading icon, item icons hidden }. Small applies when zoomed out beyond farZoomThreshold (default 2.5) times the default zoom.
+	Every node has its own colour, drawn at generation from a basket of three (nodeToneWeights, even odds): the graph's standard colour, its other standard colour a step further off the background, or the first of those faintly stained with an item colour — faintly: enough that two nodes side by side are told apart by it, not enough that a node reads as belonging to a colour. The two standard colours are written out by hand in each scheme rather than one being derived from the other; they sit close enough together that the arithmetic would only have been a stand-in for a colour picked by eye. A tinted node takes its colour from one of the items its own facilities require — what they demand of a player, not what they hand out — so the map says a little about what's on it before anything is tapped. A node whose facilities require nothing coloured has no business being tinted, and draws from the other two tones instead; staining it with an unrelated item colour was the other way, and it made the tint a lie. A node keeps its tone and its tint colour rather than a finished colour, since the base a tone departs from belongs to whichever colour scheme is up — the pair of them is what a saved level would have to carry. Train nodes have their own pair of standard colours, the graph's warmed, and a train's rails take that colour too. All three tones stay within a hair of the graph's own colour — these are three nodes of one graph, not three kinds of node. A node with a blight on it is the hazard colour instead, whatever tone it rolled: where a blight will strike is the one thing a player has to be able to read across the whole map without tapping anything, so it isn't left to a roll. Muggers don't take the colour — a mugger is a toll rather than a wave, and its own badge already says so.
+	Facility lozenges are filled with the colour of the node they're on, washed out to a faint tint a step off the background — darker in the day scheme, lighter in the night one. So a node's facilities look like they belong to that node and not the one next to it. No outline: the fill is a light enough touch that a border round it was the loudest thing in the node, and it drew a box around every icon on the map. An explanation tooltip is filled the same as the lozenges of the node it came from — it's what one of them had to say — but it keeps a border, since it floats over the map rather than sitting in a node's own stack.
+	Edges run a gradient between the colours of the two nodes they join, rather than a flat grey: an edge belongs to both of its nodes and one colour would have to pick a side. The gradient's ends are pulled in clear of the node discs rather than anchored at their centres, so the whole transition happens in the open between them and an edge leaves its node in that node's own colour. Where an edge runs into a node it's filleted on both flanks — an arc tangent to the disc and to the edge, so the wire grows out of the dot instead of lying across it. One shape does for every join, since every node and every edge is the same size. Body and fillets are one filled shape drawn in one go rather than a stroke with wedges added: it takes the edge's gradient with it, which is what makes a fillet come out its node's colour, and abutting two separately drawn antialiased shapes along the flank would leave a hairline seam. Trains get no fillets — a train is a vehicle sitting on the line, not a junction the line grows out of.
+	An item icon's widget is the box its mark actually fills, not the square it would fit in: a rod is half as wide as it is tall, and a root grid takes its grid's aspect. The mark is drawn at the size it always was — only the empty margins are cropped — so a tall thin item doesn't carry square padding around into whatever row it's laid out in.
+	Anywhere marks are laid out in a row — a badge, an action chip, a trader's take/give sequence — they're separated by a standard gap. A run of items is only legible if it's clear where one ends and the next begins, and a quantity count hanging off an icon's corner stays within that gap so it never reads as part of the next item.
+	Tapping a facility's icon in the map view should show an explanation tooltip paraphrasing the icon sequence in english, except items, which aren't described in english — they just display as their icons at full size. Tapping that same facility again closes the tooltip.
+	muggers should flash red when activated
+	a node that a player walks into, or whose facilities are tapped for a tooltip, should be shunted to the end of the list so that it's on top of all of the others. (make sure they have global keys). The order is stateful: a raised node stays raised, in the order it was raised, rather than dropping back when the player leaves or the tooltip closes.
+	
 
 The process you should follow:
 	take an inventory of utilities and conventions from other files that might be useful here, keep it brief, keep that in mind
@@ -91,59 +137,89 @@ The process you should follow:
 	I'll then ask you to implement.
 
 
-I should be more specific about the Item Catalog, or the way we generate Traders. We design the dependency graph as follows: Items will be arranged in nTiers tiers. Items above basic items will initially be defined in terms of their dependent parts, but there will often be other traders that produce them that use different parts. For now, nItemTiers = 5. tierCount = [5, 16, 8, 6, 4].
-Traders are then generated (they're essentially directed hyperedges). We do this by:
-	for each tier
-		thisTierRequired = shuffle(itemTiers[iTier].clone())
-		nextTierRequired = null if no next tier, else shuffle(itemTiers[iTier + 1].clone())
-		while either of the above are still non-empty
-			for each item
-				weighted-pick from a random requiredGenerator of traderGeneratorsPerTier[iTier], where TraderGeneratorsForTier { double totalRequiredWeight; List<(double weight, (rng, iItem, thisTierRequired, iTier, nextTierRequired)-> Trader?))> requiredGenerators, double totalSupplementalWeight; List<(double, (rng, iTier)-> Trader?)> supplementalGenerators; int supplementalRuns}))
-					if it returns null, pick again
-				introduce the new trader into the trader set
-		run supplementalRuns supplementalGenerators. Don't retry if they return null.
-	where
-		int otherItem(rng, iItem, iTier){
-			while(true){
-				var other = rng.nextInt(tierCount[iTier]);
-				if(other != iItem) break;
+item catalogue generation
+	I should be more specific about the Item Catalog, or the way we generate Traders. We design the dependency graph as follows: Items will be arranged in nTiers tiers. Items above basic items will initially be defined in terms of their dependent parts, but there will often be other traders that produce them that use different parts. For now, nItemTiers = 5. tierCount = [5, 16, 8, 6, 4].
+	for basic items
+	Traders are then generated (they're essentially directed hyperedges). We do this by:
+		for each tier
+			thisTierRequired = shuffle(itemTiers[iTier].clone())
+			nextTierRequired = null if no next tier, else shuffle(itemTiers[iTier + 1].clone())
+			while either of the above are still non-empty
+				for each item
+					weighted-pick from a random requiredGenerator of traderGeneratorsPerTier[iTier], where TraderGeneratorsForTier { double totalRequiredWeight; List<(double weight, (rng, iItem, thisTierRequired, iTier, nextTierRequired)-> Trader?))> requiredGenerators, double totalSupplementalWeight; List<(double, (rng, iTier)-> Trader?)> supplementalGenerators; int supplementalRuns}))
+						if it returns null, pick again
+					introduce the new trader into the trader set
+			run supplementalRuns supplementalGenerators. Don't retry if they return null.
+		where
+			int otherItem(rng, iItem, iTier){
+				while(true){
+					var other = rng.nextInt(tierCount[iTier]);
+					if(other != iItem) break;
+				}
 			}
-		}
-	for now, we'll use traderGeneratorsPerTier = List.generate(nItemTiers, ()=> TraderGeneratorsFor(
-		required:[
-			// links two items to next tier
-			(15, (rng, thisTierRequired, iTier, nextTierRequired){
-				if(nextTierRequired == null) return null;
-				final requi = thisTierRequired.pop() ?? randomItem(itemTiers[iTier]);
-				return Trader(
-					[Quantity(itemTier[requi], 1), Quantity(itemTier[otherItem(rng, iItem, iTier)], 1)],
-					[Quantity(nextTierRequired.pop() ?? randomItem[itemTiers[iTier + 1]], 1)]
-				);
-			})
-			// links one item to an item in the same tier
-			(3, ...)
-			// links two items to an item from the same tier
-			(1, ...)
-			// links four items of the same type to one item in the next tier
-			(5, ...)
-			// links three items to the next tier and produces one side item from the current tier
-			(6, ...)
-			// links four items to the next tier and produces one side item from the current tier and one from the prior tier
-			(2, ...)
-			// links four items to the next tier and produces one side item from the current tier and one from the prior tier
-			(2, ...)
-			// from four items of the current tier to two items of the next tier
-			(4, ...)
-			// links three items to the next tier
-			(8, ...)
-		],
-		supplementalRuns: 3
-		supplemental: [
-			// takes an item and produces two iTier - 1 items
-			(10, ...)
-			// takes two items and produces one item from iTier - 1 and 2 from iTier - 2
-			(5), ...)
-		]
-	)
-Then add a eudaimonia traders for each final tier item, who trade their final item for one eudaimonia apiece.
-We then assign higher CompositeItems their icons (they're late initialized) by picking a random trader who produces that item (from lower items), taking the inputs, and combining them using random operators distinct from their inputs' top operators. If there are more than 2 inputs, and all of the input operators are not horiz or vert, you can use a single multi horiz or vert, otherwise you'll have to use multiple pairing operators to ensure distinctness.
+		for now, we'll use traderGeneratorsPerTier = List.generate(nItemTiers, ()=> TraderGeneratorsFor(
+			required:[
+				// links two items to next tier
+				(15, (rng, thisTierRequired, iTier, nextTierRequired){
+					if(nextTierRequired == null) return null;
+					final requi = thisTierRequired.pop() ?? randomItem(itemTiers[iTier]);
+					return Trader(
+						[Quantity(itemTier[requi], 1), Quantity(itemTier[otherItem(rng, iItem, iTier)], 1)],
+						[Quantity(nextTierRequired.pop() ?? randomItem[itemTiers[iTier + 1]], 1)]
+					);
+				})
+				// links one item to an item in the same tier
+				(3, ...)
+				// links two items to an item from the same tier
+				(1, ...)
+				// links four items of the same type to one item in the next tier
+				(5, ...)
+				// links three items to the next tier and produces one side item from the current tier
+				(6, ...)
+				// links four items to the next tier and produces one side item from the current tier and one from the prior tier
+				(2, ...)
+				// from four items of the current tier to two items of the next tier
+				(4, ...)
+				// links three items to the next tier
+				(8, ...)
+			],
+			supplementalRuns: 3
+			supplemental: [
+				// takes an item and produces two iTier - 1 items
+				(10, ...)
+				// takes two items and produces one item from iTier - 1 and 2 from iTier - 2
+				(5), ...)
+			]
+		)
+	No trader may give an item that it also takes. Side outputs drawn from a tier the trader also consumes from are drawn excluding that trader's own inputs; if nothing in the tier is left over, the side output is simply dropped.
+	Then add eudaimonia traders for each final tier item, who trade their final item for one eudaimonia apiece.
+	We then assign higher CompositeItems their icons (they're late initialized) according to the design under "items". No two items may end up with the same icon — the icon is the only handle the player has on an item's identity — so a collision is recomposed, and past a few attempts an extra part is thrown in to force the issue.
+	Items should render as combinations of parts of the items they're made from. There will be an outer grid that usually doesn't exceed 3x3, and there will be nesting which may have inner grids, but the nesting will be different, and there will be a nesting limit. Depth 3 parts have to be in the root grid. Nothing is scaled up to make it legible; the only things that take more than a cell are a rod at its big size (1x2) and a nesting squircle embedding large (2x2). Nesting grids always have square cells, shrinking to whichever dimension binds, so nested parts are never distorted; inside a rod that means the inner grid and everything on it comes out small and well short of flush with the rod's ends, which is the price of sizing being automatic and right. Depth 2 parts can only be nested in a shape that's in the outer grid, and so on. So the types are like: starting with the root: RootGridIcon:Icon { Coord dims, List<IconPlacement> children}, where IconPlacement { Coord, bool tilted, Icon }, NestingIcon: Icon {BasicIcon container, Coord dims, List<IconPlacement> children}, BasicIcon: Icon {basicShape, basicColor}. RootGridIcons only occur at root, and IconPlacement isn't an icon at all — neither of them is a thing that can be drawn standing on its own, so neither may ever be a part. Destructuring the root grid out is therefore the first step of identifying the parts within an item: what a part hunt returns is always icons that can stand alone. That holds wherever parts come from, including the fallback that borrows a whole lower item when a composite has no producers to take them from.
+	How higher items are given their icon:
+		List all of the visual subcomponents of all of the inputs of all of the traders that produce the subject item, weighted by the number of times they occur across all inputs, with a bonus for higher depth (more iconic) icons (since they incidentally advantage components within themselves, and those are more likely to be incidentally shared. Depth 2 gets 5x, depth 3 gets 8x. For each trader, pick one component by filtering the list to to the components from their inputs, dropping those that have already been picked, retaining only the top 30% (ciel), then doing a weighted draw.
+		The icon will be composed from these.
+		Shuffle the parts.
+		Sort parts by how empty they are, with a bonus to squircles 3x and rods 2x, take a splice of the first 30% (ciel)
+		For each one in the splice
+			if the host icon is currently empty, choose nesting dimensions randomly. a circle or diamond only allows a 1x1 nesting grid. A rod allows a 1x1 or a 2x1. A squircle allows a 2x2.
+			a nesting squircle may also be willing to take a 2x2 footprint in the grid it sits in, at squircleTryEmbeddingLargep, so that its own inner grid gets full-size cells rather than quarter-size ones.
+			Which footprint an icon actually gets is settled per placement, not per icon. A rod is 1x2 or 1x1; a squircle willing to embed large is 2x2 or 1x1; everything else is only ever 1x1. iconGridPlacementBigp decides which size is tried first, and the tilt order is random. Sizes and tilts are alternatives of the same kind — each falls over to the next when there's no room — so they're generated together as one ordered list of placement options.
+			An icon holding a nesting of its own is too full to shrink, so it's only offered its big size and simply fails to place if that doesn't fit. Everything shallower can go either way.
+			consider nesting each other one after it into it at iconNestingp (init 0.6), starting at the end of the emptiness list
+				pick a starting cell randomly, iterate in both directions alternatingly and try both tilts (if it has irregular dimensions) until you find a place where it fits. If it doesn't fit anywhere, continue
+		Arrange the remaining parts in a RootGridIcon (if there's more than one)
+			Shuffle
+			The algorithm is
+				pop the first part and assign the position (0,0)
+				for each remaining part
+					consider every free placement that touches the cluster of currently position-assigned parts — orthogonally adjacent to a cell that's already taken, so nothing hangs off it by a corner — and all tilts, for those that can be tilted. That includes the gaps *inside* the cluster: sweeping only the four outer edges means a part can never drop into a hole, so a fourth unit shape has to go outside a 2x2 that's three quarters full and the grid comes out 3x2 with a gap in it, which is the minimize-the-max-dimension rule being broken by a placement that was never offered.
+						retain the ones that minimize the max dimension. Retain every placement that ties with the leading candidate, over all of them, before choosing
+					pick a random one from the retained placements, and assign the placement
+					(update our variable tracking the cluster's bounds)
+				now you have the final positions and can construct the RootGridIcon
+				(this isn't intended to be an optimal packing, I think this'll produce more visually interesting results than that would)
+
+saving
+	A level is written out in full rather than as the seed it grew from. A seed only names a level for as long as the generator is left alone, and the generator is the part of this under the most construction — a saved game that dissolves the next time a probability is tuned isn't saved at all. So what goes to disk is the world itself: the graph, the facilities strewn over it, the item catalogue with the icons it composed, and the state of play — where everyone is standing, what they're carrying, which trees are picked, where the trains are, what the clock says. The parameters ride along with it, all but traderGeneratorsPerTier, which is closures; those are only consulted while a level is being generated and never afterwards, so a loaded level takes the current defaults for them and is none the wiser.
+	Nothing in the format carries an identity of its own: items are named by their catalogue slot and nodes by their index in the level's node list, which is why loading goes in passes — every node exists before anything is allowed to point at one. The temporary station↔train wires aren't written down either; they come back with the trains that own them.
+	The level on screen is saved when the game screen is left and when the app is backgrounded, and the next run picks it up instead of generating. Asking for a particular seed still generates. The format is versioned; a save from a build that wrote a different shape is discarded and a fresh level generated, rather than being migrated.

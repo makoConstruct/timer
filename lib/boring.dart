@@ -13,7 +13,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:hsluv/hsluvcolor.dart';
-import 'package:just_liquid_glass/just_liquid_glass.dart' hide tau;
+import 'package:just_liquid_glass/just_liquid_glass.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 // import 'package:audioplayers/audioplayers.dart';
@@ -1156,7 +1156,7 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   }
 }
 
-/// Adapter that converts Animation<(double, double)> to Animation<double> by computing min(rise, 1 - fall)
+/// Adapter that converts `Animation<(double, double)>` to `Animation<double>` by computing min(rise, 1 - fall)
 class _UpDownToDoubleAdapter extends Animation<double>
     with AnimationWithParentMixin<(double, double)> {
   _UpDownToDoubleAdapter(this.parent);
@@ -1827,7 +1827,7 @@ double lpixPerMM(BuildContext context) {
   // return px / mm * 25.4 * dpi;
 
   // source: https://api.flutter.dev/flutter/dart-ui/FlutterView/devicePixelRatio.html
-  final double officialValue = 3.8;
+  // the officially claimed value is 3.8, but it doesn't match the device.
   final double samsungS9PlusValue = 411.4 / 70; // = 5.877
   return samsungS9PlusValue;
 }
@@ -2272,6 +2272,7 @@ class CircularRevealClipper extends CustomClipper<Path> {
 }
 
 /// Custom page route that combines circular reveal animation with translation
+/// known issue: it can't drop the shadermask even when the animation is complete, because it causes a one-frame flicker in which text fails to render.
 class CircularRevealRoute<T> extends PageRoute<T>
     with MaterialRouteTransitionMixin<T> {
   final Widget Function(BuildContext context) builder;
@@ -3689,6 +3690,10 @@ class OurThemeData {
   Color nonGlassColor;
   Color nonGlassOnSurface;
 
+  /// A plain surface tone that stands apart from a glass surface without
+  /// fighting it: light grey on light theme, dark grey on dark theme.
+  Color surfaceContrastingGlass;
+
   /// Corner radius of a timercule's backing panel. Roughly a quarter of a
   /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
   /// control buttons.
@@ -3717,6 +3722,7 @@ class OurThemeData {
     required this.onGlassColor,
     required this.nonGlassColor,
     required this.nonGlassOnSurface,
+    required this.surfaceContrastingGlass,
     this.hardEdges = false,
     this.timerculeBackingCornerRadius = 23,
     this.glassBlurRadius = 13,
@@ -3769,6 +3775,7 @@ class OurThemeData {
             onGlassColor: theme.colorScheme.onSurface,
             nonGlassColor: Colors.white,
             nonGlassOnSurface: Colors.black,
+            surfaceContrastingGlass: HSLColor.fromAHSL(1, 0, 0, 0.22).toColor(),
             edgeTint: Colors.white.withValues(alpha: 0.7),
           )
         : OurThemeData(
@@ -3805,6 +3812,7 @@ class OurThemeData {
             // onGlassColor: theme.colorScheme.onSurface,
             nonGlassColor: Colors.black,
             nonGlassOnSurface: Colors.white,
+            surfaceContrastingGlass: HSLColor.fromAHSL(1, 0, 0, 0.82).toColor(),
             edgeTint: HSLColor.fromAHSL(0.16, 0, 0, 0.2).toColor(),
           );
   }
@@ -4584,7 +4592,7 @@ Computed<bool> addToSequence(
     () =>
         (urgentShow?.value ?? false) ||
         (sequenceCounter.value == ni && showCondition.value),
-    autoDispose: true,
+    options: ComputedOptions(autoDispose: true),
   );
 }
 
@@ -5019,7 +5027,7 @@ class TimerculeCyclePainter extends CustomPainter {
         centerPoint: innerCenter,
         clockwise: true,
       );
-    timerculeIconScaling(canvas, size, furtherScaling: 0.81);
+    timerculeIconScaling(canvas, size, furtherScaling: 0.84);
     _drawRoundedPolygon(canvas, path, color, cr);
   }
 
@@ -5097,7 +5105,7 @@ class TimerculeFlatterCyclePainter extends CustomPainter {
     );
     r.close();
 
-    timerculeIconScaling(canvas, size);
+    timerculeIconScaling(canvas, size, furtherScaling: 0.935);
     _drawRoundedPolygon(canvas, r, color, cr);
   }
 
@@ -5501,6 +5509,119 @@ class HamburgerIcon extends StatelessWidget {
         radiusp: 0.36,
         lineWidthp: 0.3,
         hardEdge: hardEdge,
+      ),
+    );
+  }
+}
+
+/// A line-art "×", for close/dismiss affordances.
+class CrossIconPainter extends CustomPainter {
+  CrossIconPainter({
+    required this.color,
+    required this.lineWidth,
+    this.radiusp = 0.24,
+  });
+  final Color color;
+  final double lineWidth;
+
+  /// Half-length of each arm, as a fraction of the box's shorter side.
+  final double radiusp;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = lineWidth;
+    final r = min(size.width, size.height) * radiusp;
+    final c = Offset(size.width / 2, size.height / 2);
+    canvas.drawLine(c + Offset(-r, -r), c + Offset(r, r), paint);
+    canvas.drawLine(c + Offset(r, -r), c + Offset(-r, r), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CrossIconPainter oldDelegate) =>
+      oldDelegate.color != color ||
+      oldDelegate.lineWidth != lineWidth ||
+      oldDelegate.radiusp != radiusp;
+}
+
+class CrossIcon extends StatelessWidget {
+  const CrossIcon({super.key, required this.lineWidth, this.color});
+  final double lineWidth;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: CrossIconPainter(
+        color:
+            color ??
+            IconTheme.of(context).color ??
+            Theme.of(context).colorScheme.onSurface,
+        lineWidth: lineWidth,
+      ),
+    );
+  }
+}
+
+/// Two stacked bars: the usual "grab me and move me" grip marking. Unlike
+/// [HamburgerIcon] (a menu affordance) the bars are short and close together,
+/// so it reads as a handle rather than a list.
+class GripBarsIconPainter extends CustomPainter {
+  GripBarsIconPainter({
+    required this.color,
+    required this.lineWidth,
+    this.radiusp = 0.26,
+    this.gapp = 0.16,
+  });
+  final Color color;
+  final double lineWidth;
+
+  /// Half-length of each bar, as a fraction of the box's shorter side.
+  final double radiusp;
+
+  /// Half the distance between the two bars, same units.
+  final double gapp;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = lineWidth;
+    final md = min(size.width, size.height);
+    final r = md * radiusp;
+    final c = Offset(size.width / 2, size.height / 2);
+    for (final s in const [-1.0, 1.0]) {
+      final y = c.dy + s * md * gapp;
+      canvas.drawLine(Offset(c.dx - r, y), Offset(c.dx + r, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant GripBarsIconPainter oldDelegate) =>
+      oldDelegate.color != color ||
+      oldDelegate.lineWidth != lineWidth ||
+      oldDelegate.radiusp != radiusp ||
+      oldDelegate.gapp != gapp;
+}
+
+class GripBarsIcon extends StatelessWidget {
+  const GripBarsIcon({super.key, required this.lineWidth, this.color});
+  final double lineWidth;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: GripBarsIconPainter(
+        color:
+            color ??
+            IconTheme.of(context).color ??
+            Theme.of(context).colorScheme.onSurface,
+        lineWidth: lineWidth,
       ),
     );
   }
@@ -6377,22 +6498,29 @@ class PadStateIcon extends StatelessWidget {
 }
 
 /// A single [GestureRecognizer] for an inline [TextSpan] that fires both a tap
-/// and a long press, by forwarding pointers to an inner tap + long-press pair
-/// (a TextSpan only accepts one recognizer, and each detector competes in the
-/// gesture arena as usual).
-class _TapAndLongPressRecognizer extends GestureRecognizer {
+/// and a long press (a TextSpan only accepts one recognizer), by *being* the
+/// tap recognizer and additionally forwarding pointers to an inner long-press
+/// one — each competes in the gesture arena as usual.
+///
+/// Subclassing rather than wrapping is what keeps semantics working: text
+/// render objects match a span's recognizer by type to decide which semantic
+/// action to expose ([RenderEditable.assembleSemanticsNode], and the same
+/// switch in [RenderParagraph]), and assert on anything that isn't a tap,
+/// double-tap or long-press recognizer. A wrapper class fails that assert once
+/// per link whenever semantics is on.
+class _TapAndLongPressRecognizer extends TapGestureRecognizer {
   _TapAndLongPressRecognizer({
     required VoidCallback onTap,
     required VoidCallback onLongPress,
-  }) : _tap = (TapGestureRecognizer()..onTap = onTap),
-       _longPress = (LongPressGestureRecognizer()..onLongPress = onLongPress);
+  }) : _longPress = (LongPressGestureRecognizer()..onLongPress = onLongPress) {
+    this.onTap = onTap;
+  }
 
-  final TapGestureRecognizer _tap;
   final LongPressGestureRecognizer _longPress;
 
   @override
   void addPointer(PointerDownEvent event) {
-    _tap.addPointer(event);
+    super.addPointer(event);
     _longPress.addPointer(event);
   }
 
@@ -6400,14 +6528,7 @@ class _TapAndLongPressRecognizer extends GestureRecognizer {
   String get debugDescription => 'tapAndLongPress';
 
   @override
-  void acceptGesture(int pointer) {}
-
-  @override
-  void rejectGesture(int pointer) {}
-
-  @override
   void dispose() {
-    _tap.dispose();
     _longPress.dispose();
     super.dispose();
   }

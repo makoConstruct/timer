@@ -35,6 +35,14 @@ const MobjID completedSetupID = 'ac869383-78d9-4013-b234-1e061e742b24';
 const MobjID buttonSpanID = '1a6d9d41-3002-48b3-a2a7-7117bfcd67b2';
 
 const MobjID buttonScaleDialOnID = '59a00948-75e1-4a87-8f57-42208b03c3a2';
+
+/// when enabled, the trainscape game screen opens by default, over the timer
+/// screen, when the app launches
+const MobjID trainscapeModeID = '8365048f-a403-4d82-b408-5fd7fb8c41a5';
+/// the trainscape level that was on screen when the game was last left, stored
+/// whole (see the saving section of trainscape_boring.dart) so that it comes
+/// back on the next run
+const MobjID savedTrainscapeLevelID = '68f20569-ab64-42ca-af0d-8789882f5559';
 const MobjID crankGameWinMessageIndexID =
     '71874fd9-f83b-4bc3-a2a4-327298746577';
 const MobjID usedDragActionRecordID = '1cf75159-85e7-46eb-aa21-5b06a164b01b';

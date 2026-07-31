@@ -1,6 +1,5 @@
 // this file tries to only concern itself with the core logic of the app. Anything whose functionality would be obvious just from its name/context but can't be fully modularized will be in boring.dart. Main and Boring aren't separable, so why separate them? I guess you could say main is like a "best of" of the code.
 
-import 'dart:collection';
 import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:isolate';
@@ -16,7 +15,7 @@ import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:improved_wrap/improved_wrap.dart';
 // hide tau because boring.dart already defines one.
-import 'package:just_liquid_glass/just_liquid_glass.dart' hide tau;
+import 'package:just_liquid_glass/just_liquid_glass.dart';
 // imported as because there's a name collision with Column, lmao
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -34,6 +33,8 @@ import 'package:makos_timer/background_service_stuff.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/crank_game.dart';
+import 'package:makos_timer/trainscape.dart'
+    show TrainscapeScreen, trainscapeName;
 // import 'package:makos_timer/journeying_game.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/size_reporter.dart';
@@ -49,11 +50,11 @@ Future<void> deleteDatabase() async {
   final directory = await getApplicationSupportDirectory();
   final file = File(p.join(directory.path, '$databaseName.sqlite'));
   await file.delete();
-  print("CRITICAL: deleted database file as commanded");
+  debugPrint("CRITICAL: deleted database file as commanded");
 }
 
 Future<void> torchDatabase(TheDatabase db) async {
-  print('CRITICAL ERROR: Clearing all data from the database!');
+  debugPrint('CRITICAL ERROR: Clearing all data from the database!');
   await db.kVs.deleteAll();
 }
 
@@ -242,6 +243,12 @@ Future<void> initializeDatabase() async {
       debugLabel: "crank game win message index",
     ),
     Mobj.getOrCreate(
+      trainscapeModeID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "trainscape mode",
+    ),
+    Mobj.getOrCreate(
       usedDragActionRecordID,
       type: IntType(),
       initial: () => 0,
@@ -312,7 +319,7 @@ void main() async {
       );
       notificationResponseReceivePort!.listen((message) {
         if (message == 'dismissAlarms') {
-          print("main message to dismissAlarms");
+          debugPrint("main message to dismissAlarms");
           globalTimerHolm?.dismissAlarms();
         } else if (message == 'ready') {
           // The foreground task finished starting and registered its port; send
@@ -431,10 +438,10 @@ class TimerHolm {
 
   void dismissAlarms() {
     jukeBox.stopAudio();
-    print("dismissAlarms");
+    debugPrint("dismissAlarms");
     PlatformNotifications.cancelAll();
     for (final tt in tracking.values) {
-      print("dismissing alarm ${tt.mobj?.id}");
+      debugPrint("dismissing alarm ${tt.mobj?.id}");
       final d = tt.mobj?.peek();
       if (d != null && d.isGoingOff) {
         tt.mobj!.value = d.withChanges(isGoingOff: false);
@@ -445,7 +452,7 @@ class TimerHolm {
   }
 
   Future<void> _sendCompletionNotification(TimerTrack tt) async {
-    print("_sendCompletionNotification");
+    debugPrint("_sendCompletionNotification");
     await PlatformNotifications.showCompletion(
       id: _notificationIdCounter++,
       channelKey: completionChannelKey,
@@ -779,7 +786,7 @@ bool startTimer(
   Duration? delay,
   int suggestedStart = 0,
 }) {
-  print("starting timer ${mobj.id}");
+  debugPrint("starting timer ${mobj.id}");
   if (reset) {
     resetTimer(mobj.id);
   }
@@ -1165,8 +1172,15 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
               Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
               false;
           if (completedSetup) {
+            final trainscapeMode =
+                Mobj.getAlreadyLoaded(trainscapeModeID, BoolType()).value ??
+                false;
             return <Route<dynamic>>[
               CircularRevealRoute(builder: (context) => TimerScreen()),
+              if (trainscapeMode)
+                CircularRevealRoute(
+                  builder: (context) => const TrainscapeScreen(),
+                ),
             ];
           } else {
             // Start with a blank placeholder, then onboarding on top.
@@ -1207,6 +1221,10 @@ class TimerMenu extends StatefulWidget {
   /// [buttonHeight]). Shared with the menu builder so the corner rounding can be
   /// derived from it.
   static const double itemPadding = 8;
+
+  /// The arrow nub's width as a fraction of [arrowHeight]. Shared between the
+  /// blob that draws it and the clamp that keeps its center on screen.
+  static const double arrowThicknessFactor = 0.52;
   final Color? backgroundColor;
   final double arrowHeight;
   const TimerMenu({
@@ -1324,9 +1342,11 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
           DoubleType(),
         ).value!;
         Offset tentativeArrowCenter = topLeftManhattanCenter(widget.centerOn);
-        // correct arrowCenter to make sure it's not too close to either side
+        // correct arrowCenter to make sure it's not too close to either side.
+        // The glass blob merges the nub into the body wherever it lands, so the
+        // only requirement is that the nub itself stays inside the margin.
         final minDistanceFromSide =
-            margin + backingCornerRounding * buttonSpan + widget.arrowHeight;
+            margin + widget.arrowHeight * TimerMenu.arrowThicknessFactor / 2;
         final arrowCenter = Offset(
           clampDouble(
             tentativeArrowCenter.dx,
@@ -1363,11 +1383,6 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             // happens to make the origin be the center of the clockface
             final origin = arrowCenter - Offset(left, top);
             final column = EvenPadColumn(
-              // stretch so every item abuts the sides, letting each menu item's
-              // horizontal padding ride the EvenPad cross edges (see [menuItem]).
-              // [padEdge] supplies that item padding on every edge that abuts the
-              // menu, so a [menuItem] only overrides its leading top (the arrow).
-              // [padSibling] 0: the items butt together, no gap.
               crossAxisAlignment: CrossAxisAlignment.stretch,
               padEdge: TimerMenu.itemPadding,
               padSibling: 0,
@@ -1525,7 +1540,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             unlerpUnit(0.0, 0.3, p),
           );
           // the nub tucks away first, over the opening 0.17 of the downswing.
-          final thickness = widget.arrowHeight * 0.52;
+          final thickness = widget.arrowHeight * TimerMenu.arrowThicknessFactor;
           final ah =
               (widget.arrowHeight - thickness) *
               arrowProgress *
@@ -2314,11 +2329,6 @@ class TimerState extends TimerBaseState<Timer> {
               },
       ),
     );
-
-    final playIconRadius = 10;
-    Offset playIconPos =
-        clockRadius.offset +
-        Offset.fromDirection(-pi / 4, clockRadius + 8 + playIconRadius);
 
     final stopwatchPulse = d.transpired % 1;
     final stopwatchPulseProgress =
@@ -3635,10 +3645,10 @@ class DragActionRingState extends State<DragActionRing>
       fontSize: 30,
     );
     // has to be kept away from the border in glass mode because the glass border is thick chaos
-    double glassAddition = glassOn ? 6 : 0;
+    double paddingAddition = glassOn ? 6 : 3;
     final pillPadding = EdgeInsets.symmetric(
-      horizontal: 12 + glassAddition,
-      vertical: 4 + glassAddition,
+      horizontal: 12 + paddingAddition,
+      vertical: 4 + paddingAddition,
     );
     ({Offset relTopLeft, Size size, Alignment anchor, Offset iconOffset})
     pillLayout(int index) {
@@ -3728,7 +3738,7 @@ class DragActionRingState extends State<DragActionRing>
         (widget.arcModeNotBlobMode
             ? glassOn
                   ? 0.33
-                  : 0.14
+                  : 0.26
             : glassOn
             ? 0.22
             : 0.16);
@@ -3740,11 +3750,10 @@ class DragActionRingState extends State<DragActionRing>
       if (showFor <= 0) continue;
       final lay = pillLayouts[i];
       final topLeft = center + lay.relTopLeft;
+      final double appearance = unlerpUnit(0.06, 1, showFor) * (1 - completion);
       final (rect, radius) = pillFluidGeometry(
         lay.size,
-        Curves.easeInCubic.transform(
-          unlerpUnit(0.06, 1, showFor) * (1 - completion),
-        ),
+        Curves.easeInCubic.transform(appearance),
         iconOffset: lay.iconOffset,
         anchor: lay.anchor,
       );
@@ -3771,9 +3780,19 @@ class DragActionRingState extends State<DragActionRing>
             height: lay.size.height,
             child: DefaultTextStyle(
               style: pillStyle,
-              child: Padding(
-                padding: pillPadding,
-                child: BandCenteredText(widget.radialActivatorLabels![i]),
+              // shrink the text along with the pill's final collapse, so no
+              // lingering glyph pokes past the (nearly gone) clip. Mostly
+              // hidden by that clip anyway.
+              child: Transform.scale(
+                scale: lerp(
+                  0.4,
+                  1.0,
+                  Curves.easeOut.transform(unlerpUnit(0, 0.2, appearance)),
+                ),
+                child: Padding(
+                  padding: pillPadding,
+                  child: BandCenteredText(widget.radialActivatorLabels![i]),
+                ),
               ),
             ),
           ),
@@ -4120,16 +4139,24 @@ class TimerScreenState extends State<TimerScreen>
             false),
     options: ComputedOptions(autoDispose: true),
   );
-  late final AnimationController buttonScaleDialAnimation = AnimationController(
-    vsync: this,
-    duration: Duration(milliseconds: 200),
-  );
-  late final AnimationController buttonScaleFlashAnimation =
-      AnimationController(vsync: this, duration: Duration(milliseconds: 1600));
+  // long enough for the staged reveal (glass, then the close/grip blobs budding
+  // off it, then the controls fading up) to be legible; the dismissal doesn't
+  // need the stages, so it's quicker. An UpDownAnimationController for the
+  // [_buttonScaleDialRiseDelay] it can hold before rising.
+  late final UpDownAnimationController buttonScaleDialAnimation =
+      UpDownAnimationController(
+        vsync: this,
+        riseDuration: Duration(milliseconds: 340),
+        fallDuration: Duration(milliseconds: 230),
+      );
+
+  /// The dial is switched on from elsewhere (the settings screen); hold off
+  /// rising until that's out of the way, so it isn't revealing itself behind
+  /// something else.
+  static const Duration _buttonScaleDialRiseDelay = Duration(milliseconds: 400);
   late final Signal<Offset?> buttonScaleDialCenter = Signal(Offset.zero);
   final GlobalKey specialTimerCreateButtonKey = GlobalKey();
   late final Signal<double> buttonScaleDialAngle = Signal(0.0);
-  async.Timer? buttonScaleDialLeavingTimer;
   final Map<MobjID, Function()> _timerDeletionSubs = {};
   final List<Function()> cleanups = [];
   late final Signal<int> currentlyPressingKey = Signal(0);
@@ -4431,10 +4458,9 @@ class TimerScreenState extends State<TimerScreen>
     // resetting the button scale dial
     createEffect(() {
       if (buttonScaleDialOn.value!) {
-        buttonScaleDialAnimation.forward();
+        buttonScaleDialAnimation.forward(delay: _buttonScaleDialRiseDelay);
         buttonScaleDialCenter.value = null;
         buttonScaleDialAngle.value = 0.0;
-        buttonScaleFlashAnimation.forward(from: 0);
       } else {
         buttonScaleDialAnimation.reverse();
       }
@@ -4528,6 +4554,8 @@ class TimerScreenState extends State<TimerScreen>
       String label,
       Function(Offset?) action, {
       TextStyle? labelStyle,
+      double extraBottom = 0,
+      double extraTop = 0,
     }) {
       return InkButton(
         backgroundColor: Colors.transparent,
@@ -4539,39 +4567,43 @@ class TimerScreenState extends State<TimerScreen>
         },
         child: EvenPadding(
           top: menuItemPadding + arrowHeight,
-          child: Row(
-            mainAxisSize: MainAxisSize.max,
-            mainAxisAlignment: isRightHanded
-                ? MainAxisAlignment.start
-                : MainAxisAlignment.end,
-            children: reverseIfNot(isRightHanded, [
-              SizedBox(
-                width: TimerMenu.buttonHeight,
-                height: TimerMenu.buttonHeight,
-                child: Center(child: icon),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: Text(
-                    label,
-                    style:
-                        labelStyle ??
-                        theme.textTheme.bodyMedium!.copyWith(
-                          color: foregroundColor,
-                        ),
+          child: Padding(
+            padding: EdgeInsets.only(top: extraTop, bottom: extraBottom),
+            child: Row(
+              mainAxisSize: MainAxisSize.max,
+              mainAxisAlignment: isRightHanded
+                  ? MainAxisAlignment.start
+                  : MainAxisAlignment.end,
+              children: reverseIfNot(isRightHanded, [
+                SizedBox(
+                  width: TimerMenu.buttonHeight,
+                  height: TimerMenu.buttonHeight,
+                  child: Center(child: icon),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 3, right: 3),
+                    child: Text(
+                      label,
+                      style:
+                          labelStyle ??
+                          theme.textTheme.bodyMedium!.copyWith(
+                            color: foregroundColor,
+                          ),
+                    ),
                   ),
                 ),
-              ),
-              SizedBox(width: TimerMenu.buttonHeight * 0.2),
-            ]),
+                SizedBox(width: TimerMenu.buttonHeight * 0.2),
+              ]),
+            ),
           ),
         ),
       );
     }
 
+    double separatorHeight = 14;
     double totalVisibleMenuItemHeight =
-        TimerMenu.buttonHeight * 5 + 14 + menuItemPadding * 2;
+        TimerMenu.buttonHeight * 5 + separatorHeight + menuItemPadding * 2;
 
     _showMenuDialog(
       context: context,
@@ -4597,7 +4629,7 @@ class TimerScreenState extends State<TimerScreen>
               estimatedWidth: totalVisibleMenuItemHeight,
               backgroundColor: backgroundColor,
               animation: animation,
-              revealDuration: Duration(milliseconds: glassOn ? 670 : 370),
+              revealDuration: Duration(milliseconds: glassOn ? 500 : 370),
               items: [
                 menuItem(
                   context,
@@ -4607,11 +4639,14 @@ class TimerScreenState extends State<TimerScreen>
                   (_) {
                     deleteTimer(timerID);
                   },
+                  extraBottom: separatorHeight / 2,
                 ),
-                SeparatorGradient(color: indentColor),
+                // although dividing delete from the other actions which imply an absense of intention to delete is important, we're going to not have an unclickable separator. Two reasons. 1) it's hard to make it compatible with the inkwell effect, it doesn't look good. 2) Expanding a button and so making it harder to miss and hit a neighbor is almost equivalent to adding a separation. If you were to expand each neighbor by the separator width, it would be equivalent (but the menu would take up more space).
+                // SeparatorGradient(color: indentColor, height: separatorHeight),
                 menuItem(
                   context,
                   isRightHanded,
+                  extraTop: separatorHeight / 2,
                   Transform.rotate(
                     angle: -pi / 2,
                     child: Icon(
@@ -4864,6 +4899,46 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
 
+    // --- the button-scale dial ---------------------------------------------
+    // A knurled knob: turning it scales the control buttons. Hanging off it are
+    // a close button (top left) and a drag grip (right), and all three are one
+    // fused glass body, so it reads as a single object you can grab anywhere.
+    // Deliberately in fixed logical pixels rather than buttonSpan units — this
+    // is the thing that *sets* buttonSpan, so it mustn't squirm under the
+    // finger while you turn it.
+    const double dialDiscR = 70;
+    const double dialCloseR = 21;
+    const double dialHandleR = 20;
+    const double dialHandleCorner = 16;
+    const double dialKnobNestlingp = 0.2;
+    // the knurled rim is inset from the blob contour: the glass masks its
+    // content to the blob, so bumps drawn out at the rim would just be clipped
+    // to the circle and the rotation would be invisible.
+    const double dialKnurlInset = 13;
+    const double dialLineThickness = 3;
+    Offset dialClosePos(double p) => Offset.fromDirection(
+      -pi * 3 / 4,
+      dialDiscR -
+          dialCloseR +
+          (2 * dialCloseR - dialKnobNestlingp * dialDiscR) * p,
+    );
+    Offset dialHandlePos(double p) => Offset(
+      dialDiscR -
+          dialHandleR +
+          (2 * dialHandleR - dialKnobNestlingp * dialDiscR) * p,
+      0,
+    );
+    // headroom for the bevel and backdrop blur, which reach outside the contour
+    final Rect dialBox = Rect.fromCircle(center: Offset.zero, radius: dialDiscR)
+        .expandToInclude(
+          Rect.fromCircle(center: dialClosePos(1), radius: dialCloseR),
+        )
+        .expandToInclude(
+          Rect.fromCircle(center: dialHandlePos(1), radius: dialHandleR),
+        )
+        .inflate(26);
+    // the disc's centre in the glass layer's local coordinates
+
     final buttonScaleDial = SignalBuilder(
       builder: (context) {
         if (buttonScaleDialCenter.value == null) {
@@ -4877,97 +4952,200 @@ class TimerScreenState extends State<TimerScreen>
                 min(screenSize.height / 2, screenSize.width * 0.63),
           );
         }
+        final glassOn =
+            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+            (defaultTargetPlatform == TargetPlatform.iOS);
+        final glassFill = mt.glassFill(glassOn);
+        final onGlassFill = mt.onGlassFill(glassOn);
+        // read here, in the SignalBuilder's own build, rather than down in the
+        // AnimatedBuilder (whose element wouldn't track the read).
+        final dialAngle = buttonScaleDialAngle.value;
         return positionedAt(
-          buttonScaleDialCenter.value!,
-          FractionalTranslation(
-            translation: (-0.5).offset,
-            child: AnimatedBuilder(
-              animation: Listenable.merge([
-                buttonScaleDialAnimation,
-                buttonScaleFlashAnimation,
-              ]),
-              builder: (context, child) {
-                final fa = buttonScaleFlashAnimation.value;
-                double flashu = fa == 1.0 ? 0 : moduloProperly(-fa, 1.0 / 5.0);
-                return Transform.scale(
-                  scale: Curves.easeOutCubic.transform(
-                    buttonScaleDialAnimation.value,
+          buttonScaleDialCenter.value! + dialBox.topLeft,
+          AnimatedBuilder(
+            animation: buttonScaleDialAnimation,
+            builder: (context, child) {
+              final p = buttonScaleDialAnimation.scalarValue;
+              // final fallp = Curves.easeOut.transform(
+              //   buttonScaleDialAnimation.value.$2,
+              // );
+              if (p <= 0) return const SizedBox.shrink();
+              // Same shape of reveal as the numeral ring: the disc's glass
+              // arrives first, the close and grip blobs bud out of it, and only
+              // once the body has settled do the controls fade up onto it.
+              final discp = Curves.easeOut.transform(unlerpUnit(0, 0.8, p));
+              final budp = Curves.easeOut.transform(unlerpUnit(0.2, 0.7, p));
+              final knobp = Curves.easeOutCubic.transform(
+                unlerpUnit(0.25, 1, p),
+              );
+              final Offset dialOrigin = -dialBox.topLeft;
+
+              // The knurled disc is a solid fill sitting on the glass, so it
+              // takes whichever of the surface pair contrasts with the body
+              // beneath it: the flat body is already a solid onSurface-ish
+              // slab, the glass body is a pale translucent one. The label on
+              // top then takes the other of the pair.
+              final knurlColor = glassOn
+                  ? mt.surfaceContrastingGlass
+                  : theme.colorScheme.onPrimary;
+              final onKnurlColor = theme.colorScheme.primary;
+
+              final blobs = <GlassBlob>[
+                GlassBlob(
+                  center: dialOrigin,
+                  radii: Size.square(dialDiscR * knobp),
+                  tint: glassFill,
+                ),
+                if (budp > 0.01) ...[
+                  GlassBlob(
+                    center: dialOrigin + dialClosePos(budp),
+                    radii: Size.square(dialCloseR),
+                    tint: glassFill,
                   ),
-                  child: GestureDetector(
-                    onPanDown: (details) {
-                      buttonScaleDialLeavingTimer?.cancel();
-                    },
-                    onPanUpdate: (details) {
-                      final aa = angleFrom(
-                        buttonScaleDialCenter.peek()!,
-                        details.globalPosition - details.delta,
-                      );
-                      final ab = angleFrom(
-                        buttonScaleDialCenter.peek()!,
-                        details.globalPosition,
-                      );
-                      final a = shortestAngleDistance(aa, ab);
-                      buttonScaleDialAngle.value += a;
-                      buttonSpanMobj.value = clampDouble(
-                        buttonSpanMobj.value! + a * 1.2,
-                        12,
-                        screenSize.width / 5,
-                      );
-                    },
-                    onPanEnd: (details) {
-                      buttonScaleDialLeavingTimer = async.Timer(
-                        Duration(milliseconds: 470),
-                        () {
-                          buttonScaleDialOn.value = false;
-                        },
-                      );
-                    },
-                    child: Transform.rotate(
-                      transformHitTests: false,
-                      angle: buttonScaleDialAngle.value,
-                      child: Container(
-                        width: 140,
-                        height: 140,
-                        decoration: BoxDecoration(
-                          color: lerpColor(
-                            mt.midBackColor,
-                            theme.colorScheme.primary,
-                            flashu,
-                          ),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
+                  GlassBlob(
+                    center: dialOrigin + dialHandlePos(budp),
+                    radii: Size.square(dialHandleR),
+                    cornerRadius: dialHandleCorner,
+                    cornerContinuity: 0,
+                    tint: glassFill,
+                  ),
+                ],
+              ];
+
+              // places a child box centred on [c], in disc-centred coordinates
+              Positioned atDial(Offset c, double halfSpan, Widget child) =>
+                  Positioned(
+                    left: dialOrigin.dx + c.dx - halfSpan,
+                    top: dialOrigin.dy + c.dy - halfSpan,
+                    width: halfSpan * 2,
+                    height: halfSpan * 2,
+                    child: child,
+                  );
+
+              return GlassLayer(
+                options: ourGlassOptions(
+                  mode: glassOn ? GlassMode.glass : GlassMode.flat,
+                  // a fat bridge while the satellites are still budding off,
+                  // tightening as they arrive.
+                  blendRadius: lerp(34, 26, budp),
+                  blurRadius: mt.glassBlurRadius,
+                  edgeTint: mt.edgeTint,
+                ),
+                blobs: blobs,
+                child: SizedBox(
+                  width: dialBox.width,
+                  height: dialBox.height,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // the knob: turning it anywhere on the disc scales the
+                      // buttons. Its square hit box overlaps the satellites'
+                      // boxes at the corners, so they come after it here and
+                      // win those taps.
+                      atDial(
+                        Offset.zero,
+                        dialDiscR,
+                        // the clip keeps the grab area to the disc proper —
+                        // without it the opaque box would also claim the
+                        // empty corners of its square.
+                        ClipOval(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onPanDown: (details) {},
                             onPanUpdate: (details) {
-                              buttonScaleDialCenter.value =
-                                  buttonScaleDialCenter.value! + details.delta;
+                              final aa = angleFrom(
+                                buttonScaleDialCenter.peek()!,
+                                details.globalPosition - details.delta,
+                              );
+                              final ab = angleFrom(
+                                buttonScaleDialCenter.peek()!,
+                                details.globalPosition,
+                              );
+                              final a = shortestAngleDistance(aa, ab);
+                              buttonScaleDialAngle.value += a;
+                              buttonSpanMobj.value = clampDouble(
+                                buttonSpanMobj.value! + a * 1.2,
+                                12,
+                                screenSize.width / 5,
+                              );
                             },
-                            child: Container(
-                              width: 60,
-                              height: 60,
-                              decoration: BoxDecoration(
-                                color: mt.foreBackColor,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: Padding(
-                                padding: EdgeInsets.all(6),
-                                child: Text(
-                                  "turn me",
-                                  textAlign: TextAlign.center,
+                            // the scalloped disc, which is the whole point: a
+                            // plain disc turning under your finger gives no
+                            // feedback that anything is happening. The label
+                            // rides around with it for the same reason.
+                            child: Padding(
+                              padding: const EdgeInsets.all(dialKnurlInset),
+                              child: Transform.scale(
+                                scale: Curves.easeOut.transform(
+                                  unlerpUnit(0.2, 1, p),
+                                ),
+                                child: Transform.rotate(
+                                  angle: dialAngle,
+                                  child: Container(
+                                    alignment: Alignment.center,
+                                    decoration: ShapeDecoration(
+                                      color: knurlColor,
+                                      shape: const StarBorder(
+                                        points: 18,
+                                        innerRadiusRatio: 0.9,
+                                        pointRounding: 0.5,
+                                        valleyRounding: 0.5,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(6),
+                                      child: Text(
+                                        "turn me",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: onKnurlColor),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                      atDial(
+                        dialClosePos(1),
+                        dialCloseR,
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            buttonScaleDialOn.value = false;
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(6.0),
+                            child: CrossIcon(
+                              lineWidth: dialLineThickness,
+                              color: onGlassFill,
+                            ),
+                          ),
+                        ),
+                      ),
+                      atDial(
+                        dialHandlePos(1),
+                        dialHandleR,
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanUpdate: (details) {
+                            buttonScaleDialCenter.value =
+                                buttonScaleDialCenter.value! + details.delta;
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(6.0),
+                            child: GripBarsIcon(
+                              lineWidth: dialLineThickness,
+                              color: onGlassFill,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            },
           ),
         );
       },
@@ -5265,7 +5443,7 @@ class TimerScreenState extends State<TimerScreen>
         (child) => Stack(
           children: [
             child,
-            StatusBarScrim(background: mt.lowestBackColor),
+            StatusBarBackdrop(background: mt.lowestBackColor),
           ],
         ),
         (child) => Focus(
@@ -6071,7 +6249,7 @@ class _NumeralButtonState extends State<NumeralButton> {
       onPanDown: (Offset p) {
         final tss = context.findAncestorStateOfType<TimerScreenState>()!;
         tss.numeralPressed(widget.digits);
-        // ignore: invalid_use_of_protected_member
+        // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
         widget.otherDragActionRingStarted.notifyListeners();
         widget.otherDragActionRingStarted.addListener(
           dragActionRingController.disable,
@@ -6413,15 +6591,10 @@ class BackNavBottomGutter extends StatelessWidget {
   );
 }
 
-/// Translucent gradient behind a transparent OS status bar, fading from the
-/// page [background] at the very top down to transparent, so app content keeps
-/// contrast against the status-bar clock/icons floating over it. Sized to the
-/// top safe-area inset; renders nothing when the system reserves no top inset
-/// (e.g. an opaque status bar that already provides its own backdrop). Expects
-/// to be placed as a child of a [Stack].
-class StatusBarScrim extends StatelessWidget {
+/// Translucent gradient for contrast
+class StatusBarBackdrop extends StatelessWidget {
   final Color background;
-  const StatusBarScrim({super.key, required this.background});
+  const StatusBarBackdrop({super.key, required this.background});
 
   @override
   Widget build(BuildContext context) {
@@ -6431,13 +6604,46 @@ class StatusBarScrim extends StatelessWidget {
       top: 0,
       left: 0,
       right: 0,
-      height: topInset + 14,
+      height: topInset + 34,
       child: IgnorePointer(
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
+              colors: [background, background.withValues(alpha: 0.0)],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Mirror of [StatusBarBackdrop] for the bottom edge: content scrolls under the
+/// transparent system nav bar (contrast enforcement is off), so this fades the
+/// page [background] up from the bottom to keep the gesture pill / nav icons
+/// legible. Renders nothing when there's no bottom inset.
+class NavBarBackdrop extends StatelessWidget {
+  final Color background;
+  const NavBarBackdrop({super.key, required this.background});
+
+  @override
+  Widget build(BuildContext context) {
+    double bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    if (bottomInset <= 0) return const SizedBox.shrink();
+    return Positioned(
+      // effectively both lowers and fades for a narrower than average action bar, since that tends to be the gesture drag handle, which needs less contrast due to being visually simpler
+      bottom: min(bottomInset - 40, 0),
+      left: 0,
+      right: 0,
+      height: bottomInset + 34,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
               colors: [background, background.withValues(alpha: 0.0)],
             ),
           ),
@@ -6545,7 +6751,7 @@ Widget aboutImageBuilder(ThemeData theme, Uri uri, String? title, String? alt) {
 /// Standard chrome for a scrollable info/content page: a scrolling [headingBand]
 /// title (instead of a flickery SliverAppBar), a [CornerBackButton], a matching
 /// [BackNavBottomGutter] so the last item clears that button, and a
-/// [StatusBarScrim]. The page's own content [slivers] sit between the title band
+/// [StatusBarBackdrop]. The page's own content [slivers] sit between the title band
 /// and the bottom gutter.
 class InfoScaffold extends StatelessWidget {
   /// Heading-band label — usually [headingBandLabel] or a plain [Text].
@@ -6587,8 +6793,9 @@ class InfoScaffold extends StatelessWidget {
               ),
             ],
           ),
+          NavBarBackdrop(background: backgroundColorB),
           CornerBackButton(background: backgroundColorB),
-          StatusBarScrim(background: backgroundColorB),
+          StatusBarBackdrop(background: backgroundColorB),
         ],
       ),
     );
@@ -6694,7 +6901,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                         final padLandscapeNonNull = computed(
                           () => padLandscapeMobj.value ?? false,
-                          autoDispose: true,
+                          options: ComputedOptions<bool>(autoDispose: true),
                         );
                         return MenuTile(
                           title: settingTitle('Numpad orientation'),
@@ -7136,6 +7343,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     Builder(
                       builder: (context) {
+                        Offset? tapPosition;
+                        return MenuTile(
+                          onTapUpGlobalPosition: (pos) => tapPosition = pos,
+                          title: settingTitle('$trainscapeName: Thrival'),
+                          subtitle: settingSubtitle(
+                            "A game about navigating complexity and arranging things in time. Still very raw.",
+                          ),
+                          trailing: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: ScalingAspectRatio(
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.train,
+                                    color: theme.colorScheme.onSurface,
+                                    size: 24,
+                                  ),
+                                  Positioned(
+                                    right: 0,
+                                    bottom: 0,
+                                    child: Icon(
+                                      Icons.sports_esports,
+                                      color: theme.colorScheme.onSurface,
+                                      size: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              CircularRevealRoute(
+                                builder: (context) => const TrainscapeScreen(),
+                                buttonCenter: tapPosition ?? Offset.zero,
+                              ),
+                            );
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    SignalBuilder(
+                      builder: (context) {
+                        final trainscapeModeMobj = Mobj.getAlreadyLoaded(
+                          trainscapeModeID,
+                          BoolType(),
+                        );
+                        final trainscapeMode =
+                            trainscapeModeMobj.value ?? false;
+                        return RoundedCheckboxListTile(
+                          title: settingTitle('$trainscapeName Mode'),
+                          subtitle: settingSubtitle(
+                            'If enabled, app opens straight into Trainscape: Thrival',
+                            // trainscapeMode
+                            //     ? 'On: $trainscapeName opens over the timer screen when the app launches'
+                            //     : 'Off: the app launches into the timer screen as usual',
+                          ),
+                          value: trainscapeMode,
+                          onChanged: (value) {
+                            trainscapeModeMobj.value = value == true;
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    Builder(
+                      builder: (context) {
                         final GlobalKey iconKey = GlobalKey();
                         final hereIconKey = GlobalKey();
                         return MenuTile(
@@ -7183,8 +7461,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
+          NavBarBackdrop(background: headingBackground),
           CornerBackButton(background: headingBackground),
-          StatusBarScrim(background: headingBackground),
+          StatusBarBackdrop(background: headingBackground),
         ],
       ),
     );
@@ -7414,8 +7693,9 @@ class BinScreenState extends State<BinScreen> {
                 ],
               ),
             ),
+            NavBarBackdrop(background: headingBackground),
             CornerBackButton(background: headingBackground),
-            StatusBarScrim(background: headingBackground),
+            StatusBarBackdrop(background: headingBackground),
           ],
         ),
       ),
@@ -7470,7 +7750,8 @@ class _AboutScreenState extends State<AboutScreen> {
   void initState() {
     super.initState();
     rootBundle.loadString('assets/about.md').then((md) {
-      if (mounted) setState(() => _md = md);
+      _md = md;
+      if (mounted) setState(() {});
     });
   }
 
@@ -7664,7 +7945,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         });
       }
     } catch (e) {
-      print('Error loading sounds: $e');
+      debugPrint('Error loading sounds: $e');
       setState(() {
         _loading = false;
       });
@@ -7827,7 +8108,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (title != null && title.isNotEmpty)
+              if (title.isNotEmpty)
                 Padding(
                   padding: EdgeInsets.only(bottom: 7),
                   child: Text(title, style: headingTextStyle(theme)),
@@ -7949,6 +8230,10 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
                 ],
               ],
             ),
+            // In perTimerMode the opaque Done/Cancel bar below already backs the
+            // nav bar, so the gradient would only tint its buttons.
+            if (!widget.perTimerMode)
+              NavBarBackdrop(background: backgroundColorB),
             if (widget.perTimerMode)
               Positioned(
                 left: 0,
@@ -8002,7 +8287,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
             // result-returning pop, so it gets no corner back button.
             if (!widget.perTimerMode)
               CornerBackButton(background: backgroundColorB),
-            StatusBarScrim(background: backgroundColorB),
+            StatusBarBackdrop(background: backgroundColorB),
           ],
         ),
       ),
@@ -8720,7 +9005,8 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
               ],
             ),
           ),
-          StatusBarScrim(background: headingBackground),
+          NavBarBackdrop(background: headingBackground),
+          StatusBarBackdrop(background: headingBackground),
         ],
       ),
     );

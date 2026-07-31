@@ -1,0 +1,162 @@
+Amendments to your plan:
+Trains take a Quantity of items, not just Item. Usually it will be a quantity of one item, sometimes two. The item it takes should be weighted to be a basic item.
+
+Corrections to the constants listing: set gridSizeN to 9, globalTime to 500, nPlayers to 2, lineRemovalProb to 0.27, nTrains 3. middleNodeProb to 0.11. s 1.6, r 3.4, f 6, i 16. Bucket size weights (starting at 0): [1, 8, 4, 2, 0.8]
+There are going to have to be just as many traders as we generate. Multi output prob is no longer a relevant figure, that's handled in trader generation. Decomposers are cut. Generally we're no longer specifying fixed numbers of facilties, we're either generating a number proportionate to the number of bucket slots, and the number of buckets is set by the number of nodes (plus train nodes). Each bucket slot has one facility. The total bucket slots is determined by the bucket size distribution. The buckets are then shuffled over the nodes and that's where each of their facilities go (there's no concept of buckets in the code after generation has finished). Although traders also have a minimum number that could be above their proportion due to the need for every trader type to have at least one instance. So distribute traders first.
+
+Actually, have players render at the same scale as the node icons even when they're moving along an edge, not at world scale, that was a good guess, but I've changed my mind.
+
+See the amendments and additions I've made to the design doc, and consider those.
+
+Make adjustments to the design doc first if any need to be made, we should keep it up to date as an overview/approximation of the sketch.
+
+Move your sketching into trainscape_thrival.dart, and produce the updated sketch. Suggest (but don't put them into the sketch yet) utilities and conventions you think we're going to need.
+
+
+
+Add two new tiles in the Extra section, "$trainscapeName: Thrival", which opens the game, and a "$trainscapeName Mode" Mobj<bool> toggle which has the screen open by default, over the timer screen, when the app launches.
+Pressing Esc from within trainscape should pop the navigator.
+Then proceed to implement everything.
+
+
+
+note the changes in trainscape_thrival.txt
+	initial default for farZoomThreshold should be 2.5
+increase map span to 13x13
+trains that're on a cycle should show a countdown pie
+
+
+
+note changes to trainscape_thrival.txt
+tooltips shouldn't describe the items in english. Items should just display as their icons at full size.
+but it's clear that my approach to icon generation was idiotic, rework is in design doc.
+(switched to opus partway through)
+
+
+oh, we should avoid having situations where traders directly output their inputs, how should we amend this
+you're still failing to notice the change to player rendering, the name should be centered in a stack over the player
+I'm not seeing any horizontal pills, pills should be randomly tilted or not when placed into the grid. Note, if you're not doing this, all placements that lead to minimum max dim equal to the currently leading candidate should be retained and then chosen randomly between once all sides and placements have been considered.
+When pills are displayed in large mode, they should be broadened
+icons in grid should be closer together, reduce gap by 60%
+remove "shared by everyone in this node" from storage descriptions. remove "tap to take it" from plant descriptions. replace "this station can call the train from anywhere" with "this station can control the train". Remove "moves only when moved".
+clicking the facility while the tooltip is open should close it
+don't show currently selected player name at top left
+
+
+When the player moves while offscreen, camera shouldn't pan. That behavior isn't needed, camera should pan straight to target node on move.
+muggers don't seem to be detecting the item in the player's inventory. I suspect remove is doing a reference equality comparison. Check for similar issues with traders.
+add a night and day system. Night mode affects all UIs, mainly just inverting lightness. dayLength = 4 minutes. Night turns to day halfway through the day. A clock shows next to the global timer. facilityDayOnlyp = 0.34, muggerNightOnlyp = 0.45. Day only facilities have a small day icon, top-aligned, before their main icon (keep showing in zoomed out mode), and are faded in the night. Night only facilities similarly have a small night icon displaying bottom aligned, and are faded in the day. briefly show NIGHT HAS FALLEN or DAY HAS RISEN when the night/day signal changes
+Time intervals should come in two types. Some facilities just have an interval of an arbitrary time period, others (most, or all current cyclic events) facilities should have daily "clock" intervals, ie, a random offset, on a whole-number multiple or whole number fraction of the day length.
+trains should have division clock intervals
+add a "blight" facility with a danger icon that casts a wide faint red-dashed circle onto the map around it, which on a clock intervial of one to three days, takes place during the night. When the blight fires, it deletes any items within the radius carried by players or kept in unsecured storage, though not on plants. blightRadiusMin = 6, blightRadiusMax = 17. If the player is caught in a blight wave, say BLIGHTSTRUCK. blightMitigablep = 0.8, in which case the blight can be mitigated by giving it a particular item. The item required is uniformly random. blightHungryp = 0.15, visually denoted with 'R', which means it needs another item every cycle. If a blight is satiated and not hungry, stop showing the cycle indicator.
+add secured storages, at storageSecurep = 0.12. render with a lock after the storage icon
+when a player is mugged, say MUGGED. Also change what muggers do. Instead of disabling, they should take all of the player's items.
+for both blights and mugging events, flash the player's inventory red three times
+any facility with a clock schedule should show the clock time next to its countdown pie. remember to add a countdown pie to cyclical trains. If the facility's frequency is a whole multiple of a day, the clock should have a small night or day icon before it, being (facility.interval.offset + day*0.02 > day/2)? night : day.
+add a clock display to the top of the screen. Also add in all caps "<days remaining> DAYS REMAIN. <eudaimonia requirement> <eudaimonia icon> REQUIRED" (<days remaining> is floor of time remaining divided by day length)
+update trainscape_thrival.txt in light of this, leaving parameter defaults out.
+
+
+Replace nonTraderProportions with weights, parameters must be specified as weights with an arbitrary total because humans can't easily tweak proportions that have to sum to one. I may periodically ask you to normalize the weights later on.
+The clock and remaining time and eudaimonia requirement should be in line with the main timer, and opaque, same font, and it should replace the older corner eudaimonia requirement counter (I guess that part of the message should update when eudaimonia goes down). Put all of that in a wrap with width same as the screen
+Something is very wrong with the way pills are rendering, many of them are huge. We don't want to do hugeness any more. A pill in the root grid should always be a normal size, and pills inside it should be a little smaller. Render pills not as capped lines but as rounded rects with high corner radius. A pill should have the thickness equal to the radius of the circle when it's in large mode within a grid. Pills nesting in 1x2 mode inside it... the inside grid and everything on it will just have to be scaled down. Nested pills and squircles wont look flush, but it's a price we have to pay for sizing to be automatic and right.
+
+
+squircles can have a footprint of 2x2 at squircleTryEmbeddingLargep = 0.4 (if it ends up not being able to embed large due to space constraints, it should fail over to trying small (which in turn should fail if the icon part contains too much to be shrunk), this should all already be happening for pills)
+remove the floor, we should instead go by depth limit
+
+no, rods are not always 1x2, they can be 1x1. make sure that pills and squircles can nest in small mode if their nesting level isn't too high (otherwise fail over to large mode) (notice how both nesting sizes and tilts can fail over to the others, which may call for an abstraction). Make sure there's a parameter iconGridPlacementBigp = 0.7 which determines the first size that gets tried
+
+I'm not seeing any squircles. On the first pass when choosing basic shapes, shuffle a list of the colors and shapes and pick each one at least once before starting to pick at random ones.
+make the screen quit x just be a clickable back arrow icon (that visually accords with the rest of that line), no padding. Same for the pause/play, the spacing looks uneven with this current button widget thing.
+the sun/moon indicating when a facility is active shouldn't be transparent, and it should be inside the facility's main icon flow.
+facility icon backgrounds shouldn't dim when the facility is inactive, only the icons should dim.
+clicking a plant in the map shouldn't harvest, only clicking in the controls should harvest.
+Trader icons are still using the circle-less icon variant.
+inner grids shouldn't shrink quite as much as they do.
+countdown pies should turn down in the other direction, they're currently turning anticlockwise. They shouldn't have a background disc.
+The outer wrap should have a bit more side padding
+
+it seems as if icon widgets have equal side spacing around them, ie, a tall thin one will have empty space to either side as if it were square. This is bad. The widget should fit the shape of the actual icon.
+When showing multiple items in sequence, in a facility, put spaces between them, or else it's ambiguous where one ends and the next begins. (the issue mainly just seems to be in traders)
+When a facility is inactive, fade the outline as well (or interpolate it towards the background color). Make the fade a bit milder.
+make sure pill radius is always half of thickness.
+define custom paints for sun/moon, we need them to look better compact than flutter's do. Sun should be an 8-star. Moon should just be a half-circle, diagonally cut; oriented towards the bottom-left. Don't use the flutter icons for this any more.
+small sun/moon indicator should be smaller, and the box should be narrower, especially on the right side (which should be very close to the following icon
+I initially decided the precision of seconds should be one decimal place, lets' change this so that it's no decimal places, whole number seconds only
+
+
+blight borders should be opaque and thick, the color should just be similar to the background color. blights' nodes should have a 2 radius circle in the same color behind them. All of that should be behind the graph nodes and edges.
+replace the "MOVE" on the move pad with "drag to move"
+countdown timers seem to be positioned kind of arbitrarily. Make sure they're at the top right of the whole facility icon. Don't show day/night symbol, don't show clock time separate from second time. Choose to show clock time after the pie if it's available and seconds otherwise. Transparency was also unwanted.
+make camera seek more ease-in-out, and a bit slower, it's currently too abrupt. Use a spring that's just two joined parabola segments. If that's not how flutter's regular springs work, check the animove library in cache for the special timely easer spring and use that if available.
+remove tree regen divisions, it's too complicated, clock regen trees should only regen once per day
+don't use sage for items, it's too indistinct.
+Make sure that root grids aren't being placed inside other shapes as parts, they shouldn't be parts, the first step of identifying parts within an item is destructuring the root grid out. There are a few types in that structure that can't be standalone icons.
+
+when the user is panning the camera by dragging, TimelyParabolicSimulation.target shouldn't be used, you should instead just set the TimelyParabolicSimulation.endValues
+there's a bug where storages can have items shoved into them even if they're inactive
+remove blightGrey, that too should be a lerp with the actual world background color.
+replace blight radius bounds with a set of discrete radii, initially [5, 7, 14]
+train nodes should be the same color as their rail. Trains/rails should take color as a parameter even though we only have one for now.
+I'm seeing an icon generation issue where there's a shape that seems like it couldn't have been formed except by violating max dimension minimization. Let's take a closer look at that code.
+
+replace the moon painter with one that does the traditional crescent shape, but it'll be a more extreme form than flutter's. So, there's an outer circle (diameter min(width, height)), an inner circle, smaller, positioned a bit to to the up-right, you start on a point at which they intersect, arc to the other point per the outer circle, then arc back on the inner circle.
+when players are on a node, position the node's facilities so that they're left of the center of the node, and the player column so that it's right of center. No longer should they both just be in a row i guess.
+shunt a node's facilities to the end of the stack whenever they receive a tooltip tap or whatever, not only when they have players. Their z-ordering can be stateful.
+
+facilities should be centered when no player is on the node
+
+if a mugger is only active at night, their tooltip should mention that
+the lightness inversion shader was a cute hack, but I don't think it's good enough, dark and light need different tuning, so make the dark and light colors two different colorschemes, cut the inversion filter.
+the dark color scheme should use the same item colors for now
+
+train node edge color needs to be dimmer in the dark theme, so that has to be part of the Palette doesn't it?
+also: change the color of facility lozenges, make it similar to the color of the node they're part of (currently all the same, but...), but tinted slightly off-background-color (so darker on light theme, lighter on dark theme)
+and also: randomize node color from a basket of three. The current colors, one that's slightly further off, and one that causes it to take a random rootmost color from one of its facility item requirements, if any of them are colored, otherwise, it picks a random item color, and with that color it slightly tints the base node color.
+And this color carries through to the facility lozenges.
+
+soften the node tint by a lot, and soften the lozenge tint. We no longer need lozenge outlines. Tooltip lozenges should be the same color as the facility lozenges. Change item color light grey so that it's fully light now that all backgrounds are grey.
+edges should do a gradient between the two nodes
+
+edge gradient handles need to be displaced a little to make sure the transition starts after the edge of the node circle
+
+maintain a 'fillet' shape that we reuse to add fillets at the joins between the nodes and their edges. Same color as the node? Or should it be same as the edge. Would it be efficient to merge them with the edge and have the edges use fill so that they can share a fill style/gradient? Don't put them around trains though.
+
+trains in dark don't seem to have a train color, or, perhaps I can't tell, dark's train doesn't seem to be applying to the train edges. It seems like trainColors and trainGrey shouldn't be around any more.
+give hazard nodes a special color: light: ffb6ae, dark: 670000
+I notice faded (sleeping) facilities have a lighter lozenge, remove that feature, lozenge should be same color.
+put an AnimoveFrame around the map so that we can then put Animoves around all of the facility widgets. You may need to introduce globalkeys for them.
+oh to clarify, the AnimoveFrame should go around the part of the map that is panned/moved/the container that's still relative to all of the nodes (they do fall under a parent that's moving right?), rather than the map widget, as putting it that far out would cause the map to drift behind when panned
+
+We need a map level frame. You could put all positioneds within a new stack that's within a positioned at cam (or -cam, whatever), couldn't you? And the AnimoveFrame could go around the inside stack that's not moving relative to the camera. I guess I can tolerate scaling still causing an animove over facilities. It'd probably be kind of trippy.
+Decent thought but don't redden the muggers.
+When zoomed out by > 2.5, start to fade in an overGraphMaxOpacity = 0.5 copy of the graph that renders on top of the facilities, so that the graph structure can be seen over the now very tightly crowded facilities. Ideally it would be a saved version of the composite that was just draw below? Would saveLayer or something be the most efficient way to do this?
+
+
+Animoves are working correctly.
+Hmm I just ran a trade for the first time and it seems like I lost my inputs but didn't receive the output.
+Oh, the overgraph is barely perceptible, which makes sense I guess. Increase opacity to 0.8.
+
+I'm so sorry, it was because it was a non-instant trade.
+Perhaps there was no indicator of that. There is no indicator of recovery cooldown. In fact it seems that it
+never recovers.
+
+
+--
+Oh I was misunderstanding again. Show a "working..." indicator over traders when they're building the thing
+
+When something happens to a player who's off-screen, it needs to mention them in the popup message, like "<Rudy icon> MUGGED", or else it's sheer confusion.
+
+Add the ability to carry other players piggyback.
+
+Big new feature. We need to do time shit. Controlling two characters simultaneously while dealing with time limits doesn't really work unless it's turn based, believe it or not. Moving characters in alternation sucks, so you want to be able to move one independently for a while then only move the second to follow once they need to cross paths. So we're going to do that by, when you wanna move the second player, rewind to the last time they moved, which will rewind the first player's actions, then as the second player moves, the first one's actions replay in parallel. This means the actions later moving characters take can interfere with the actions of the first character, in some cases invalidating them, but we can detect that. So:
+	there has to be a time dial that can turn time forwards and backwards
+	time needs to advance only when the player does things, such as walking, or riding a train, or turning the time dial forward
+	we need to be able to record action histories so that we can replay them after rewinding
+		Actions can become invalid against a state, which stops that player's action history from replaying any further.
+	needs to be easy to take periodic snapshots of state so that we can "rewind" to any state by playing action histories forward to it.
+
+
+later
+	create an encoding for actions players can take. Allow scheduling arbitrary action

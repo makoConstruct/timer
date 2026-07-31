@@ -5,7 +5,6 @@ import 'package:collection/collection.dart';
 import 'package:drift/drift.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
-import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
 
 bool _typeHelpDescriptionDeepEquals(Object a, Object b) {
@@ -472,7 +471,6 @@ class Mobj<T> extends Signal<T?> {
   String _valueEncoded = "";
   late final Function() _systemSubscription;
   bool _blockInitialWriteBack = false;
-  bool _unloaded = true;
 
   /// only actually writes back if the new value has a newer timestamp than the value in the db, this is important for situations where more than one process is doing writes and we want to make sure they all end up agreeing.
   Future<void> writeBack() async {
@@ -530,17 +528,18 @@ class Mobj<T> extends Signal<T?> {
     // on reflection I'm not sure we can support autodispose, because of the refcounting stuff
     // bool autoDispose = false,
   }) : _isActive = isActive ?? true,
-       super(initial, debugLabel: debugLabel, autoDispose: false) {
+       super(
+         initial,
+         options: SignalOptions(name: debugLabel, autoDispose: false),
+       ) {
     if (T == dynamic) {
       throw StateError(
         "dynamic mobj type. It's very unlikely that this is what you intended, we're not sure how it could be. In most cases, this is an accident that will prevent you from being able to cast your Mobjs to the actual intended type.",
       );
     }
     MobjRegistry.loadedMobjs[_id] = this;
+    MobjRegistry._preloadedMobjEncodings.remove(_id);
     _blockInitialWriteBack = !initialWriteBack;
-    if (initial != null) {
-      _unloaded = false;
-    }
 
     if (timestamp != null) {
       _lastTimestamp = timestamp;
@@ -622,22 +621,22 @@ class Mobj<T> extends Signal<T?> {
     required T initial,
     String? debugLabel,
   }) {
-    // Check if signal already exists
-    final existing = Mobj.seekAlreadyLoaded<T>(id, type);
-    if (existing != null) {
-      existing.value = initial;
-      return existing;
-    } else {
-      final m = Mobj<T>._createAndRegister(
-        id,
-        type,
-        initial: initial,
-        debugLabel: debugLabel,
-        initialWriteBack: true,
-      );
-      m.writeBack();
-      return m;
-    }
+    final existing = Mobj.write(id, initial, type, isActive: true);
+    if (existing != null) return existing;
+    // The value is already in the db, so the new mobj doesn't write it again —
+    // it takes over the stamp that write just used, so that its next write
+    // back is recognisably more recent than what's sitting there even if it
+    // lands in the same millisecond.
+    final stamp = _writeStamps[id];
+    return Mobj<T>._createAndRegister(
+      id,
+      type,
+      initial: initial,
+      debugLabel: debugLabel,
+      initialWriteBack: false,
+      timestamp: stamp?.$1,
+      sequenceNumber: stamp?.$2,
+    );
   }
 
   /// like createIfNotLoaded but delayed because it checks the db
@@ -694,20 +693,89 @@ class Mobj<T> extends Signal<T?> {
     return ret;
   }
 
+  /// the timestamps [write] has stamped this session, so that two writes
+  /// landing in the same millisecond don't have the second one dropped for
+  /// being no more recent than the first
+  static final Map<MobjID, (DateTime, int)> _writeStamps = {};
+
+  /// Writes a value to the db under [id], and returns the Mobj it went
+  /// through, if there was one.
+  ///
+  /// If [id] is already loaded, this is that Mobj being set: it writes itself
+  /// back, everything subscribed to it hears about the change, and it's what
+  /// comes back from here. If it isn't loaded, the row is written directly and
+  /// null comes back — a value that mutates in place has nothing for a signal
+  /// to notify anyone about, so there's no reason to mint one just to write.
+  /// The counterpart is [read].
+  ///
+  /// [isActive] only applies to rows written directly; a loaded Mobj carries
+  /// its own. Directly written rows default to inactive: nothing preloads
+  /// them at startup, so whatever wants one asks for it when it wants it.
+  static Mobj<T>? write<T>(
+    MobjID id,
+    T value,
+    TypeHelp<T> type, {
+    bool isActive = false,
+  }) {
+    // deliberately not seekAlreadyLoaded: a preloaded encoding is a value
+    // that's about to be replaced, and parsing it (or failing to) on the way
+    // to overwriting it would be work at best and a thrown error at worst
+    final loaded = MobjRegistry.loadedMobjs[id];
+    if (loaded != null) {
+      if (loaded.type != type) {
+        throw MobjTypeMismatchError(
+          'Mobj.write: type mismatch, expected ${type.typeDescription} but got ${loaded.type.typeDescription}',
+        );
+      }
+      // forced, since the value may be the same instance it was, mutated
+      (loaded as Mobj<T>).set(value, force: true);
+      return loaded;
+    }
+    final encoded = Mobj.serialize(value, type);
+    // whatever was preloaded under this id is now stale, and leaving it there
+    // would have the next seek materialize the old value
+    if (MobjRegistry._preloadedMobjEncodings.containsKey(id)) {
+      MobjRegistry._preloadedMobjEncodings[id] = encoded;
+    }
+    final previous = _writeStamps[id];
+    var timestamp = DateTime.now();
+    var sequenceNumber = 0;
+    if (previous != null && !timestamp.isAfter(previous.$1)) {
+      timestamp = previous.$1;
+      sequenceNumber = previous.$2 + 1;
+    }
+    _writeStamps[id] = (timestamp, sequenceNumber);
+    MobjRegistry.db.insertIfMoreRecent(
+      id: id,
+      timestamp: timestamp,
+      sequenceNumber: sequenceNumber,
+      value: encoded,
+      isActive: isActive,
+    );
+    return null;
+  }
+
+  /// Reads back what [write] wrote (or what a Mobj of the same type left
+  /// there), without creating or loading a Mobj. Null if there's no such row;
+  /// throws [MobjTypeMismatchError] if there is one and it's something else.
+  static Future<T?> read<T>(MobjID id, TypeHelp<T> type) async {
+    final kv =
+        await (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(id)))
+            .getSingleOrNull();
+    if (kv == null) return null;
+    return Mobj.deserialize(kv.value, type);
+  }
+
   /// Reads the current value from the database without creating or loading a Mobj
   static Future<T> readCurrentValue<T>(
     MobjID id, {
     required TypeHelp<T> type,
   }) async {
-    final kv =
-        await (MobjRegistry.db.kVs.select()..where((t) => t.id.equals(id)))
-            .getSingleOrNull();
-
-    if (kv == null) {
+    final v = await read(id, type);
+    if (v == null) {
       throw StateError("Mobj $id does not exist in the database");
     }
-
-    return Mobj.deserialize(kv.value, type);
+    return v;
   }
 
   /// (can't be called "get" because Signal already has a method of that name)

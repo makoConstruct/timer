@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 
 /// Native notification bridge replacing awesome_notifications. Covers exactly
@@ -27,7 +28,7 @@ class PlatformNotifications {
         'importance': importance,
       });
     } on PlatformException catch (e) {
-      print('ensureChannel failed: ${e.message}');
+      debugPrint('ensureChannel failed: ${e.message}');
     } on MissingPluginException {
       // non-Android (e.g. linux test target) — notifications are a no-op there
     }
@@ -47,7 +48,7 @@ class PlatformNotifications {
         'body': body,
       });
     } on PlatformException catch (e) {
-      print('showCompletion failed: ${e.message}');
+      debugPrint('showCompletion failed: ${e.message}');
     } on MissingPluginException {
       // non-Android — no-op
     }
@@ -57,7 +58,7 @@ class PlatformNotifications {
     try {
       await _channel.invokeMethod('cancelAll');
     } on PlatformException catch (e) {
-      print('cancelAll failed: ${e.message}');
+      debugPrint('cancelAll failed: ${e.message}');
     } on MissingPluginException {
       // non-Android — no-op
     }

@@ -6,7 +6,7 @@ import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding, debugPrint;
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/platform_notifications.dart';
 import 'package:makos_timer/database.dart';
@@ -21,15 +21,15 @@ import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
 
 void backthreadLog(String message, {String name = "ForegroundService"}) {
-  print("[$name] $message");
+  debugPrint("[$name] $message");
 }
 
 void printExceptions(void Function() fn, [String context = ""]) {
   try {
     fn();
   } catch (error, stack) {
-    print("ERROR${context.isEmpty ? '' : ' in $context'}: $error");
-    print("STACK TRACE:\n$stack");
+    debugPrint("ERROR${context.isEmpty ? '' : ' in $context'}: $error");
+    debugPrint("STACK TRACE:\n$stack");
   }
 }
 
@@ -40,8 +40,8 @@ Future<void> printExceptionsAsync(
   try {
     await fn();
   } catch (error, stack) {
-    print("ERROR${context.isEmpty ? '' : ' in $context'}: $error");
-    print("STACK TRACE:\n$stack");
+    debugPrint("ERROR${context.isEmpty ? '' : ' in $context'}: $error");
+    debugPrint("STACK TRACE:\n$stack");
   }
 }
 
@@ -214,16 +214,16 @@ void foregroundTaskStart() {
   // PlatformNotifications — throws "Cannot set the method call handler before the
   // binary messenger has been initialized."
   WidgetsFlutterBinding.ensureInitialized();
-  print("mako foregroundTaskStart");
+  debugPrint("mako foregroundTaskStart");
 
   final errorPort = ReceivePort();
   Isolate.current.addErrorListener(errorPort.sendPort);
   errorPort.listen((errorData) {
     if (errorData is List && errorData.length >= 2) {
-      print("UNCAUGHT ISOLATE ERROR: ${errorData[0]}");
-      print("STACK TRACE:\n${errorData[1]}");
+      debugPrint("UNCAUGHT ISOLATE ERROR: ${errorData[0]}");
+      debugPrint("STACK TRACE:\n${errorData[1]}");
     } else {
-      print("UNCAUGHT ISOLATE ERROR (unknown format): $errorData");
+      debugPrint("UNCAUGHT ISOLATE ERROR (unknown format): $errorData");
     }
   });
 
@@ -319,7 +319,7 @@ class ForegroundTaskRunner {
   }
 
   Future<void> start() async {
-    print("foreground runner start a");
+    debugPrint("foreground runner start a");
 
     // The binding (and thus the binary messenger) is initialized in
     // foregroundTaskStart, so method channels are usable from here on.
@@ -341,7 +341,7 @@ class ForegroundTaskRunner {
         (await _taskChannel.invokeMethod<bool>('ready')) ?? false;
     appActive.value = isApiStart;
 
-    print("foreground runner start b");
+    debugPrint("foreground runner start b");
     jukeBox = JukeBox.create();
     await MobjRegistry.initialize(TheDatabase(), preload: true);
 
@@ -558,10 +558,10 @@ Future<bool> graspForegroundService() async {
   }
   final bool alreadyRunning = await ForegroundControl.isRunning();
   if (!alreadyRunning) {
-    print("starting service");
+    debugPrint("starting service");
     _pendingTaskMessages = [];
   } else {
-    print("service is already running; re-issuing start to re-show notification");
+    debugPrint("service is already running; re-issuing start to re-show notification");
   }
   // Always (re)issue start, even when already running. Android 14+ lets the user
   // swipe away a foreground-service notification while leaving the service alive;

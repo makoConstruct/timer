@@ -48,6 +48,7 @@ void main() {
 
       // This depends on timing - if microtask already ran, result will be set
       // This test demonstrates the race condition inherent in the design
+      expect(result, anyOf(isNull, 42));
     });
 
     test('does not throw error when cancelled before error', () async {

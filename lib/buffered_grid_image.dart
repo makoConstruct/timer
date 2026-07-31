@@ -70,11 +70,15 @@ class BufferedGridImage extends CustomPainter {
       // X strips: new columns that entered the view
       if (minX < _visMinX) {
         for (int wx = minX; wx < _visMinX; wx++) {
-          for (int wy = minY; wy <= maxY; wy++) addTile(wx, wy);
+          for (int wy = minY; wy <= maxY; wy++) {
+            addTile(wx, wy);
+          }
         }
       } else if (maxX > _visMaxX) {
         for (int wx = _visMaxX + 1; wx <= maxX; wx++) {
-          for (int wy = minY; wy <= maxY; wy++) addTile(wx, wy);
+          for (int wy = minY; wy <= maxY; wy++) {
+            addTile(wx, wy);
+          }
         }
       }
       // Y strips: new rows that entered the view (excluding corners already covered)
@@ -82,13 +86,17 @@ class BufferedGridImage extends CustomPainter {
         final xLo = minX.clamp(_visMinX, maxX + 1);
         final xHi = maxX.clamp(minX - 1, _visMaxX);
         for (int wy = minY; wy < _visMinY; wy++) {
-          for (int wx = xLo; wx <= xHi; wx++) addTile(wx, wy);
+          for (int wx = xLo; wx <= xHi; wx++) {
+            addTile(wx, wy);
+          }
         }
       } else if (maxY > _visMaxY) {
         final xLo = minX.clamp(_visMinX, maxX + 1);
         final xHi = maxX.clamp(minX - 1, _visMaxX);
         for (int wy = _visMaxY + 1; wy <= maxY; wy++) {
-          for (int wx = xLo; wx <= xHi; wx++) addTile(wx, wy);
+          for (int wx = xLo; wx <= xHi; wx++) {
+            addTile(wx, wy);
+          }
         }
       }
     }

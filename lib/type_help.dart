@@ -2,7 +2,6 @@ import 'dart:ui';
 
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/platform_audio.dart';
-import 'package:signals/signals.dart';
 
 import 'mobj.dart';
 
