@@ -6493,89 +6493,18 @@ Widget headingBand({
       : null,
 );
 
-// Geometry of the floating corner back button (and the matching gutter band
-// settings leaves for it at the bottom of its list).
-const backNavSpan = 64.0;
-const backNavGap =
-    RoundedSectionSliver.defaultMargin + 0.33333 * MenuTile.defaultPaddingTotal;
-const backNavGutterHeight = backNavSpan + backNavGap * 2;
-const chevronSpan = 14.0;
-const arrowBoxLineThickness = 3.0;
+/// Height of the [BottomGutter] band, above the bottom safe-area inset.
+const bottomGutterHeight = 72.0;
 
-/// Floating back button that sits in the bottom corner closest to the user's
-/// dominant hand (bottom-left when right-handed, bottom-right when not), its
-/// outer corner matched concentrically to the phone's screen corner. Shared by
-/// Settings and the info sub-pages (About, How it was made), which use a
-/// [headingBand] header rather than a Flutter app bar and so have no built-in
-/// back affordance. Expects to be placed as a child of a [Stack].
-class CornerBackButton extends StatelessWidget {
-  /// The button's fill — usually the page's heading band colour.
-  final Color background;
-  const CornerBackButton({super.key, required this.background});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isRightHandedMobj = Mobj.getAlreadyLoaded(
-      isRightHandedID,
-      BoolType(),
-    );
-    return Positioned.fill(
-      child: SafeArea(
-        child: SignalBuilder(
-          builder: (context) {
-            final isRightHanded = isRightHandedMobj.value ?? true;
-            final screenCorner = getReasonableAestheticBottomCornerRadius();
-            // Match the background's nearest corner to the phone's screen
-            // corner so they sit concentrically, shrunk by the gap between
-            // the screen edge and the background.
-            final backgroundCornerRadius = screenCorner - backNavGap;
-            return AnimatedAlign(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-              alignment: isRightHanded
-                  ? Alignment.bottomLeft
-                  : Alignment.bottomRight,
-              child: Padding(
-                padding: const EdgeInsets.all(backNavGap),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(backgroundCornerRadius),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkButton(
-                    backgroundColor: background,
-                    onTap: () => Navigator.of(context).maybePop(),
-                    child: SizedBox(
-                      width: backNavSpan,
-                      height: backNavSpan,
-                      child: Center(
-                        child: ChevronBackIcon(
-                          size: Size(chevronSpan, chevronSpan),
-                          lineWidth: arrowBoxLineThickness,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Bottom-of-scroll spacer that clears the floating [CornerBackButton] so the
-/// last item in a scroll view isn't permanently obscured by it. The band is
-/// [backNavGutterHeight] tall (the button's footprint), with room for the
-/// bottom safe-area inset below it. Pass [background] to tint the band so it
-/// reads as a tray for the button, matching the button's fill.
-class BackNavBottomGutter extends StatelessWidget {
+/// Bottom-of-scroll spacer: dead space below the last item in a scroll view, so
+/// the content the thumb is reaching for never sits in the awkward strip right
+/// at the bottom of the screen (where the system gesture/nav bar also lives).
+/// Sits above the bottom safe-area inset, which it also reserves room for. Pass
+/// [background] to tint the band so it reads as part of the page's frame rather
+/// than as more content.
+class BottomGutter extends StatelessWidget {
   final Color? background;
-  const BackNavBottomGutter({super.key, this.background});
+  const BottomGutter({super.key, this.background});
 
   @override
   Widget build(BuildContext context) => Column(
@@ -6583,7 +6512,7 @@ class BackNavBottomGutter extends StatelessWidget {
     children: [
       Container(
         width: double.infinity,
-        height: backNavGutterHeight,
+        height: bottomGutterHeight,
         color: background,
       ),
       SizedBox(height: MediaQuery.of(context).padding.bottom),
@@ -6749,10 +6678,10 @@ Widget aboutImageBuilder(ThemeData theme, Uri uri, String? title, String? alt) {
 }
 
 /// Standard chrome for a scrollable info/content page: a scrolling [headingBand]
-/// title (instead of a flickery SliverAppBar), a [CornerBackButton], a matching
-/// [BackNavBottomGutter] so the last item clears that button, and a
+/// title (instead of a flickery SliverAppBar), a [BottomGutter], and a
 /// [StatusBarBackdrop]. The page's own content [slivers] sit between the title band
-/// and the bottom gutter.
+/// and the bottom gutter. Back navigation is the system's (and Escape, via
+/// [EscapeToPop]).
 class InfoScaffold extends StatelessWidget {
   /// Heading-band label — usually [headingBandLabel] or a plain [Text].
   final Widget title;
@@ -6768,35 +6697,36 @@ class InfoScaffold extends StatelessWidget {
     final mako = OurThemeData.fromTheme(theme);
     final backgroundColorA = mako.menuSurfaceFore;
     final backgroundColorB = mako.menuSurfaceBack;
-    return Scaffold(
-      backgroundColor: backgroundColorB,
-      body: Stack(
-        children: [
-          CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: headingBand(
-                  theme: theme,
-                  label: title,
-                  height:
-                      halfScreenHeight(context) +
-                      MediaQuery.of(context).viewPadding.top,
-                  background: backgroundColorB,
+    return EscapeToPop(
+      child: Scaffold(
+        backgroundColor: backgroundColorB,
+        body: Stack(
+          children: [
+            CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: headingBand(
+                    theme: theme,
+                    label: title,
+                    height:
+                        halfScreenHeight(context) +
+                        MediaQuery.of(context).viewPadding.top,
+                    background: backgroundColorB,
+                  ),
                 ),
-              ),
-              DecoratedSliver(
-                decoration: BoxDecoration(color: backgroundColorA),
-                sliver: SliverMainAxisGroup(slivers: slivers),
-              ),
-              SliverToBoxAdapter(
-                child: BackNavBottomGutter(background: backgroundColorB),
-              ),
-            ],
-          ),
-          NavBarBackdrop(background: backgroundColorB),
-          CornerBackButton(background: backgroundColorB),
-          StatusBarBackdrop(background: backgroundColorB),
-        ],
+                DecoratedSliver(
+                  decoration: BoxDecoration(color: backgroundColorA),
+                  sliver: SliverMainAxisGroup(slivers: slivers),
+                ),
+                SliverToBoxAdapter(
+                  child: BottomGutter(background: backgroundColorB),
+                ),
+              ],
+            ),
+            NavBarBackdrop(background: backgroundColorB),
+            StatusBarBackdrop(background: backgroundColorB),
+          ],
+        ),
       ),
     );
   }
@@ -6863,7 +6793,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
 
-    return Scaffold(
+    // (bound to EscapeToPop at the end of the build; it's a separate local only
+    // to keep this long build method from gaining another level of indent)
+    final scaffold = Scaffold(
       // Page background is the section-header colour (so short content / the
       // area below the bottom gutter never reveals a mismatched colour); the
       // rounded section cards carry the contrasting content colour instead.
@@ -7457,16 +7389,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               SliverToBoxAdapter(
-                child: BackNavBottomGutter(background: headingBackground),
+                child: BottomGutter(background: headingBackground),
               ),
             ],
           ),
           NavBarBackdrop(background: headingBackground),
-          CornerBackButton(background: headingBackground),
           StatusBarBackdrop(background: headingBackground),
         ],
       ),
     );
+    return EscapeToPop(child: scaffold);
   }
 }
 
@@ -7631,72 +7563,73 @@ class BinScreenState extends State<BinScreen> {
     final mako = OurThemeData.fromTheme(theme);
     final contentBackground = mako.menuSurfaceFore;
     final headingBackground = mako.menuSurfaceBack;
-    return Scaffold(
-      backgroundColor: headingBackground,
-      resizeToAvoidBottomInset: false,
-      body: ConstrainedBox(
-        constraints: BoxConstraints.expand(),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CustomScrollView(
-                // reverse:true anchors short content to the bottom of the
-                // viewport (and the tray wraps upward from the bottom), so the
-                // slivers are listed bottom-to-top: gutter, tray, heading.
-                reverse: true,
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: BackNavBottomGutter(background: headingBackground),
-                  ),
-                  RoundedSectionSliver(
-                    color: contentBackground,
-                    padding: EdgeInsets.zero,
-                    // AnimoveFrame lets the remaining timers slide to fill the
-                    // gap when one is restored (their Animove wrappers need a
-                    // frame ancestor); SelfRemovalHost is the overlay a restored
-                    // timer is lifted into to play its exit animation.
-                    child: AnimoveFrame(
-                      child: SelfRemovalHost(
-                        key: ephemeralAnimationLayer,
-                        builder: (overlay, context) => Stack(
-                          children: [
-                            Padding(
-                              // vertical breathing room around the tray, echoing
-                              // the space the TimerScreen leaves above/below its
-                              // timers
-                              padding: const EdgeInsets.symmetric(
-                                vertical: timerGap,
+    return EscapeToPop(
+      child: Scaffold(
+        backgroundColor: headingBackground,
+        resizeToAvoidBottomInset: false,
+        body: ConstrainedBox(
+          constraints: BoxConstraints.expand(),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomScrollView(
+                  // reverse:true anchors short content to the bottom of the
+                  // viewport (and the tray wraps upward from the bottom), so the
+                  // slivers are listed bottom-to-top: gutter, tray, heading.
+                  reverse: true,
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: BottomGutter(background: headingBackground),
+                    ),
+                    RoundedSectionSliver(
+                      color: contentBackground,
+                      padding: EdgeInsets.zero,
+                      // AnimoveFrame lets the remaining timers slide to fill the
+                      // gap when one is restored (their Animove wrappers need a
+                      // frame ancestor); SelfRemovalHost is the overlay a restored
+                      // timer is lifted into to play its exit animation.
+                      child: AnimoveFrame(
+                        child: SelfRemovalHost(
+                          key: ephemeralAnimationLayer,
+                          builder: (overlay, context) => Stack(
+                            children: [
+                              Padding(
+                                // vertical breathing room around the tray, echoing
+                                // the space the TimerScreen leaves above/below its
+                                // timers
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: timerGap,
+                                ),
+                                child: _buildTray(theme),
                               ),
-                              child: _buildTray(theme),
-                            ),
-                            ...overlay,
-                          ],
+                              ...overlay,
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: headingBand(
-                      theme: theme,
-                      label: headingBandLabel(
+                    SliverToBoxAdapter(
+                      child: headingBand(
                         theme: theme,
-                        icon: Icons.delete_outline,
-                        heroTag: 'trash-bin-icon',
-                        title: 'Trash',
+                        label: headingBandLabel(
+                          theme: theme,
+                          icon: Icons.delete_outline,
+                          heroTag: 'trash-bin-icon',
+                          title: 'Trash',
+                        ),
+                        height:
+                            halfScreenHeight(context) +
+                            MediaQuery.of(context).viewPadding.top,
+                        background: headingBackground,
                       ),
-                      height:
-                          halfScreenHeight(context) +
-                          MediaQuery.of(context).viewPadding.top,
-                      background: headingBackground,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            NavBarBackdrop(background: headingBackground),
-            CornerBackButton(background: headingBackground),
-            StatusBarBackdrop(background: headingBackground),
-          ],
+              NavBarBackdrop(background: headingBackground),
+              StatusBarBackdrop(background: headingBackground),
+            ],
+          ),
         ),
       ),
     );
@@ -8129,166 +8062,166 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
 
     const bottomBarHeight = 64.0;
 
-    return PopScope(
-      canPop: !widget.perTimerMode,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && widget.perTimerMode) {
-          _popWithResult();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: backgroundColorB,
-        body: Stack(
-          children: [
-            CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: headingBand(
-                    theme: theme,
-                    label: widget.perTimerMode
-                        ? Text('Pick a sound')
-                        : headingBandLabel(
-                            theme: theme,
-                            icon: Icons.music_note,
-                            heroTag: 'alarm-sound-icon',
-                            title: 'Alarm sound',
-                            createRectTween: (begin, end) => DelayedRectTween(
-                              begin: begin,
-                              end: end,
-                              delay: 0.14,
+    // Escape goes through maybePop, so in perTimerMode the PopScope below turns
+    // it into the same result-returning pop the Done/Cancel bar does.
+    return EscapeToPop(
+      child: PopScope(
+        canPop: !widget.perTimerMode,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && widget.perTimerMode) {
+            _popWithResult();
+          }
+        },
+        child: Scaffold(
+          backgroundColor: backgroundColorB,
+          body: Stack(
+            children: [
+              CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: headingBand(
+                      theme: theme,
+                      label: widget.perTimerMode
+                          ? Text('Pick a sound')
+                          : headingBandLabel(
+                              theme: theme,
+                              icon: Icons.music_note,
+                              heroTag: 'alarm-sound-icon',
+                              title: 'Alarm sound',
+                              createRectTween: (begin, end) => DelayedRectTween(
+                                begin: begin,
+                                end: end,
+                                delay: 0.14,
+                              ),
                             ),
-                          ),
-                    height:
-                        halfScreenHeight(context) +
-                        MediaQuery.of(context).viewPadding.top,
-                    background: backgroundColorB,
-                  ),
-                ),
-                if (!_loading) ...[
-                  // Each sound section is its own rounded card (backgroundColorA)
-                  // inset from the screen edges; the page (backgroundColorB) shows
-                  // between them, and the chips inside flip to B to contrast.
-                  SliverMainAxisGroup(
-                    slivers: intersperse(
-                      const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                      [
-                        if (widget.perTimerMode)
-                          section('', [
-                            null,
-                          ], fadeDelay: Duration(milliseconds: 0)),
-                        if (_assetSounds.isNotEmpty)
-                          section(
-                            "Our Sounds",
-                            _assetSounds,
-                            fadeDelay: Duration(milliseconds: 0),
-                          ),
-                        if (_notificationSounds != null &&
-                            _notificationSounds!.isNotEmpty)
-                          section(
-                            'Phone Notification Sounds',
-                            _notificationSounds!,
-                            fadeDelay: Duration(milliseconds: 200),
-                          ),
-                        if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
-                          section(
-                            'Device alarm sounds (long duration)',
-                            _alarmSounds!,
-                            fadeDelay: Duration(milliseconds: 100),
-                          ),
-                        if (_ringtoneSounds != null &&
-                            _ringtoneSounds!.isNotEmpty)
-                          section(
-                            'Device ringtones',
-                            _ringtoneSounds!,
-                            fadeDelay: Duration(milliseconds: 300),
-                          ),
-                        if (Platform.isAndroid)
-                          section(
-                            'From files',
-                            _pickedFiles,
-                            fadeDelay: Duration(milliseconds: 400),
-                            extraChildren: [
-                              _buildPickFileChip(theme, backgroundColorB),
-                            ],
-                          ),
-                      ],
+                      height:
+                          halfScreenHeight(context) +
+                          MediaQuery.of(context).viewPadding.top,
+                      background: backgroundColorB,
                     ),
                   ),
-                  if (widget.perTimerMode)
-                    SliverToBoxAdapter(
-                      child: SizedBox(
-                        height:
-                            bottomBarHeight +
-                            16 +
-                            MediaQuery.of(context).padding.bottom,
+                  if (!_loading) ...[
+                    // Each sound section is its own rounded card (backgroundColorA)
+                    // inset from the screen edges; the page (backgroundColorB) shows
+                    // between them, and the chips inside flip to B to contrast.
+                    SliverMainAxisGroup(
+                      slivers: intersperse(
+                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                        [
+                          if (widget.perTimerMode)
+                            section('', [
+                              null,
+                            ], fadeDelay: Duration(milliseconds: 0)),
+                          if (_assetSounds.isNotEmpty)
+                            section(
+                              "Our Sounds",
+                              _assetSounds,
+                              fadeDelay: Duration(milliseconds: 0),
+                            ),
+                          if (_notificationSounds != null &&
+                              _notificationSounds!.isNotEmpty)
+                            section(
+                              'Phone Notification Sounds',
+                              _notificationSounds!,
+                              fadeDelay: Duration(milliseconds: 200),
+                            ),
+                          if (_alarmSounds != null && _alarmSounds!.isNotEmpty)
+                            section(
+                              'Device alarm sounds (long duration)',
+                              _alarmSounds!,
+                              fadeDelay: Duration(milliseconds: 100),
+                            ),
+                          if (_ringtoneSounds != null &&
+                              _ringtoneSounds!.isNotEmpty)
+                            section(
+                              'Device ringtones',
+                              _ringtoneSounds!,
+                              fadeDelay: Duration(milliseconds: 300),
+                            ),
+                          if (Platform.isAndroid)
+                            section(
+                              'From files',
+                              _pickedFiles,
+                              fadeDelay: Duration(milliseconds: 400),
+                              extraChildren: [
+                                _buildPickFileChip(theme, backgroundColorB),
+                              ],
+                            ),
+                        ],
                       ),
-                    )
-                  else
-                    SliverToBoxAdapter(
-                      child: BackNavBottomGutter(background: backgroundColorB),
                     ),
+                    if (widget.perTimerMode)
+                      SliverToBoxAdapter(
+                        child: SizedBox(
+                          height:
+                              bottomBarHeight +
+                              16 +
+                              MediaQuery.of(context).padding.bottom,
+                        ),
+                      )
+                    else
+                      SliverToBoxAdapter(
+                        child: BottomGutter(background: backgroundColorB),
+                      ),
+                  ],
                 ],
-              ],
-            ),
-            // In perTimerMode the opaque Done/Cancel bar below already backs the
-            // nav bar, so the gradient would only tint its buttons.
-            if (!widget.perTimerMode)
-              NavBarBackdrop(background: backgroundColorB),
-            if (widget.perTimerMode)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  height:
-                      bottomBarHeight + MediaQuery.of(context).padding.bottom,
-                  padding: EdgeInsets.only(
-                    bottom: MediaQuery.of(context).padding.bottom,
-                  ),
-                  decoration: BoxDecoration(
-                    color: backgroundColorB,
-                    border: Border(
-                      top: BorderSide(
-                        color: theme.colorScheme.outlineVariant.withValues(
-                          alpha: 0.3,
+              ),
+              // In perTimerMode the opaque Done/Cancel bar below already backs the
+              // nav bar, so the gradient would only tint its buttons.
+              if (!widget.perTimerMode)
+                NavBarBackdrop(background: backgroundColorB),
+              if (widget.perTimerMode)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    height:
+                        bottomBarHeight + MediaQuery.of(context).padding.bottom,
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).padding.bottom,
+                    ),
+                    decoration: BoxDecoration(
+                      color: backgroundColorB,
+                      border: Border(
+                        top: BorderSide(
+                          color: theme.colorScheme.outlineVariant.withValues(
+                            alpha: 0.3,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  child: Center(
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: bottomBarHeight,
-                      child: TextButton(
-                        onPressed: _popWithResult,
-                        style: TextButton.styleFrom(
-                          shape: RoundedRectangleBorder(),
-                          backgroundColor: _hasInteracted
-                              ? theme.colorScheme.primaryContainer
-                              : null,
-                          foregroundColor: _hasInteracted
-                              ? theme.colorScheme.onPrimaryContainer
-                              : theme.colorScheme.onSurface,
-                        ),
-                        child: Text(
-                          _hasInteracted ? 'Done' : 'Cancel',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: _hasInteracted
+                    child: Center(
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: bottomBarHeight,
+                        child: TextButton(
+                          onPressed: _popWithResult,
+                          style: TextButton.styleFrom(
+                            shape: RoundedRectangleBorder(),
+                            backgroundColor: _hasInteracted
+                                ? theme.colorScheme.primaryContainer
+                                : null,
+                            foregroundColor: _hasInteracted
                                 ? theme.colorScheme.onPrimaryContainer
                                 : theme.colorScheme.onSurface,
                           ),
+                          child: Text(
+                            _hasInteracted ? 'Done' : 'Cancel',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: _hasInteracted
+                                  ? theme.colorScheme.onPrimaryContainer
+                                  : theme.colorScheme.onSurface,
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            // perTimerMode is a modal picker with its own Done/Cancel bar and
-            // result-returning pop, so it gets no corner back button.
-            if (!widget.perTimerMode)
-              CornerBackButton(background: backgroundColorB),
-            StatusBarBackdrop(background: backgroundColorB),
-          ],
+              StatusBarBackdrop(background: backgroundColorB),
+            ],
+          ),
         ),
       ),
     );
@@ -8585,7 +8518,8 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
       );
     }
 
-    return Scaffold(
+    // (bound to EscapeToPop at the end of the build, as in SettingsScreen)
+    final scaffold = Scaffold(
       // Page background is the section-header colour; the rounded section cards
       // carry the contrasting content colour instead. Mirrors SettingsScreen.
       backgroundColor: headingBackground,
@@ -9010,5 +8944,6 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
         ],
       ),
     );
+    return EscapeToPop(child: scaffold);
   }
 }

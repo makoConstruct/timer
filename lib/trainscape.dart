@@ -14,7 +14,6 @@ import 'package:animove/animove.dart'
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart' show savedTrainscapeLevelID;
@@ -4717,76 +4716,69 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   @override
   Widget build(BuildContext context) {
     if (_game == null) return ColoredBox(color: palette.ground);
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            Navigator.of(context).maybePop(),
-      },
-      child: Focus(
-        autofocus: true,
-        // Everything under here is built against [palette], so the flip has to
-        // happen above it and rebuild the lot. It's a rebuild, not a
-        // restructure: the tree keeps its shape, so the world view's state —
-        // the player's zoom and pan — rides through the turn of the day.
-        child: SignalBuilder(builder: (context) {
-          palette = game.isNight.value ? nightPalette : dayPalette;
-          return Scaffold(
-            backgroundColor: palette.ground,
-            body: SafeArea(
-              child: Stack(
-                children: [
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isWide =
-                          constraints.maxWidth > constraints.maxHeight;
-                      final world = Expanded(
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: WorldView(
-                                key: ObjectKey(game),
-                                game: game,
-                                frame: _frame,
-                                recenterNudge: _recenterNudge,
-                              ),
+    return EscapeToPop(
+      // Everything under here is built against [palette], so the flip has to
+      // happen above it and rebuild the lot. It's a rebuild, not a
+      // restructure: the tree keeps its shape, so the world view's state —
+      // the player's zoom and pan — rides through the turn of the day.
+      child: SignalBuilder(builder: (context) {
+        palette = game.isNight.value ? nightPalette : dayPalette;
+        return Scaffold(
+          backgroundColor: palette.ground,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide =
+                        constraints.maxWidth > constraints.maxHeight;
+                    final world = Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: WorldView(
+                              key: ObjectKey(game),
+                              game: game,
+                              frame: _frame,
+                              recenterNudge: _recenterNudge,
                             ),
-                            Positioned(
-                              left: 10,
-                              right: 10,
-                              top: 3,
-                              child: _hud(),
+                          ),
+                          Positioned(
+                            left: 10,
+                            right: 10,
+                            top: 3,
+                            child: _hud(),
+                          ),
+                          Positioned.fill(child: _announcement()),
+                        ],
+                      ),
+                    );
+                    final controls = isWide
+                        ? SizedBox(
+                            width: 340,
+                            child: ControlsPanel(
+                              game: game,
+                              recenterNudge: _recenterNudge,
                             ),
-                            Positioned.fill(child: _announcement()),
-                          ],
-                        ),
-                      );
-                      final controls = isWide
-                          ? SizedBox(
-                              width: 340,
-                              child: ControlsPanel(
-                                game: game,
-                                recenterNudge: _recenterNudge,
-                              ),
-                            )
-                          : SizedBox(
-                              height: 210,
-                              child: ControlsPanel(
-                                game: game,
-                                recenterNudge: _recenterNudge,
-                              ),
-                            );
-                      return isWide
-                          ? Row(children: [world, controls])
-                          : Column(children: [world, controls]);
-                    },
-                  ),
-                  _phaseOverlay(),
-                ],
-              ),
+                          )
+                        : SizedBox(
+                            height: 210,
+                            child: ControlsPanel(
+                              game: game,
+                              recenterNudge: _recenterNudge,
+                            ),
+                          );
+                    return isWide
+                        ? Row(children: [world, controls])
+                        : Column(children: [world, controls]);
+                  },
+                ),
+                _phaseOverlay(),
+              ],
             ),
-          );
-        }),
-      ),
+          ),
+        );
+      }),
     );
   }
 

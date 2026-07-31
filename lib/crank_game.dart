@@ -290,7 +290,8 @@ class _CrankGameScreenState extends State<CrankGameScreen>
 
     final barBottom = screenWidth * 0.8;
     final barThickness = 50.0;
-    return Scaffold(
+    // (bound to EscapeToPop at the end of the build, as in SettingsScreen)
+    final scaffold = Scaffold(
       backgroundColor: backgroundColorA,
       appBar: AppBar(
         title: Row(
@@ -523,6 +524,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
         ],
       ),
     );
+    return EscapeToPop(child: scaffold);
   }
 }
 

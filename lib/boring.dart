@@ -2183,6 +2183,30 @@ int? recognizeDigitPress(LogicalKeyboardKey k) {
   }
 }
 
+/// Wraps a pushed screen so that pressing Escape leaves it, the way every
+/// desktop and web user expects. Touch users have the system's own back
+/// affordance (Android's nav button or its back gesture), so that's the only
+/// back nav the screens carry.
+///
+/// Uses [Navigator.maybePop], so a screen that guards its exit with a
+/// [PopScope] (returning a result, confirming, …) still gets its say. The
+/// [Focus] is there because key events are only routed to widgets on the focus
+/// chain — without it, a screen where nothing has taken focus yet would never
+/// see the keystroke.
+class EscapeToPop extends StatelessWidget {
+  final Widget child;
+  const EscapeToPop({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.escape): () =>
+          Navigator.of(context).maybePop(),
+    },
+    child: Focus(autofocus: true, child: child),
+  );
+}
+
 double calcMaxRadiusForPointWithinRectangle(Size size, Offset center) {
   final w = max(center.dx, size.width - center.dx);
   final h = max(center.dy, size.height - center.dy);
@@ -5105,7 +5129,7 @@ class TimerculeFlatterCyclePainter extends CustomPainter {
     );
     r.close();
 
-    timerculeIconScaling(canvas, size, furtherScaling: 0.935);
+    timerculeIconScaling(canvas, size, furtherScaling: 0.9);
     _drawRoundedPolygon(canvas, r, color, cr);
   }
 
