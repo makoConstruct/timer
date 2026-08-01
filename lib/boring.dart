@@ -102,6 +102,130 @@ class ComputedWithDisposer<T> {
 bool platformIsDesktop() =>
     Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
+// --- corner style ---
+// Every rounded box in the app is drawn either with circular corner arcs or
+// with Apple-style continuous ("squircle") corners, per the
+// [continuousCornersID] setting. Anything that rounds a box goes through the
+// helpers below, so the one toggle restyles the lot.
+
+/// The corner style a platform expects before the user has an opinion: iOS
+/// rounds everything continuously, everyone else uses circular arcs.
+bool get continuousCornersDefault =>
+    defaultTargetPlatform == TargetPlatform.iOS;
+
+/// Whether rounded boxes are currently drawn with continuous corners. Reading
+/// this from a reactive build (a [SignalStatefulWidget], a `SignalBuilder`, an
+/// effect) subscribes to the setting, so those widgets restyle the moment it's
+/// toggled; elsewhere it's picked up on the next rebuild.
+bool continuousCornersOn() =>
+    Mobj.getAlreadyLoaded(continuousCornersID, BoolType()).value ??
+    continuousCornersDefault;
+
+/// A continuous corner leaves the edge earlier but stays flatter through the
+/// turn, so at an equal radius it reads as *less* rounded than a circular arc.
+/// Radii passed to the helpers here are multiplied by this when continuous
+/// corners are on — it's the one knob to turn to make them rounder or tighter.
+/// (The glass menu compensates the same way, harder, in `_buildGlassBody`,
+/// because a blob's corner term rounds off more than an [RSuperellipse]'s.)
+const double continuousCornerScale = 1.0;
+
+/// [radius] adjusted for the current corner style, for geometry that has to be
+/// worked out in plain numbers rather than handed to one of the helpers below.
+double cornerStyleRadius(double radius) =>
+    continuousCornersOn() ? radius * continuousCornerScale : radius;
+
+/// The rounded-box [ShapeBorder] for the current corner style, for the things
+/// that take a shape rather than a radius ([Material], [ShapeDecoration],
+/// button styles). Pass `scale: false` for a radius that has to match something
+/// physical — the screen's own corners — rather than merely look right.
+ShapeBorder cornerStyleBorder(
+  BorderRadiusGeometry borderRadius, {
+  BorderSide side = BorderSide.none,
+  bool scale = true,
+}) => continuousCornersOn()
+    ? RoundedSuperellipseBorder(
+        borderRadius: scale
+            ? borderRadius * continuousCornerScale
+            : borderRadius,
+        side: side,
+      )
+    : RoundedRectangleBorder(borderRadius: borderRadius, side: side);
+
+/// A clip in the current corner style. See [cornerStyleBorder] for [scale].
+///
+/// Always a [ClipPath], never a [ClipRRect]/[ClipRSuperellipse] pair: a clip
+/// whose widget *type* changed with the setting would deactivate and re-inflate
+/// its entire subtree the instant the setting was toggled, losing every State
+/// under it — which is more than a settings toggle should cost, and outright
+/// breaks an [InkButton] whose live ink wells hold animation controllers their
+/// State disposes on unmount. One widget type, only the clipper differs.
+Widget cornerStyleClip({
+  required BorderRadiusGeometry borderRadius,
+  Clip clipBehavior = Clip.antiAlias,
+  bool scale = true,
+  required Widget child,
+}) => ClipPath(
+  clipper: ShapeBorderClipper(
+    shape: cornerStyleBorder(borderRadius, scale: scale),
+  ),
+  clipBehavior: clipBehavior,
+  child: child,
+);
+
+/// Draws a rounded rect on [canvas] in the given corner style, scaling [radius]
+/// the way the rest of these helpers do. Painters take [continuous] as an
+/// argument rather than calling [continuousCornersOn] themselves, so that the
+/// widget that builds them captures it (and can compare it in `shouldRepaint`).
+void drawCornerStyled(
+  Canvas canvas,
+  Rect rect,
+  Radius radius,
+  Paint paint, {
+  required bool continuous,
+}) {
+  if (continuous) {
+    canvas.drawRSuperellipse(
+      RSuperellipse.fromRectAndRadius(rect, radius * continuousCornerScale),
+      paint,
+    );
+  } else {
+    canvas.drawRRect(RRect.fromRectAndRadius(rect, radius), paint);
+  }
+}
+
+extension CornerStyled on BoxDecoration {
+  /// This decoration drawn in the current corner style: itself when corners are
+  /// circular, an equivalent [ShapeDecoration] over a [RoundedSuperellipseBorder]
+  /// when they're continuous. Decorations a shape can't express — a non-uniform
+  /// border, a background blend mode, a non-rectangular [shape] — are handed
+  /// back unchanged rather than quietly losing that part of themselves.
+  Decoration get cornerStyled {
+    final radius = borderRadius;
+    if (radius == null ||
+        shape != BoxShape.rectangle ||
+        backgroundBlendMode != null ||
+        !continuousCornersOn()) {
+      return this;
+    }
+    final BorderSide side;
+    final b = border;
+    if (b == null) {
+      side = BorderSide.none;
+    } else if (b is Border && b.isUniform) {
+      side = b.top;
+    } else {
+      return this;
+    }
+    return ShapeDecoration(
+      color: color,
+      image: image,
+      gradient: gradient,
+      shadows: boxShadow,
+      shape: cornerStyleBorder(radius, side: side),
+    );
+  }
+}
+
 void scrollToWithPadding(
   BuildContext context,
   ScrollController scrollController, {
@@ -2367,7 +2491,10 @@ class CircularRevealRoute<T> extends PageRoute<T>
 
         return Transform.scale(
           scale: scale,
-          child: ClipRRect(
+          // unscaled: these are the screen's own corners, so they want the
+          // measured radius, only drawn in the chosen style.
+          child: cornerStyleClip(
+            scale: false,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(corners.topLeft),
               topRight: Radius.circular(corners.topRight),
@@ -2527,14 +2654,16 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
         }
         return Transform.scale(
           scale: scale,
-          child: ClipRRect(
+          // unscaled, as in [CircularRevealRoute]: the screen's own corners.
+          child: cornerStyleClip(
+            scale: false,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(corners.topLeft),
               topRight: Radius.circular(corners.topRight),
               bottomLeft: Radius.circular(corners.bottomLeft),
               bottomRight: Radius.circular(corners.bottomRight),
             ),
-            child: child,
+            child: child!,
           ),
         );
       },
@@ -3353,7 +3482,13 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     Widget clipIfNeeded(Widget child) {
       if (widget.borderRadius != null) {
-        return ClipRRect(borderRadius: widget.borderRadius!, child: child);
+        // SignalBuilder because this State's build isn't signal-tracked, and
+        // the clip follows the corner-style setting. It rebuilds around the
+        // same [child] instance, so nothing under it is disturbed.
+        return SignalBuilder(
+          builder: (context) =>
+              cornerStyleClip(borderRadius: widget.borderRadius!, child: child),
+        );
       }
       return child;
     }
@@ -6151,26 +6286,34 @@ class RoundedCheckbox extends StatelessWidget {
     return GestureDetector(
       onTap: () => onChanged(!value),
       behavior: HitTestBehavior.opaque,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0.0, end: value ? 1.0 : 0.0),
-        duration: const Duration(milliseconds: 130),
-        builder: (context, t, _) {
-          final tt = Curves.easeOutExpo.transform(t);
-          final borderColor = dimWhenFalse
-              ? Color.lerp(Colors.grey, outlineColor, tt)!
-              : outlineColor;
-          return SizedBox(
-            width: size,
-            height: size,
-            child: CustomPaint(
-              painter: _RoundedCheckboxPainter(
-                innerScale: tt,
-                color: color,
-                borderColor: borderColor,
-                radius: radius,
-                innerInset: innerInset,
-              ),
-            ),
+      // (SignalBuilder so the box follows a corner-style change live — one of
+      // these is the switch that makes it)
+      child: SignalBuilder(
+        builder: (context) {
+          final continuous = continuousCornersOn();
+          return TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: value ? 1.0 : 0.0),
+            duration: const Duration(milliseconds: 130),
+            builder: (context, t, _) {
+              final tt = Curves.easeOutExpo.transform(t);
+              final borderColor = dimWhenFalse
+                  ? Color.lerp(Colors.grey, outlineColor, tt)!
+                  : outlineColor;
+              return SizedBox(
+                width: size,
+                height: size,
+                child: CustomPaint(
+                  painter: _RoundedCheckboxPainter(
+                    innerScale: tt,
+                    color: color,
+                    borderColor: borderColor,
+                    radius: radius,
+                    innerInset: innerInset,
+                    continuous: continuous,
+                  ),
+                ),
+              );
+            },
           );
         },
       ),
@@ -6185,6 +6328,7 @@ class _RoundedCheckboxPainter extends CustomPainter {
     required this.borderColor,
     required this.radius,
     required this.innerInset,
+    required this.continuous,
   });
 
   final double innerScale;
@@ -6192,6 +6336,7 @@ class _RoundedCheckboxPainter extends CustomPainter {
   final Color borderColor;
   final Radius radius;
   final double innerInset;
+  final bool continuous;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -6200,7 +6345,8 @@ class _RoundedCheckboxPainter extends CustomPainter {
       ..color = borderColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
-    final outerRect = RRect.fromRectAndRadius(
+    drawCornerStyled(
+      canvas,
       Rect.fromLTWH(
         strokeWidth / 2,
         strokeWidth / 2,
@@ -6208,8 +6354,9 @@ class _RoundedCheckboxPainter extends CustomPainter {
         size.height - strokeWidth,
       ),
       radius,
+      borderPaint,
+      continuous: continuous,
     );
-    canvas.drawRRect(outerRect, borderPaint);
     if (innerScale > 0) {
       final fillPaint = Paint()
         ..color = color
@@ -6218,11 +6365,13 @@ class _RoundedCheckboxPainter extends CustomPainter {
       final maxH = size.height - innerInset * 2;
       final w = maxW * innerScale;
       final h = maxH * innerScale;
-      final innerRect = RRect.fromRectAndRadius(
+      drawCornerStyled(
+        canvas,
         Rect.fromLTWH((size.width - w) / 2, (size.height - h) / 2, w, h),
         Radius.circular(radius.x * 0.6 * innerScale),
+        fillPaint,
+        continuous: continuous,
       );
-      canvas.drawRRect(innerRect, fillPaint);
     }
   }
 
@@ -6230,7 +6379,8 @@ class _RoundedCheckboxPainter extends CustomPainter {
   bool shouldRepaint(_RoundedCheckboxPainter old) =>
       old.innerScale != innerScale ||
       old.color != color ||
-      old.borderColor != borderColor;
+      old.borderColor != borderColor ||
+      old.continuous != continuous;
 }
 
 /// How a [ManyStateCheckbox] is filled. Each state is the inner fill rectangle
@@ -6280,23 +6430,29 @@ class ManyStateCheckbox extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: TweenAnimationBuilder<Rect?>(
-        tween: RectTween(begin: target, end: target),
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutExpo,
-        builder: (context, fillFractions, _) {
-          return SizedBox(
-            width: size,
-            height: size,
-            child: CustomPaint(
-              painter: _ManyStateCheckboxPainter(
-                fillFractions: fillFractions ?? target,
-                color: color,
-                borderColor: color,
-                radius: radius,
-                innerInset: innerInset,
-              ),
-            ),
+      child: SignalBuilder(
+        builder: (context) {
+          final continuous = continuousCornersOn();
+          return TweenAnimationBuilder<Rect?>(
+            tween: RectTween(begin: target, end: target),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutExpo,
+            builder: (context, fillFractions, _) {
+              return SizedBox(
+                width: size,
+                height: size,
+                child: CustomPaint(
+                  painter: _ManyStateCheckboxPainter(
+                    fillFractions: fillFractions ?? target,
+                    color: color,
+                    borderColor: color,
+                    radius: radius,
+                    innerInset: innerInset,
+                    continuous: continuous,
+                  ),
+                ),
+              );
+            },
           );
         },
       ),
@@ -6311,6 +6467,7 @@ class _ManyStateCheckboxPainter extends CustomPainter {
     required this.borderColor,
     required this.radius,
     required this.innerInset,
+    required this.continuous,
   });
 
   /// The fill rectangle in inner-area fractions (see [CheckboxFill]).
@@ -6319,6 +6476,7 @@ class _ManyStateCheckboxPainter extends CustomPainter {
   final Color borderColor;
   final Radius radius;
   final double innerInset;
+  final bool continuous;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -6327,7 +6485,8 @@ class _ManyStateCheckboxPainter extends CustomPainter {
       ..color = borderColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
-    final outerRect = RRect.fromRectAndRadius(
+    drawCornerStyled(
+      canvas,
       Rect.fromLTWH(
         strokeWidth / 2,
         strokeWidth / 2,
@@ -6335,8 +6494,9 @@ class _ManyStateCheckboxPainter extends CustomPainter {
         size.height - strokeWidth,
       ),
       radius,
+      borderPaint,
+      continuous: continuous,
     );
-    canvas.drawRRect(outerRect, borderPaint);
     if (fillFractions.width > 0.001 && fillFractions.height > 0.001) {
       final innerW = size.width - innerInset * 2;
       final innerH = size.height - innerInset * 2;
@@ -6349,9 +6509,12 @@ class _ManyStateCheckboxPainter extends CustomPainter {
       final fillPaint = Paint()
         ..color = color
         ..style = PaintingStyle.fill;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(fillRect, Radius.circular(radius.x * 0.6)),
+      drawCornerStyled(
+        canvas,
+        fillRect,
+        Radius.circular(radius.x * 0.6),
         fillPaint,
+        continuous: continuous,
       );
     }
   }
@@ -6360,7 +6523,8 @@ class _ManyStateCheckboxPainter extends CustomPainter {
   bool shouldRepaint(_ManyStateCheckboxPainter old) =>
       old.fillFractions != fillFractions ||
       old.color != color ||
-      old.borderColor != borderColor;
+      old.borderColor != borderColor ||
+      old.continuous != continuous;
 }
 
 /// A settings row laid out like a [ListTile] — optional [title] over [subtitle]
@@ -6580,12 +6744,16 @@ class RoundedSectionSliver extends StatelessWidget {
     return SliverPadding(
       padding: margin,
       sliver: SliverToBoxAdapter(
-        child: Material(
-          type: MaterialType.canvas,
-          color: color,
-          borderRadius: BorderRadius.circular(r),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(padding: padding, child: child),
+        // the SignalBuilder is just so the card follows a corner-style change
+        // live — these sections host the setting that makes it.
+        child: SignalBuilder(
+          builder: (context) => Material(
+            type: MaterialType.canvas,
+            color: color,
+            shape: cornerStyleBorder(BorderRadius.circular(r)),
+            clipBehavior: Clip.antiAlias,
+            child: Padding(padding: padding, child: child),
+          ),
         ),
       ),
     );

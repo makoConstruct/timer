@@ -183,6 +183,12 @@ Future<void> initializeDatabase() async {
       debugLabel: "liquid glass on",
     ),
     Mobj.getOrCreate(
+      continuousCornersID,
+      type: BoolType(),
+      initial: () => continuousCornersDefault,
+      debugLabel: "continuous corners",
+    ),
+    Mobj.getOrCreate(
       selectedAudioID,
       type: AudioInfoType(),
       initial: () => PlatformAudio.assetSounds[0],
@@ -1395,7 +1401,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             // excursion plus the bevel, and lift the box by the same amount so
             // the content still lands at [top].
             final double topHeadroom = max(0.0, -origin.dy) + _glassMenuTopPad;
-            double cornerStyle = glassOn ? 1 : 0;
+            double cornerStyle = continuousCornersOn() ? 1 : 0;
             final Widget body = _buildGlassBody(
               mt: mt,
               glassOn: glassOn,
@@ -2609,7 +2615,7 @@ class TimerculeState extends TimerBaseState<Timercule> {
                     // color: TimerBaseState.backgroundColor(d.hue),
                     color: backgroundColor,
                     borderRadius: BorderRadius.circular(cornerRadius),
-                  ),
+                  ).cornerStyled,
                 ),
               ),
               ConstrainedBox(
@@ -5213,31 +5219,36 @@ class TimerScreenState extends State<TimerScreen>
         // ),
         // ).deflate(backingDeflation),
       ).inflate(backingInflation),
-      child: AnimatedBuilder(
-        animation: numeralBackshadowController,
-        builder: (context, child) {
-          final shadowp = Curves.easeInOut.transform(
-            numeralBackshadowController.value,
-          );
-          return Container(
-            constraints: BoxConstraints.expand(),
-            decoration: BoxDecoration(
-              color: mt.foreBackColor,
-              borderRadius: BorderRadius.circular(
-                buttonSpan / 2 + backingInflation,
-              ),
-              boxShadow: shadowp <= 0
-                  ? null
-                  : [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.17 * shadowp),
-                        blurRadius: 20,
-                        spreadRadius: 1,
-                      ),
-                    ],
-            ),
-          );
-        },
+      // the corner style is read down in the AnimatedBuilder's closure, which
+      // runs in that builder's own element rather than this build, so this
+      // screen's signal tracking doesn't reach it — hence the SignalBuilder.
+      child: SignalBuilder(
+        builder: (context) => AnimatedBuilder(
+          animation: numeralBackshadowController,
+          builder: (context, child) {
+            final shadowp = Curves.easeInOut.transform(
+              numeralBackshadowController.value,
+            );
+            return Container(
+              constraints: BoxConstraints.expand(),
+              decoration: BoxDecoration(
+                color: mt.foreBackColor,
+                borderRadius: BorderRadius.circular(
+                  buttonSpan / 2 + backingInflation,
+                ),
+                boxShadow: shadowp <= 0
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.17 * shadowp),
+                          blurRadius: 20,
+                          spreadRadius: 1,
+                        ),
+                      ],
+              ).cornerStyled,
+            );
+          },
+        ),
       ),
     );
 
@@ -7109,6 +7120,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       },
                     ),
+                    SignalBuilder(
+                      builder: (context) {
+                        final continuousCornersMobj = Mobj.getAlreadyLoaded(
+                          continuousCornersID,
+                          BoolType(),
+                        );
+                        final on =
+                            continuousCornersMobj.value ??
+                            continuousCornersDefault;
+                        return RoundedCheckboxListTile(
+                          title: settingTitle('Corner rounding'),
+                          subtitle: settingSubtitle(
+                            on
+                                ? 'Continuous: corners ease into the sides (squircles, as on iOS)'
+                                : 'Circular: corners are circular arcs',
+                          ),
+                          value: on,
+                          onChanged: (value) {
+                            continuousCornersMobj.value = value;
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -7907,7 +7942,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
   Widget _buildPickFileChip(ThemeData theme, Color backgroundColor) {
     final jukeBox = Provider.of<JukeBox>(context, listen: false);
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
+      customBorder: cornerStyleBorder(BorderRadius.circular(10)),
       onTap: () async {
         jukeBox.pauseAudio();
         final AudioInfo? picked;
@@ -7937,7 +7972,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(10),
-        ),
+        ).cornerStyled,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -8020,7 +8055,7 @@ class _AlarmSoundPickerScreenState extends State<AlarmSoundPickerScreen>
               decoration: BoxDecoration(
                 color: backgroundColor,
                 borderRadius: BorderRadius.circular(10),
-              ),
+              ).cornerStyled,
               child: Text(audio?.name ?? 'Default', style: textTheme),
             );
           },
@@ -8456,7 +8491,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
               decoration: BoxDecoration(
                 color: backgroundColorFor(theme, isOn),
                 borderRadius: BorderRadius.circular(buttonCornerRadius),
-              ),
+              ).cornerStyled,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: isRight
@@ -8504,7 +8539,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
             decoration: BoxDecoration(
               color: backgroundColorFor(theme, isOn),
               borderRadius: BorderRadius.circular(buttonCornerRadius),
-            ),
+            ).cornerStyled,
             child: NumpadTypeIndicator(
               isAscending: isAscending,
               color: foregroundColorFor(theme, isOn),
@@ -8559,11 +8594,13 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                           child: Material(
                             type: MaterialType.canvas,
                             color: contentBackground,
-                            borderRadius: BorderRadius.circular(
-                              max(
-                                0.0,
-                                getReasonableAestheticBottomCornerRadius() -
-                                    RoundedSectionSliver.defaultMargin,
+                            shape: cornerStyleBorder(
+                              BorderRadius.circular(
+                                max(
+                                  0.0,
+                                  getReasonableAestheticBottomCornerRadius() -
+                                      RoundedSectionSliver.defaultMargin,
+                                ),
                               ),
                             ),
                             clipBehavior: Clip.antiAlias,
@@ -8684,7 +8721,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                                           borderRadius: BorderRadius.circular(
                                             buttonCornerRadius,
                                           ),
-                                        ),
+                                        ).cornerStyled,
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 22.0,
@@ -8723,7 +8760,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                                           borderRadius: BorderRadius.circular(
                                             buttonCornerRadius,
                                           ),
-                                        ),
+                                        ).cornerStyled,
                                         child: Center(
                                           child: Text(
                                             'ring once',

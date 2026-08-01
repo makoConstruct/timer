@@ -22,6 +22,12 @@ const MobjID padLandscapeID = '4cffef06-1ec9-44b6-87d9-2f6ee5b1ce07';
 /// when off, glass widgets render in flat style instead.
 const MobjID liquidGlassOnID = '25a474bb-c0fa-4f42-9b95-dd7b308885bb';
 
+/// whether rounded boxes are drawn with Apple-style continuous ("squircle")
+/// corners instead of circular corner arcs. Defaults to true on iOS, false
+/// elsewhere. Read it through `continuousCornersOn()` in boring.dart, which is
+/// also where the helpers that draw in the chosen style live.
+const MobjID continuousCornersID = 'cf3b2bd4-93ff-4825-b1df-d596b92b849c';
+
 /// gets set when they set the app up
 const MobjID timeFirstUsedApp = 'f6ba1437-0300-4762-9848-827e71c16099';
 
