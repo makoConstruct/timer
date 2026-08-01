@@ -3749,7 +3749,7 @@ class OurThemeData {
     required this.surfaceContrastingGlass,
     this.hardEdges = false,
     this.timerculeBackingCornerRadius = 23,
-    this.glassBlurRadius = 13,
+    this.glassBlurRadius = 18,
     this.edgeTint = const Color(0x26000000),
   });
 
@@ -3870,7 +3870,7 @@ GlassOptions ourGlassOptions({
   double blendRadius = 18,
 }) => GlassOptions(
   mode: mode,
-  bevelThickness: bevelThickness ?? 17,
+  bevelThickness: bevelThickness ?? 18,
   blendRadius: blendRadius,
   blurRadius: blurRadius,
   edgeTint: edgeTint,
@@ -4236,6 +4236,149 @@ class _RenderSignedPadding extends RenderShiftedBox {
       inset.top + (slotH - child!.size.height) / 2,
     );
     size = c.constrain(Size(inset.horizontal + slotW, inset.vertical + slotH));
+  }
+}
+
+/// A horizontal [Align] whose bias fades out as the child runs out of room:
+/// with plenty of free space the child sits where `Align(FractionalOffset(bias,
+/// 1))` would put it, but once the leftover space drops below [centeringSlack]
+/// the child is simply centered, so a child that nearly fills the parent gets
+/// equal margins instead of being pressed against one edge.
+///
+/// The left inset is `free/2 + (bias - 0.5) * max(0, free - centeringSlack)`,
+/// where `free` is the unoccupied width. That's continuous in the child's
+/// width — exactly centered while `free <= centeringSlack`, and above that it
+/// grows at the same rate as [Align]'s `bias * free` (just shifted by a
+/// constant `(bias - 0.5) * centeringSlack`), so the child doesn't jump when it
+/// crosses the threshold, it just stops drifting sideways as it fills up.
+///
+/// Sizing follows [Align] with no size factors: fills the incoming maxima on
+/// each axis where they're bounded, shrink-wraps the child where they aren't
+/// (so this is usable in a scrollview). The child sits on the bottom edge.
+class TaperedAlign extends SingleChildRenderObjectWidget {
+  /// Fraction of the free space placed on the *left* of the child, as with
+  /// [FractionalOffset.dx]. 0 is left-aligned, 1 right-aligned.
+  final double bias;
+
+  /// How much free space is left when the child is fully centered.
+  final double centeringSlack;
+
+  const TaperedAlign({
+    super.key,
+    required this.bias,
+    this.centeringSlack = 30,
+    super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderTaperedAlign(bias: bias, centeringSlack: centeringSlack);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderObject renderObject) {
+    (renderObject as _RenderTaperedAlign)
+      ..bias = bias
+      ..centeringSlack = centeringSlack;
+  }
+}
+
+class _RenderTaperedAlign extends RenderShiftedBox {
+  _RenderTaperedAlign({
+    required double bias,
+    required double centeringSlack,
+    RenderBox? child,
+  }) : _bias = bias,
+       _centeringSlack = centeringSlack,
+       super(child);
+
+  double get bias => _bias;
+  double _bias;
+  set bias(double value) {
+    if (value == _bias) {
+      return;
+    }
+    _bias = value;
+    markNeedsLayout();
+  }
+
+  double get centeringSlack => _centeringSlack;
+  double _centeringSlack;
+  set centeringSlack(double value) {
+    if (value == _centeringSlack) {
+      return;
+    }
+    _centeringSlack = value;
+    markNeedsLayout();
+  }
+
+  double _leftInset(double slotWidth, double childWidth) {
+    final free = max(0.0, slotWidth - childWidth);
+    return free / 2 + (_bias - 0.5) * max(0.0, free - _centeringSlack);
+  }
+
+  Size _slot(BoxConstraints c, Size childSize) => c.constrain(
+    Size(
+      c.hasBoundedWidth ? c.maxWidth : childSize.width,
+      c.hasBoundedHeight ? c.maxHeight : childSize.height,
+    ),
+  );
+
+  @override
+  double computeMinIntrinsicWidth(double height) =>
+      child?.getMinIntrinsicWidth(height) ?? 0.0;
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      child?.getMaxIntrinsicWidth(height) ?? 0.0;
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      child?.getMinIntrinsicHeight(width) ?? 0.0;
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      child?.getMaxIntrinsicHeight(width) ?? 0.0;
+
+  @override
+  @protected
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final child = this.child;
+    if (child == null) {
+      return _slot(constraints, Size.zero);
+    }
+    return _slot(constraints, child.getDryLayout(constraints.loosen()));
+  }
+
+  @override
+  double? computeDryBaseline(
+    covariant BoxConstraints constraints,
+    TextBaseline baseline,
+  ) {
+    final child = this.child;
+    if (child == null) {
+      return null;
+    }
+    final childConstraints = constraints.loosen();
+    final childSize = child.getDryLayout(childConstraints);
+    final slot = _slot(constraints, childSize);
+    return (BaselineOffset(child.getDryBaseline(childConstraints, baseline)) +
+            (slot.height - childSize.height))
+        .offset;
+  }
+
+  @override
+  void performLayout() {
+    final child = this.child;
+    if (child == null) {
+      size = _slot(constraints, Size.zero);
+      return;
+    }
+    child.layout(constraints.loosen(), parentUsesSize: true);
+    size = _slot(constraints, child.size);
+    (child.parentData! as BoxParentData).offset = Offset(
+      _leftInset(size.width, child.size.width),
+      size.height - child.size.height,
+    );
   }
 }
 

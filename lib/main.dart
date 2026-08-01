@@ -1545,17 +1545,15 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
               (widget.arrowHeight - thickness) *
               arrowProgress *
               (1 - unlerpUnit(0, 0.7, downwardProgress));
-          if (ah > 0.5) {
-            blobs.add(
-              GlassBlob.line(
-                arrowBase,
-                arrowBase + arrowNorm * ah,
-                thickness: thickness,
-                cornerContinuity: 0,
-                tint: tint,
-              ),
-            );
-          }
+          blobs.add(
+            GlassBlob.line(
+              arrowBase,
+              arrowBase + arrowNorm * ah,
+              thickness: thickness,
+              cornerContinuity: 0,
+              tint: tint,
+            ),
+          );
         }
         return blobs;
       },
@@ -2843,10 +2841,12 @@ class TimerTrayState extends State<TimerTray> {
         ).value!;
         return nesting<Widget>(
           [
-            (child) => Align(
-              alignment: isRightHanded
-                  ? FractionalOffset(0.8, 1)
-                  : FractionalOffset(0.2, 1),
+            // biased towards the hand while the tray is small, tapering to
+            // centered once the timers come within 30 of filling the width, so
+            // a full tray gets even margins instead of hugging one edge.
+            (child) => TaperedAlign(
+              bias: isRightHanded ? 0.8 : 0.2,
+              centeringSlack: 30,
               child: child,
             ),
             // very minor bug: we can't have this yet, because resizes cause movement discontinuities. This will make scrolling the timertray feel sluggish. Fix animove.
@@ -4973,22 +4973,15 @@ class TimerScreenState extends State<TimerScreen>
               // Same shape of reveal as the numeral ring: the disc's glass
               // arrives first, the close and grip blobs bud out of it, and only
               // once the body has settled do the controls fade up onto it.
-              final discp = Curves.easeOut.transform(unlerpUnit(0, 0.8, p));
-              final budp = Curves.easeOut.transform(unlerpUnit(0.2, 0.7, p));
+              final budp = Curves.easeOut.transform(unlerpUnit(0.3, 0.9, p));
               final knobp = Curves.easeOutCubic.transform(
-                unlerpUnit(0.25, 1, p),
+                unlerpUnit(0.4, 1, p),
               );
               final Offset dialOrigin = -dialBox.topLeft;
 
-              // The knurled disc is a solid fill sitting on the glass, so it
-              // takes whichever of the surface pair contrasts with the body
-              // beneath it: the flat body is already a solid onSurface-ish
-              // slab, the glass body is a pale translucent one. The label on
-              // top then takes the other of the pair.
-              final knurlColor = glassOn
-                  ? mt.surfaceContrastingGlass
-                  : theme.colorScheme.onPrimary;
-              final onKnurlColor = theme.colorScheme.primary;
+              // currently not glass-responsive, used to be
+              final knurlColor = mt.foreBackColor;
+              final onKnurlColor = theme.colorScheme.onSurface;
 
               final blobs = <GlassBlob>[
                 GlassBlob(
@@ -4998,13 +4991,13 @@ class TimerScreenState extends State<TimerScreen>
                 ),
                 if (budp > 0.01) ...[
                   GlassBlob(
-                    center: dialOrigin + dialClosePos(budp),
-                    radii: Size.square(dialCloseR),
+                    center: dialOrigin + dialClosePos(budp) * knobp,
+                    radii: Size.square(dialCloseR * knobp),
                     tint: glassFill,
                   ),
                   GlassBlob(
-                    center: dialOrigin + dialHandlePos(budp),
-                    radii: Size.square(dialHandleR),
+                    center: dialOrigin + dialHandlePos(budp) * knobp,
+                    radii: Size.square(dialHandleR * knobp),
                     cornerRadius: dialHandleCorner,
                     cornerContinuity: 0,
                     tint: glassFill,
@@ -5096,7 +5089,11 @@ class TimerScreenState extends State<TimerScreen>
                                       child: Text(
                                         "turn me",
                                         textAlign: TextAlign.center,
-                                        style: TextStyle(color: onKnurlColor),
+                                        style: TextStyle(
+                                          color: onKnurlColor,
+                                          fontSize: 30,
+                                          fontFamily: 'Dongle',
+                                        ),
                                       ),
                                     ),
                                   ),
