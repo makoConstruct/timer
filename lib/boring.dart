@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:just_liquid_glass/just_liquid_glass.dart';
+import 'package:material_color_utilities/material_color_utilities.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 // import 'package:audioplayers/audioplayers.dart';
@@ -102,6 +103,17 @@ class ComputedWithDisposer<T> {
 bool platformIsDesktop() =>
     Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
+/// Whether the app is currently coloring itself from the system's
+/// wallpaper-derived palette. Only Android hands one out, so the setting is
+/// only offered (and only honored) there. Two things follow from it: the
+/// [ColorScheme] the app is built with (see `TimersApp.build`), and the tinting
+/// of the greys that [OurThemeData] would otherwise hardcode (see
+/// [OurThemeData.materialYou]). Reading this from a reactive build subscribes
+/// to the setting, like [continuousCornersOn].
+bool materialYouOn() =>
+    Platform.isAndroid &&
+    (Mobj.getAlreadyLoaded(materialYouID, BoolType()).value ?? false);
+
 // --- corner style ---
 // Every rounded box in the app is drawn either with circular corner arcs or
 // with Apple-style continuous ("squircle") corners, per the
@@ -138,11 +150,14 @@ double cornerStyleRadius(double radius) =>
 /// that take a shape rather than a radius ([Material], [ShapeDecoration],
 /// button styles). Pass `scale: false` for a radius that has to match something
 /// physical — the screen's own corners — rather than merely look right.
+/// [continuous] defaults to [continuousCornersOn]; see [drawCornerStyled] for
+/// when to pass it explicitly instead.
 ShapeBorder cornerStyleBorder(
   BorderRadiusGeometry borderRadius, {
   BorderSide side = BorderSide.none,
   bool scale = true,
-}) => continuousCornersOn()
+  bool? continuous,
+}) => (continuous ?? continuousCornersOn())
     ? RoundedSuperellipseBorder(
         borderRadius: scale
             ? borderRadius * continuousCornerScale
@@ -199,12 +214,16 @@ extension CornerStyled on BoxDecoration {
   /// when they're continuous. Decorations a shape can't express — a non-uniform
   /// border, a background blend mode, a non-rectangular [shape] — are handed
   /// back unchanged rather than quietly losing that part of themselves.
-  Decoration get cornerStyled {
+  Decoration get cornerStyled => cornerStyledWith(continuousCornersOn());
+
+  /// [cornerStyled] with the corner style passed in rather than read here; see
+  /// [drawCornerStyled] for when that matters.
+  Decoration cornerStyledWith(bool continuous) {
     final radius = borderRadius;
     if (radius == null ||
         shape != BoxShape.rectangle ||
         backgroundBlendMode != null ||
-        !continuousCornersOn()) {
+        !continuous) {
       return this;
     }
     final BorderSide side;
@@ -221,7 +240,7 @@ extension CornerStyled on BoxDecoration {
       image: image,
       gradient: gradient,
       shadows: boxShadow,
-      shape: cornerStyleBorder(radius, side: side),
+      shape: cornerStyleBorder(radius, side: side, continuous: continuous),
     );
   }
 }
@@ -3819,6 +3838,101 @@ Color backgroundColorFor(ThemeData theme, bool isOn) {
       : theme.colorScheme.surfaceContainerHigh;
 }
 
+/// The tonal palettes Android derives from the wallpaper. Aliased because
+/// material_color_utilities has deprecated `CorePalette` in favour of its own
+/// `CorePalettes`, but the platform channel still hands out the old type, so
+/// it's the one we have to name — the alias keeps that to one place.
+// ignore: deprecated_member_use
+typedef WallpaperPalette = CorePalette;
+
+/// The [ColorScheme] for a [WallpaperPalette] the OS handed us (see
+/// [materialYouOn]).
+///
+/// What Android gives out isn't a seed color, it's five whole tonal palettes —
+/// three accents and two neutrals — worked out from the wallpaper *and* the
+/// style the user picked in Wallpaper & Style. Neither obvious shortcut keeps
+/// all of that: `dynamic_color`'s own `CorePalette.toColorScheme` predates half
+/// the M3 roles and fills in none of the surface containers (which
+/// [ColorScheme] then quietly collapses onto plain `surface`, flattening every
+/// fore/back distinction we draw), while reseeding from one key color throws
+/// the other four palettes away and regenerates their chroma from the spec,
+/// losing whichever style the user chose. So we hand the palettes to a
+/// [DynamicScheme] as they are and let [MaterialDynamicColors] do the tone
+/// assignment: the wallpaper decides the colors, M3 decides the roles.
+///
+/// The OS only sends the thirteen common tones, and the surface containers want
+/// tones (4, 6, 12, 17, 22, 92, 94, 96, 98) that aren't among them; those get
+/// generated from each palette's own deduced hue and chroma, so nothing is
+/// approximated that the OS actually had an opinion about.
+ColorScheme colorSchemeFromCorePalette(
+  WallpaperPalette palette,
+  Brightness brightness,
+) {
+  final scheme = DynamicScheme(
+    // only used for roles we override anyway, but it wants the wallpaper's key.
+    sourceColorHct: palette.primary.keyColor,
+    variant: Variant.tonalSpot,
+    isDark: brightness == Brightness.dark,
+    primaryPalette: palette.primary,
+    secondaryPalette: palette.secondary,
+    tertiaryPalette: palette.tertiary,
+    neutralPalette: palette.neutral,
+    neutralVariantPalette: palette.neutralVariant,
+    errorPalette: palette.error,
+  );
+  Color c(DynamicColor role) => Color(role.getArgb(scheme));
+  return ColorScheme(
+    brightness: brightness,
+    primary: c(MaterialDynamicColors.primary),
+    onPrimary: c(MaterialDynamicColors.onPrimary),
+    primaryContainer: c(MaterialDynamicColors.primaryContainer),
+    onPrimaryContainer: c(MaterialDynamicColors.onPrimaryContainer),
+    primaryFixed: c(MaterialDynamicColors.primaryFixed),
+    primaryFixedDim: c(MaterialDynamicColors.primaryFixedDim),
+    onPrimaryFixed: c(MaterialDynamicColors.onPrimaryFixed),
+    onPrimaryFixedVariant: c(MaterialDynamicColors.onPrimaryFixedVariant),
+    secondary: c(MaterialDynamicColors.secondary),
+    onSecondary: c(MaterialDynamicColors.onSecondary),
+    secondaryContainer: c(MaterialDynamicColors.secondaryContainer),
+    onSecondaryContainer: c(MaterialDynamicColors.onSecondaryContainer),
+    secondaryFixed: c(MaterialDynamicColors.secondaryFixed),
+    secondaryFixedDim: c(MaterialDynamicColors.secondaryFixedDim),
+    onSecondaryFixed: c(MaterialDynamicColors.onSecondaryFixed),
+    onSecondaryFixedVariant: c(MaterialDynamicColors.onSecondaryFixedVariant),
+    tertiary: c(MaterialDynamicColors.tertiary),
+    onTertiary: c(MaterialDynamicColors.onTertiary),
+    tertiaryContainer: c(MaterialDynamicColors.tertiaryContainer),
+    onTertiaryContainer: c(MaterialDynamicColors.onTertiaryContainer),
+    tertiaryFixed: c(MaterialDynamicColors.tertiaryFixed),
+    tertiaryFixedDim: c(MaterialDynamicColors.tertiaryFixedDim),
+    onTertiaryFixed: c(MaterialDynamicColors.onTertiaryFixed),
+    onTertiaryFixedVariant: c(MaterialDynamicColors.onTertiaryFixedVariant),
+    error: c(MaterialDynamicColors.error),
+    onError: c(MaterialDynamicColors.onError),
+    errorContainer: c(MaterialDynamicColors.errorContainer),
+    onErrorContainer: c(MaterialDynamicColors.onErrorContainer),
+    // the surface family — the whole reason this function exists.
+    surface: c(MaterialDynamicColors.surface),
+    onSurface: c(MaterialDynamicColors.onSurface),
+    surfaceDim: c(MaterialDynamicColors.surfaceDim),
+    surfaceBright: c(MaterialDynamicColors.surfaceBright),
+    surfaceContainerLowest: c(MaterialDynamicColors.surfaceContainerLowest),
+    surfaceContainerLow: c(MaterialDynamicColors.surfaceContainerLow),
+    surfaceContainer: c(MaterialDynamicColors.surfaceContainer),
+    surfaceContainerHigh: c(MaterialDynamicColors.surfaceContainerHigh),
+    surfaceContainerHighest: c(MaterialDynamicColors.surfaceContainerHighest),
+    onSurfaceVariant: c(MaterialDynamicColors.onSurfaceVariant),
+    outline: c(MaterialDynamicColors.outline),
+    outlineVariant: c(MaterialDynamicColors.outlineVariant),
+    shadow: c(MaterialDynamicColors.shadow),
+    scrim: c(MaterialDynamicColors.scrim),
+    inverseSurface: c(MaterialDynamicColors.inverseSurface),
+    onInverseSurface: c(MaterialDynamicColors.inverseOnSurface),
+    inversePrimary: c(MaterialDynamicColors.inversePrimary),
+    surfaceTint: c(MaterialDynamicColors.primary),
+  );
+}
+
 class OurThemeData {
   Color lowestBackColor;
 
@@ -3829,6 +3943,12 @@ class OurThemeData {
   Color foreIndentColor;
   Color inkColor;
   Color reducedProminenceColor;
+
+  /// Color of the special-timer-create drag ring while collapsed (its idle,
+  /// unexpanded state). [reducedProminenceColor] everywhere except
+  /// [materialYou], where it's [ColorScheme.primary] so the ring picks up the
+  /// wallpaper tint instead of reading as a flat neutral.
+  Color collapsedSpecialDragRingColor;
   // todo: remove?
   Color harderForeIndentColor;
   Color hintTextColor;
@@ -3849,9 +3969,12 @@ class OurThemeData {
   Color nonGlassColor;
   Color nonGlassOnSurface;
 
-  /// A plain surface tone that stands apart from a glass surface without
-  /// fighting it: light grey on light theme, dark grey on dark theme.
-  Color surfaceContrastingGlass;
+  /// Fill for a popup menu when liquid glass is off. [nonGlassColor]
+  /// everywhere except [materialYou], where it's [ColorScheme.secondary] so
+  /// the menu picks up the wallpaper tint instead of reading as flat
+  /// black/white. Content on top uses [onNonGlassPopupMenu].
+  Color nonGlassPopupMenu;
+  Color onNonGlassPopupMenu;
 
   /// Corner radius of a timercule's backing panel. Roughly a quarter of a
   /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
@@ -3860,7 +3983,11 @@ class OurThemeData {
 
   /// Backdrop blur radius for liquid-glass surfaces; feed into [ourGlassOptions]
   /// so the app's glass look stays themeable rather than hardcoded per call site.
+  /// The light theme takes it down (glass over a light background needs less
+  /// blur to read as glass); the initializations that don't say otherwise get
+  /// [defaultGlassBlurRadius].
   double glassBlurRadius;
+  static const double defaultGlassBlurRadius = 12;
 
   /// Rim-darkening tint for liquid-glass surfaces; feed into [ourGlassOptions]'s
   /// [GlassOptions.edgeTint].
@@ -3873,6 +4000,7 @@ class OurThemeData {
     required this.foreBackColor,
     required this.foreIndentColor,
     required this.reducedProminenceColor,
+    required this.collapsedSpecialDragRingColor,
     required this.inkColor,
     required this.harderForeIndentColor,
     required this.veryLowProminenceColor,
@@ -3881,10 +4009,11 @@ class OurThemeData {
     required this.onGlassColor,
     required this.nonGlassColor,
     required this.nonGlassOnSurface,
-    required this.surfaceContrastingGlass,
+    required this.nonGlassPopupMenu,
+    required this.onNonGlassPopupMenu,
     this.hardEdges = false,
     this.timerculeBackingCornerRadius = 23,
-    this.glassBlurRadius = 18,
+    this.glassBlurRadius = defaultGlassBlurRadius,
     this.edgeTint = const Color(0x26000000),
   });
 
@@ -3895,85 +4024,134 @@ class OurThemeData {
   /// Content color to draw on top of [glassFill].
   Color onGlassFill(bool glassOn) => glassOn ? onGlassColor : nonGlassOnSurface;
 
+  /// Fill for a popup menu: the translucent [glassColor] when liquid glass is
+  /// on, the solid [nonGlassPopupMenu] when it's off.
+  Color popupMenuFill(bool glassOn) => glassOn ? glassColor : nonGlassPopupMenu;
+
+  /// Content color to draw on top of [popupMenuFill].
+  Color onPopupMenuFill(bool glassOn) =>
+      glassOn ? onGlassColor : onNonGlassPopupMenu;
+
   static OurThemeData fromContext(BuildContext context) {
     return fromTheme(Theme.of(context));
   }
 
   static OurThemeData fromTheme(ThemeData theme, {Brightness? brightness}) {
-    return (brightness ?? theme.brightness) == Brightness.dark
+    final b = brightness ?? theme.brightness;
+    if (materialYouOn()) return OurThemeData.materialYou(theme, b);
+    final cs = theme.colorScheme;
+    return b == Brightness.dark
         ? OurThemeData(
-            lowestBackColor: theme.colorScheme.surfaceContainerLowest,
-            midBackColor: theme.colorScheme.surfaceContainerLow,
-            foreBackColor: theme.colorScheme.surfaceContainerHighest,
-            reducedProminenceColor: darkenColor(
-              theme.colorScheme.onSurface,
-              0.27,
-            ),
-            veryLowProminenceColor: darkenColor(
-              theme.colorScheme.onSurface,
-              0.67,
-            ),
-            lowestIndentColor: lightenColor(
-              theme.colorScheme.surfaceContainerLowest,
-              0.03,
-            ),
-            foreIndentColor: darkenColor(
-              theme.colorScheme.surfaceContainerHighest,
-              0.03,
-            ),
+            lowestBackColor: cs.surfaceContainerLowest,
+            midBackColor: cs.surfaceContainerLow,
+            foreBackColor: cs.surfaceContainerHighest,
+            reducedProminenceColor: darkenColor(cs.onSurface, 0.27),
+            collapsedSpecialDragRingColor: darkenColor(cs.onSurface, 0.27),
+            veryLowProminenceColor: darkenColor(cs.onSurface, 0.67),
+            lowestIndentColor: lightenColor(cs.surfaceContainerLowest, 0.03),
+            foreIndentColor: darkenColor(cs.surfaceContainerHighest, 0.03),
             harderForeIndentColor: darkenColor(
-              theme.colorScheme.surfaceContainerHighest,
+              cs.surfaceContainerHighest,
               0.35,
             ),
-            inkColor: theme.colorScheme.primary.withAlpha(30),
-            hintTextColor: darkenColor(theme.colorScheme.onSurface, 0.4),
+            inkColor: cs.primary.withAlpha(30),
+            hintTextColor: darkenColor(cs.onSurface, 0.4),
             glassColor: lightenColor(
-              theme.colorScheme.surfaceContainerHighest,
+              cs.surfaceContainerHighest,
               0.1,
             ).withValues(alpha: 0.65),
-            onGlassColor: theme.colorScheme.onSurface,
+            onGlassColor: cs.onSurface,
             nonGlassColor: Colors.white,
             nonGlassOnSurface: Colors.black,
-            surfaceContrastingGlass: HSLColor.fromAHSL(1, 0, 0, 0.22).toColor(),
+            nonGlassPopupMenu: Colors.white,
+            onNonGlassPopupMenu: Colors.black,
             edgeTint: Colors.white.withValues(alpha: 0.7),
           )
         : OurThemeData(
-            lowestBackColor: theme.colorScheme.surfaceContainerHighest,
-            midBackColor: theme.colorScheme.surfaceContainerHigh,
-            foreBackColor: theme.colorScheme.surfaceContainerLowest,
-            reducedProminenceColor: lightenColor(
-              theme.colorScheme.onSurface,
-              0.66,
-            ),
-            veryLowProminenceColor: lightenColor(
-              theme.colorScheme.onSurface,
-              0.86,
-            ),
-            lowestIndentColor: darkenColor(
-              theme.colorScheme.surfaceContainerHighest,
-              0.05,
-            ),
-            foreIndentColor: darkenColor(
-              theme.colorScheme.surfaceContainerLowest,
-              0.03,
-            ),
-            harderForeIndentColor: darkenColor(
-              theme.colorScheme.surfaceContainerLowest,
-              0.1,
-            ),
-            inkColor: theme.colorScheme.primary.withAlpha(30),
-            hintTextColor: lightenColor(theme.colorScheme.onSurface, 0.375),
-            // glassColor: theme.colorScheme.primary.withValues(alpha: 0.8),
-            glassBlurRadius: 6,
-            // onGlassColor: theme.colorScheme.onPrimary,
+            lowestBackColor: cs.surfaceContainerHighest,
+            midBackColor: cs.surfaceContainerHigh,
+            foreBackColor: cs.surfaceContainerLowest,
+            reducedProminenceColor: lightenColor(cs.onSurface, 0.66),
+            collapsedSpecialDragRingColor: lightenColor(cs.onSurface, 0.66),
+            veryLowProminenceColor: lightenColor(cs.onSurface, 0.86),
+            lowestIndentColor: darkenColor(cs.surfaceContainerHighest, 0.05),
+            foreIndentColor: darkenColor(cs.surfaceContainerLowest, 0.03),
+            harderForeIndentColor: darkenColor(cs.surfaceContainerLowest, 0.1),
+            inkColor: cs.primary.withAlpha(30),
+            hintTextColor: lightenColor(cs.onSurface, 0.375),
+            // glassColor: cs.primary.withValues(alpha: 0.8),
+            // onGlassColor: cs.onPrimary,
             glassColor: HSLColor.fromAHSL(0.68, 0, 0, 1).toColor(),
-            onGlassColor: theme.colorScheme.onSurfaceVariant,
+            onGlassColor: cs.onSurfaceVariant,
             // onGlassColor: theme.colorScheme.onSurface,
             nonGlassColor: Colors.black,
             nonGlassOnSurface: Colors.white,
-            surfaceContrastingGlass: HSLColor.fromAHSL(1, 0, 0, 0.82).toColor(),
+            nonGlassPopupMenu: Colors.black,
+            onNonGlassPopupMenu: Colors.white,
             edgeTint: HSLColor.fromAHSL(0.16, 0, 0, 0.2).toColor(),
           );
+  }
+
+  /// The initialization used when [materialYouOn]. The surface and content
+  /// tones need no special handling — they're read off the [ColorScheme], which
+  /// by then is the wallpaper-derived one, so they come out tinted on their
+  /// own. What this exists for is the handful of fields the standard
+  /// initializations hardcode as flat greys (the glass fills, the rims, the
+  /// solid non-glass panel): left alone they'd be the one part of the app that
+  /// ignored the wallpaper, so here they're pulled toward the scheme too.
+  ///
+  /// Both brightnesses are handled in the one initialization because they
+  /// differ only in which direction the neutrals run.
+  static OurThemeData materialYou(ThemeData theme, Brightness brightness) {
+    final cs = theme.colorScheme;
+    final dark = brightness == Brightness.dark;
+
+    /// [base] nudged toward the wallpaper's hue, keeping its lightness and
+    /// alpha. Keep [amount] low — these should read as neutrals that happen to
+    /// agree with the wallpaper, not as colored surfaces.
+    Color tint(Color base, [double amount = 0.12]) =>
+        lerpColor(base, cs.primary.withValues(alpha: base.a), amount);
+
+    final surfaceBack = dark
+        ? cs.surfaceContainerLowest
+        : cs.surfaceContainerHighest;
+    final surfaceFore = dark
+        ? cs.surfaceContainerHighest
+        : cs.surfaceContainerLowest;
+    return OurThemeData(
+      lowestBackColor: surfaceBack,
+      midBackColor: dark ? cs.surfaceContainerLow : cs.surfaceContainerHigh,
+      foreBackColor: surfaceFore,
+      lowestIndentColor: dark
+          ? lightenColor(surfaceBack, 0.03)
+          : darkenColor(surfaceBack, 0.05),
+      foreIndentColor: darkenColor(surfaceFore, 0.03),
+      harderForeIndentColor: darkenColor(surfaceFore, dark ? 0.35 : 0.1),
+      reducedProminenceColor: dark
+          ? darkenColor(cs.onSurface, 0.27)
+          // : lightenColor(cs.onSurface, 0.66),
+          : cs.outline,
+      collapsedSpecialDragRingColor: cs.primary,
+      veryLowProminenceColor: cs.surfaceDim,
+      hintTextColor: dark
+          ? darkenColor(cs.onSurface, 0.4)
+          : lightenColor(cs.onSurface, 0.375),
+      inkColor: cs.primary.withAlpha(30),
+      glassBlurRadius: dark ? 6 : defaultGlassBlurRadius,
+      glassColor: cs.primaryContainer.withValues(alpha: 0.65),
+      onGlassColor: cs.onPrimaryContainer,
+      // the scheme's own high-contrast panel pair, which is what the flat
+      // black/white of the standard initializations was reaching for.
+      nonGlassColor: cs.primary,
+      nonGlassOnSurface: cs.onPrimary,
+      nonGlassPopupMenu: cs.secondary,
+      onNonGlassPopupMenu: cs.onSecondary,
+      edgeTint: dark
+          ? tint(Colors.white, 0.2).withValues(alpha: 0.7)
+          : tint(
+              HSLColor.fromAHSL(1, 0, 0, 0.2).toColor(),
+            ).withValues(alpha: 0.16),
+    );
   }
 
   /// The two background tones menu/settings-style screens use: content sits on
@@ -6279,7 +6457,7 @@ class RoundedCheckbox extends StatelessWidget {
   final bool dimWhenFalse;
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final color = Theme.of(context).colorScheme.onSurface;
     final outlineColor = color;
     final radius = Radius.circular(size * 0.3);
     final innerInset = size * 0.22;
@@ -6423,7 +6601,7 @@ class ManyStateCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final color = Theme.of(context).colorScheme.onSurface;
     final radius = Radius.circular(size * 0.3);
     final innerInset = size * 0.22;
     final target = fill.rect;

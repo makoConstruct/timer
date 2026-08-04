@@ -10,6 +10,7 @@ import 'dart:ui';
 
 import 'package:collection/collection.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:makos_timer/platform_notifications.dart';
 import 'package:flutter_refresh_rate_control/flutter_refresh_rate_control.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -82,7 +83,7 @@ const databaseName = 'mako_timer_db';
 const double defaultTimerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(25);
+final Signal<double> timerWidgetRadius = Signal(28);
 
 const double standardLineWidth = 6;
 
@@ -139,7 +140,6 @@ Future<void> initializeDatabase() async {
     debugLabel: "version",
   );
   await Future.wait(<Future>[
-    // we know that the data required for the app is minimal enough that we should wait until it's loaded before showing anything... idk not sure I believe this
     Mobj.getOrCreate(
       timerListID,
       type: ListType(StringType()),
@@ -177,9 +177,7 @@ Future<void> initializeDatabase() async {
     Mobj.getOrCreate(
       liquidGlassOnID,
       type: BoolType(),
-      // liquid glass is the default look on iOS; elsewhere we default to the
-      // flat style until the user opts in.
-      initial: () => defaultTargetPlatform == TargetPlatform.iOS,
+      initial: () => Platform.isIOS || Platform.isMacOS,
       debugLabel: "liquid glass on",
     ),
     Mobj.getOrCreate(
@@ -187,6 +185,13 @@ Future<void> initializeDatabase() async {
       type: BoolType(),
       initial: () => continuousCornersDefault,
       debugLabel: "continuous corners",
+    ),
+    Mobj.getOrCreate(
+      materialYouID,
+      type: BoolType(),
+      initial: () =>
+          Platform.isAndroid || Platform.isWindows || Platform.isLinux,
+      debugLabel: "material you",
     ),
     Mobj.getOrCreate(
       selectedAudioID,
@@ -1081,6 +1086,13 @@ class TimersApp extends StatefulWidget {
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late final JukeBox jukeBox;
   late final PredictiveBackRetractor _backRetractor;
+
+  /// The tonal palettes the OS derived from the wallpaper, for the Material You
+  /// setting; null off Android and before Android 12, and until the platform
+  /// call comes back. Fetched regardless of whether the setting is on (it's one
+  /// call) so that switching it on restyles the app then and there.
+  WallpaperPalette? _wallpaperPalette;
+
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
     jukeBox = JukeBox.create();
@@ -1089,6 +1101,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _loadCornerRadius();
+    _loadWallpaperPalette();
 
     // Enable edge-to-edge mode
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -1099,6 +1112,16 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
   }
 
+  Future<void> _loadWallpaperPalette() async {
+    // OptionalMethodChannel, so this is a null rather than a throw wherever the
+    // plugin isn't listening.
+    final palette = await DynamicColorPlugin.getCorePalette();
+    if (!mounted || palette == _wallpaperPalette) return;
+    setState(() {
+      _wallpaperPalette = palette;
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
@@ -1106,6 +1129,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
       isBackgrounded.value = true;
     } else if (state == AppLifecycleState.resumed) {
       isBackgrounded.value = false;
+      // they may have been off changing their wallpaper or theme style.
+      _loadWallpaperPalette();
     }
   }
 
@@ -1119,17 +1144,19 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    ThemeData makeTheme(Brightness brightness) {
+    ThemeData makeTheme(Brightness brightness, WallpaperPalette? wallpaper) {
       return ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.white,
-          dynamicSchemeVariant: DynamicSchemeVariant.monochrome,
-          // brightness: (() {
-          //   print("CRITICAL WARNING: overriding theme for debugging purposes");
-          //   return Brightness.light;
-          // })(),
-          brightness: brightness,
-        ),
+        colorScheme: wallpaper != null
+            ? colorSchemeFromCorePalette(wallpaper, brightness)
+            : ColorScheme.fromSeed(
+                seedColor: Colors.white,
+                dynamicSchemeVariant: DynamicSchemeVariant.monochrome,
+                // brightness: (() {
+                //   print("CRITICAL WARNING: overriding theme for debugging purposes");
+                //   return Brightness.light;
+                // })(),
+                brightness: brightness,
+              ),
         useMaterial3: true,
       );
     }
@@ -1141,70 +1168,78 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
         ),
         Provider<JukeBox>(create: (_) => jukeBox),
       ],
-      child: MaterialApp(
-        navigatorKey: rootNavigatorKey,
-        scaffoldMessengerKey: globalScaffoldMessengerKey,
-        title: 'timer',
-        theme: makeTheme(Brightness.light),
-        // darkTheme: makeTheme(Brightness.dark),
-        darkTheme: makeTheme(Brightness.light),
-        onGenerateRoute: (settings) {
-          if (settings.name == '/') {
-            return CircularRevealRoute(builder: (context) => TimerScreen());
-          }
-          if (settings.name == '/onboard') {
-            return CircularRevealRoute(
-              builder: (context) => OnboardScreen(),
-              iconOriginKey: configButtonKey,
-            );
-          }
-          // abandoned on journey_game branch
-          // if (settings.name == '/journeying') {
-          //   return CircularRevealRoute(
-          //     builder: (context) => const JourneyingGameScreen(),
-          //   );
-          // }
-          return null;
-        },
-        onGenerateInitialRoutes: (initialRouteName) {
-          // if (initialRouteName == '/journeying') {
-          //   return <Route<dynamic>>[
-          //     CircularRevealRoute(
-          //       builder: (context) => const JourneyingGameScreen(),
-          //     ),
-          //   ];
-          // }
-          final completedSetup =
-              Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
-              false;
-          if (completedSetup) {
-            final trainscapeMode =
-                Mobj.getAlreadyLoaded(trainscapeModeID, BoolType()).value ??
-                false;
-            return <Route<dynamic>>[
-              CircularRevealRoute(builder: (context) => TimerScreen()),
-              if (trainscapeMode)
-                CircularRevealRoute(
-                  builder: (context) => const TrainscapeScreen(),
-                ),
-            ];
-          } else {
-            // Start with a blank placeholder, then onboarding on top.
-            // When onboarding completes, only then are we able to initialize TimerScreen, and at that time we replaceRouteBelow with TimerScreen (we can't just push below at that time because for some reason Navigator doesn't support that) then we pop(). The pop animation is the one we want, so pushReplace wouldn't work either.
-            return <Route>[
-              PageRouteBuilder(
-                pageBuilder: (context, __, ___) => ColoredBox(
-                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
-                ),
-                transitionDuration: Duration.zero,
-              ),
-              CircularRevealRoute(
-                builder: (context) => OnboardScreen(isRootal: true),
-                reverseTransitionDuration: Duration(milliseconds: 350),
-                iconOriginKey: configButtonKey,
-              ),
-            ];
-          }
+      // the SignalBuilder is what notices the setting being switched.
+      child: SignalBuilder(
+        builder: (context) {
+          final wallpaper = materialYouOn() ? _wallpaperPalette : null;
+          return MaterialApp(
+            navigatorKey: rootNavigatorKey,
+            scaffoldMessengerKey: globalScaffoldMessengerKey,
+            title: 'timer',
+            theme: makeTheme(Brightness.light, wallpaper),
+            // darkTheme: makeTheme(Brightness.dark, wallpaper),
+            darkTheme: makeTheme(Brightness.light, wallpaper),
+            onGenerateRoute: (settings) {
+              if (settings.name == '/') {
+                return CircularRevealRoute(builder: (context) => TimerScreen());
+              }
+              if (settings.name == '/onboard') {
+                return CircularRevealRoute(
+                  builder: (context) => OnboardScreen(),
+                  iconOriginKey: configButtonKey,
+                );
+              }
+              // abandoned on journey_game branch
+              // if (settings.name == '/journeying') {
+              //   return CircularRevealRoute(
+              //     builder: (context) => const JourneyingGameScreen(),
+              //   );
+              // }
+              return null;
+            },
+            onGenerateInitialRoutes: (initialRouteName) {
+              // if (initialRouteName == '/journeying') {
+              //   return <Route<dynamic>>[
+              //     CircularRevealRoute(
+              //       builder: (context) => const JourneyingGameScreen(),
+              //     ),
+              //   ];
+              // }
+              final completedSetup =
+                  Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
+                  false;
+              if (completedSetup) {
+                final trainscapeMode =
+                    Mobj.getAlreadyLoaded(trainscapeModeID, BoolType()).value ??
+                    false;
+                return <Route<dynamic>>[
+                  CircularRevealRoute(builder: (context) => TimerScreen()),
+                  if (trainscapeMode)
+                    CircularRevealRoute(
+                      builder: (context) => const TrainscapeScreen(),
+                    ),
+                ];
+              } else {
+                // Start with a blank placeholder, then onboarding on top.
+                // When onboarding completes, only then are we able to initialize TimerScreen, and at that time we replaceRouteBelow with TimerScreen (we can't just push below at that time because for some reason Navigator doesn't support that) then we pop(). The pop animation is the one we want, so pushReplace wouldn't work either.
+                return <Route>[
+                  PageRouteBuilder(
+                    pageBuilder: (context, __, ___) => ColoredBox(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerLowest,
+                    ),
+                    transitionDuration: Duration.zero,
+                  ),
+                  CircularRevealRoute(
+                    builder: (context) => OnboardScreen(isRootal: true),
+                    reverseTransitionDuration: Duration(milliseconds: 350),
+                    iconOriginKey: configButtonKey,
+                  ),
+                ];
+              }
+            },
+          );
         },
       ),
     );
@@ -1231,7 +1266,6 @@ class TimerMenu extends StatefulWidget {
   /// The arrow nub's width as a fraction of [arrowHeight]. Shared between the
   /// blob that draws it and the clamp that keeps its center on screen.
   static const double arrowThicknessFactor = 0.52;
-  final Color? backgroundColor;
   final double arrowHeight;
   const TimerMenu({
     super.key,
@@ -1242,7 +1276,6 @@ class TimerMenu extends StatefulWidget {
     required this.animation,
     required this.revealDuration,
     required this.arrowHeight,
-    this.backgroundColor,
   });
 
   @override
@@ -1339,10 +1372,11 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
         final mt = OurThemeData.fromTheme(theme);
         // the menu is always merged glass blobs (a body plus an arrow pill
         // fused into it); the setting only picks glass vs flat rendering.
-        final glassOn =
-            Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
-            (defaultTargetPlatform == TargetPlatform.iOS);
-        final backgroundColor = widget.backgroundColor ?? mt.glassFill(glassOn);
+        final glassOn = Mobj.getAlreadyLoaded(
+          liquidGlassOnID,
+          BoolType(),
+        ).value!;
+        final tint = mt.popupMenuFill(glassOn);
         final buttonSpan = Mobj.getAlreadyLoaded(
           buttonSpanID,
           DoubleType(),
@@ -1412,7 +1446,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
               cornerRounding: cornerRounding * lerp(1, 1.62, cornerStyle),
               width: width,
               topInset: topHeadroom,
-              tint: backgroundColor,
+              tint: tint,
               cornerStyle: cornerStyle,
               child: column,
             );
@@ -3580,7 +3614,7 @@ class DragActionRingState extends State<DragActionRing>
     // only the special timer (arc) ring lerps up from the reduced prominence
     // color as it grows; the numeral rings are just the glass fill.
     final ringColor = widget.arcModeNotBlobMode
-        ? lerpColor(mt.reducedProminenceColor, glassFill, baseGrow)
+        ? lerpColor(mt.collapsedSpecialDragRingColor, glassFill, baseGrow)
         : glassFill;
 
     // raw per-item selection growth; the blob builder owns any release recede
@@ -4530,10 +4564,6 @@ class TimerScreenState extends State<TimerScreen>
     GlobalKey<TimerBaseState> timerKey,
     MobjID<TimerData> timerID,
   ) {
-    // final tm = Mobj.getAlreadyLoaded(timerID, TimerDataType());
-    // final tmParent = Mobj.seekTypedsAlreadyLoaded(tm.peek()!.parentId!, [TimerDataType(), ListType(StringType())])!;
-    // final indexInParent = childrenOf(tmParent).indexOf(timerID);
-
     final menuCountMobj = Mobj.getAlreadyLoaded(usedMenuCountID, IntType());
     if ((menuCountMobj.peek() ?? 0) < 2) {
       menuCountMobj.value = (menuCountMobj.peek() ?? 0) + 1;
@@ -4545,12 +4575,11 @@ class TimerScreenState extends State<TimerScreen>
     final glassOn =
         Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
         (defaultTargetPlatform == TargetPlatform.iOS);
-    final backgroundColor = mt.glassFill(glassOn);
-    final foregroundColor = mt.onGlassFill(glassOn);
-    final indentColor = foregroundColor.withValues(alpha: 0.07);
+    final foregroundColor = mt.onPopupMenuFill(glassOn);
     const double menuItemPadding = TimerMenu.itemPadding;
     TimerData td = Mobj.getAlreadyLoaded(timerID, TimerDataType()).peek()!;
-    Color inkColor = td.isComposite
+    // per-timer highlight colors tend to clash with materialYou menu color
+    Color inkColor = td.isComposite || materialYouOn()
         ? foregroundColor
         : TimerBaseState.backgroundColor(td.hue);
     Widget menuItem(
@@ -4633,7 +4662,6 @@ class TimerScreenState extends State<TimerScreen>
               centerOn: p,
               // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it
               estimatedWidth: totalVisibleMenuItemHeight,
-              backgroundColor: backgroundColor,
               animation: animation,
               revealDuration: Duration(milliseconds: glassOn ? 500 : 370),
               items: [
@@ -5219,36 +5247,38 @@ class TimerScreenState extends State<TimerScreen>
         // ),
         // ).deflate(backingDeflation),
       ).inflate(backingInflation),
-      // the corner style is read down in the AnimatedBuilder's closure, which
-      // runs in that builder's own element rather than this build, so this
-      // screen's signal tracking doesn't reach it — hence the SignalBuilder.
       child: SignalBuilder(
-        builder: (context) => AnimatedBuilder(
-          animation: numeralBackshadowController,
-          builder: (context, child) {
-            final shadowp = Curves.easeInOut.transform(
-              numeralBackshadowController.value,
-            );
-            return Container(
-              constraints: BoxConstraints.expand(),
-              decoration: BoxDecoration(
-                color: mt.foreBackColor,
-                borderRadius: BorderRadius.circular(
-                  buttonSpan / 2 + backingInflation,
-                ),
-                boxShadow: shadowp <= 0
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.17 * shadowp),
-                          blurRadius: 20,
-                          spreadRadius: 1,
-                        ),
-                      ],
-              ).cornerStyled,
-            );
-          },
-        ),
+        builder: (context) {
+          final continuous = continuousCornersOn();
+          return AnimatedBuilder(
+            animation: numeralBackshadowController,
+            builder: (context, child) {
+              final shadowp = Curves.easeInOut.transform(
+                numeralBackshadowController.value,
+              );
+              return Container(
+                constraints: BoxConstraints.expand(),
+                decoration: BoxDecoration(
+                  color: mt.foreBackColor,
+                  borderRadius: BorderRadius.circular(
+                    buttonSpan / 2 + backingInflation,
+                  ),
+                  boxShadow: shadowp <= 0
+                      ? null
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withValues(
+                              alpha: 0.17 * shadowp,
+                            ),
+                            blurRadius: 20,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                ).cornerStyledWith(continuous),
+              );
+            },
+          );
+        },
       ),
     );
 
@@ -5596,7 +5626,6 @@ class TimerScreenState extends State<TimerScreen>
                           ...controls,
                           editBackspaceButton,
                           editPlayButton,
-                          buttonScaleDial,
                           specialTimerCreateDragRingController
                               .buildPersistentRing(
                                 key: const ValueKey('specialTimerRing'),
@@ -5605,6 +5634,7 @@ class TimerScreenState extends State<TimerScreen>
                                   Size(1, 1),
                                 ).center,
                               ),
+                          buttonScaleDial,
                         ] +
                         children,
                   ),
@@ -6886,7 +6916,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 child: Icon(
                                   Icons.music_note,
                                   key: hereIconKey,
-                                  color: theme.colorScheme.primary,
+                                  color: theme.colorScheme.onSurface,
                                 ),
                               ),
                             ),
@@ -7068,6 +7098,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           trailing: NumpadTypeIndicator(
                             isAscending: padVerticallyAscending,
+                            color: theme.colorScheme.onSurface,
                             width: 36,
                           ),
                           onTap: () {
@@ -7144,6 +7175,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       },
                     ),
+                    // only Android hands out a wallpaper palette, so this is
+                    // the only place the setting means anything.
+                    if (Platform.isAndroid)
+                      SignalBuilder(
+                        builder: (context) {
+                          final materialYouMobj = Mobj.getAlreadyLoaded(
+                            materialYouID,
+                            BoolType(),
+                          );
+                          final on = materialYouMobj.value ?? false;
+                          return RoundedCheckboxListTile(
+                            title: settingTitle('Material You'),
+                            subtitle: settingSubtitle(
+                              on
+                                  ? "On: colors follow your wallpaper"
+                                  : "Off: a neutral canvas",
+                            ),
+                            value: on,
+                            onChanged: (value) {
+                              materialYouMobj.value = value;
+                            },
+                            contentPadding: listItemPadding,
+                          );
+                        },
+                      ),
                   ],
                 ),
               ),

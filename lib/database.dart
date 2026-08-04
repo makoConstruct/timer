@@ -28,6 +28,12 @@ const MobjID liquidGlassOnID = '25a474bb-c0fa-4f42-9b95-dd7b308885bb';
 /// also where the helpers that draw in the chosen style live.
 const MobjID continuousCornersID = 'cf3b2bd4-93ff-4825-b1df-d596b92b849c';
 
+/// whether the app takes its colors from the system's wallpaper-derived palette
+/// (Material You) instead of our own monochrome scheme. Android only — the
+/// setting isn't offered elsewhere — and off by default. Read it through
+/// `materialYouOn()` in boring.dart.
+const MobjID materialYouID = '36416125-9576-4bc4-9ef2-facb90386074';
+
 /// gets set when they set the app up
 const MobjID timeFirstUsedApp = 'f6ba1437-0300-4762-9848-827e71c16099';
 
