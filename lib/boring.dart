@@ -2350,6 +2350,12 @@ class EscapeToPop extends StatelessWidget {
   );
 }
 
+/// [v] as a unit vector, or [fallback] if it has no direction to speak of.
+Offset normalizedOr(Offset v, Offset fallback) {
+  final d = v.distance;
+  return d < 0.0001 ? fallback : v / d;
+}
+
 double calcMaxRadiusForPointWithinRectangle(Size size, Offset center) {
   final w = max(center.dx, size.width - center.dx);
   final h = max(center.dy, size.height - center.dy);
@@ -2438,13 +2444,129 @@ class CircularRevealClipper extends CustomClipper<Path> {
   bool shouldReclip(CustomClipper<Path> oldClipper) => true;
 }
 
-/// Custom page route that combines circular reveal animation with translation
-/// known issue: it can't drop the shadermask even when the animation is complete, because it causes a one-frame flicker in which text fails to render.
+/// Builds a route's [child] as it animates in (and, played backwards, as it
+/// animates out), and as it's covered/uncovered by a route pushed on top of it
+/// ([secondaryAnimation]). Same signature as [PageRoute.buildTransitions], plus
+/// the route, which some stock transitions want.
+typedef RouteTransitionBuilder =
+    Widget Function(
+      BuildContext context,
+      PageRoute<dynamic> route,
+      Animation<double> animation,
+      Animation<double> secondaryAnimation,
+      Widget child,
+    );
+
+/// A transition, parameterized by where it comes from: [origin] is the point
+/// the new screen emanates from (route-local coordinates, which is screen
+/// coordinates for a fullscreen route), [motionDirection] is a unit vector
+/// pointing the way it travels. Radial transitions ignore the direction; it's
+/// there for directional ones.
+typedef RouteTransitionAnimation =
+    RouteTransitionBuilder Function(Offset origin, Offset motionDirection);
+
+/// The transition every [CircularRevealRoute] uses, indirected through a
+/// variable so it can be swapped per platform, or swapped out entirely while
+/// trying alternatives. Assign in `main` before the first push.
+///
+/// Back on [shaderRevealTransition], the long-standing one: neither
+/// [clipRevealTransition] (choppy) nor [stockTransition] did anything for the
+/// first-open hitch, so there's no reason to be off it.
+RouteTransitionAnimation routeTransitionAnimation = shaderRevealTransition;
+
+/// Whatever the platform's [PageTransitionsTheme] says — the same transition a
+/// plain [MaterialPageRoute] would get. Zoom-through on Android, the sliding
+/// back-gesture-aware one on iOS/macOS, fade-upwards elsewhere. Ignores
+/// [origin]/[motionDirection], and does its own outgoing animation, so none of
+/// our screen-corner scale-down applies.
+RouteTransitionBuilder stockTransition(Offset origin, Offset motionDirection) =>
+    (context, route, animation, secondaryAnimation, child) => Theme.of(context)
+        .pageTransitionsTheme
+        .buildTransitions(route, context, animation, secondaryAnimation, child);
+
+/// Circular reveal drawn as a hard-edged expanding clip. No mask, no saveLayer.
+RouteTransitionBuilder clipRevealTransition(
+  Offset origin,
+  Offset motionDirection,
+) =>
+    (context, route, animation, secondaryAnimation, child) =>
+        screenCornerScaleDown(
+          context,
+          secondaryAnimation,
+          _ClipRevealRouteTransition(
+            animation: animation,
+            origin: origin,
+            child: child,
+          ),
+        );
+
+/// Circular reveal with a soft edge, drawn by masking with a radial gradient.
+/// Costs a saveLayer for the whole animation, and can't be dropped once it
+/// completes (see [_CircularRevealRouteTransition]).
+RouteTransitionBuilder shaderRevealTransition(
+  Offset origin,
+  Offset motionDirection,
+) =>
+    (context, route, animation, secondaryAnimation, child) =>
+        screenCornerScaleDown(
+          context,
+          secondaryAnimation,
+          _CircularRevealRouteTransition(
+            animation: animation,
+            revealOrigin: origin,
+            child: child,
+          ),
+        );
+
+/// The outgoing half of our own transitions: as a route is covered it shrinks a
+/// little and clips to the screen's own corners (unscaled — they're the real
+/// corners, just drawn in the chosen style). Desktop skips the scale, it looks
+/// bad there.
+///
+/// Deliberately unconditional, even at rest: returning a bare [child] at zero
+/// (an obvious saving — the scale is 1 and the clip is the screen's own shape,
+/// so it draws the same thing) changes the *type* of widget sitting above the
+/// route's page, and the page below it is anchored by a [GlobalKey], so the
+/// instant the animation leaves zero the whole subtree is deactivated,
+/// re-inflated, and the page reparented into it — layers dropped, screen
+/// relaid-out, in the one frame. On a route being uncovered that frame is the
+/// only thing on screen. Same hazard [cornerStyleClip] documents, one level up.
+Widget screenCornerScaleDown(
+  BuildContext context,
+  Animation<double> secondaryAnimation,
+  Widget child,
+) {
+  final corners = getCachedCornerRadius();
+  final scale = platformIsDesktop()
+      ? 1.0
+      : 1.0 - 0.13 * Curves.easeIn.transform(secondaryAnimation.value);
+  return Transform.scale(
+    scale: scale,
+    child: cornerStyleClip(
+      scale: false,
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(corners.topLeft),
+        topRight: Radius.circular(corners.topRight),
+        bottomLeft: Radius.circular(corners.bottomLeft),
+        bottomRight: Radius.circular(corners.bottomRight),
+      ),
+      child: child,
+    ),
+  );
+}
+
+/// Custom page route that combines the screen-corner scale-down of the route
+/// below with, coming in, whatever [routeTransitionAnimation] currently is.
 class CircularRevealRoute<T> extends PageRoute<T>
     with MaterialRouteTransitionMixin<T> {
   final Widget Function(BuildContext context) builder;
   final Offset? buttonCenter;
   final GlobalKey? iconOriginKey;
+
+  /// The way the incoming screen travels, for transitions that are directional
+  /// (the reveals aren't). Defaults to "outward from the origin", ie, from the
+  /// origin towards the middle of the screen.
+  final Offset? motionDirection;
   final Duration _transitionDuration;
   final Duration _reverseTransitionDuration;
 
@@ -2452,10 +2574,20 @@ class CircularRevealRoute<T> extends PageRoute<T>
     required this.builder,
     this.buttonCenter,
     this.iconOriginKey,
+    this.motionDirection,
     Duration transitionDuration = const Duration(milliseconds: 380),
     Duration reverseTransitionDuration = const Duration(milliseconds: 270),
   }) : _transitionDuration = transitionDuration,
-       _reverseTransitionDuration = reverseTransitionDuration;
+       _reverseTransitionDuration = reverseTransitionDuration,
+       // Never let a transition rasterize our screens into a snapshot.
+       // [ZoomPageTransitionsBuilder] does it by default and it goes wrong for
+       // us two ways: a BackdropFilter rasterized offscreen has no backdrop to
+       // sample, so glass surfaces come out black mid-animation; and the raster
+       // is only dropped on the animation's final status callback, which a
+       // route torn down mid-flight (as [PredictiveBackRetractor] can do) may
+       // never deliver, leaving a frozen still of the screen that looks alive
+       // but doesn't respond to anything.
+       super(allowSnapshotting: false);
 
   @override
   Widget buildContent(BuildContext context) => builder(context);
@@ -2488,47 +2620,26 @@ class CircularRevealRoute<T> extends PageRoute<T>
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    // Incorporate screen corner scale-down with secondaryAnimation,
-    // and primary animation is still circular reveal.
+    // ModalRoute rebuilds this every frame of either animation, so the origin
+    // is re-resolved each frame: [iconOriginKey] is usually a widget on the
+    // incoming screen, which hasn't been laid out yet on the first frame.
     final screenSize = MediaQuery.sizeOf(context);
-    return AnimatedBuilder(
-      animation: secondaryAnimation,
-      builder: (context, child_) {
-        final corners = getCachedCornerRadius();
-        double scale;
-        if (platformIsDesktop()) {
-          scale = 1.0;
-        } else {
-          scale =
-              1.0 - 0.13 * Curves.easeIn.transform(secondaryAnimation.value);
-        }
-
-        final revealOrigin =
-            boxRect(iconOriginKey)?.center ??
-            buttonCenter ??
-            Offset(screenSize.width / 2, screenSize.height * 2.4);
-
-        return Transform.scale(
-          scale: scale,
-          // unscaled: these are the screen's own corners, so they want the
-          // measured radius, only drawn in the chosen style.
-          child: cornerStyleClip(
-            scale: false,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(corners.topLeft),
-              topRight: Radius.circular(corners.topRight),
-              bottomLeft: Radius.circular(corners.bottomLeft),
-              bottomRight: Radius.circular(corners.bottomRight),
-            ),
-            child: _CircularRevealRouteTransition(
-              animation: animation,
-              revealOrigin: revealOrigin,
-              child: child,
-            ),
-          ),
+    final revealOrigin =
+        boxRect(iconOriginKey)?.center ??
+        buttonCenter ??
+        Offset(screenSize.width / 2, screenSize.height * 2.4);
+    final motion =
+        motionDirection ??
+        normalizedOr(
+          Offset(screenSize.width / 2, screenSize.height / 2) - revealOrigin,
+          const Offset(0, -1),
         );
-      },
-      child: child,
+    return routeTransitionAnimation(revealOrigin, motion)(
+      context,
+      this,
+      animation,
+      secondaryAnimation,
+      child,
     );
   }
 }
@@ -2555,10 +2666,20 @@ class PredictiveBackRetractor with WidgetsBindingObserver {
   }
 
   void dispose() {
+    _route = null;
+    _endUserGesture();
     WidgetsBinding.instance.removeObserver(this);
   }
 
   CircularRevealRoute<dynamic>? _route;
+
+  /// The navigator we've told a gesture is in progress, until we tell it the
+  /// gesture is over. Must never be left set: while a navigator thinks a user
+  /// gesture is running it wraps every one of its routes in an [IgnorePointer],
+  /// so dropping this ball freezes the whole app to touch while still painting
+  /// normally — and freezes this class too, since we refuse to start a gesture
+  /// while one is in progress.
+  NavigatorState? _gesturing;
 
   /// The gesture progress past which the retraction plays. Kept small because
   /// the system's progress only reaches 1.0 with the thumb clear across the
@@ -2567,6 +2688,9 @@ class PredictiveBackRetractor with WidgetsBindingObserver {
 
   @override
   bool handleStartBackGesture(PredictiveBackEvent backEvent) {
+    // If we're still holding a gesture here, its commit/cancel never arrived;
+    // let it go rather than wedging ourselves shut forever.
+    _endUserGesture();
     final navigator = navigatorKey.currentState;
     if (navigator == null || navigator.userGestureInProgress) return false;
     // there's no public "top route" accessor; this predicate-peek is the
@@ -2584,6 +2708,7 @@ class PredictiveBackRetractor with WidgetsBindingObserver {
       return false;
     }
     _route = route;
+    _gesturing = navigator;
     navigator.didStartUserGesture();
     return true;
   }
@@ -2607,8 +2732,19 @@ class PredictiveBackRetractor with WidgetsBindingObserver {
   void handleCommitBackGesture() {
     final route = _route;
     _route = null;
-    if (route == null || route.navigator == null) return;
-    if (route.isCurrent) route.navigator!.pop();
+    if (route == null || route.navigator == null) {
+      _endUserGesture();
+      return;
+    }
+    final navigator = route.navigator!;
+    if (route.isCurrent) {
+      navigator.pop();
+    } else if (route.isActive) {
+      // Something got pushed over it mid-gesture. Leaving it as it is would
+      // strand a route we've already retracted out of sight, and an invisible
+      // route still has a modal barrier swallowing every touch.
+      navigator.removeRoute(route);
+    }
     _stopUserGestureWhenSettled(route);
   }
 
@@ -2616,7 +2752,10 @@ class PredictiveBackRetractor with WidgetsBindingObserver {
   void handleCancelBackGesture() {
     final route = _route;
     _route = null;
-    if (route == null || route.navigator == null) return;
+    if (route == null || route.navigator == null) {
+      _endUserGesture();
+      return;
+    }
     route.transitionController.forward();
     _stopUserGestureWhenSettled(route);
   }
@@ -2625,18 +2764,36 @@ class PredictiveBackRetractor with WidgetsBindingObserver {
   /// navigator doesn't let another gesture grab the route mid-flight
   /// (mirrors Cupertino's back-swipe controller).
   void _stopUserGestureWhenSettled(CircularRevealRoute<dynamic> route) {
-    final navigator = route.navigator!;
+    // Disposed already (removeRoute does that synchronously): nothing left to
+    // wait on, and its controller would throw if we touched it.
+    if (route.navigator == null) {
+      _endUserGesture();
+      return;
+    }
     final controller = route.transitionController;
     if (!controller.isAnimating) {
-      navigator.didStopUserGesture();
+      _endUserGesture();
       return;
     }
     late final AnimationStatusListener onSettle;
     onSettle = (status) {
-      navigator.didStopUserGesture();
-      controller.removeStatusListener(onSettle);
+      if (status.isAnimating) return;
+      _endUserGesture();
+      // The pop's own status listener runs before ours and disposes the route,
+      // and a disposed controller throws when touched, so only detach while
+      // the route is still alive. If it isn't, the controller is gone anyway.
+      if (route.navigator != null) controller.removeStatusListener(onSettle);
     };
     controller.addStatusListener(onSettle);
+  }
+
+  /// Balances the [NavigatorState.didStartUserGesture] from the gesture start,
+  /// exactly once, and safely if the navigator has gone away since.
+  void _endUserGesture() {
+    final navigator = _gesturing;
+    if (navigator == null) return;
+    _gesturing = null;
+    if (navigator.mounted) navigator.didStopUserGesture();
   }
 }
 
@@ -2651,43 +2808,9 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    // First apply default MaterialPageRoute transition
-    // final materialTransition =
-    //     super.buildTransitions(context, animation, secondaryAnimation, child);
-
-    // When another route is pushed on top, clip to screen corners and scale down
-    return AnimatedBuilder(
-      animation: secondaryAnimation,
-      builder: (context, child) {
-        if (secondaryAnimation.value == 0.0) {
-          return child!;
-        }
-        final corners = getCachedCornerRadius();
-        final double scale;
-        if (platformIsDesktop()) {
-          // scale animations look bad on desktop
-          scale = 1.0;
-        } else {
-          scale =
-              1.0 - Curves.easeIn.transform(secondaryAnimation.value) * 0.13;
-        }
-        return Transform.scale(
-          scale: scale,
-          // unscaled, as in [CircularRevealRoute]: the screen's own corners.
-          child: cornerStyleClip(
-            scale: false,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(corners.topLeft),
-              topRight: Radius.circular(corners.topRight),
-              bottomLeft: Radius.circular(corners.bottomLeft),
-              bottomRight: Radius.circular(corners.bottomRight),
-            ),
-            child: child!,
-          ),
-        );
-      },
-      child: child,
-    );
+    // No incoming transition of its own; when another route is pushed on top,
+    // clip to screen corners and scale down.
+    return screenCornerScaleDown(context, secondaryAnimation, child);
   }
 }
 
@@ -2727,11 +2850,20 @@ Shader createRadialRevealShader({
 
   return RadialGradient(
     center: center,
-    radius: currentRadius / min(bounds.width, bounds.height),
+    radius: zeroSafeRadius(currentRadius / min(bounds.width, bounds.height)),
     colors: colors,
     stops: stops,
   ).createShader(bounds);
 }
+
+/// A gradient radius that's never zero. A zero-radius radial gradient is
+/// degenerate — every point is infinitely far along it — and the backends don't
+/// agree on what to do about it: the sensible reading paints the last colour
+/// everywhere, but resolving it to the *first* colour is just as defensible,
+/// and that turns "reveal nothing" into "reveal everything", a full-screen
+/// flash. Nudging the radius off zero makes the answer unambiguous, and a
+/// radius this small is invisible either way.
+double zeroSafeRadius(double radius) => max(radius, 1e-6);
 
 /// Creates a linear gradient shader with a fuzzy edge for directional reveal effects.
 /// The gradient progresses in the direction specified by [angle] (in radians).
@@ -3053,6 +3185,149 @@ class FuzzyLinearClip extends StatelessWidget {
   }
 }
 
+/// [clipRevealTransition]'s guts: the same staging as
+/// [_CircularRevealRouteTransition] — a radial penumbra running ahead of the
+/// reveal, the new screen appearing inside an expanding circle, its interior
+/// veiled at first and fading to expose the screen — but the circle is a plain
+/// [ClipOval] rather than a gradient mask, so nothing here needs a saveLayer or
+/// a shader to be compiled, and the whole thing can be dropped from the tree
+/// the moment it finishes.
+class _ClipRevealRouteTransition extends StatelessWidget {
+  final Animation<double> animation;
+  final Offset origin;
+  final Widget child;
+
+  const _ClipRevealRouteTransition({
+    required this.animation,
+    required this.origin,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final Color backgroundColor = theme.colorScheme.primary;
+    final Color fadedOfBackgroundColor = backgroundColor.withAlpha(14);
+    final Color transparentOfBackgroundColor = backgroundColor.withAlpha(0);
+    final Color interiorVeilColor = OurThemeData.fromTheme(theme).foreBackColor;
+
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (context, child) {
+        final screenSize = MediaQuery.sizeOf(context);
+        final expansionp = circularRevealRouteCurve(
+          unlerpUnit(0.07, 0.8, animation.value),
+        );
+        // The revealed interior is initially veiled with the highest background
+        // color, fading down to expose the new screen gradually at first then
+        // quickly by the time expansion ends.
+        final veilOpacity =
+            1.0 -
+            Curves.easeIn.transform(unlerpUnit(0.2, 0.85, animation.value));
+
+        // Fully open: no clip, no veil, no penumbra, nothing left to pay for.
+        if (expansionp >= 1.0 && veilOpacity <= 0.0) {
+          return child!;
+        }
+
+        final penumbrap = circularRevealRouteCurve(
+          unlerpUnit(0.0, 0.8, animation.value),
+        );
+        // Fully retracted, and a back gesture can hold it here indefinitely:
+        // nothing to draw, and nothing that would make us draw a degenerate
+        // zero-radius gradient (see [zeroSafeRadius]).
+        if (expansionp <= 0.0 && penumbrap <= 0.0) {
+          return Opacity(opacity: 0.0, child: child!);
+        }
+        final c = Alignment(
+          (origin.dx / screenSize.width - 0.5) * 2.0,
+          (origin.dy / screenSize.height - 0.5) * 2.0,
+        );
+
+        return Stack(
+          children: [
+            // circular shadow gradient moving in advance of the clip
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      radius: zeroSafeRadius(
+                        Curves.easeOut.transform(penumbrap) * 3.0,
+                      ),
+                      center: c,
+                      focal: c,
+                      colors: [
+                        fadedOfBackgroundColor,
+                        fadedOfBackgroundColor,
+                        transparentOfBackgroundColor,
+                      ],
+                      stops: [0.0, penumbrap, penumbrap * 2],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: ClipOval(
+                clipper: _RevealCircleClipper(
+                  center: origin,
+                  fraction: expansionp,
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    child!,
+                    if (veilOpacity > 0.0)
+                      IgnorePointer(
+                        child: ColoredBox(
+                          color: interiorVeilColor.withValues(
+                            alpha: veilOpacity,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The circle [clipRevealTransition] reveals through: at fraction 0 it's the
+/// largest circle around [center] that misses the screen entirely (zero when
+/// the center is on screen, so a tap origin starts from a point, but an origin
+/// off below the screen starts as a circle just touching it, as the gradient
+/// version did), at 1 it's the smallest one that covers the screen.
+class _RevealCircleClipper extends CustomClipper<Rect> {
+  final Offset center;
+  final double fraction;
+
+  const _RevealCircleClipper({required this.center, required this.fraction});
+
+  @override
+  Rect getClip(Size size) => Rect.fromCircle(
+    center: center,
+    radius: lerp(
+      distanceToRectangle(size.width, size.height, center),
+      calcMaxRadiusForPointWithinRectangle(size, center),
+      fraction,
+    ),
+  );
+
+  @override
+  bool shouldReclip(_RevealCircleClipper oldClipper) =>
+      oldClipper.fraction != fraction || oldClipper.center != center;
+}
+
+/// [shaderRevealTransition]'s guts.
+/// Known issue: it can't drop the shadermask even when the animation is
+/// complete, because it causes a one-frame flicker in which text fails to
+/// render. [_ClipRevealRouteTransition] doesn't have that problem.
 class _CircularRevealRouteTransition extends StatefulWidget {
   final Animation<double> animation;
   final Offset revealOrigin;
@@ -3098,6 +3373,9 @@ class _CircularRevealRouteTransitionState
               final progress = circularRevealRouteCurve(
                 unlerpUnit(0.0, 0.8, widget.animation.value),
               );
+              // A zero-radius gradient is degenerate — see [zeroSafeRadius] —
+              // and there's nothing to draw at zero anyway.
+              if (progress <= 0.0) return const SizedBox.expand();
 
               final c = Alignment(
                 (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
@@ -3108,7 +3386,9 @@ class _CircularRevealRouteTransitionState
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
-                      radius: Curves.easeOut.transform(progress) * 3.0,
+                      radius: zeroSafeRadius(
+                        Curves.easeOut.transform(progress) * 3.0,
+                      ),
                       center: c,
                       focal: c,
                       colors: [
@@ -3133,9 +3413,17 @@ class _CircularRevealRouteTransitionState
               final expansionp = circularRevealRouteCurve(
                 unlerpUnit(0.07, 0.8, widget.animation.value),
               );
-              // if (fraction == 1.0) {
-              //   return child!;
-              // }
+              // Nothing revealed yet — a back gesture can hold it here
+              // indefinitely. Hidden with opacity rather than by dropping the
+              // mask from the tree: the shape of the tree above the page has to
+              // stay fixed frame to frame (see [screenCornerScaleDown]), and
+              // opacity zero doesn't paint the child at all, so the mask costs
+              // nothing while it's held here. It also makes the reveal
+              // proof against the degenerate zero-radius shader (see
+              // [zeroSafeRadius]) that a backend may resolve to "keep
+              // everything", which is a full-screen flash of the opaque
+              // interior veil: there's nothing to keep.
+              final revealed = expansionp > 0.0;
               final centerAlignment = Alignment(
                 (widget.revealOrigin.dx / screenSize.width - 0.5) * 2.0,
                 (widget.revealOrigin.dy / screenSize.height - 0.5) * 2.0,
@@ -3150,32 +3438,36 @@ class _CircularRevealRouteTransitionState
                     unlerpUnit(0.2, 0.85, widget.animation.value),
                   );
 
-              return ClipRect(
-                child: ShaderMask(
-                  shaderCallback: (Rect bounds) {
-                    return createRadialRevealShader(
-                      bounds: bounds,
-                      center: centerAlignment,
-                      fraction: expansionp,
-                      fuzzyEdgeWidth: 20.0,
-                    );
-                  },
-                  // no shader if complete
-                  // blendMode: fraction == 1.0 ? BlendMode.dst: BlendMode.dstIn,
-                  blendMode: BlendMode.dstIn,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      child!,
-                      if (veilOpacity > 0.0)
+              return Opacity(
+                opacity: revealed ? 1.0 : 0.0,
+                child: ClipRect(
+                  child: ShaderMask(
+                    shaderCallback: (Rect bounds) {
+                      return createRadialRevealShader(
+                        bounds: bounds,
+                        center: centerAlignment,
+                        fraction: expansionp,
+                        fuzzyEdgeWidth: 20.0,
+                      );
+                    },
+                    // no shader if complete
+                    // blendMode: fraction == 1.0 ? BlendMode.dst: BlendMode.dstIn,
+                    blendMode: BlendMode.dstIn,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        child!,
+                        // always present, transparent when spent: dropping it
+                        // would reshape the tree over the page mid-reveal.
                         IgnorePointer(
                           child: ColoredBox(
                             color: interiorVeilColor.withValues(
-                              alpha: veilOpacity,
+                              alpha: max(veilOpacity, 0.0),
                             ),
                           ),
                         ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -3934,64 +4226,64 @@ ColorScheme colorSchemeFromCorePalette(
 }
 
 class OurThemeData {
-  Color lowestBackColor;
+  final Color lowestBackColor;
 
   /// indent colors are for subtle details like dividers, they don't have to contrast very well, only enough to *acknowledge*.
-  Color lowestIndentColor;
-  Color midBackColor;
-  Color foreBackColor;
-  Color foreIndentColor;
-  Color inkColor;
-  Color reducedProminenceColor;
+  final Color lowestIndentColor;
+  final Color midBackColor;
+  final Color foreBackColor;
+  final Color foreIndentColor;
+  final Color inkColor;
+  final Color reducedProminenceColor;
 
   /// Color of the special-timer-create drag ring while collapsed (its idle,
   /// unexpanded state). [reducedProminenceColor] everywhere except
   /// [materialYou], where it's [ColorScheme.primary] so the ring picks up the
   /// wallpaper tint instead of reading as a flat neutral.
-  Color collapsedSpecialDragRingColor;
+  final Color collapsedSpecialDragRingColor;
   // todo: remove?
-  Color harderForeIndentColor;
-  Color hintTextColor;
-  Color veryLowProminenceColor;
-  bool hardEdges;
+  final Color harderForeIndentColor;
+  final Color hintTextColor;
+  final Color veryLowProminenceColor;
+  final bool hardEdges;
 
   /// Fill for a liquid-glass surface (the timer menu, drag rings). Already
   /// carries the translucency a glass tint wants, so it goes straight into a
   /// [GlassBlob]/fill — no extra alpha juggling. Content on top uses
   /// [onGlassColor]. When glass is off, use [nonGlassColor] instead; see
   /// [glassFill].
-  Color glassColor;
-  Color onGlassColor;
+  final Color glassColor;
+  final Color onGlassColor;
 
   /// Solid fill for those same surfaces when liquid glass is switched off:
   /// black on light theme, white on dark theme. Content on top uses
   /// [nonGlassOnSurface].
-  Color nonGlassColor;
-  Color nonGlassOnSurface;
+  final Color nonGlassColor;
+  final Color nonGlassOnSurface;
 
   /// Fill for a popup menu when liquid glass is off. [nonGlassColor]
   /// everywhere except [materialYou], where it's [ColorScheme.secondary] so
   /// the menu picks up the wallpaper tint instead of reading as flat
   /// black/white. Content on top uses [onNonGlassPopupMenu].
-  Color nonGlassPopupMenu;
-  Color onNonGlassPopupMenu;
+  final Color nonGlassPopupMenu;
+  final Color onNonGlassPopupMenu;
 
   /// Corner radius of a timercule's backing panel. Roughly a quarter of a
   /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
   /// control buttons.
-  double timerculeBackingCornerRadius;
+  final double timerculeBackingCornerRadius;
 
   /// Backdrop blur radius for liquid-glass surfaces; feed into [ourGlassOptions]
   /// so the app's glass look stays themeable rather than hardcoded per call site.
   /// The light theme takes it down (glass over a light background needs less
   /// blur to read as glass); the initializations that don't say otherwise get
   /// [defaultGlassBlurRadius].
-  double glassBlurRadius;
+  final double glassBlurRadius;
   static const double defaultGlassBlurRadius = 12;
 
   /// Rim-darkening tint for liquid-glass surfaces; feed into [ourGlassOptions]'s
   /// [GlassOptions.edgeTint].
-  Color edgeTint;
+  final Color edgeTint;
 
   OurThemeData({
     required this.lowestBackColor,
@@ -4036,9 +4328,43 @@ class OurThemeData {
     return fromTheme(Theme.of(context));
   }
 
+  // Building one of these is not free: most of its colors come out of an HSLuv
+  // round trip, and it's asked for in a dozen build methods, some of which run
+  // on every frame of a transition. The result depends only on the theme, the
+  // brightness and the Material You setting, so keep the last one. One entry is
+  // enough because every widget in a frame gets the same ThemeData instance
+  // from [Theme.of]; the entry turns over when the theme itself does.
+  static OurThemeData? _memo;
+  static ThemeData? _memoTheme;
+  static Brightness? _memoBrightness;
+  static bool? _memoMaterialYou;
+
   static OurThemeData fromTheme(ThemeData theme, {Brightness? brightness}) {
     final b = brightness ?? theme.brightness;
-    if (materialYouOn()) return OurThemeData.materialYou(theme, b);
+    // Called before the cache check on purpose, and not just because it's part
+    // of the key: reading that signal is what subscribes the calling build to
+    // it, so short-circuiting past it would leave those widgets unable to
+    // notice the setting change.
+    final materialYou = materialYouOn();
+    if (identical(_memoTheme, theme) &&
+        _memoBrightness == b &&
+        _memoMaterialYou == materialYou) {
+      return _memo!;
+    }
+    final built = _build(theme, b, materialYou);
+    _memoTheme = theme;
+    _memoBrightness = b;
+    _memoMaterialYou = materialYou;
+    _memo = built;
+    return built;
+  }
+
+  static OurThemeData _build(
+    ThemeData theme,
+    Brightness b,
+    bool materialYouOn,
+  ) {
+    if (materialYouOn) return OurThemeData.materialYou(theme, b);
     final cs = theme.colorScheme;
     return b == Brightness.dark
         ? OurThemeData(

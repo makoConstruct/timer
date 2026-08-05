@@ -83,7 +83,7 @@ const databaseName = 'mako_timer_db';
 const double defaultTimerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(28);
+final Signal<double> timerWidgetRadius = Signal(23);
 
 const double standardLineWidth = 6;
 
@@ -310,6 +310,30 @@ Future<void> enableHighRefreshRate() async {
 const mainNotificationPortName = 'main_notification';
 ReceivePort? notificationResponseReceivePort;
 
+/// Pays, at a moment nobody is looking, a cost that otherwise lands on the
+/// first screen with selectable text on it.
+///
+/// Every [SelectableRegion] (so every [SelectionArea], and every
+/// `selectable: true` markdown body) asks Android in its `initState` which
+/// `ACTION_PROCESS_TEXT` activities exist, to fill in its selection toolbar.
+/// That's a PackageManager query, it takes a quarter of a second the first time
+/// a process makes one, and since Flutter runs the Dart UI thread merged with
+/// Android's main thread, it blocks the isolate outright — a ~250ms freeze on
+/// the frame where that screen appears. The OS caches the answer, so making the
+/// same query early makes every later one cheap.
+///
+/// Deferred past the first frame so it doesn't hold up startup instead, and
+/// past a further second so it doesn't land in the middle of whatever the timer
+/// screen does on arrival.
+void warmTextSelection() {
+  if (!Platform.isAndroid) return;
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      DefaultProcessTextService().queryTextActions();
+    });
+  });
+}
+
 void main() async {
   // await deleteDatabase();
   WidgetsFlutterBinding.ensureInitialized();
@@ -317,6 +341,7 @@ void main() async {
   // warm the glass shader programs so the first ring can render as glass rather
   // than an unmasked child for a few frames.
   GlassLayer.precache();
+  warmTextSelection();
   await Future.wait([
     enableHighRefreshRate(),
     initializeDatabase(),
@@ -6658,9 +6683,15 @@ Widget markdownBody(
     color: theme.colorScheme.primary,
     decoration: TextDecoration.underline,
   );
+  // Not `selectable: true`: that gives every block its own SelectableText, and
+  // so its own EditableText and RenderEditable, which costs about five times as
+  // much to build as the rest of the page put together (measured on how_made.md
+  // — parsing the markdown itself is a rounding error next to it). The
+  // SelectionArea in [markdownPageSliver] provides selection instead, and does
+  // it better: selection runs across the whole document rather than stopping at
+  // each block.
   return MarkdownBody(
     data: md,
-    selectable: true,
     imageBuilder: imageBuilder,
     builders: {
       'a': LinkElementBuilder(
@@ -6694,7 +6725,9 @@ Widget markdownPageSliver(
             duration: const Duration(milliseconds: 200),
             builder: (context, value, child) =>
                 Opacity(opacity: value, child: child),
-            child: markdownBody(theme, md, imageBuilder: imageBuilder),
+            child: SelectionArea(
+              child: markdownBody(theme, md, imageBuilder: imageBuilder),
+            ),
           ),
   ),
 );
