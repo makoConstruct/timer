@@ -1278,6 +1278,11 @@ class TimerMenu extends StatefulWidget {
   final double? estimatedWidth;
   final Animation<double> animation;
 
+  /// Goes on the body's [GlassLayer] so that items can inject their press
+  /// highlight into the same merged surface; see [GlassMenuButton]. Created by
+  /// whoever builds [items], since they need it too. —Claude Opus 5
+  final GlobalKey<GlassLayerState> glassLayerKey;
+
   /// Duration of the upward reveal. The downward (closing) swing is a separate,
   /// faster shrink — see [_TimerMenuState._reveal] and [_kMenuDownDuration].
   final Duration revealDuration;
@@ -1301,6 +1306,7 @@ class TimerMenu extends StatefulWidget {
     required this.animation,
     required this.revealDuration,
     required this.arrowHeight,
+    required this.glassLayerKey,
   });
 
   @override
@@ -1471,16 +1477,22 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
               cornerRounding: cornerRounding * lerp(1, 1.62, cornerStyle),
               width: width,
               topInset: topHeadroom,
+              bulgeInset: _glassMenuBulgePad,
               tint: tint,
               cornerStyle: cornerStyle,
               child: column,
             );
             return Stack(
+              // The glass box deliberately overhangs its content, and near the
+              // top or the sides of the screen it can overhang the stack too;
+              // let it. What's actually offscreen the backdrop filter trims for
+              // itself, against the render target. —Claude Opus 5
+              clipBehavior: Clip.none,
               children: [
                 Positioned(
-                  left: left,
+                  left: left - _glassMenuBulgePad,
                   top: top - topHeadroom,
-                  width: width,
+                  width: width + _glassMenuBulgePad * 2,
                   child: body,
                 ),
               ],
@@ -1508,17 +1520,27 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
     // from above y=0) and their glass bevel aren't clipped; blob geometry is
     // shifted down by this and the whole box is lifted by it above.
     required double topInset,
+    // The same idea on the other three sides, for the body's own edge band and
+    // for the swell a pressed item pushes out through it ([GlassMenuButton]).
+    // The menu is still [width] wide; this is transparent margin around it.
+    // —Claude Opus 5
+    required double bulgeInset,
     required Color tint,
     required double cornerStyle,
     required Widget child,
   }) {
     Widget result = SizedBox(
-      width: width,
-      // pad the content down by the headroom so the box extends above it; the
+      width: width + bulgeInset * 2,
+      // pad the content in by the headroom so the box extends past it; the
       // content's own height is the layer size minus this padding, recovered in
       // the blob builder below.
       child: Padding(
-        padding: EdgeInsets.only(top: topInset),
+        padding: EdgeInsets.only(
+          top: topInset,
+          left: bulgeInset,
+          right: bulgeInset,
+          bottom: bulgeInset,
+        ),
         child: child,
       ),
     );
@@ -1531,6 +1553,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
     final bevelThickness = lerp(30, 19, deblubbingp);
 
     return GlassLayer(
+      key: widget.glassLayerKey,
       options: ourGlassOptions(
         mode: glassOn ? GlassMode.glass : GlassMode.flat,
         blendRadius: blendRadius,
@@ -1541,17 +1564,21 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
       blobs: const [],
       // Blobs are placed in the content's coordinate space, so they need the
       // content height. The layer sizes itself to [result], so at paint time
-      // its size is (width, topInset + contentHeight) — the height falls out
-      // synchronously, no measure round-trip and no first-frame pop.
+      // its size is (width + 2 * bulgeInset, topInset + contentHeight +
+      // bulgeInset) — the height falls out synchronously, no measure round-trip
+      // and no first-frame pop.
       blobBuilder: (size) {
-        final height = size.height - topInset;
+        final height = size.height - topInset - bulgeInset;
         final earlyBlubp = Curves.easeOut.transform(unlerpUnit(0, 0.65, p));
-        final shiftedOrigin = origin.translate(
+        // everything below is in layer coordinates, which the insets displace
+        // the content within.
+        final placedOrigin = origin.translate(bulgeInset, 0);
+        final shiftedOrigin = placedOrigin.translate(
           0,
           widget.arrowHeight + topInset,
         );
         final target =
-            Offset(0, widget.arrowHeight + topInset) &
+            Offset(bulgeInset, widget.arrowHeight + topInset) &
             Size(width, height - widget.arrowHeight);
         var span = lerpOffset(
           Offset.zero,
@@ -1570,11 +1597,11 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
         final (blubArrowPositionBase, blubArrowPositionNorm) = ovalEdgeArrow(
           body.center,
           span,
-          origin,
+          placedOrigin,
         );
         final (rectArrowPositionBase, rectArrowPositionNorm) = rectEdgeArrow(
           body,
-          origin,
+          placedOrigin,
         );
         final arrowBase = lerpOffset(
           blubArrowPositionBase,
@@ -1630,6 +1657,13 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
 /// Extra transparent space above the content in the glass menu, on top of the
 /// origin excursion — room for the arrow tip's bevel/shine so it isn't clipped.
 const double _glassMenuTopPad = 32;
+
+/// The same, at the sides and the bottom, where the body's edge runs flush with
+/// the content: enough for a pressed item's swell plus the shine band around
+/// the displaced edge. The GlassLayer clips its shading to its own box, so
+/// anything the blobs reach past the content has to be paid for in box size.
+/// —Claude Opus 5
+const double _glassMenuBulgePad = GlassMenuButton.swellDepth + 6;
 
 abstract class TimerBase extends SignalStatefulWidget {
   final Mobj<TimerData> mobj;
@@ -3066,9 +3100,6 @@ final List<Function(TimerScreenState)> numericRadialActivatorFunctions = [
   );
 }
 
-/// A selected item's highlight disc, as a multiple of the icon disc radius — a touch bigger than the resting dot it grows out of.
-const double dragRingSelectedClipScale = 1.12;
-
 class DragActionRing extends SignalStatefulWidget {
   final Offset position;
   final Signal<int?> dragEvents;
@@ -3403,8 +3434,8 @@ class DragActionRingState extends State<DragActionRing>
     final growth = widget.useSpringExpansion
         ? _expansionGrowth.clamp(0.0, 1.0)
         : Curves.easeOut.transform(unlerpUnit(0, 0.6, _expansionGrowth));
-    final leafp = unlerpUnit(0.7, 1, Curves.easeOut.transform(growth));
-    return (leafp / dragRingSelectedClipScale).clamp(0.0, 1.0);
+    return unlerpUnit(0.7, 1, Curves.easeOut.transform(growth));
+    // return (leafp).clamp(0.0, 1.0);
   }
 
   static const int nonGlassBlobRise = 500;
@@ -3792,11 +3823,9 @@ class DragActionRingState extends State<DragActionRing>
       child: Stack(clipBehavior: Clip.none, children: radialActivatorIcons),
     );
 
-    // render the ring — and, for the special-timer menu, its label pills — as
-    // merged glass blobs, gated by the liquidGlassOn setting. The arc lerps in
-    // via [ringColor]; the pills are the plain glass fill.
-    final Color ringTint = ringColor;
     final Color pillTint = glassFill;
+    // may be made more transparent by arc logic
+    Color ringTint = ringColor;
 
     final double blendRadius =
         actionRadiusMax *
@@ -3906,9 +3935,21 @@ class DragActionRingState extends State<DragActionRing>
       final bandCenter =
           center + Offset(handednessSign * restRadius * 0.34, 0) * (1 - g);
       final bandRadius = lerp(restRadius, radialRadiusMax, g);
-      final halfThickness = lerp(restHalfThickness, actionRadius, g);
       final startAngle = lerp(restStart, _arcStartSpring.value, g);
       final endAngle = lerp(restEnd, _arcEndSpring.value, g);
+      final togetherp = fullArc.abs() < 1e-6
+          ? 1.0
+          : unlerpUnit(fullArc.abs(), 0, (endAngle - startAngle).abs());
+      final halfThickness =
+          lerp(restHalfThickness, actionRadius, g) *
+          lerp(1, 1.12, Curves.easeIn.transform(togetherp));
+      if (glassOn) {
+        ringTint = ringTint.withValues(
+          alpha:
+              ringTint.a *
+              lerp(1, glassTintAlphaSofteningOnSelection, togetherp),
+        );
+      }
 
       if (halfThickness < 0.5) {
         // thinned away to nothing while retiring (completion -> 1).
@@ -4607,6 +4648,10 @@ class TimerScreenState extends State<TimerScreen>
     Color inkColor = td.isComposite || materialYouOn()
         ? foregroundColor
         : TimerBaseState.backgroundColor(td.hue);
+    // Items inject their press highlight into the menu body's glass, so they
+    // need its layer; it's made here rather than in TimerMenu because both
+    // sides of that split need it. —Claude Opus 5
+    final glassLayerKey = GlobalKey<GlassLayerState>();
     Widget menuItem(
       BuildContext context,
       bool isRightHanded,
@@ -4617,18 +4662,30 @@ class TimerScreenState extends State<TimerScreen>
       double extraBottom = 0,
       double extraTop = 0,
     }) {
-      return InkButton(
-        backgroundColor: Colors.transparent,
-        inkColor: inkColor.withValues(alpha: 0.6),
-        inkColorFaded: inkColor.withValues(alpha: 0.3),
-        onTapUpGlobalPosition: action,
-        onTap: () {
-          Navigator.of(context).pop();
-        },
-        child: EvenPadding(
-          top: menuItemPadding + arrowHeight,
+      // The padding is resolved here rather than left to an EvenPadding inside,
+      // because the swell blob has to be inset by the same amount to land on
+      // the row the eye sees — the tap target runs to the column's edges, and
+      // the leading item's also covers the nub's headroom. —Claude Opus 5
+      return EvenPadBuilder((context, extraPadding) {
+        final insets =
+            extraPadding.resolve(top: menuItemPadding + arrowHeight) +
+            EdgeInsets.only(top: extraTop, bottom: extraBottom);
+        // in glass mode the swelling glass blob *is* the press feedback, so the
+        // ink well stands down rather than the two of them stacking up.
+        final Widget button = InkButton(
+          backgroundColor: Colors.transparent,
+          inkColor: glassOn
+              ? Colors.transparent
+              : inkColor.withValues(alpha: 0.6),
+          inkColorFaded: glassOn
+              ? Colors.transparent
+              : inkColor.withValues(alpha: 0.3),
+          onTapUpGlobalPosition: action,
+          onTap: () {
+            Navigator.of(context).pop();
+          },
           child: Padding(
-            padding: EdgeInsets.only(top: extraTop, bottom: extraBottom),
+            padding: insets,
             child: Row(
               mainAxisSize: MainAxisSize.max,
               mainAxisAlignment: isRightHanded
@@ -4657,8 +4714,11 @@ class TimerScreenState extends State<TimerScreen>
               ]),
             ),
           ),
-        ),
-      );
+        );
+        return glassOn
+            ? GlassMenuButton(glassLayerKey, button, insets: insets)
+            : button;
+      });
     }
 
     double separatorHeight = 14;
@@ -4683,6 +4743,7 @@ class TimerScreenState extends State<TimerScreen>
             bool isRightHanded = isRightHandedMobj.value!;
             return TimerMenu(
               timerID: timerID,
+              glassLayerKey: glassLayerKey,
               arrowHeight: arrowHeight,
               centerOn: p,
               // we're making it square :3 it was initially as wide as the screen, but it occurred to me that all of the crispest menus aren't, and then I thought about whether it really needed to be wide, and the answer is no, because to open a menu your thumb has to already be over there above it

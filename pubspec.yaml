@@ -63,6 +63,13 @@ dependencies:
   dynamic_color: ^1.8.1
   material_color_utilities: ^0.13.0
 
+# GlassLayerState (and its injectedBlobs/replaceBlob, which GlassMenuButton
+# needs) isn't in a published just_liquid_glass yet, so we build against the
+# local checkout. Drop this once that's released. —Claude Opus 5
+dependency_overrides:
+  just_liquid_glass:
+    path: ../just_liquid_glass
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

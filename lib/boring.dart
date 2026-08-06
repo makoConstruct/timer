@@ -3935,6 +3935,110 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
   }
 }
 
+const double glassTintAlphaSofteningOnSelection = 0.5;
+
+/// Press feedback for a button sitting on a [GlassLayer]: the panel's glass
+/// swells up around [child] on pointer down and sinks back on release.
+///
+/// The glass work is the library's declarative [GlassSwell], driven from an
+/// [AnimatedBuilder]; the press animation stays this app's
+/// [UpDownAnimationController], whose independent rise/fall components
+/// (`scalarValue = rise * (1 - fall)`) keep a quick tap swelling smoothly
+/// through the release instead of flipping direction — which is why this
+/// composes [GlassSwell] rather than using the library's simpler
+/// [GlassPressSwell].
+class GlassMenuButton extends StatefulWidget {
+  final GlobalKey<GlassLayerState> layerKey;
+  final Widget child;
+
+  /// [child]'s own padding, taken back off so the swell follows the part of the
+  /// row that reads as a button rather than the whole tap target — a tap target
+  /// usually reaches further than what the eye calls the button, and a leading
+  /// item's can reach a lot further.
+  final EdgeInsets insets;
+  const GlassMenuButton(
+    this.layerKey,
+    this.child, {
+    super.key,
+    this.insets = EdgeInsets.zero,
+  });
+
+  /// The blob stays up at least this long after a press begins, no matter how
+  /// brief the tap was — a tap that came and went in 40ms should still read as
+  /// a press, and the down swing is delayed to make up the difference.
+  static const Duration minimumHold = Duration(milliseconds: 90);
+
+  /// How far out the panel's surface is pushed at the height of the press, in
+  /// logical pixels; `_glassMenuBulgePad` in main.dart budgets clip room for
+  /// it. The range softens the bulge into the rest of the panel — too short
+  /// and the pressed row looks like a step cut into the edge.
+  static const double swellDepth = 5;
+  static const double swellRange = 26;
+
+  @override
+  State<GlassMenuButton> createState() => _GlassMenuButtonState();
+}
+
+class _GlassMenuButtonState extends State<GlassMenuButton>
+    with SingleTickerProviderStateMixin {
+  late final UpDownAnimationController _press = UpDownAnimationController(
+    riseDuration: Duration(milliseconds: 120),
+    fallDuration: Duration(milliseconds: 100),
+    vsync: this,
+  );
+  DateTime _pressedAt = DateTime.now();
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _pressedAt = DateTime.now();
+    // from: 0 rather than plain forward(), which would try to resume from
+    // wherever a previous press left off — every press is its own swell.
+    _press.forward(from: 0);
+  }
+
+  void _handleRelease() {
+    final held = DateTime.now().difference(_pressedAt);
+    _press.reverse(
+      delay: held < GlassMenuButton.minimumHold
+          ? GlassMenuButton.minimumHold - held
+          : null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: _handlePointerDown,
+      onPointerUp: (_) => _handleRelease(),
+      onPointerCancel: (_) => _handleRelease(),
+      child: AnimatedBuilder(
+        animation: _press,
+        builder: (context, child) {
+          final p = Curves.easeOutCubic.transform(_press.scalarValue);
+          final glass = OurThemeData.fromContext(context).glassColor;
+          return GlassSwell(
+            layerKey: widget.layerKey,
+            tint: glass.withValues(
+              alpha:
+                  glass.a * lerp(1, glassTintAlphaSofteningOnSelection, p),
+            ),
+            distortion: GlassMenuButton.swellDepth * p,
+            distortionRange: GlassMenuButton.swellRange,
+            insets: widget.insets,
+            child: child!,
+          );
+        },
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 /// animates from the previous state using an inkwell from epicenter
 /// trivial to implement, so included mostly for illustrative purposes, but also because a lot of you are going to want it
 class InvertToggleButton extends StatelessWidget {
