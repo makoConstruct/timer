@@ -3638,7 +3638,6 @@ class DragActionRingState extends State<DragActionRing>
   }
 
   Widget buildWithGivenAnimationParameters(
-    bool glassOn,
     double growp,
     double swipep,
     double releasep,
@@ -3646,6 +3645,7 @@ class DragActionRingState extends State<DragActionRing>
     // as hints fade, let a cap ease inward as soon as one drops below the hold
     // threshold instead of waiting for it to settle at 0.
     _reevaluateHintExtent();
+    final glassOn = Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value!;
     final theme = Theme.of(context);
     final thumbSpan = Thumbspan.of(context);
     final isRightHanded = Mobj.getAlreadyLoaded(
@@ -3667,11 +3667,6 @@ class DragActionRingState extends State<DragActionRing>
     final mt = OurThemeData.fromTheme(theme);
     final glassFill = mt.glassFill(glassOn);
     final onGlassFill = mt.onGlassFill(glassOn);
-    // only the special timer (arc) ring lerps up from the reduced prominence
-    // color as it grows; the numeral rings are just the glass fill.
-    final ringColor = widget.arcModeNotBlobMode
-        ? lerpColor(mt.collapsedSpecialDragRingColor, glassFill, baseGrow)
-        : glassFill;
 
     // raw per-item selection growth; the blob builder owns any release recede
     // (it keeps the chosen item's highlight crisp while the sweep collapses onto
@@ -3824,8 +3819,8 @@ class DragActionRingState extends State<DragActionRing>
     );
 
     final Color pillTint = glassFill;
-    // may be made more transparent by arc logic
-    Color ringTint = ringColor;
+    // may be altered by arc logic
+    Color ringTint = glassFill;
 
     final double blendRadius =
         actionRadiusMax *
@@ -3943,13 +3938,13 @@ class DragActionRingState extends State<DragActionRing>
       final halfThickness =
           lerp(restHalfThickness, actionRadius, g) *
           lerp(1, 1.12, Curves.easeIn.transform(togetherp));
-      if (glassOn) {
-        ringTint = ringTint.withValues(
-          alpha:
-              ringTint.a *
-              lerp(1, glassTintAlphaSofteningOnSelection, togetherp),
-        );
-      }
+      ringTint = lerpColorThunks(
+        () => mt.collapsedSpecialDragRingColor,
+        () => glassOn
+            ? tensionedGlassColor(context, togetherp)
+            : mt.nonGlassColor,
+        g,
+      );
 
       if (halfThickness < 0.5) {
         // thinned away to nothing while retiring (completion -> 1).
@@ -4096,9 +4091,6 @@ class DragActionRingState extends State<DragActionRing>
     // the ring re-renders when it's toggled. The AnimatedBuilder below builds in
     // its own element, where a signal read wouldn't be tracked, so we thread the
     // value in rather than reading it there.
-    final glassOn =
-        Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
-        (defaultTargetPlatform == TargetPlatform.iOS);
     return Positioned(
       left: widget.visualPosition.dx,
       top: widget.visualPosition.dy,
@@ -4119,11 +4111,13 @@ class DragActionRingState extends State<DragActionRing>
           tutorialShowLabelsAnimation,
         ]),
         builder: (context, child) {
-          return buildWithGivenAnimationParameters(
-            glassOn,
-            _expansionGrowth,
-            optionConsiderationAnimation.value,
-            optionActivationAnimation.value,
+          // the build function calls on some theme signals as well
+          return SignalBuilder(
+            builder: (context) => buildWithGivenAnimationParameters(
+              _expansionGrowth,
+              optionConsiderationAnimation.value,
+              optionActivationAnimation.value,
+            ),
           );
         },
       ),
@@ -9129,5 +9123,126 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
       ),
     );
     return EscapeToPop(child: scaffold);
+  }
+}
+
+Color tensionedGlassColor(BuildContext context, double extent) {
+  // transparency only looks good if the primary color is quite strong, which is not the case outside of materialYou
+  final mt = OurThemeData.fromContext(context);
+  Color ringTint = mt.glassColor;
+  return ringTint.withValues(
+    alpha:
+        ringTint.a *
+        lerp(
+          1,
+          materialYouOn()
+              ? glassTintAlphaSofteningOnSelection
+              : glassTintAlphaStrenghteningOnSelection,
+          extent,
+        ),
+  );
+}
+
+const double glassTintAlphaSofteningOnSelection = 0.5;
+const double glassTintAlphaStrenghteningOnSelection = 1.26;
+
+/// Press feedback for a button sitting on a [GlassLayer]: the panel's glass
+/// swells up around [child] on pointer down and sinks back on release.
+///
+/// The glass work is the library's declarative [GlassSwell], driven from an
+/// [AnimatedBuilder]; the press animation stays this app's
+/// [UpDownAnimationController], whose independent rise/fall components
+/// (`scalarValue = rise * (1 - fall)`) keep a quick tap swelling smoothly
+/// through the release instead of flipping direction — which is why this
+/// composes [GlassSwell] rather than using the library's simpler
+/// [GlassPressSwell].
+class GlassMenuButton extends StatefulWidget {
+  final GlobalKey<GlassLayerState> layerKey;
+  final Widget child;
+
+  /// [child]'s own padding, taken back off so the swell follows the part of the
+  /// row that reads as a button rather than the whole tap target — a tap target
+  /// usually reaches further than what the eye calls the button, and a leading
+  /// item's can reach a lot further.
+  final EdgeInsets insets;
+  const GlassMenuButton(
+    this.layerKey,
+    this.child, {
+    super.key,
+    this.insets = EdgeInsets.zero,
+  });
+
+  /// The blob stays up at least this long after a press begins, no matter how
+  /// brief the tap was — a tap that came and went in 40ms should still read as
+  /// a press, and the down swing is delayed to make up the difference.
+  static const Duration minimumHold = Duration(milliseconds: 90);
+
+  /// How far out the panel's surface is pushed at the height of the press, in
+  /// logical pixels; `_glassMenuBulgePad` in main.dart budgets clip room for
+  /// it. The range softens the bulge into the rest of the panel — too short
+  /// and the pressed row looks like a step cut into the edge.
+  static const double swellDepth = 5;
+  static const double swellRange = 26;
+
+  @override
+  State<GlassMenuButton> createState() => _GlassMenuButtonState();
+}
+
+class _GlassMenuButtonState extends State<GlassMenuButton>
+    with SingleTickerProviderStateMixin {
+  late final UpDownAnimationController _press = UpDownAnimationController(
+    riseDuration: Duration(milliseconds: 120),
+    fallDuration: Duration(milliseconds: 100),
+    vsync: this,
+  );
+  DateTime _pressedAt = DateTime.now();
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _pressedAt = DateTime.now();
+    // from: 0 rather than plain forward(), which would try to resume from
+    // wherever a previous press left off — every press is its own swell.
+    _press.forward(from: 0);
+  }
+
+  void _handleRelease() {
+    final held = DateTime.now().difference(_pressedAt);
+    _press.reverse(
+      delay: held < GlassMenuButton.minimumHold
+          ? GlassMenuButton.minimumHold - held
+          : null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: _handlePointerDown,
+      onPointerUp: (_) => _handleRelease(),
+      onPointerCancel: (_) => _handleRelease(),
+      child: AnimatedBuilder(
+        animation: _press,
+        builder: (context, child) {
+          final p = Curves.easeOutCubic.transform(_press.scalarValue);
+          //tensionedGlassColor uses signals
+          return SignalBuilder(
+            builder: (context) => GlassSwell(
+              layerKey: widget.layerKey,
+              tint: tensionedGlassColor(context, p),
+              distortion: GlassMenuButton.swellDepth * p,
+              distortionRange: GlassMenuButton.swellRange,
+              insets: widget.insets,
+              child: child!,
+            ),
+          );
+        },
+        child: widget.child,
+      ),
+    );
   }
 }
