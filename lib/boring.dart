@@ -4147,6 +4147,25 @@ Color backgroundColorFor(ThemeData theme, bool isOn) {
 // ignore: deprecated_member_use
 typedef WallpaperPalette = CorePalette;
 
+/// The palettes the OS last handed us, or null off Android, before Android 12,
+/// and until the platform call comes back. Fetched (and held) regardless of
+/// whether [materialYouOn], so that switching the setting on restyles the app
+/// then and there — and so the setting's own icon can wear the colors it's
+/// offering while it's still off.
+final Signal<WallpaperPalette?> wallpaperPalette = Signal(null);
+
+/// The scheme the app takes on when Material You is on, whether or not it
+/// currently is — for previewing the setting. Falls back to the ambient scheme
+/// where the OS has no palette for us, which is also the scheme the setting
+/// would leave in place there.
+ColorScheme materialYouScheme(BuildContext context) {
+  final theme = Theme.of(context);
+  final palette = wallpaperPalette.value;
+  return palette == null
+      ? theme.colorScheme
+      : colorSchemeFromCorePalette(palette, theme.brightness);
+}
+
 /// The [ColorScheme] for a [WallpaperPalette] the OS handed us (see
 /// [materialYouOn]).
 ///
@@ -7344,6 +7363,148 @@ class PadStateIcon extends StatelessWidget {
       },
     );
   }
+}
+
+/// The Material You setting's icon: a disc of the three colour roles the
+/// setting most visibly moves — [ColorScheme.primary] over the top half,
+/// [ColorScheme.surfaceContainerHighest] bottom left and
+/// [ColorScheme.secondary] bottom right — struck through when off, ticked when
+/// on.
+///
+/// The flip is a handover rather than a crossfade or a morph: the strike
+/// retracts into its own tip, and then the tick draws itself on, its long arm
+/// running the strike's own angle so both moves carry the eye the one way — up
+/// and to the right.
+class MaterialYouIcon extends StatelessWidget {
+  final bool on;
+
+  /// The scheme the *disc* is drawn from — always the Material You one (see
+  /// [materialYouScheme]), on or off, since the disc shows what the setting is
+  /// offering rather than what's currently in force. The line art isn't part of
+  /// that offer, so it stays in the ambient theme.
+  final ColorScheme scheme;
+  final double span;
+
+  /// The line art's colour. Defaults to the ambient [ColorScheme.onSurface].
+  final Color? strokeColor;
+  const MaterialYouIcon({
+    super.key,
+    required this.on,
+    required this.scheme,
+    this.span = 30,
+    this.strokeColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lineColor = strokeColor ?? Theme.of(context).colorScheme.onSurface;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: on ? 1.0 : 0.0),
+      duration: const Duration(milliseconds: 420),
+      builder: (context, progress, _) => CustomPaint(
+        size: Size.square(span),
+        painter: MaterialYouIconPainter(
+          progress: progress,
+          scheme: scheme,
+          strokeColor: lineColor,
+        ),
+      ),
+    );
+  }
+}
+
+class MaterialYouIconPainter extends CustomPainter {
+  MaterialYouIconPainter({
+    required this.progress,
+    required this.scheme,
+    required this.strokeColor,
+  });
+
+  /// 0 is off (struck through), 1 is on (ticked).
+  final double progress;
+  final ColorScheme scheme;
+  final Color strokeColor;
+
+  /// The direction both the strike and the tick's long arm point — up and to
+  /// the right. Canvas angles run clockwise from east, so up is negative.
+  static const double _tipAngle = -pi / 4;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final span = min(size.width, size.height);
+    final center = Offset(size.width / 2, size.height / 2);
+    final stroke = span * 0.2;
+    final discRadius = span / 2;
+    final discRect = Rect.fromCircle(center: center, radius: discRadius);
+
+    // the full circle first, then the bottom half over it, then the bottom
+    // right quarter over that, so the wedges can't leave hairline seams where
+    // they meet (each one covers the last rather than abutting it).
+    void wedge(Color color, double startAngle, double sweep) => canvas.drawArc(
+      discRect,
+      startAngle,
+      sweep,
+      true,
+      Paint()..color = color,
+    );
+    wedge(scheme.primary, 0, 2 * pi);
+    wedge(scheme.surfaceContainerHighest, 0, pi);
+    wedge(scheme.secondary, 0, pi / 2);
+
+    final linePaint = Paint()
+      ..color = strokeColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt
+      ..strokeJoin = StrokeJoin.round;
+    // the strike, across the whole disc and overhanging it a little at each
+    // end.
+    final lineR = discRadius * 1.26;
+    final along = Offset.fromDirection(_tipAngle);
+    final strikeTip = center + along * lineR;
+    final strikeTail = center - along * lineR;
+
+    // the tick, tucked into the bottom right corner: its elbow rests on the
+    // bottom margin and its tip on the right one, and its long arm runs
+    // [_tipAngle], same as the strike.
+    final margin = stroke / 2 + span * 0.02;
+    final longArm = span * 0.36;
+    final shortArm = span * 0.2;
+    final tickElbow = Offset(size.width - margin, size.height - margin);
+    // the short arm arrives at the elbow heading down and to the right.
+    final tickTail = tickElbow - Offset.fromDirection(pi / 4, shortArm);
+
+    // The two don't morph into one another, they hand over, both moving the
+    // one way: the strike retracts up and to the right into its own tip, then
+    // the tick draws itself on, its long arm finishing in that same direction.
+    final lineGoingp = Curves.easeInCubic.transform(
+      unlerpUnit(0, 0.55, progress),
+    );
+    if (lineGoingp < 1) {
+      final strikeEnd = Offset.lerp(strikeTail, strikeTip, lineGoingp)!;
+      canvas.drawLine(strikeEnd, strikeTip, linePaint);
+    }
+    final tickp =
+        Curves.easeOutCubic.transform(unlerpUnit(0.45, 1, progress)) *
+        (shortArm + longArm);
+    if (tickp > 0) {
+      final path = Path()..moveTo(tickTail.dx, tickTail.dy);
+      // the elbow is at [shortArm] along, so before that it's still coming
+      // down the short arm, after it it's climbing the long one.
+      final head = tickp <= shortArm
+          ? tickTail + Offset.fromDirection(pi / 4, tickp)
+          : tickElbow + along * (tickp - shortArm);
+      if (tickp > shortArm) path.lineTo(tickElbow.dx, tickElbow.dy);
+      path.lineTo(head.dx, head.dy);
+      canvas.drawPath(path, linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant MaterialYouIconPainter oldDelegate) =>
+      oldDelegate.progress != progress ||
+      oldDelegate.strokeColor != strokeColor ||
+      oldDelegate.scheme != scheme;
 }
 
 /// A single [GestureRecognizer] for an inline [TextSpan] that fires both a tap

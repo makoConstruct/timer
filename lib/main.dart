@@ -1112,12 +1112,6 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late final JukeBox jukeBox;
   late final PredictiveBackRetractor _backRetractor;
 
-  /// The tonal palettes the OS derived from the wallpaper, for the Material You
-  /// setting; null off Android and before Android 12, and until the platform
-  /// call comes back. Fetched regardless of whether the setting is on (it's one
-  /// call) so that switching it on restyles the app then and there.
-  WallpaperPalette? _wallpaperPalette;
-
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
     jukeBox = JukeBox.create();
@@ -1139,12 +1133,10 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
 
   Future<void> _loadWallpaperPalette() async {
     // OptionalMethodChannel, so this is a null rather than a throw wherever the
-    // plugin isn't listening.
-    final palette = await DynamicColorPlugin.getCorePalette();
-    if (!mounted || palette == _wallpaperPalette) return;
-    setState(() {
-      _wallpaperPalette = palette;
-    });
+    // plugin isn't listening. It's a global signal rather than state of ours
+    // because the Material You setting's icon previews these colors even while
+    // the setting is off (see [wallpaperPalette]).
+    wallpaperPalette.value = await DynamicColorPlugin.getCorePalette();
   }
 
   @override
@@ -1196,7 +1188,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
       // the SignalBuilder is what notices the setting being switched.
       child: SignalBuilder(
         builder: (context) {
-          final wallpaper = materialYouOn() ? _wallpaperPalette : null;
+          final wallpaper = materialYouOn() ? wallpaperPalette.value : null;
           return MaterialApp(
             navigatorKey: rootNavigatorKey,
             scaffoldMessengerKey: globalScaffoldMessengerKey,
@@ -7273,16 +7265,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             BoolType(),
                           );
                           final on = materialYouMobj.value ?? false;
-                          return RoundedCheckboxListTile(
+                          return MenuTile(
                             title: settingTitle('Material You'),
                             subtitle: settingSubtitle(
                               on
                                   ? "On: colors follow your wallpaper"
                                   : "Off: a neutral canvas",
                             ),
-                            value: on,
-                            onChanged: (value) {
-                              materialYouMobj.value = value;
+                            // the wallpaper's own colors, not the app's current
+                            // ones, so the disc shows what's on offer even
+                            // while the setting is off (the SignalBuilder picks
+                            // up the palette arriving).
+                            trailing: MaterialYouIcon(
+                              on: on,
+                              scheme: materialYouScheme(context),
+                            ),
+                            onTap: () {
+                              materialYouMobj.value = !on;
                             },
                             contentPadding: listItemPadding,
                           );
@@ -7516,7 +7515,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (value) {
                             trainscapeModeMobj.value = value == true;
                           },
-                          contentPadding: listItemPadding,
+                          // no top pad, which halves the gap to the Thrival
+                          // button above (a tile's gap to its neighbour is the
+                          // two facing pads), tucking this in under the thing
+                          // it's about.
+                          contentPadding: const EdgeInsets.only(
+                            left: MenuTile.defaultPaddingInside,
+                            bottom: MenuTile.defaultPaddingInside,
+                          ),
                         );
                       },
                     ),
