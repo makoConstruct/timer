@@ -26,13 +26,19 @@ There is going to be a donation nag. In this house we believe that societies gro
 
 Things are generally persisted by setting a Mobj, which is a signal that persists the value to a sqlite db whenever it changes. A signal is like a stream but better, as it can be reacted to lazily. Signal.value gets the current value and subscribes to it if called from the builder of a SignalStatefulWidget or SignalBuilder or a Computed evaluator. Signal.peek() gets the value without subscribing. So, peek is mainly for event handlers.
 
+### compensation
+
+Naturally, since this project earns an income, we will try to reward really substantiative contributions with shares or payment. Specifics would have to be worked out on a case by case basis.
+
 ### style
 
-Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long.
+Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long *and* occurring more than twice.
 
 ## license
 
 It's BSL-1.1(Apache-2.0, non-compete), a fair source license, which means you can use the code for anything as long as it isn't a directly competing project (a timer app). Even that restriction goes away after 4 years, at which point it converts to Apache 2. "mako's timer" and its logo are trademarks of the licensor.
+
+The sound and icon assets are carved out of that license — see [ASSETS.md](ASSETS.md). Though many of them are already under permissive licenses, some are reserved only for distribution along with unmodified builds of the app. If people ever want to fork the old source (but why), we'll have to come up with some new icons and sounds for it.
 
 ## Building
 

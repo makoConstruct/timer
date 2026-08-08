@@ -1,23 +1,9 @@
 name: makos_timer
-description: "The most ergonomic timer. (set and initiate a timer with a single sweep)"
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: "none" # Remove this line if you wish to publish to pub.dev
+description: "The most ergonomic timer app."
+publish_to: "none"
 license: "BSL-1.1(Apache-2.0, non-compete)"
 
-# The following defines the version and build number for your application.
-# A version number is three numbers separated by dots, like 1.2.43
-# followed by an optional build number separated by a +.
-# Both the version and the builder number may be overridden in flutter
-# build by specifying --build-name and --build-number, respectively.
-# In Android, build-name is used as versionName while build-number used as versionCode.
-# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
-# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
-# Read more about iOS versioning at
-# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-# In Windows, build-name is used as the major, minor, and patch parts
-# of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 0.1.0
 
 environment:
   sdk: ^3.11.4
@@ -70,78 +56,22 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
-  # brick_offline_first_with_supabase_build: ^2.0.0
   flutter_lints: ^5.0.0
   build_runner: ^2.4.13
 
-# For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
-
-# The following section is specific to Flutter packages.
 flutter:
-  # Declare the platform audio plugin
-  # plugin:
-  #   platforms:
-  #     android:
-  #       package: org.dreamshrine.makos_timer
-  #       pluginClass: PlatformAudioPlugin
-
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
   assets:
-    # CC0: https://freesound.org/people/TEDAgame/sounds/448552/
-    # - assets/sounds/jarring piano sound 448552__tedagame__g4.ogg
-    # - assets/sounds/forceField_002_kenney.ogg
     - assets/sounds/jingles_STEEL15.ogg
     - assets/sounds/jingles_STEEL16.ogg
     - assets/sounds/june_russel_mako_timer_e-piano_1.ogg
     - assets/sounds/silent.ogg
-    - assets/journey/
     - assets/about.md
     - assets/how_made.md
     - assets/qr_code.svg
 
-  # An image asset can refer to one or more resolution-specific "variants", see
-  # https://flutter.dev/to/resolution-aware-images
-
-  # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
-
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
-  #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
   fonts:
-    # - family: DongleLatin
-    #   fonts:
-    #     - asset: assets/fonts/DongleLatin-Regular.ttf
-    #       weight: 400
-    #     - asset: assets/fonts/DongleLatin-Bold.ttf
-    #       weight: 700
     - family: Dongle
       fonts:
         - asset: assets/fonts/Dongle-Regular.ttf

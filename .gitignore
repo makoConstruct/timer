@@ -66,9 +66,9 @@ android/app/src/main/res/
 
 
 # temporary, haven't decided which binaries we're keeping yet
-assets/sounds/
-assets/fonts/
-assets/journey/
+assets/sounds/june_russel_mako_timer_e-piano_1.ogg
+assets/sounds/silent.wav
+assets/sounds/silent.ogg
 
 sorting sounds/
 .vscode/settings.json

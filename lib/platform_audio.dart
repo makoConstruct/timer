@@ -1,10 +1,6 @@
 import 'package:flutter/services.dart';
 
-enum PlatformAudioType {
-  ringtone,
-  notification,
-  alarm,
-}
+enum PlatformAudioType { ringtone, notification, alarm }
 
 class AudioInfo {
   /// a null uri means "use the default for the given category"
@@ -18,12 +14,21 @@ class AudioInfo {
     required this.isLong,
   });
 
-  static const defaultRingtone =
-      AudioInfo(url: null, name: 'Default Ringtone', isLong: true);
-  static const defaultNotification =
-      AudioInfo(url: null, name: 'Default Notification', isLong: false);
-  static const defaultAlarm =
-      AudioInfo(url: null, name: 'Default Alarm', isLong: true);
+  static const defaultRingtone = AudioInfo(
+    url: null,
+    name: 'Default Ringtone',
+    isLong: true,
+  );
+  static const defaultNotification = AudioInfo(
+    url: null,
+    name: 'Default Notification',
+    isLong: false,
+  );
+  static const defaultAlarm = AudioInfo(
+    url: null,
+    name: 'Default Alarm',
+    isLong: true,
+  );
 
   factory AudioInfo.fromMap(Map<dynamic, dynamic> map) {
     return AudioInfo(
@@ -34,11 +39,7 @@ class AudioInfo {
   }
 
   Map<String, dynamic> toMap() {
-    return {
-      'uri': url,
-      'name': name,
-      'isLong': isLong,
-    };
+    return {'uri': url, 'name': name, 'isLong': isLong};
   }
 }
 
@@ -46,7 +47,8 @@ class PlatformAudio {
   static const MethodChannel _channel = MethodChannel('platform_audio');
 
   static Future<List<AudioInfo>> getPlatformAudio(
-      PlatformAudioType type) async {
+    PlatformAudioType type,
+  ) async {
     try {
       final String typeString = type.name;
       final List<dynamic> result = await _channel.invokeMethod(
@@ -119,8 +121,9 @@ class PlatformAudio {
   /// arbitrary audio file. Returns null if they cancel.
   static Future<AudioInfo?> pickAudioFile() async {
     try {
-      final Map<dynamic, dynamic>? result =
-          await _channel.invokeMethod('pickAudioFile');
+      final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
+        'pickAudioFile',
+      );
       if (result == null) return null;
       return AudioInfo.fromMap(result);
     } on PlatformException catch (e) {
@@ -130,16 +133,24 @@ class PlatformAudio {
 
   static const List<AudioInfo> assetSounds = [
     AudioInfo(
-        url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
-        name: 'JR - Announcement',
-        isLong: false),
+      url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
+      name: 'JR - Announcement',
+      isLong: false,
+    ),
     AudioInfo(
-        url: 'asset://assets/sounds/jingles_STEEL16.ogg',
-        name: 'Steel Jingle 16',
-        isLong: false),
+      url: 'asset://assets/sounds/jingles_STEEL16.ogg',
+      name: 'Kenney - Steel Drum 16',
+      isLong: false,
+    ),
+    // AudioInfo(
+    //   url: 'asset://assets/sounds/jingles_STEEL15.ogg',
+    //   name: 'Kenney - Steel Jingle 15',
+    //   isLong: false,
+    // ),
     AudioInfo(
-        url: 'asset://assets/sounds/silent.ogg',
-        name: 'Silent',
-        isLong: false),
+      url: 'asset://assets/sounds/silent.ogg',
+      name: 'Silent',
+      isLong: false,
+    ),
   ];
 }
