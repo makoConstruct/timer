@@ -3927,9 +3927,9 @@ class DragActionRingState extends State<DragActionRing>
       final togetherp = fullArc.abs() < 1e-6
           ? 1.0
           : unlerpUnit(fullArc.abs(), 0, (endAngle - startAngle).abs());
-      final halfThickness =
+      double halfThickness =
           lerp(restHalfThickness, actionRadius, g) *
-          lerp(1, 1.12, Curves.easeIn.transform(togetherp));
+          (glassOn ? lerp(1, 1.12, Curves.easeIn.transform(togetherp)) : 1);
       ringTint = lerpColorThunks(
         () => mt.collapsedSpecialDragRingColor,
         () => glassOn
@@ -7491,7 +7491,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             );
                           },
-                          contentPadding: listItemPadding,
+                          contentPadding: const EdgeInsets.only(
+                            top: MenuTile.defaultPaddingInside,
+                            left: MenuTile.defaultPaddingInside,
+                            bottom: MenuTile.defaultPaddingInside / 3,
+                          ),
                         );
                       },
                     ),
@@ -7507,19 +7511,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: settingTitle('$trainscapeName Mode'),
                           subtitle: settingSubtitle(
                             'If enabled, app opens straight into Trainscape: Thrival',
-                            // trainscapeMode
-                            //     ? 'On: $trainscapeName opens over the timer screen when the app launches'
-                            //     : 'Off: the app launches into the timer screen as usual',
                           ),
                           value: trainscapeMode,
                           onChanged: (value) {
                             trainscapeModeMobj.value = value == true;
                           },
-                          // no top pad, which halves the gap to the Thrival
-                          // button above (a tile's gap to its neighbour is the
-                          // two facing pads), tucking this in under the thing
-                          // it's about.
                           contentPadding: const EdgeInsets.only(
+                            top: MenuTile.defaultPaddingInside / 3,
                             left: MenuTile.defaultPaddingInside,
                             bottom: MenuTile.defaultPaddingInside,
                           ),

@@ -5878,64 +5878,98 @@ class TimerculeFlatterCyclePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final c = Offset.zero;
+    // how much the top of the loop bows: the angle the top arc sweeps. Zero
+    // gives the flat-topped shape this used to be.
+    const topArcRad = pi * 0.3;
+
     final cr = timerculeIconRounding;
     final boxSize = Size(
       timerculeIconRectWidth * 0.5 - 2 * cr,
       timerculeIconRectHeight - 2 * cr,
     );
     final arcDiameter = 2 * cr + timerculeIconRectHeight * 0.24;
-    final height = boxSize.height + arcDiameter;
-    final boxPartWidth = boxSize.width + 2 * cr + timerculeIconGap;
-    final boxTop = height / 2 - boxSize.height;
-    // final width = boxPartWidth + arcDiameter/2;
-    final arrowBoxUL =
-        c + Offset(-boxPartWidth / 2, height / 2 - boxSize.height);
+    // the height it would have with a flat top, which is also the diameter of
+    // the end caps
+    final flatHeight = boxSize.height + arcDiameter;
+    final halfW = (boxSize.width + 2 * cr + timerculeIconGap) / 2;
 
-    void halfCircle(
-      Path toPath, {
-      required Offset start,
-      required Offset end,
-      required bool clockwise,
-    }) {
-      toPath.arcBetweenOffsets(
-        start: start,
-        end: end,
-        centerPoint: (start + end) / 2,
-        clockwise: clockwise,
-      );
+    // The top arc is tangent to both end caps, which is what decides its radius
+    // and where the caps have to stop: [th] short of their tops. It bulges
+    // [rise] above where the flat top was, so everything else shifts down half
+    // of that to keep the shape centred.
+    const th = topArcRad / 2;
+    final capR = flatHeight / 2;
+    final rise = halfW * tan(th / 2);
+    final capCenterY = rise / 2;
+    final bottom = capCenterY + capR;
+    final boxTop = bottom - boxSize.height;
+    final domeCenter = Offset(0, capCenterY + halfW / tan(th));
+    // the tangent points, where each cap hands over to the top arc
+    final joinR = Offset(halfW + capR * sin(th), capCenterY - capR * cos(th));
+    final joinL = mirrorx(joinR);
+
+    // The hole's end caps meet the top arc at those same points (the top of the
+    // ring is a pinch: outer and inner edge are the same arc, so the top stays
+    // exactly 2*cr thick). Their radius is whatever lands them back on the
+    // hole's floor.
+    final holeR = (boxTop - joinR.dy) / (1 + cos(th));
+    final holeCenterR = joinR - Offset(sin(th), -cos(th)) * holeR;
+    final holeCenterL = mirrorx(holeCenterR);
+    // the mouth's right wall stays vertical, so it's the hole cap, not the
+    // outer cap, that says where it is
+    final faceX = holeCenterR.dx;
+    final faceBottom = Offset(
+      faceX,
+      capCenterY + sqrt(capR * capR - (faceX - halfW) * (faceX - halfW)),
+    );
+
+    void topArc(Path toPath, Offset start, Offset end, bool clockwise) {
+      if (topArcRad < 1e-6) {
+        toPath.lineToOffset(end);
+      } else {
+        toPath.arcBetweenOffsets(
+          start: start,
+          end: end,
+          centerPoint: domeCenter,
+          clockwise: clockwise,
+        );
+      }
     }
 
     final r = Path();
     r.addPath(
-      rightwardsArrowBoxWithoutCr(arrowBoxUL, boxSize, toClose: false),
+      rightwardsArrowBoxWithoutCr(
+        Offset(-halfW, boxTop),
+        boxSize,
+        toClose: false,
+      ),
       Offset.zero,
     );
-    halfCircle(
-      r,
-      start: c + Offset(-boxPartWidth / 2, height / 2),
-      end: c + Offset(-boxPartWidth / 2, -height / 2),
+    r.arcBetweenOffsets(
+      start: Offset(-halfW, bottom),
+      end: joinL,
+      centerPoint: Offset(-halfW, capCenterY),
       clockwise: true,
     );
-    r.lineToOffset(c + Offset(boxPartWidth / 2, -height / 2));
-    halfCircle(
-      r,
-      start: c + Offset(boxPartWidth / 2, -height / 2),
-      end: c + Offset(boxPartWidth / 2, height / 2),
+    topArc(r, joinL, joinR, true);
+    r.arcBetweenOffsets(
+      start: joinR,
+      end: faceBottom,
+      centerPoint: Offset(halfW, capCenterY),
       clockwise: true,
     );
-    r.lineToOffset(c + Offset(boxPartWidth / 2, boxTop));
-    halfCircle(
-      r,
-      start: c + Offset(boxPartWidth / 2, boxTop),
-      end: c + Offset(boxPartWidth / 2, -height / 2),
+    r.lineToOffset(Offset(faceX, boxTop));
+    r.arcBetweenOffsets(
+      start: Offset(faceX, boxTop),
+      end: joinR,
+      centerPoint: holeCenterR,
       clockwise: false,
     );
-    r.lineToOffset(c + Offset(-boxPartWidth / 2, -height / 2));
-    halfCircle(
-      r,
-      start: c + Offset(-boxPartWidth / 2, -height / 2),
-      end: c + Offset(-boxPartWidth / 2, boxTop),
+    topArc(r, joinR, joinL, false);
+    r.arcBetweenOffsets(
+      start: joinL,
+      end: Offset(-faceX, boxTop),
+      centerPoint: holeCenterL,
       clockwise: false,
     );
     r.close();
@@ -7368,13 +7402,15 @@ class PadStateIcon extends StatelessWidget {
 /// The Material You setting's icon: a disc of the three colour roles the
 /// setting most visibly moves — [ColorScheme.primary] over the top half,
 /// [ColorScheme.surfaceContainerHighest] bottom left and
-/// [ColorScheme.secondary] bottom right — struck through when off, ticked when
+/// [ColorScheme.secondary] bottom right — struck through when off, bare when
 /// on.
 ///
-/// The flip is a handover rather than a crossfade or a morph: the strike
-/// retracts into its own tip, and then the tick draws itself on, its long arm
-/// running the strike's own angle so both moves carry the eye the one way — up
-/// and to the right.
+/// The strike sits in a slot cut clean through the disc — a real hole, not a
+/// line in the background colour, since the background here is an inkwell and
+/// has no colour to match.
+///
+/// The flip isn't a crossfade: the strike retracts into its own tip, up and to
+/// the right, taking its slot with it and leaving the disc to speak for itself.
 class MaterialYouIcon extends StatelessWidget {
   final bool on;
 
@@ -7400,7 +7436,7 @@ class MaterialYouIcon extends StatelessWidget {
     final lineColor = strokeColor ?? Theme.of(context).colorScheme.onSurface;
     return TweenAnimationBuilder<double>(
       tween: Tween(end: on ? 1.0 : 0.0),
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 220),
       builder: (context, progress, _) => CustomPaint(
         size: Size.square(span),
         painter: MaterialYouIconPainter(
@@ -7420,14 +7456,18 @@ class MaterialYouIconPainter extends CustomPainter {
     required this.strokeColor,
   });
 
-  /// 0 is off (struck through), 1 is on (ticked).
+  /// 0 is off (struck through), 1 is on (bare).
   final double progress;
   final ColorScheme scheme;
   final Color strokeColor;
 
-  /// The direction both the strike and the tick's long arm point — up and to
-  /// the right. Canvas angles run clockwise from east, so up is negative.
+  /// The direction the strike points — up and to the right. Canvas angles run
+  /// clockwise from east, so up is negative.
   static const double _tipAngle = -pi / 4;
+
+  /// The width of the hole punched out below the strike, as a fraction of the
+  /// strike's own width.
+  static const double _gapWidth = 0.45;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -7437,6 +7477,23 @@ class MaterialYouIconPainter extends CustomPainter {
     final discRadius = span / 2;
     final discRect = Rect.fromCircle(center: center, radius: discRadius);
 
+    // the strike, across the whole disc and overhanging it a little at each
+    // end.
+    final lineR = discRadius * 1.26;
+    final along = Offset.fromDirection(_tipAngle);
+    final strikeTip = center + along * lineR;
+    final strikeTail = center - along * lineR;
+
+    // the tail chases the tip, so the strike leaves the way it points.
+    final lineGoingp = Curves.easeInCubic.transform(progress);
+    final strikeEnd = Offset.lerp(strikeTail, strikeTip, lineGoingp)!;
+    final struck = lineGoingp < 1;
+
+    // The slot the strike sits in is cut out of the disc rather than painted
+    // over it: there's no fixed colour to paint it in, the row behind being an
+    // inkwell. So the disc goes into its own layer and the slot is cleared out
+    // of it, letting whatever is behind show through.
+    canvas.saveLayer(discRect, Paint());
     // the full circle first, then the bottom half over it, then the bottom
     // right quarter over that, so the wedges can't leave hairline seams where
     // they meet (each one covers the last rather than abutting it).
@@ -7450,53 +7507,38 @@ class MaterialYouIconPainter extends CustomPainter {
     wedge(scheme.primary, 0, 2 * pi);
     wedge(scheme.surfaceContainerHighest, 0, pi);
     wedge(scheme.secondary, 0, pi / 2);
-
-    final linePaint = Paint()
-      ..color = strokeColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.butt
-      ..strokeJoin = StrokeJoin.round;
-    // the strike, across the whole disc and overhanging it a little at each
-    // end.
-    final lineR = discRadius * 1.26;
-    final along = Offset.fromDirection(_tipAngle);
-    final strikeTip = center + along * lineR;
-    final strikeTail = center - along * lineR;
-
-    // the tick, tucked into the bottom right corner: its elbow rests on the
-    // bottom margin and its tip on the right one, and its long arm runs
-    // [_tipAngle], same as the strike.
-    final margin = stroke / 2 + span * 0.02;
-    final longArm = span * 0.36;
-    final shortArm = span * 0.2;
-    final tickElbow = Offset(size.width - margin, size.height - margin);
-    // the short arm arrives at the elbow heading down and to the right.
-    final tickTail = tickElbow - Offset.fromDirection(pi / 4, shortArm);
-
-    // The two don't morph into one another, they hand over, both moving the
-    // one way: the strike retracts up and to the right into its own tip, then
-    // the tick draws itself on, its long arm finishing in that same direction.
-    final lineGoingp = Curves.easeInCubic.transform(
-      unlerpUnit(0, 0.55, progress),
-    );
-    if (lineGoingp < 1) {
-      final strikeEnd = Offset.lerp(strikeTail, strikeTip, lineGoingp)!;
-      canvas.drawLine(strikeEnd, strikeTip, linePaint);
+    if (struck) {
+      // The cut is the strike's own line, shifted perpendicular to it, down
+      // and to the right. It's shifted by less than its own width, so it stays
+      // overlapping the strike rather than abutting it — abutting edges leave
+      // a hairline seam — and [_gapWidth] of it shows past the strike's lower
+      // edge, the strike covering the rest when it goes on top.
+      final gapShift = Offset.fromDirection(
+        _tipAngle + pi / 2,
+        stroke * _gapWidth,
+      );
+      canvas.drawLine(
+        strikeEnd + gapShift,
+        strikeTip + gapShift,
+        Paint()
+          ..blendMode = BlendMode.clear
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..strokeCap = StrokeCap.round,
+      );
     }
-    final tickp =
-        Curves.easeOutCubic.transform(unlerpUnit(0.45, 1, progress)) *
-        (shortArm + longArm);
-    if (tickp > 0) {
-      final path = Path()..moveTo(tickTail.dx, tickTail.dy);
-      // the elbow is at [shortArm] along, so before that it's still coming
-      // down the short arm, after it it's climbing the long one.
-      final head = tickp <= shortArm
-          ? tickTail + Offset.fromDirection(pi / 4, tickp)
-          : tickElbow + along * (tickp - shortArm);
-      if (tickp > shortArm) path.lineTo(tickElbow.dx, tickElbow.dy);
-      path.lineTo(head.dx, head.dy);
-      canvas.drawPath(path, linePaint);
+    canvas.restore();
+
+    if (struck) {
+      canvas.drawLine(
+        strikeEnd,
+        strikeTip,
+        Paint()
+          ..color = strokeColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..strokeCap = StrokeCap.round,
+      );
     }
   }
 
