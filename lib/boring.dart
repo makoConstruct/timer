@@ -123,7 +123,8 @@ bool materialYouOn() =>
 /// The corner style a platform expects before the user has an opinion: iOS
 /// rounds everything continuously, everyone else uses circular arcs.
 bool get continuousCornersDefault =>
-    defaultTargetPlatform == TargetPlatform.iOS;
+    defaultTargetPlatform == TargetPlatform.iOS ||
+    defaultTargetPlatform == TargetPlatform.macOS;
 
 /// Whether rounded boxes are currently drawn with continuous corners. Reading
 /// this from a reactive build (a [SignalStatefulWidget], a `SignalBuilder`, an
@@ -133,40 +134,19 @@ bool continuousCornersOn() =>
     Mobj.getAlreadyLoaded(continuousCornersID, BoolType()).value ??
     continuousCornersDefault;
 
-/// A continuous corner leaves the edge earlier but stays flatter through the
-/// turn, so at an equal radius it reads as *less* rounded than a circular arc.
-/// Radii passed to the helpers here are multiplied by this when continuous
-/// corners are on — it's the one knob to turn to make them rounder or tighter.
-/// (The glass menu compensates the same way, harder, in `_buildGlassBody`,
-/// because a blob's corner term rounds off more than an [RSuperellipse]'s.)
-const double continuousCornerScale = 1.0;
-
-/// [radius] adjusted for the current corner style, for geometry that has to be
-/// worked out in plain numbers rather than handed to one of the helpers below.
-double cornerStyleRadius(double radius) =>
-    continuousCornersOn() ? radius * continuousCornerScale : radius;
-
 /// The rounded-box [ShapeBorder] for the current corner style, for the things
 /// that take a shape rather than a radius ([Material], [ShapeDecoration],
-/// button styles). Pass `scale: false` for a radius that has to match something
-/// physical — the screen's own corners — rather than merely look right.
-/// [continuous] defaults to [continuousCornersOn]; see [drawCornerStyled] for
-/// when to pass it explicitly instead.
+/// button styles). [continuous] defaults to [continuousCornersOn]; see
+/// [drawCornerStyled] for when to pass it explicitly instead.
 ShapeBorder cornerStyleBorder(
   BorderRadiusGeometry borderRadius, {
   BorderSide side = BorderSide.none,
-  bool scale = true,
   bool? continuous,
 }) => (continuous ?? continuousCornersOn())
-    ? RoundedSuperellipseBorder(
-        borderRadius: scale
-            ? borderRadius * continuousCornerScale
-            : borderRadius,
-        side: side,
-      )
+    ? RoundedSuperellipseBorder(borderRadius: borderRadius, side: side)
     : RoundedRectangleBorder(borderRadius: borderRadius, side: side);
 
-/// A clip in the current corner style. See [cornerStyleBorder] for [scale].
+/// A clip in the current corner style.
 ///
 /// Always a [ClipPath], never a [ClipRRect]/[ClipRSuperellipse] pair: a clip
 /// whose widget *type* changed with the setting would deactivate and re-inflate
@@ -177,19 +157,16 @@ ShapeBorder cornerStyleBorder(
 Widget cornerStyleClip({
   required BorderRadiusGeometry borderRadius,
   Clip clipBehavior = Clip.antiAlias,
-  bool scale = true,
   required Widget child,
 }) => ClipPath(
-  clipper: ShapeBorderClipper(
-    shape: cornerStyleBorder(borderRadius, scale: scale),
-  ),
+  clipper: ShapeBorderClipper(shape: cornerStyleBorder(borderRadius)),
   clipBehavior: clipBehavior,
   child: child,
 );
 
-/// Draws a rounded rect on [canvas] in the given corner style, scaling [radius]
-/// the way the rest of these helpers do. Painters take [continuous] as an
-/// argument rather than calling [continuousCornersOn] themselves, so that the
+/// Draws a rounded rect on [canvas] in the given corner style. Painters take
+/// [continuous] as an argument rather than calling [continuousCornersOn]
+/// themselves, so that the
 /// widget that builds them captures it (and can compare it in `shouldRepaint`).
 void drawCornerStyled(
   Canvas canvas,
@@ -200,7 +177,7 @@ void drawCornerStyled(
 }) {
   if (continuous) {
     canvas.drawRSuperellipse(
-      RSuperellipse.fromRectAndRadius(rect, radius * continuousCornerScale),
+      RSuperellipse.fromRectAndRadius(rect, radius),
       paint,
     );
   } else {
@@ -2553,7 +2530,6 @@ Widget screenCornerScaleDown(
   return Transform.scale(
     scale: scale,
     child: cornerStyleClip(
-      scale: false,
       borderRadius: BorderRadius.only(
         topLeft: Radius.circular(corners.topLeft),
         topRight: Radius.circular(corners.topRight),
@@ -4525,6 +4501,9 @@ class OurThemeData {
   }
 }
 
+final BackdropKey ourGlassBackdropKey = BackdropKey();
+// final BackdropKey? ourGlassBackdropKey = null;
+
 /// Our standard [GlassOptions]. Differs from the package defaults only in a
 /// crisper backdrop [blurRadius]; go through this so the app's glass look stays
 /// consistent across the timer menu and drag rings. [blurRadius] and [edgeTint]
@@ -4560,7 +4539,7 @@ GlassOptions glassLerpedToFlat(GlassOptions options, double glassiness) =>
       edgeTint: options.edgeTint.withValues(
         alpha: options.edgeTint.a * glassiness,
       ),
-      bevelThickness: options.bevelThickness * glassiness,
+      bevelThickness: options.bevelThickness,
     );
 
 Positioned positionedAt(Offset offset, Widget child) {
@@ -5974,7 +5953,7 @@ class TimerculeFlatterCyclePainter extends CustomPainter {
     );
     r.close();
 
-    timerculeIconScaling(canvas, size, furtherScaling: 0.9);
+    timerculeIconScaling(canvas, size, furtherScaling: 0.95);
     _drawRoundedPolygon(canvas, r, color, cr);
   }
 

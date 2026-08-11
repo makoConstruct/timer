@@ -1272,7 +1272,7 @@ class TimerMenu extends StatefulWidget {
 
   /// Goes on the body's [GlassLayer] so that items can inject their press
   /// highlight into the same merged surface; see [GlassMenuButton]. Created by
-  /// whoever builds [items], since they need it too. —Claude Opus 5
+  /// whoever builds [items], since they need it too. —Opus 5
   final GlobalKey<GlassLayerState> glassLayerKey;
 
   /// Duration of the upward reveal. The downward (closing) swing is a separate,
@@ -1466,7 +1466,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
               downwardProgress: downwardProgress,
               opacity: contentOpacity,
               origin: origin,
-              cornerRounding: cornerRounding * lerp(1, 1.62, cornerStyle),
+              cornerRounding: cornerRounding,
               width: width,
               topInset: topHeadroom,
               bulgeInset: _glassMenuBulgePad,
@@ -1478,7 +1478,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
               // The glass box deliberately overhangs its content, and near the
               // top or the sides of the screen it can overhang the stack too;
               // let it. What's actually offscreen the backdrop filter trims for
-              // itself, against the render target. —Claude Opus 5
+              // itself, against the render target. —Opus 5
               clipBehavior: Clip.none,
               children: [
                 Positioned(
@@ -1515,7 +1515,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
     // The same idea on the other three sides, for the body's own edge band and
     // for the swell a pressed item pushes out through it ([GlassMenuButton]).
     // The menu is still [width] wide; this is transparent margin around it.
-    // —Claude Opus 5
+    // —Opus 5
     required double bulgeInset,
     required Color tint,
     required double cornerStyle,
@@ -1546,6 +1546,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
 
     return GlassLayer(
       key: widget.glassLayerKey,
+      backdropGroupKey: ourGlassBackdropKey,
       options: ourGlassOptions(
         mode: glassOn ? GlassMode.glass : GlassMode.flat,
         blendRadius: blendRadius,
@@ -1654,8 +1655,8 @@ const double _glassMenuTopPad = 32;
 /// the content: enough for a pressed item's swell plus the shine band around
 /// the displaced edge. The GlassLayer clips its shading to its own box, so
 /// anything the blobs reach past the content has to be paid for in box size.
-/// —Claude Opus 5
-const double _glassMenuBulgePad = GlassMenuButton.swellDepth + 6;
+/// —Opus 5
+const double _glassMenuBulgePad = GlassMenuButton.swellDepth + 7;
 
 abstract class TimerBase extends SignalStatefulWidget {
   final Mobj<TimerData> mobj;
@@ -4044,6 +4045,7 @@ class DragActionRingState extends State<DragActionRing>
     final Widget clippedRing = blobs.isEmpty
         ? const SizedBox.shrink()
         : GlassLayer(
+            backdropGroupKey: ourGlassBackdropKey,
             options: glassLerpedToFlat(
               ourGlassOptions(
                 mode: glassOn ? GlassMode.glass : GlassMode.flat,
@@ -4280,12 +4282,14 @@ class TimerScreenState extends State<TimerScreen>
   });
   late final ScrollController timersScroller = ScrollController();
 
-  /// Fades in a subtle shadow beneath the numeral pad backing while the timer
-  /// tray is scrolled down (content slid under the pad), giving the pad depth.
-  late final AnimationController numeralBackshadowController =
-      AnimationController(
+  /// Rises while the timer tray is scrolled down (content slid under the pad),
+  /// giving the numeral pad backing depth: a subtle shadow beneath it, or — in
+  /// glass mode, where a shadow would be wrong — the pad turning to glass.
+  late final UpDownAnimationController numeralBackshadowController =
+      UpDownAnimationController(
         vsync: this,
-        duration: const Duration(milliseconds: 700),
+        riseDuration: const Duration(milliseconds: 700),
+        fallDuration: const Duration(milliseconds: 300),
       );
   late final AnimationController squishPanelController = AnimationController(
     vsync: this,
@@ -4426,11 +4430,34 @@ class TimerScreenState extends State<TimerScreen>
 
   void _updateNumeralBackshadow() {
     final scrolledDown = timersScroller.hasClients && timersScroller.offset > 0;
-    if (scrolledDown) {
-      numeralBackshadowController.forward();
-    } else {
-      numeralBackshadowController.reverse();
-    }
+    numeralBackshadowController.towards(scrolledDown);
+  }
+
+  bool _snappingTimersScroll = false;
+
+  /// If the tray comes to rest less than one timer up from the bottom, roll it back down to the bottom, to make sure numeral backing transparency isn't activated unwantedly
+  void _settleTimersScroll() {
+    if (_snappingTimersScroll || !timersScroller.hasClients) return;
+    final position = timersScroller.position;
+    final double span = Timer.usualHeight();
+    if (position.pixels <= 0 || position.pixels >= span) return;
+    _snappingTimersScroll = true;
+    // the scroll end notification is dispatched from within beginActivity,
+    // before it has installed the idle activity, so an animation started here
+    // would be clobbered the moment we return. Wait for the stack to unwind.
+    scheduleMicrotask(() {
+      if (!mounted || !timersScroller.hasClients) {
+        _snappingTimersScroll = false;
+        return;
+      }
+      timersScroller
+          .animateTo(
+            0,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+          )
+          .whenComplete(() => _snappingTimersScroll = false);
+    });
   }
 
   @override
@@ -4636,7 +4663,7 @@ class TimerScreenState extends State<TimerScreen>
         : TimerBaseState.backgroundColor(td.hue);
     // Items inject their press highlight into the menu body's glass, so they
     // need its layer; it's made here rather than in TimerMenu because both
-    // sides of that split need it. —Claude Opus 5
+    // sides of that split need it. —Opus 5
     final glassLayerKey = GlobalKey<GlassLayerState>();
     Widget menuItem(
       BuildContext context,
@@ -4651,7 +4678,7 @@ class TimerScreenState extends State<TimerScreen>
       // The padding is resolved here rather than left to an EvenPadding inside,
       // because the swell blob has to be inset by the same amount to land on
       // the row the eye sees — the tap target runs to the column's edges, and
-      // the leading item's also covers the nub's headroom. —Claude Opus 5
+      // the leading item's also covers the nub's headroom. —Opus 5
       return EvenPadBuilder((context, extraPadding) {
         final insets =
             extraPadding.resolve(top: menuItemPadding + arrowHeight) +
@@ -5122,6 +5149,7 @@ class TimerScreenState extends State<TimerScreen>
                   );
 
               return GlassLayer(
+                backdropGroupKey: ourGlassBackdropKey,
                 options: ourGlassOptions(
                   mode: glassOn ? GlassMode.glass : GlassMode.flat,
                   // a fat bridge while the satellites are still budding off,
@@ -5312,42 +5340,97 @@ class TimerScreenState extends State<TimerScreen>
       },
     );
 
+    final Rect numeralBackingRect = controlGridBound(
+      padLandscape ? Offset(-4, 0) : Offset(-3, 0),
+      padLandscape ? Size(4, 3) : Size(3, 4),
+      // ),
+      // ).deflate(backingDeflation),
+    ).inflate(backingInflation);
+    final double numeralBackingRadius = buttonSpan / 2 + backingInflation;
+    // Transparent headroom around the pad: a GlassLayer clips its shading to
+    // its own bounds, so the bevel and rim shine of a blob flush with the edge
+    // would be cut off. The flat path pads back in by the same amount, so the
+    // pad lands in the same place either way.
+    const double numeralBackingPadding = 26.0;
     Widget numeralBacking = Positioned.fromRect(
-      rect: controlGridBound(
-        padLandscape ? Offset(-4, 0) : Offset(-3, 0),
-        padLandscape ? Size(4, 3) : Size(3, 4),
-        // ),
-        // ).deflate(backingDeflation),
-      ).inflate(backingInflation),
+      rect: numeralBackingRect.inflate(numeralBackingPadding),
       child: SignalBuilder(
         builder: (context) {
           final continuous = continuousCornersOn();
+          final glassOn = Mobj.getAlreadyLoaded(
+            liquidGlassOnID,
+            BoolType(),
+          ).value!;
           return AnimatedBuilder(
             animation: numeralBackshadowController,
             builder: (context, child) {
               final shadowp = Curves.easeInOut.transform(
-                numeralBackshadowController.value,
+                numeralBackshadowController.scalarValue,
               );
-              return Container(
-                constraints: BoxConstraints.expand(),
-                decoration: BoxDecoration(
-                  color: mt.foreBackColor,
-                  borderRadius: BorderRadius.circular(
-                    buttonSpan / 2 + backingInflation,
+              if (!glassOn) {
+                return Padding(
+                  padding: const EdgeInsets.all(numeralBackingPadding),
+                  child: Container(
+                    constraints: BoxConstraints.expand(),
+                    decoration: BoxDecoration(
+                      color: mt.foreBackColor,
+                      borderRadius: BorderRadius.circular(numeralBackingRadius),
+                      boxShadow: shadowp <= 0
+                          ? null
+                          : [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: 0.17 * shadowp,
+                                ),
+                                blurRadius: 20,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                    ).cornerStyledWith(continuous),
                   ),
-                  boxShadow: shadowp <= 0
-                      ? null
-                      : [
-                          BoxShadow(
-                            color: Colors.black.withValues(
-                              alpha: 0.17 * shadowp,
-                            ),
-                            blurRadius: 20,
-                            spreadRadius: 1,
-                          ),
-                        ],
-                ).cornerStyledWith(continuous),
-              );
+                );
+              } else if (shadowp <= 0) {
+                return Padding(
+                  padding: const EdgeInsets.all(numeralBackingPadding),
+                  child: Container(
+                    constraints: BoxConstraints.expand(),
+                    decoration: BoxDecoration(
+                      color: mt.foreBackColor,
+                      borderRadius: BorderRadius.circular(numeralBackingRadius),
+                      boxShadow: null,
+                    ).cornerStyledWith(continuous),
+                  ),
+                );
+              } else {
+                return GlassLayer(
+                  backdropGroupKey: ourGlassBackdropKey,
+                  options: glassLerpedToFlat(
+                    ourGlassOptions(
+                      mode: GlassMode.glass,
+                      blurRadius: mt.glassBlurRadius,
+                      edgeTint: mt.edgeTint,
+                    ),
+                    shadowp,
+                  ),
+                  blobs: [
+                    GlassBlob(
+                      center:
+                          Offset(numeralBackingPadding, numeralBackingPadding) +
+                          sizeToOffset(numeralBackingRect.size / 2),
+                      radii: numeralBackingRect.size / 2,
+                      cornerRadius: numeralBackingRadius,
+                      cornerContinuity: continuous ? 1 : 0,
+                      // deliberately not mt.glassColor: the pad keeps its own
+                      // surface color and only picks up a little transparency,
+                      // so going to glass barely disturbs the layout's colors.
+                      tint: mt.foreBackColor.withValues(
+                        alpha: lerp(1, 0.65, shadowp),
+                      ),
+                    ),
+                  ],
+                  child: const SizedBox.expand(),
+                );
+              }
             },
           );
         },
@@ -5676,21 +5759,32 @@ class TimerScreenState extends State<TimerScreen>
                                   },
                                 ),
                                 Expanded(
-                                  child: SingleChildScrollView(
-                                    controller: timersScroller,
-                                    reverse: true,
-                                    child: Padding(
-                                      padding: EdgeInsets.only(
-                                        top:
-                                            screenSize.height -
-                                            controlsh -
-                                            timerHeight -
-                                            timerGap / 2,
-                                        bottom: controlsh + timerGap / 2,
+                                  child:
+                                      NotificationListener<
+                                        ScrollEndNotification
+                                      >(
+                                        onNotification: (notification) {
+                                          if (notification.depth == 0) {
+                                            _settleTimersScroll();
+                                          }
+                                          return false;
+                                        },
+                                        child: SingleChildScrollView(
+                                          controller: timersScroller,
+                                          reverse: true,
+                                          child: Padding(
+                                            padding: EdgeInsets.only(
+                                              top:
+                                                  screenSize.height -
+                                                  controlsh -
+                                                  timerHeight -
+                                                  timerGap / 2,
+                                              bottom: controlsh + timerGap / 2,
+                                            ),
+                                            child: timersWidget,
+                                          ),
+                                        ),
                                       ),
-                                      child: timersWidget,
-                                    ),
-                                  ),
                                 ),
                               ],
                             ),
@@ -9196,7 +9290,7 @@ class _GlassMenuButtonState extends State<GlassMenuButton>
     with SingleTickerProviderStateMixin {
   late final UpDownAnimationController _press = UpDownAnimationController(
     riseDuration: Duration(milliseconds: 120),
-    fallDuration: Duration(milliseconds: 100),
+    fallDuration: Duration(milliseconds: 200),
     vsync: this,
   );
   DateTime _pressedAt = DateTime.now();
@@ -9232,7 +9326,10 @@ class _GlassMenuButtonState extends State<GlassMenuButton>
       child: AnimatedBuilder(
         animation: _press,
         builder: (context, child) {
-          final p = Curves.easeOutCubic.transform(_press.scalarValue);
+          final (rise, fall) = _press.value;
+          final p =
+              Curves.easeOutCubic.transform(rise) *
+              (1 - Curves.easeInOut.transform(fall));
           //tensionedGlassColor uses signals
           return SignalBuilder(
             builder: (context) => GlassSwell(

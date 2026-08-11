@@ -10,13 +10,11 @@ If you encounter a task that would benefit much from human help, ask the human t
 
 ## Style
 
-Follow style guides in README.md ## contributing
+Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long *and* occurring more than twice.
 
-Don't leave excessive comments, if the code is self-explanatory, no comment.
+Don't leave comments unless the code is especially difficult to understand.
 
-Sign all of your comments with your name, including model name.
-
-Comments should be written for new readers, not for the user approving the edit.
+If you do write a comment, sign it with your model variant name.
 
 ## Project Overview
 

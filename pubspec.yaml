@@ -49,9 +49,9 @@ dependencies:
   dynamic_color: ^1.8.1
   material_color_utilities: ^0.13.0
 
-# dependency_overrides:
-#   just_liquid_glass:
-#     path: ../just_liquid_glass
+dependency_overrides:
+  just_liquid_glass:
+    path: ../just_liquid_glass
 
 dev_dependencies:
   flutter_test:
