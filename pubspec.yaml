@@ -42,16 +42,17 @@ dependencies:
   vibration: ^3.1.8
   shadow_widget: ^0.1.1
   flutter_svg: ^2.0.9
-  just_liquid_glass: ^0.5.0
+  just_liquid_glass: ^0.6.0
   flutter_markdown_plus: ^1.0.3
   markdown: ^7.3.1
   url_launcher: ^6.3.1
   dynamic_color: ^1.8.1
   material_color_utilities: ^0.13.0
+  swipeable_page_route: ^0.4.8
 
-dependency_overrides:
-  just_liquid_glass:
-    path: ../just_liquid_glass
+# dependency_overrides:
+#   just_liquid_glass:
+#     path: ../just_liquid_glass
 
 dev_dependencies:
   flutter_test:
@@ -63,10 +64,10 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/sounds/jingles_STEEL15.ogg
-    - assets/sounds/jingles_STEEL16.ogg
-    - assets/sounds/june_russel_mako_timer_e-piano_1.ogg
-    - assets/sounds/silent.ogg
+    - assets/sounds/jingles_STEEL15.wav
+    - assets/sounds/jingles_STEEL16.wav
+    - assets/sounds/june_russel_mako_timer_e-piano_1.wav
+    - assets/sounds/silent.wav
     - assets/about.md
     - assets/how_made.md
     - assets/qr_code.svg

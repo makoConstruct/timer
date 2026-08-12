@@ -54,6 +54,58 @@ class PlatformNotifications {
     }
   }
 
+  /// Replaces the whole pending set. iOS-only: android keeps a live foreground
+  /// service instead of scheduling ahead, so there's nothing to hand over to.
+  static Future<void> scheduleCompletions(
+    List<Map<String, Object?>> items,
+  ) async {
+    try {
+      await _channel.invokeMethod('scheduleCompletions', {'items': items});
+    } on PlatformException catch (e) {
+      debugPrint('scheduleCompletions failed: ${e.message}');
+    } on MissingPluginException {
+      // non-iOS — no-op
+    }
+  }
+
+  /// Shows the system prompt, once ever. Returns whether it was granted.
+  static Future<bool> requestAuthorization() async {
+    try {
+      return await _channel.invokeMethod<bool>('requestAuthorization') ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('requestAuthorization failed: ${e.message}');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// 'notDetermined' | 'denied' | 'authorized' | 'provisional' | 'ephemeral',
+  /// or null where the platform doesn't gate notifications this way.
+  static Future<String?> notificationStatus() async {
+    try {
+      return await _channel.invokeMethod<String>('notificationStatus');
+    } on PlatformException catch (e) {
+      debugPrint('notificationStatus failed: ${e.message}');
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Opens this app's page in system settings. The only recourse once the user
+  /// has refused: iOS asks exactly once and never again.
+  static Future<bool> openSystemSettings() async {
+    try {
+      return await _channel.invokeMethod<bool>('openSystemSettings') ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('openSystemSettings failed: ${e.message}');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   static Future<void> cancelAll() async {
     try {
       await _channel.invokeMethod('cancelAll');

@@ -1,30 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Regenerates the sound assets that aren't committed (assets/sounds/ is
-# gitignored), so collaborators can produce the files platform_audio.dart and
-# pubspec.yaml expect.
+# Regenerates the sound assets that aren't committed (they're gitignored), so
+# collaborators can produce the files platform_audio.dart and pubspec.yaml
+# expect.
+#
+# Everything ships as 16-bit PCM wav. iOS accepts nothing else as a notification
+# sound, so one wav serves both in-app playback and the alarm notification,
+# where an ogg could serve neither. The whole sound payload lands under a
+# megabyte, against ~8.5MB of fonts. — Opus 5
 
 cd "$(dirname "$0")"
 
 SOUNDS=assets/sounds
-ANNOUNCEMENT_SRC=$SOUNDS/june_russel_mako_timer_e-piano_1.wav
-ANNOUNCEMENT_DST=$SOUNDS/june_russel_mako_timer_e-piano_1.ogg
 SILENT_WAV=$SOUNDS/silent.wav
-SILENT_OGG=$SOUNDS/silent.ogg
 
-command -v ffmpeg >/dev/null 2>&1 || { echo "Error: ffmpeg not found. Install it (e.g. pacman -S ffmpeg)."; exit 1; }
-[[ -f "$ANNOUNCEMENT_SRC" ]] || { echo "Error: source file missing: $ANNOUNCEMENT_SRC"; exit 1; }
+command -v ffmpeg >/dev/null 2>&1 || {
+  echo "Error: ffmpeg not found. Install it (e.g. pacman -S ffmpeg, brew install ffmpeg)."
+  exit 1
+}
 
-# "JR - Announcement". -q:a 5 is what the shipped version was encoded at:
-# vorbis, 44100 Hz stereo, ~115 kb/s actual.
-ffmpeg -hide_banner -loglevel error -y -i "$ANNOUNCEMENT_SRC" -c:a libvorbis -q:a 5 "$ANNOUNCEMENT_DST"
-echo "wrote $ANNOUNCEMENT_DST"
-
-# "Silent". 1.3s of nothing, 48 kHz mono; the ogg is opus at its lowest useful
-# bitrate, which lands at well under a kilobyte.
-ffmpeg -hide_banner -loglevel error -y -f lavfi -i anullsrc=r=48000:cl=mono -t 1.3 -c:a pcm_s16le "$SILENT_WAV"
+# "Silent". 1.3s of nothing, 48 kHz mono.
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i anullsrc=r=48000:cl=mono \
+  -t 1.3 -c:a pcm_s16le "$SILENT_WAV"
 echo "wrote $SILENT_WAV"
 
-ffmpeg -hide_banner -loglevel error -y -i "$SILENT_WAV" -c:a libopus -b:a 6k "$SILENT_OGG"
-echo "wrote $SILENT_OGG"
+# Kenney's jingles only reached us as vorbis, so their wavs are decoded from the
+# committed oggs rather than being masters of their own. "JR - Announcement"
+# needs no step here: its wav is the committed master. — Opus 5
+for n in jingles_STEEL15 jingles_STEEL16; do
+  [[ -f "$SOUNDS/$n.ogg" ]] || {
+    echo "Error: source file missing: $SOUNDS/$n.ogg"
+    exit 1
+  }
+  ffmpeg -hide_banner -loglevel error -y -i "$SOUNDS/$n.ogg" \
+    -c:a pcm_s16le "$SOUNDS/$n.wav"
+  echo "wrote $SOUNDS/$n.wav"
+done

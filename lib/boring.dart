@@ -262,7 +262,7 @@ void scrollToWithPadding(
 // On Linux, uses audioplayers instead since platform_audio doesn't work there, though audioplayers doesn't work perfectly, we're not actually doing a linux target, linux is just for testing
 class JukeBox {
   static final AssetSource _defaultSound = AssetSource(
-    'sounds/jingles_STEEL16.ogg',
+    'sounds/jingles_STEEL16.wav',
   );
   AudioPlayer? _audioPlayer; // Only used on Linux
 
@@ -2539,248 +2539,6 @@ Widget screenCornerScaleDown(
       child: child,
     ),
   );
-}
-
-/// Custom page route that combines the screen-corner scale-down of the route
-/// below with, coming in, whatever [routeTransitionAnimation] currently is.
-class CircularRevealRoute<T> extends PageRoute<T>
-    with MaterialRouteTransitionMixin<T> {
-  final Widget Function(BuildContext context) builder;
-  final Offset? buttonCenter;
-  final GlobalKey? iconOriginKey;
-
-  /// The way the incoming screen travels, for transitions that are directional
-  /// (the reveals aren't). Defaults to "outward from the origin", ie, from the
-  /// origin towards the middle of the screen.
-  final Offset? motionDirection;
-  final Duration _transitionDuration;
-  final Duration _reverseTransitionDuration;
-
-  CircularRevealRoute({
-    required this.builder,
-    this.buttonCenter,
-    this.iconOriginKey,
-    this.motionDirection,
-    Duration transitionDuration = const Duration(milliseconds: 380),
-    Duration reverseTransitionDuration = const Duration(milliseconds: 270),
-  }) : _transitionDuration = transitionDuration,
-       _reverseTransitionDuration = reverseTransitionDuration,
-       // Never let a transition rasterize our screens into a snapshot.
-       // [ZoomPageTransitionsBuilder] does it by default and it goes wrong for
-       // us two ways: a BackdropFilter rasterized offscreen has no backdrop to
-       // sample, so glass surfaces come out black mid-animation; and the raster
-       // is only dropped on the animation's final status callback, which a
-       // route torn down mid-flight (as [PredictiveBackRetractor] can do) may
-       // never deliver, leaving a frozen still of the screen that looks alive
-       // but doesn't respond to anything.
-       super(allowSnapshotting: false);
-
-  @override
-  Widget buildContent(BuildContext context) => builder(context);
-
-  /// The transition controller, re-exposed (it's protected) so
-  /// [PredictiveBackRetractor] can play the reveal backwards during the back
-  /// gesture.
-  AnimationController get transitionController => controller!;
-
-  @override
-  bool get opaque => animation?.isCompleted ?? false;
-
-  // Force our own duration, don't let mixin override it
-  @override
-  Duration get transitionDuration => _transitionDuration;
-
-  @override
-  Duration get reverseTransitionDuration => _reverseTransitionDuration;
-
-  @override
-  bool get maintainState => true;
-
-  @override
-  bool canTransitionFrom(TransitionRoute<dynamic> previousRoute) => true;
-
-  @override
-  Widget buildTransitions(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    // ModalRoute rebuilds this every frame of either animation, so the origin
-    // is re-resolved each frame: [iconOriginKey] is usually a widget on the
-    // incoming screen, which hasn't been laid out yet on the first frame.
-    final screenSize = MediaQuery.sizeOf(context);
-    final revealOrigin =
-        boxRect(iconOriginKey)?.center ??
-        buttonCenter ??
-        Offset(screenSize.width / 2, screenSize.height * 2.4);
-    final motion =
-        motionDirection ??
-        normalizedOr(
-          Offset(screenSize.width / 2, screenSize.height / 2) - revealOrigin,
-          const Offset(0, -1),
-        );
-    return routeTransitionAnimation(revealOrigin, motion)(
-      context,
-      this,
-      animation,
-      secondaryAnimation,
-      child,
-    );
-  }
-}
-
-/// Android predictive back: once the system back gesture travels past
-/// [_retractionThreshold], the top [CircularRevealRoute]'s pop transition
-/// starts playing at its normal rate — before the finger lifts — and dragging
-/// back below the threshold (toward the screen edge) reverses it, re-revealing
-/// the screen. Committing the gesture then does the actual pop, whose
-/// transition continues from wherever the early animation had gotten
-/// (instantly, if it already finished); cancelling re-reveals.
-///
-/// Doesn't claim the gesture for the root route (the system's back-to-home
-/// animation should play there), for routes a [PopScope] is blocking (their
-/// pop-intercepting callback still runs on commit, as before), or for non-
-/// [CircularRevealRoute]s like dialogs. Requires
-/// `android:enableOnBackInvokedCallback="true"` in the manifest; on platforms
-/// without predictive back the gesture events never arrive and back behaves as
-/// before.
-class PredictiveBackRetractor with WidgetsBindingObserver {
-  final GlobalKey<NavigatorState> navigatorKey;
-  PredictiveBackRetractor(this.navigatorKey) {
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  void dispose() {
-    _route = null;
-    _endUserGesture();
-    WidgetsBinding.instance.removeObserver(this);
-  }
-
-  CircularRevealRoute<dynamic>? _route;
-
-  /// The navigator we've told a gesture is in progress, until we tell it the
-  /// gesture is over. Must never be left set: while a navigator thinks a user
-  /// gesture is running it wraps every one of its routes in an [IgnorePointer],
-  /// so dropping this ball freezes the whole app to touch while still painting
-  /// normally — and freezes this class too, since we refuse to start a gesture
-  /// while one is in progress.
-  NavigatorState? _gesturing;
-
-  /// The gesture progress past which the retraction plays. Kept small because
-  /// the system's progress only reaches 1.0 with the thumb clear across the
-  /// screen, while real back gestures barely travel.
-  static const double _retractionThreshold = 0.07;
-
-  @override
-  bool handleStartBackGesture(PredictiveBackEvent backEvent) {
-    // If we're still holding a gesture here, its commit/cancel never arrived;
-    // let it go rather than wedging ourselves shut forever.
-    _endUserGesture();
-    final navigator = navigatorKey.currentState;
-    if (navigator == null || navigator.userGestureInProgress) return false;
-    // there's no public "top route" accessor; this predicate-peek is the
-    // conventional workaround (popUntil never pops when we return true)
-    Route<dynamic>? top;
-    navigator.popUntil((route) {
-      top = route;
-      return true;
-    });
-    final route = top;
-    if (route is! CircularRevealRoute ||
-        route.isFirst ||
-        !route.transitionController.isCompleted ||
-        route.popDisposition != RoutePopDisposition.pop) {
-      return false;
-    }
-    _route = route;
-    _gesturing = navigator;
-    navigator.didStartUserGesture();
-    return true;
-  }
-
-  @override
-  void handleUpdateBackGestureProgress(PredictiveBackEvent backEvent) {
-    final route = _route;
-    if (route == null || route.navigator == null) return;
-    final controller = route.transitionController;
-    final retracting =
-        controller.status == AnimationStatus.reverse ||
-        controller.status == AnimationStatus.dismissed;
-    if (backEvent.progress >= _retractionThreshold) {
-      if (!retracting) controller.reverse();
-    } else {
-      if (retracting) controller.forward();
-    }
-  }
-
-  @override
-  void handleCommitBackGesture() {
-    final route = _route;
-    _route = null;
-    if (route == null || route.navigator == null) {
-      _endUserGesture();
-      return;
-    }
-    final navigator = route.navigator!;
-    if (route.isCurrent) {
-      navigator.pop();
-    } else if (route.isActive) {
-      // Something got pushed over it mid-gesture. Leaving it as it is would
-      // strand a route we've already retracted out of sight, and an invisible
-      // route still has a modal barrier swallowing every touch.
-      navigator.removeRoute(route);
-    }
-    _stopUserGestureWhenSettled(route);
-  }
-
-  @override
-  void handleCancelBackGesture() {
-    final route = _route;
-    _route = null;
-    if (route == null || route.navigator == null) {
-      _endUserGesture();
-      return;
-    }
-    route.transitionController.forward();
-    _stopUserGestureWhenSettled(route);
-  }
-
-  /// Only report the gesture over once the transition settles, so the
-  /// navigator doesn't let another gesture grab the route mid-flight
-  /// (mirrors Cupertino's back-swipe controller).
-  void _stopUserGestureWhenSettled(CircularRevealRoute<dynamic> route) {
-    // Disposed already (removeRoute does that synchronously): nothing left to
-    // wait on, and its controller would throw if we touched it.
-    if (route.navigator == null) {
-      _endUserGesture();
-      return;
-    }
-    final controller = route.transitionController;
-    if (!controller.isAnimating) {
-      _endUserGesture();
-      return;
-    }
-    late final AnimationStatusListener onSettle;
-    onSettle = (status) {
-      if (status.isAnimating) return;
-      _endUserGesture();
-      // The pop's own status listener runs before ours and disposes the route,
-      // and a disposed controller throws when touched, so only detach while
-      // the route is still alive. If it isn't, the controller is gone anyway.
-      if (route.navigator != null) controller.removeStatusListener(onSettle);
-    };
-    controller.addStatusListener(onSettle);
-  }
-
-  /// Balances the [NavigatorState.didStartUserGesture] from the gesture start,
-  /// exactly once, and safely if the navigator has gone away since.
-  void _endUserGesture() {
-    final navigator = _gesturing;
-    if (navigator == null) return;
-    _gesturing = null;
-    if (navigator.mounted) navigator.didStopUserGesture();
-  }
 }
 
 /// Route for pages that should clip to screen corners and scale when covered
@@ -7269,12 +7027,15 @@ class RoundedSectionSliver extends StatelessWidget {
   final EdgeInsetsGeometry padding;
 
   static const double defaultMargin = 12;
+
+  static const double contentRadius =
+      MenuTile.trailingSlotSpan / 2 + defaultMargin;
   const RoundedSectionSliver({
     super.key,
     required this.child,
     required this.color,
     this.radius,
-    this.margin = const EdgeInsets.fromLTRB(defaultMargin, 0, defaultMargin, 0),
+    this.margin = const EdgeInsets.symmetric(horizontal: defaultMargin),
     this.padding = const EdgeInsets.all(16),
   });
 
@@ -7286,7 +7047,9 @@ class RoundedSectionSliver extends StatelessWidget {
       max(cornerRadius, cornerRadius),
       max(cornerRadius, cornerRadius),
     );
-    final r = radius ?? max(0.0, screenRounding - horizontalInset);
+    final r =
+        radius ??
+        min(contentRadius, max(0.0, screenRounding - horizontalInset));
     return SliverPadding(
       padding: margin,
       sliver: SliverToBoxAdapter(

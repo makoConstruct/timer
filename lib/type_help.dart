@@ -454,11 +454,21 @@ class JourneyPlayerType extends TypeHelp<JourneyPlayer> {
 class AudioInfoType extends TypeHelp<AudioInfo> {
   AudioInfoType() : super('AudioInfo');
 
+  /// Our sounds shipped as ogg until iOS, which can neither decode it nor take
+  /// it as a notification sound. Selections persisted before that still name the
+  /// old file, on every platform, and only the container changed. — Opus 5
+  static String? _movedToWav(String? uri) =>
+      uri != null && uri.startsWith('asset://') && uri.endsWith('.ogg')
+      ? '${uri.substring(0, uri.length - '.ogg'.length)}.wav'
+      : uri;
+
   @override
   AudioInfo fromJsonValue(Object? json) {
     if (json is Map<String, dynamic>) {
       return AudioInfo(
-        url: json['uri'] != null ? StringType().fromJson(json['uri']) : null,
+        url: json['uri'] != null
+            ? _movedToWav(StringType().fromJson(json['uri']))
+            : null,
         name: StringType().fromJson(json['name']),
         isLong: BoolType().fromJson(json['isLong']),
       );

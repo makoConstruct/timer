@@ -21,6 +21,7 @@ import 'package:just_liquid_glass/just_liquid_glass.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
+import 'package:swipeable_page_route/swipeable_page_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter/scheduler.dart' hide Priority;
@@ -455,8 +456,20 @@ class TimerHolm {
     required this.list,
     required this.jukeBox,
     bool dismissOnForeground = true,
+    DateTime? fastForwardTo,
   }) {
     allTimers = MobjRegistry.createQuerySet(TimerDataType());
+    if (fastForwardTo != null) _fastForwardAll(fastForwardTo);
+    enliven();
+    _backgroundedReaction = effect(() {
+      if (dismissOnForeground && !isBackgrounded.value) {
+        dismissAlarms();
+      }
+    });
+  }
+
+  /// Subscribes every timer, arming its alarms from whatever state it's in.
+  void enliven() {
     // runs every time a new timer is created or loaded
     _newTimerReaction = allTimers.forAll((mobj) {
       if (!tracking.containsKey(mobj.id)) {
@@ -465,11 +478,96 @@ class TimerHolm {
         tt.subscription = enlivenTimer(tt, mobj, jukeBox);
       }
     });
-    _backgroundedReaction = effect(() {
-      if (dismissOnForeground && !isBackgrounded.value) {
-        dismissAlarms();
+  }
+
+  /// Drops every subscription and pending alarm, leaving the mobjs alone.
+  void unenliven() {
+    _newTimerReaction.cancel();
+    for (final id in tracking.keys.toList()) {
+      stopTracking(id);
+    }
+  }
+
+  /// Moves every timer to where it should be at [to]. Unenlivens first because
+  /// an alarm armed before the correction was armed against the state it's
+  /// correcting, and would fire against that instead. — Opus 5
+  void fastForward(DateTime to) {
+    unenliven();
+    _fastForwardAll(to);
+    enliven();
+  }
+
+  /// iOS caps an app at 64 pending notifications. The cap is ours alone and we
+  /// replace the whole set each time, so all 64 are available — the last is held
+  /// back to say we ran out rather than going quiet without explanation.
+  static const _notificationSlots = 64;
+
+  /// Nothing of ours runs while iOS has us suspended, so a backgrounded alarm
+  /// only sounds if the OS was told in advance. Repeatedly takes the soonest
+  /// event across every running timer, rather than draining one timer first,
+  /// which would starve the others. — Opus 5
+  void scheduleBackgroundAlarms() {
+    final now = DateTime.now();
+    final streams = <MapEntry<Mobj<TimerData>, Iterator<DateTime>>>[];
+    for (final id in list.peek() ?? const []) {
+      final mobj = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+      if (mobj == null || !(mobj.peek()?.isRunning ?? false)) continue;
+      final fires = upcomingFires(mobj).iterator;
+      if (fires.moveNext()) streams.add(MapEntry(mobj, fires));
+    }
+
+    final fallback = Mobj.getAlreadyLoaded(
+      selectedAudioID,
+      AudioInfoType(),
+    ).peek();
+    final items = <Map<String, Object?>>[];
+    DateTime? ranOutAt;
+
+    while (streams.isNotEmpty) {
+      var soonest = 0;
+      for (var i = 1; i < streams.length; i++) {
+        if (streams[i].value.current.isBefore(streams[soonest].value.current)) {
+          soonest = i;
+        }
       }
-    });
+      final at = streams[soonest].value.current;
+      if (items.length >= _notificationSlots - 1) {
+        ranOutAt = at;
+        break;
+      }
+      final mobj = streams[soonest].key;
+      final d = mobj.peek();
+      final delay = at.difference(now);
+      if (!delay.isNegative) {
+        items.add({
+          'identifier': '${mobj.id}#${items.length}',
+          'seconds': delay.inMilliseconds / 1000.0,
+          'title': 'timer complete',
+          'body': d?.title ?? 'tap to dismiss',
+          'soundUri': (d?.soundEffect ?? fallback)?.url,
+        });
+      }
+      if (!streams[soonest].value.moveNext()) streams.removeAt(soonest);
+    }
+
+    if (ranOutAt != null) {
+      items.add({
+        'identifier': 'slots-exhausted',
+        'seconds': ranOutAt.difference(now).inMilliseconds / 1000.0,
+        'title': 'notification limit reached',
+        'body': 'some timers are still running, open the app',
+        'soundUri': fallback?.url,
+      });
+    }
+
+    PlatformNotifications.scheduleCompletions(items);
+  }
+
+  void _fastForwardAll(DateTime to) {
+    for (final id in list.peek() ?? const []) {
+      final mobj = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+      if (mobj != null) fastForwardTimer(mobj, to);
+    }
   }
 
   void dismissAlarms() {
@@ -525,6 +623,17 @@ class TimerHolm {
   void _timerGoesOff(TimerTrack tt, Mobj<TimerData> mobj) {
     final d = mobj.value!;
     tt.completionTimer = null;
+    // No dart runs while iOS has us suspended, so on resume every completion we
+    // slept through arrives at once. Those already went off as notifications, so
+    // catching up should move state without making a sound. — Opus 5
+    final due = d.startTime.add(
+      Duration(microseconds: (totalDuration(d) * 1000000).round()),
+    );
+    if (DateTime.now().difference(due) > const Duration(seconds: 3)) {
+      mobj.value = d.withRunningState(TimerData.completed);
+      returnAndContinueParent(mobj);
+      return;
+    }
     if (d.soundsOnStart) {
       // alarm already played at start; complete silently
       mobj.value = d.withRunningState(TimerData.completed);
@@ -551,6 +660,10 @@ class TimerHolm {
       } else {
         jukeBox.playAudio(audio);
         mobj.value = d.withRunningState(TimerData.completed);
+        // since an ios app can't just play audio in a background thread, it often can only play through a scheduled notification. so when firing while backgrounded, we should do a notification for consistency.
+        if (Platform.isIOS && isBackgrounded.peek()) {
+          _sendCompletionNotification(tt);
+        }
       }
       // actuate any parent timers
       returnAndContinueParent(mobj);
@@ -814,8 +927,195 @@ void pauseTimer(Mobj<TimerData> mobj, {required bool reset}) {
   _pauseTimer(rootTimer(mobj), reset: reset);
 }
 
-/// important, if it returns true, that means it was synchronous and it's done, it wont leave an asynchronous timer or whatever running and then call back in through returnAndContinueParent, so you should continue to run the next one.
-/// the boolean return has the same meaning for all the methods below too
+/// Moves [mobj] to the state it should hold at [to], for when we've been
+/// suspended and no dart ran. Must happen before enlivening: the completion
+/// timers enlivening arms are computed from whatever state it finds, so running
+/// it after would leave stale ones to race the corrected ones. Silent by
+/// design — everything it skips past already went off as a notification.
+/// — Opus 5
+void fastForwardTimer(Mobj<TimerData> mobj, DateTime to) {
+  final d = mobj.peek();
+  if (d == null || !d.isRunning) return;
+  final total = totalDuration(d);
+  final elapsed = to.difference(d.startTime).inMicroseconds / 1000000.0;
+  if (elapsed <= 0) return;
+
+  switch (d.kind) {
+    case TimerKind.stopwatch:
+      return;
+    case TimerKind.timer:
+      if (elapsed >= total) {
+        mobj.value = _completed(d);
+      }
+    case TimerKind.loop:
+      // A cycle repeats forever, so where it sits is elapsed modulo one lap
+      // rather than however many laps we slept through. — Opus 5
+      if (total <= 0) return;
+      _fastForwardSequence(d, elapsed % total, to);
+    case TimerKind.series:
+      if (elapsed >= total) {
+        for (final id in d.children) {
+          final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+          if (c?.peek() != null) c!.value = _completed(c.peek()!);
+        }
+        mobj.value = _completed(d);
+      } else {
+        _fastForwardSequence(d, elapsed, to);
+      }
+    case TimerKind.parallelStartJustified:
+    case TimerKind.parallelEndJustified:
+      for (final id in d.children) {
+        final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+        if (c != null) fastForwardTimer(c, to);
+      }
+      if (elapsed >= total) {
+        mobj.value = _completed(d);
+      }
+  }
+}
+
+/// Not withChanges: reaching completed also has to settle ranTime to the full
+/// duration, or [TimerData.transpired] still reads as barely started and the pie
+/// draws empty. — Opus 5
+TimerData _completed(TimerData d) => d.withRunningState(TimerData.completed);
+
+/// Places a series/loop at [pos] seconds into one pass of its children.
+void _fastForwardSequence(TimerData parent, double pos, DateTime to) {
+  var remaining = pos;
+  var placed = false;
+  for (final id in parent.children) {
+    final child = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+    final cd = child?.peek();
+    if (child == null || cd == null) continue;
+    if (placed) {
+      child.value = cd.withChanges(runningState: TimerData.paused);
+    } else {
+      final td = totalDuration(cd);
+      if (remaining < td) {
+        child.value = cd.withChanges(
+          runningState: TimerData.running,
+          startTime: to.subtract(
+            Duration(microseconds: (remaining * 1000000).round()),
+          ),
+        );
+        // a composite child still has to place its own children within itself
+        if (cd.isComposite) fastForwardTimer(child, to);
+        placed = true;
+      } else {
+        remaining -= td;
+        child.value = _completed(cd);
+      }
+    }
+  }
+}
+
+/// iOS asks for notification permission exactly once ever, and refusing leaves
+/// an alarm that can't sound once the app is closed, with nothing on screen to
+/// say so. Making a timer is when the user has shown they want one, so that's
+/// when to ask — or, if it's already too late to ask, to point at the only way
+/// back. — Opus 5
+Future<void> ensureNotificationPermission() async {
+  if (!Platform.isIOS) return;
+  final status = await PlatformNotifications.notificationStatus();
+  if (status == null || status == 'authorized' || status == 'provisional') {
+    return;
+  }
+  if (status == 'notDetermined') {
+    await PlatformNotifications.requestAuthorization();
+    return;
+  }
+  globalScaffoldMessengerKey.currentState?.showSnackBar(
+    SnackBar(
+      duration: const Duration(seconds: 6),
+      content: const Text(
+        "you denied notification permissions, so timers wont work reliably until "
+        "you go into settings, find the settings for this app, and enable "
+        "notifications.",
+      ),
+      action: SnackBarAction(
+        label: 'settings',
+        onPressed: PlatformNotifications.openSystemSettings,
+      ),
+    ),
+  );
+}
+
+Duration _seconds(double s) => Duration(microseconds: (s * 1000000).round());
+
+/// Every completion this subtree is going to reach, in order, starting from
+/// where it currently is. Lazy because a loop's sequence is endless: take only
+/// as many as there are notification slots for. — Opus 5
+Iterable<DateTime> upcomingFires(Mobj<TimerData> mobj) sync* {
+  final d = mobj.peek();
+  if (d == null || !d.isRunning) return;
+  switch (d.kind) {
+    case TimerKind.stopwatch:
+      return;
+    case TimerKind.timer:
+      yield d.startTime.add(_seconds(totalDuration(d)));
+    case TimerKind.parallelStartJustified:
+    case TimerKind.parallelEndJustified:
+      for (final id in d.children) {
+        final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+        if (c != null) yield* upcomingFires(c);
+      }
+    case TimerKind.series:
+    case TimerKind.loop:
+      final children = d.children
+          .map((id) => Mobj.seekTypedAlreadyLoaded(id, TimerDataType()))
+          .whereType<Mobj<TimerData>>()
+          .toList();
+      if (children.isEmpty) return;
+      var index = children.indexWhere((c) => c.peek()?.isRunning ?? false);
+      if (index < 0) index = 0;
+      // only the running child keeps its own start; everything after it is
+      // reckoned from when its predecessor lands
+      yield* upcomingFires(children[index]);
+      var cursor = children[index].peek()!.startTime.add(
+        _seconds(totalDuration(children[index].peek()!)),
+      );
+      final wraps = d.kind == TimerKind.loop;
+      var i = index + 1;
+      while (true) {
+        if (i >= children.length) {
+          if (!wraps) return;
+          i = 0;
+        }
+        yield* _firesFrom(children[i], cursor);
+        cursor = cursor.add(_seconds(totalDuration(children[i].peek()!)));
+        i++;
+      }
+  }
+}
+
+/// As above for a run that hasn't begun yet, so every time comes off [start]
+/// rather than off any stored startTime.
+Iterable<DateTime> _firesFrom(Mobj<TimerData> mobj, DateTime start) sync* {
+  final d = mobj.peek();
+  if (d == null) return;
+  switch (d.kind) {
+    case TimerKind.stopwatch:
+      return;
+    case TimerKind.timer:
+      yield start.add(_seconds(totalDuration(d)));
+    case TimerKind.parallelStartJustified:
+    case TimerKind.parallelEndJustified:
+      for (final id in d.children) {
+        final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+        if (c != null) yield* _firesFrom(c, start);
+      }
+    case TimerKind.series:
+    case TimerKind.loop:
+      var cursor = start;
+      for (final id in d.children) {
+        final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
+        if (c?.peek() == null) continue;
+        yield* _firesFrom(c!, cursor);
+        cursor = cursor.add(_seconds(totalDuration(c.peek()!)));
+      }
+  }
+}
+
 bool startTimer(
   Mobj<TimerData> mobj, {
   bool reset = false,
@@ -971,6 +1271,8 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
   }
 }
 
+/// important, if it returns true, that means it was synchronous and it's done, it wont leave an asynchronous timer or whatever running and then call back in through returnAndContinueParent, so you should continue to run the next one.
+/// the boolean return has the same meaning for all the methods below too
 bool _startSingle(Mobj<TimerData> mobj, {Duration? delay}) {
   final data = mobj.peek()!;
   if (data.isRunning) return false;
@@ -1110,7 +1412,6 @@ class TimersApp extends StatefulWidget {
 
 class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   late final JukeBox jukeBox;
-  late final PredictiveBackRetractor _backRetractor;
 
   _TimersAppState() {
     WidgetsFlutterBinding.ensureInitialized();
@@ -1126,7 +1427,6 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     WidgetsBinding.instance.addObserver(this);
-    _backRetractor = PredictiveBackRetractor(rootNavigatorKey);
 
     // start listening to all currently existing timers (I'd like if this were listening to the lists, but we tried implementing that with background task and it was complicated and didn't quite come together, again, we don't need to, there's only one other place new timers are added through)
   }
@@ -1144,7 +1444,13 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       isBackgrounded.value = true;
+      // The last moment our dart runs, and iOS won't call us on termination, so
+      // this is where the alarms have to be handed over. — Opus 5
+      if (Platform.isIOS) globalTimerHolm?.scheduleBackgroundAlarms();
     } else if (state == AppLifecycleState.resumed) {
+      // Before anything else reacts to being foregrounded: no dart ran while we
+      // were suspended, so every timer is still where we left it. — Opus 5
+      globalTimerHolm?.fastForward(DateTime.now());
       isBackgrounded.value = false;
       // they may have been off changing their wallpaper or theme style.
       _loadWallpaperPalette();
@@ -1153,7 +1459,6 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    _backRetractor.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -1198,17 +1503,16 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
             darkTheme: makeTheme(Brightness.light, wallpaper),
             onGenerateRoute: (settings) {
               if (settings.name == '/') {
-                return CircularRevealRoute(builder: (context) => TimerScreen());
+                return SwipeablePageRoute(builder: (context) => TimerScreen());
               }
               if (settings.name == '/onboard') {
-                return CircularRevealRoute(
+                return SwipeablePageRoute(
                   builder: (context) => OnboardScreen(),
-                  iconOriginKey: configButtonKey,
                 );
               }
               // abandoned on journey_game branch
               // if (settings.name == '/journeying') {
-              //   return CircularRevealRoute(
+              //   return SwipeablePageRoute(
               //     builder: (context) => const JourneyingGameScreen(),
               //   );
               // }
@@ -1217,7 +1521,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
             onGenerateInitialRoutes: (initialRouteName) {
               // if (initialRouteName == '/journeying') {
               //   return <Route<dynamic>>[
-              //     CircularRevealRoute(
+              //     SwipeablePageRoute(
               //       builder: (context) => const JourneyingGameScreen(),
               //     ),
               //   ];
@@ -1230,9 +1534,9 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                     Mobj.getAlreadyLoaded(trainscapeModeID, BoolType()).value ??
                     false;
                 return <Route<dynamic>>[
-                  CircularRevealRoute(builder: (context) => TimerScreen()),
+                  SwipeablePageRoute(builder: (context) => TimerScreen()),
                   if (trainscapeMode)
-                    CircularRevealRoute(
+                    SwipeablePageRoute(
                       builder: (context) => const TrainscapeScreen(),
                     ),
                 ];
@@ -1248,10 +1552,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                     ),
                     transitionDuration: Duration.zero,
                   ),
-                  CircularRevealRoute(
+                  SwipeablePageRoute(
                     builder: (context) => OnboardScreen(isRootal: true),
-                    reverseTransitionDuration: Duration(milliseconds: 350),
-                    iconOriginKey: configButtonKey,
                   ),
                 ];
               }
@@ -4515,6 +4817,7 @@ class TimerScreenState extends State<TimerScreen>
     timerHolm = globalTimerHolm = TimerHolm(
       list: timerListMobj,
       jukeBox: jukeBox,
+      fastForwardTo: DateTime.now(),
     );
 
     // my impression so far is that apple forbid you from running stuff in the background on iOS (unless you're an application for which it would create bad PR for them to kill you), so you can't really make the best timer apps there. On iOS, we're going to have to approach this in a very hacky way.
@@ -4812,12 +5115,11 @@ class TimerScreenState extends State<TimerScreen>
                         WidgetsBinding.instance.addPostFrameCallback((_) async {
                           final result = await Navigator.push<AudioInfo?>(
                             this.context,
-                            CircularRevealRoute(
+                            SwipeablePageRoute(
                               builder: (context) => AlarmSoundPickerScreen(
                                 perTimerMode: true,
                                 initialPerTimerSelection: td.soundEffect,
                               ),
-                              buttonCenter: tapPoint,
                             ),
                           );
                           final mobj = Mobj.getAlreadyLoaded(
@@ -5332,10 +5634,7 @@ class TimerScreenState extends State<TimerScreen>
       onPanEnd: () {
         Navigator.push(
           context,
-          CircularRevealRoute(
-            builder: (context) => SettingsScreen(),
-            iconOriginKey: configButtonKey,
-          ),
+          SwipeablePageRoute(builder: (context) => SettingsScreen()),
         );
       },
     );
@@ -5862,6 +6161,7 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
     Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
+    ensureNotificationPermission();
     final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
     n.value = n.peek()! + 1;
 
@@ -5899,6 +6199,7 @@ class TimerScreenState extends State<TimerScreen>
       ),
     );
     Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
+    ensureNotificationPermission();
     final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
     n.value = n.peek()! + 1;
 
@@ -6997,10 +7298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onTap: () {
         Navigator.push(
           context,
-          CircularRevealRoute(
-            builder: (context) => OnboardScreen(),
-            iconOriginKey: configButtonKey,
-          ),
+          SwipeablePageRoute(builder: (context) => OnboardScreen()),
         );
       },
     );
@@ -7098,11 +7396,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              CircularRevealRoute(
+                              SwipeablePageRoute(
                                 builder: (context) =>
                                     AlarmSoundPickerScreen(iconKey: iconKey),
-                                buttonCenter: widgetCenter(hereIconKey),
-                                iconOriginKey: iconKey,
                               ),
                             );
                           },
@@ -7310,16 +7606,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final liquidGlassOn =
                             liquidGlassOnMobj.value ??
                             (defaultTargetPlatform == TargetPlatform.iOS);
+                        // Glass is the norm on iOS, so there the setting is the
+                        // departure from it rather than the thing itself.
+                        // — Opus 5
+                        final asFlat =
+                            defaultTargetPlatform == TargetPlatform.iOS;
                         return RoundedCheckboxListTile(
-                          title: settingTitle('Liquid glass'),
+                          title: settingTitle(
+                            asFlat ? 'Material Flat' : 'Liquid glass',
+                          ),
                           subtitle: settingSubtitle(
-                            liquidGlassOn
+                            asFlat
+                                ? 'use bold, flat, high contrast styling instead of liquid glass'
+                                : liquidGlassOn
                                 ? 'On: Liquid glass'
                                 : 'Off: Flat style',
                           ),
-                          value: liquidGlassOn,
+                          value: asFlat ? !liquidGlassOn : liquidGlassOn,
                           onChanged: (value) {
-                            liquidGlassOnMobj.value = value;
+                            liquidGlassOnMobj.value = asFlat && value != null
+                                ? !value
+                                : value;
                           },
                           contentPadding: listItemPadding,
                         );
@@ -7424,11 +7731,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              CircularRevealRoute(
+                              SwipeablePageRoute(
                                 builder: (context) =>
                                     AboutScreen(iconKey: iconKey),
-                                buttonCenter: widgetCenter(hereIconKey),
-                                iconOriginKey: iconKey,
                               ),
                             );
                           },
@@ -7459,11 +7764,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              CircularRevealRoute(
+                              SwipeablePageRoute(
                                 builder: (context) =>
                                     ThankAuthorScreen(iconKey: iconKey),
-                                buttonCenter: widgetCenter(hereIconKey),
-                                iconOriginKey: iconKey,
                               ),
                             );
                           },
@@ -7492,9 +7795,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Builder(
                       builder: (context) {
                         final GlobalKey iconKey = GlobalKey();
-                        Offset? tapPosition;
                         return MenuTile(
-                          onTapUpGlobalPosition: (pos) => tapPosition = pos,
                           title: settingTitle('Crank game'),
                           subtitle: settingSubtitle(
                             "This is a game that came to me in a dream while I was making this timer app. I kind of hate it. It's about time, though, it's about the virtues of clocks.",
@@ -7530,11 +7831,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              CircularRevealRoute(
+                              SwipeablePageRoute(
                                 builder: (context) =>
                                     CrankGameScreen(iconKey: iconKey),
-                                buttonCenter: tapPosition ?? Offset.zero,
-                                iconOriginKey: iconKey,
                               ),
                             );
                           },
@@ -7544,9 +7843,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     Builder(
                       builder: (context) {
-                        Offset? tapPosition;
                         return MenuTile(
-                          onTapUpGlobalPosition: (pos) => tapPosition = pos,
                           title: settingTitle('$trainscapeName: Thrival'),
                           subtitle: settingSubtitle(
                             "A game about navigating complexity and arranging things in time. Still very raw.",
@@ -7579,9 +7876,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              CircularRevealRoute(
+                              SwipeablePageRoute(
                                 builder: (context) => const TrainscapeScreen(),
-                                buttonCenter: tapPosition ?? Offset.zero,
                               ),
                             );
                           },
@@ -7644,11 +7940,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              CircularRevealRoute(
+                              SwipeablePageRoute(
                                 builder: (context) =>
                                     BinScreen(iconKey: iconKey),
-                                buttonCenter: widgetCenter(hereIconKey),
-                                iconOriginKey: iconKey,
                               ),
                             );
                           },
@@ -7976,10 +8270,8 @@ class _AboutScreenState extends State<AboutScreen> {
   void _openHowMade() {
     Navigator.push(
       context,
-      CircularRevealRoute(
+      SwipeablePageRoute(
         builder: (context) => HowMadeScreen(iconKey: _howMadeIconKey),
-        buttonCenter: widgetCenter(_seeAlsoLinkKey),
-        iconOriginKey: _howMadeIconKey,
       ),
     );
   }
@@ -8687,7 +8979,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
         // we're now ready to create timerscreen, replace the blank placeholder below us with it
         navigator.replaceRouteBelow(
           anchorRoute: currentRoute,
-          newRoute: CircularRevealRoute(builder: (context) => TimerScreen()),
+          newRoute: SwipeablePageRoute(builder: (context) => TimerScreen()),
         );
       }
       navigator.pop();

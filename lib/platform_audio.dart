@@ -133,22 +133,22 @@ class PlatformAudio {
 
   static const List<AudioInfo> assetSounds = [
     AudioInfo(
-      url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.ogg',
+      url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.wav',
       name: 'JR - Announcement',
       isLong: false,
     ),
     AudioInfo(
-      url: 'asset://assets/sounds/jingles_STEEL16.ogg',
+      url: 'asset://assets/sounds/jingles_STEEL16.wav',
       name: 'Kenney - Steel Drum 16',
       isLong: false,
     ),
     // AudioInfo(
-    //   url: 'asset://assets/sounds/jingles_STEEL15.ogg',
+    //   url: 'asset://assets/sounds/jingles_STEEL15.wav',
     //   name: 'Kenney - Steel Jingle 15',
     //   isLong: false,
     // ),
     AudioInfo(
-      url: 'asset://assets/sounds/silent.ogg',
+      url: 'asset://assets/sounds/silent.wav',
       name: 'Silent',
       isLong: false,
     ),
