@@ -131,17 +131,23 @@ class PlatformAudio {
     }
   }
 
+  /// For telling the user something went wrong rather than that a timer
+  /// finished, so it wants to be recognisably not an alarm. Named rather than
+  /// indexed out of [assetSounds], which is a user-facing list and free to be
+  /// reordered. — Opus 5
+  static const alert = AudioInfo(
+    url: 'asset://assets/sounds/jingles_STEEL16.wav',
+    name: 'Kenney - Steel Drum 16',
+    isLong: false,
+  );
+
   static const List<AudioInfo> assetSounds = [
     AudioInfo(
       url: 'asset://assets/sounds/june_russel_mako_timer_e-piano_1.wav',
       name: 'JR - Announcement',
       isLong: false,
     ),
-    AudioInfo(
-      url: 'asset://assets/sounds/jingles_STEEL16.wav',
-      name: 'Kenney - Steel Drum 16',
-      isLong: false,
-    ),
+    alert,
     // AudioInfo(
     //   url: 'asset://assets/sounds/jingles_STEEL15.wav',
     //   name: 'Kenney - Steel Jingle 15',

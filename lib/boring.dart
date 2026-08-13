@@ -370,8 +370,30 @@ Rect negativeInfinityRect() => Rect.fromLTRB(
   -double.infinity,
 );
 
+/// One pass through a cycle's children, which is what its position within
+/// itself is modulo. Finite for an ordinary cycle; a cycle nested inside
+/// another makes the outer lap infinite, and rightly, since the outer one never
+/// comes back around. — Opus 5
+double lapDuration(TimerData d) {
+  double sum = 0;
+  for (final childId in d.children) {
+    final child = Mobj.seekAlreadyLoaded(childId, TimerDataType())?.peek();
+    if (child != null) {
+      sum += totalDuration(child);
+    }
+  }
+  return sum;
+}
+
+/// will return infinity for a stopwatch or a cycle.
 double totalDuration(TimerData d) {
-  if (d.kind == TimerKind.series || d.kind == TimerKind.loop) {
+  if (d.kind == TimerKind.loop) {
+    return d.children.isEmpty ? 0 : double.infinity;
+  }
+  if (d.kind == TimerKind.stopwatch) {
+    return double.infinity;
+  }
+  if (d.kind == TimerKind.series) {
     if (d.children.isEmpty) {
       return 0;
     }
@@ -7039,30 +7061,81 @@ class RoundedSectionSliver extends StatelessWidget {
     this.padding = const EdgeInsets.all(16),
   });
 
+  /// Concentric with the rounded screen corners this is inset from.
+  static double concentricRadius(
+    BuildContext context,
+    EdgeInsetsGeometry margin,
+  ) => max(
+    0.0,
+    getReasonableAestheticBottomCornerRadius() -
+        margin.resolve(Directionality.of(context)).left,
+  );
+
+  /// As [concentricRadius], but never rounder than what it contains — past that
+  /// a card stops reading as concentric with its contents and starts reading as
+  /// a lozenge. Somewhere with contents big enough to carry the rounding down
+  /// into them can pass an explicit radius and skip this. — Opus 5
+  static double radiusFor(BuildContext context, EdgeInsetsGeometry margin) =>
+      min(contentRadius, concentricRadius(context, margin));
+
+  @override
+  Widget build(BuildContext context) => SliverPadding(
+    padding: margin,
+    sliver: SliverToBoxAdapter(
+      child: RoundedSection(
+        color: color,
+        radius: radius,
+        margin: EdgeInsets.zero,
+        padding: padding,
+        marginForRadius: margin,
+        child: child,
+      ),
+    ),
+  );
+}
+
+/// The same card as [RoundedSectionSliver] for places that aren't building a
+/// sliver. Shares the shape rather than restating it, so a card can't quietly
+/// end up rounder than the sections around it. — Opus 5
+class RoundedSection extends StatelessWidget {
+  final Widget child;
+  final Color color;
+  final double? radius;
+  final EdgeInsetsGeometry margin;
+  final EdgeInsetsGeometry padding;
+
+  /// What the radius is reckoned against when [margin] has already been applied
+  /// by an enclosing sliver.
+  final EdgeInsetsGeometry? marginForRadius;
+
+  const RoundedSection({
+    super.key,
+    required this.child,
+    required this.color,
+    this.radius,
+    this.margin = const EdgeInsets.symmetric(
+      horizontal: RoundedSectionSliver.defaultMargin,
+    ),
+    this.padding = const EdgeInsets.all(16),
+    this.marginForRadius,
+  });
+
   @override
   Widget build(BuildContext context) {
-    final horizontalInset = margin.resolve(Directionality.of(context)).left;
-    final cornerRadius = getReasonableAestheticBottomCornerRadius();
-    final screenRounding = max(
-      max(cornerRadius, cornerRadius),
-      max(cornerRadius, cornerRadius),
-    );
     final r =
         radius ??
-        min(contentRadius, max(0.0, screenRounding - horizontalInset));
-    return SliverPadding(
+        RoundedSectionSliver.radiusFor(context, marginForRadius ?? margin);
+    return Padding(
       padding: margin,
-      sliver: SliverToBoxAdapter(
-        // the SignalBuilder is just so the card follows a corner-style change
-        // live — these sections host the setting that makes it.
-        child: SignalBuilder(
-          builder: (context) => Material(
-            type: MaterialType.canvas,
-            color: color,
-            shape: cornerStyleBorder(BorderRadius.circular(r)),
-            clipBehavior: Clip.antiAlias,
-            child: Padding(padding: padding, child: child),
-          ),
+      // the SignalBuilder is just so the card follows a corner-style change
+      // live — these sections host the setting that makes it.
+      child: SignalBuilder(
+        builder: (context) => Material(
+          type: MaterialType.canvas,
+          color: color,
+          shape: cornerStyleBorder(BorderRadius.circular(r)),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(padding: padding, child: child),
         ),
       ),
     );

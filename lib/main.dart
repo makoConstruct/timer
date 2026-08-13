@@ -339,11 +339,17 @@ void main() async {
   // await deleteDatabase();
   WidgetsFlutterBinding.ensureInitialized();
   SignalsObserver.instance = null;
+  final cornerRadiusWaiting = _loadCornerRadius().then((_) {});
   // warm the glass shader programs so the first ring can render as glass rather
   // than an unmasked child for a few frames.
   GlassLayer.precache();
   warmTextSelection();
   await Future.wait([
+    // wait for the corner radius, but don't wait too long, we can render with a false one and update later if we have to
+    Future.any(<Future<void>>[
+      cornerRadiusWaiting,
+      Future<void>.delayed(const Duration(milliseconds: 200)),
+    ]),
     enableHighRefreshRate(),
     initializeDatabase(),
     Future(() async {
@@ -450,7 +456,11 @@ class TimerHolm {
   int _notificationIdCounter = 200000;
 
   late EffectCleanup _backgroundedReaction;
-  late StreamSubscription<Mobj<TimerData>> _newTimerReaction;
+
+  /// Null while stood down, which is also what makes [enliven] idempotent —
+  /// subscribing twice would leak the first subscription and double every
+  /// timer's handling. — Opus 5
+  StreamSubscription<Mobj<TimerData>>? _newTimerReaction;
   late QuerySet<TimerData> allTimers;
   TimerHolm({
     required this.list,
@@ -470,6 +480,7 @@ class TimerHolm {
 
   /// Subscribes every timer, arming its alarms from whatever state it's in.
   void enliven() {
+    if (_newTimerReaction != null) return;
     // runs every time a new timer is created or loaded
     _newTimerReaction = allTimers.forAll((mobj) {
       if (!tracking.containsKey(mobj.id)) {
@@ -482,19 +493,11 @@ class TimerHolm {
 
   /// Drops every subscription and pending alarm, leaving the mobjs alone.
   void unenliven() {
-    _newTimerReaction.cancel();
+    _newTimerReaction?.cancel();
+    _newTimerReaction = null;
     for (final id in tracking.keys.toList()) {
       stopTracking(id);
     }
-  }
-
-  /// Moves every timer to where it should be at [to]. Unenlivens first because
-  /// an alarm armed before the correction was armed against the state it's
-  /// correcting, and would fire against that instead. — Opus 5
-  void fastForward(DateTime to) {
-    unenliven();
-    _fastForwardAll(to);
-    enliven();
   }
 
   /// iOS caps an app at 64 pending notifications. The cap is ours alone and we
@@ -502,52 +505,48 @@ class TimerHolm {
   /// back to say we ran out rather than going quiet without explanation.
   static const _notificationSlots = 64;
 
-  /// Nothing of ours runs while iOS has us suspended, so a backgrounded alarm
-  /// only sounds if the OS was told in advance. Repeatedly takes the soonest
-  /// event across every running timer, rather than draining one timer first,
-  /// which would starve the others. — Opus 5
+  /// Nothing of ours runs while iOS has us suspended or backgrounded, so a backgrounded alarm
+  /// only sounds if the OS was told in advance. Works by repeatedly taking the soonest
+  /// event across every running timer until the iOS notification limit is reached.
   void scheduleBackgroundAlarms() {
     final now = DateTime.now();
-    final streams = <MapEntry<Mobj<TimerData>, Iterator<DateTime>>>[];
+    final streams = <Iterator<({DateTime at, Mobj<TimerData> timer})>>[];
     for (final id in list.peek() ?? const []) {
       final mobj = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
       if (mobj == null || !(mobj.peek()?.isRunning ?? false)) continue;
       final fires = upcomingFires(mobj).iterator;
-      if (fires.moveNext()) streams.add(MapEntry(mobj, fires));
+      if (fires.moveNext()) streams.add(fires);
     }
 
-    final fallback = Mobj.getAlreadyLoaded(
-      selectedAudioID,
-      AudioInfoType(),
-    ).peek();
     final items = <Map<String, Object?>>[];
     DateTime? ranOutAt;
 
     while (streams.isNotEmpty) {
       var soonest = 0;
       for (var i = 1; i < streams.length; i++) {
-        if (streams[i].value.current.isBefore(streams[soonest].value.current)) {
+        if (streams[i].current.at.isBefore(streams[soonest].current.at)) {
           soonest = i;
         }
       }
-      final at = streams[soonest].value.current;
+      final fire = streams[soonest].current;
       if (items.length >= _notificationSlots - 1) {
-        ranOutAt = at;
+        ranOutAt = fire.at;
         break;
       }
-      final mobj = streams[soonest].key;
-      final d = mobj.peek();
-      final delay = at.difference(now);
+      // the stage that's going off, not the timercule containing it: they sound
+      // different from one another and are named separately
+      final d = fire.timer.peek();
+      final delay = fire.at.difference(now);
       if (!delay.isNegative) {
         items.add({
-          'identifier': '${mobj.id}#${items.length}',
+          'identifier': '${fire.timer.id}#${items.length}',
           'seconds': delay.inMilliseconds / 1000.0,
           'title': 'timer complete',
-          'body': d?.title ?? 'tap to dismiss',
-          'soundUri': (d?.soundEffect ?? fallback)?.url,
+          'subtitle': d == null ? null : _completionSubtitle(d),
+          'soundUri': d == null ? null : _audioForTimer(d).url,
         });
       }
-      if (!streams[soonest].value.moveNext()) streams.removeAt(soonest);
+      if (!streams[soonest].moveNext()) streams.removeAt(soonest);
     }
 
     if (ranOutAt != null) {
@@ -555,8 +554,9 @@ class TimerHolm {
         'identifier': 'slots-exhausted',
         'seconds': ranOutAt.difference(now).inMilliseconds / 1000.0,
         'title': 'notification limit reached',
-        'body': 'some timers are still running, open the app',
-        'soundUri': fallback?.url,
+        'subtitle':
+            'iOS prevents us from cycling indefinitely, you must open the app to continue',
+        'soundUri': PlatformAudio.alert.url,
       });
     }
 
@@ -585,13 +585,31 @@ class TimerHolm {
     }
   }
 
+  /// What to say after "timer complete", or null when there's nothing worth
+  /// adding. A persistent alarm is still going and wants acknowledging, so it
+  /// says so; an ordinary one has finished sounding by the time this is read,
+  /// and what's useful then is which timer it was. — Opus 5
+  String? _completionSubtitle(TimerData d) {
+    if (d.title != null && d.title!.isNotEmpty) {
+      return d.title;
+    }
+    final persistent =
+        d.persistentAlarm ??
+        (Mobj.getAlreadyLoaded(persistentAlarmModeID, BoolType()).peek() ??
+            false);
+    if (persistent) return 'tap to dismiss';
+    return d.digits.isEmpty ? null : formatTime(d.digits);
+  }
+
   Future<void> _sendCompletionNotification(TimerTrack tt) async {
     debugPrint("_sendCompletionNotification");
+    final d = tt.mobj?.peek();
     await PlatformNotifications.showCompletion(
       id: _notificationIdCounter++,
       channelKey: completionChannelKey,
       title: 'timer complete',
-      body: tt.mobj?.peek()?.title ?? 'tap to dismiss',
+      subtitle: d == null ? null : _completionSubtitle(d),
+      soundUri: d == null ? null : _audioForTimer(d).url,
     );
   }
 
@@ -626,10 +644,12 @@ class TimerHolm {
     // No dart runs while iOS has us suspended, so on resume every completion we
     // slept through arrives at once. Those already went off as notifications, so
     // catching up should move state without making a sound. — Opus 5
-    final due = d.startTime.add(
-      Duration(microseconds: (totalDuration(d) * 1000000).round()),
-    );
-    if (DateTime.now().difference(due) > const Duration(seconds: 3)) {
+    final span = totalDuration(d);
+    final due = span.isFinite
+        ? d.startTime.add(Duration(microseconds: (span * 1000000).round()))
+        : null;
+    if (due != null &&
+        DateTime.now().difference(due) > const Duration(seconds: 3)) {
       mobj.value = d.withRunningState(TimerData.completed);
       returnAndContinueParent(mobj);
       return;
@@ -660,10 +680,10 @@ class TimerHolm {
       } else {
         jukeBox.playAudio(audio);
         mobj.value = d.withRunningState(TimerData.completed);
-        // since an ios app can't just play audio in a background thread, it often can only play through a scheduled notification. so when firing while backgrounded, we should do a notification for consistency.
-        if (Platform.isIOS && isBackgrounded.peek()) {
-          _sendCompletionNotification(tt);
-        }
+        // ios can't play audio from a suspended app, so a backgrounded
+        // completion is only heard through the notification scheduled on the
+        // way out — which is already pending, so there's nothing to post here.
+        // — Opus 5
       }
       // actuate any parent timers
       returnAndContinueParent(mobj);
@@ -814,7 +834,9 @@ class TimerHolm {
                 tt.completionTimer = null;
               }
             case TimerKind.parallelEndJustified:
-              if (d.isRunning) {
+              // an endless child makes the whole thing endless, so there's no
+              // completion to schedule — Opus 5
+              if (d.isRunning && totalDuration(d).isFinite) {
                 tt.completionTimer?.cancel();
                 final total = Duration(
                   microseconds: (totalDuration(d) * 1000000).round(),
@@ -846,7 +868,8 @@ class TimerHolm {
 
   void dispose() {
     _backgroundedReaction();
-    _newTimerReaction.cancel();
+    _newTimerReaction?.cancel();
+    _newTimerReaction = null;
     allTimers.dispose();
     for (final tt in tracking.values) {
       tt.completionTimer?.cancel();
@@ -948,10 +971,13 @@ void fastForwardTimer(Mobj<TimerData> mobj, DateTime to) {
         mobj.value = _completed(d);
       }
     case TimerKind.loop:
-      // A cycle repeats forever, so where it sits is elapsed modulo one lap
-      // rather than however many laps we slept through. — Opus 5
-      if (total <= 0) return;
-      _fastForwardSequence(d, elapsed % total, to);
+      // Where a cycle sits is elapsed modulo one lap, rather than however many
+      // laps we slept through. A lap containing another cycle never comes back
+      // around, so there's nothing to take a modulus of and we walk it straight
+      // through instead, landing inside the inner cycle. — Opus 5
+      final lap = lapDuration(d);
+      if (lap <= 0) return;
+      _fastForwardSequence(d, lap.isFinite ? elapsed % lap : elapsed, to);
     case TimerKind.series:
       if (elapsed >= total) {
         for (final id in d.children) {
@@ -1042,76 +1068,72 @@ Future<void> ensureNotificationPermission() async {
 
 Duration _seconds(double s) => Duration(microseconds: (s * 1000000).round());
 
-/// Every completion this subtree is going to reach, in order, starting from
-/// where it currently is. Lazy because a loop's sequence is endless: take only
-/// as many as there are notification slots for. — Opus 5
-Iterable<DateTime> upcomingFires(Mobj<TimerData> mobj) sync* {
+/// Every completion this subtree will reach, in order, each with the timer that
+/// reaches it — a timercule's stages sound different from one another, so the
+/// caller needs to know which one is going off and not merely when.
+///
+/// [from] null means the subtree is already running and reckons off its own
+/// stored startTimes; anything else is reckoned from [from]. Lazy, because a
+/// cycle's sequence is endless: take only as many as there are slots for.
+/// — Opus 5
+Iterable<({DateTime at, Mobj<TimerData> timer})> upcomingFires(
+  Mobj<TimerData> mobj, [
+  DateTime? from,
+]) sync* {
   final d = mobj.peek();
-  if (d == null || !d.isRunning) return;
+  if (d == null) return;
+  if (from == null && !d.isRunning) return;
+  final start = from ?? d.startTime;
+
   switch (d.kind) {
     case TimerKind.stopwatch:
       return;
     case TimerKind.timer:
-      yield d.startTime.add(_seconds(totalDuration(d)));
+      yield (at: start.add(_seconds(totalDuration(d))), timer: mobj);
     case TimerKind.parallelStartJustified:
     case TimerKind.parallelEndJustified:
       for (final id in d.children) {
         final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
-        if (c != null) yield* upcomingFires(c);
+        if (c != null) yield* upcomingFires(c, from == null ? null : start);
       }
     case TimerKind.series:
     case TimerKind.loop:
       final children = d.children
           .map((id) => Mobj.seekTypedAlreadyLoaded(id, TimerDataType()))
           .whereType<Mobj<TimerData>>()
+          .where((c) => c.peek() != null)
           .toList();
       if (children.isEmpty) return;
-      var index = children.indexWhere((c) => c.peek()?.isRunning ?? false);
-      if (index < 0) index = 0;
-      // only the running child keeps its own start; everything after it is
-      // reckoned from when its predecessor lands
-      yield* upcomingFires(children[index]);
-      var cursor = children[index].peek()!.startTime.add(
-        _seconds(totalDuration(children[index].peek()!)),
-      );
       final wraps = d.kind == TimerKind.loop;
-      var i = index + 1;
+      // a lap of no length would spin without ever reaching a later fire
+      if (wraps && lapDuration(d) <= 0) return;
+
+      var i = 0;
+      var cursor = start;
+      if (from == null) {
+        // whichever child is mid-flight keeps its own start; everything after
+        // is reckoned from where its predecessor lands
+        final mid = children.indexWhere((c) => c.peek()!.isRunning);
+        if (mid >= 0) {
+          i = mid;
+          yield* upcomingFires(children[i]);
+          final span = totalDuration(children[i].peek()!);
+          // nothing sequenced after something endless is ever reached
+          if (!span.isFinite) return;
+          cursor = children[i].peek()!.startTime.add(_seconds(span));
+          i++;
+        }
+      }
       while (true) {
         if (i >= children.length) {
           if (!wraps) return;
           i = 0;
         }
-        yield* _firesFrom(children[i], cursor);
-        cursor = cursor.add(_seconds(totalDuration(children[i].peek()!)));
+        yield* upcomingFires(children[i], cursor);
+        final span = totalDuration(children[i].peek()!);
+        if (!span.isFinite) return;
+        cursor = cursor.add(_seconds(span));
         i++;
-      }
-  }
-}
-
-/// As above for a run that hasn't begun yet, so every time comes off [start]
-/// rather than off any stored startTime.
-Iterable<DateTime> _firesFrom(Mobj<TimerData> mobj, DateTime start) sync* {
-  final d = mobj.peek();
-  if (d == null) return;
-  switch (d.kind) {
-    case TimerKind.stopwatch:
-      return;
-    case TimerKind.timer:
-      yield start.add(_seconds(totalDuration(d)));
-    case TimerKind.parallelStartJustified:
-    case TimerKind.parallelEndJustified:
-      for (final id in d.children) {
-        final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
-        if (c != null) yield* _firesFrom(c, start);
-      }
-    case TimerKind.series:
-    case TimerKind.loop:
-      var cursor = start;
-      for (final id in d.children) {
-        final c = Mobj.seekTypedAlreadyLoaded(id, TimerDataType());
-        if (c?.peek() == null) continue;
-        yield* _firesFrom(c!, cursor);
-        cursor = cursor.add(_seconds(totalDuration(c.peek()!)));
       }
   }
 }
@@ -1378,29 +1400,37 @@ void setTimerSubtreeActive(Mobj<TimerData> mobj, bool active) {
   }
 }
 
-// Global to cache screen corner radius
-ScreenRadius? _cachedCornerRadius;
+/// The screen's own corner radius, which arrives from the platform a moment
+/// after launch. A signal rather than a bare global because everything
+/// concentric with the screen is sized off it, and whoever laid out before it
+/// landed has to be told to try again — otherwise the rounding depends on
+/// whether a build won a race. — Opus 5
+final Signal<ScreenRadius?> screenCornerRadius = Signal(null);
 ScreenRadius defaultCornerRadius = ScreenRadius.value(0.0);
 Future<ScreenRadius> _loadCornerRadius() async {
-  if (_cachedCornerRadius != null) return _cachedCornerRadius!;
+  final known = screenCornerRadius.peek();
+  if (known != null) return known;
+  ScreenRadius found;
   try {
-    _cachedCornerRadius = await ScreenCornerRadius.get() ?? defaultCornerRadius;
+    found = await ScreenCornerRadius.get() ?? defaultCornerRadius;
   } on UnimplementedError catch (_) {
-    _cachedCornerRadius = defaultCornerRadius;
+    found = defaultCornerRadius;
   } on MissingPluginException catch (_) {
-    _cachedCornerRadius = defaultCornerRadius;
+    found = defaultCornerRadius;
   }
-  return _cachedCornerRadius!;
+  screenCornerRadius.value = found;
+  return found;
 }
 
 ScreenRadius getCachedCornerRadius() =>
-    _cachedCornerRadius ?? defaultCornerRadius;
+    screenCornerRadius.value ?? defaultCornerRadius;
 
 double getReasonableAestheticBottomCornerRadius() {
   const double def = 30;
-  double r() =>
-      max(_cachedCornerRadius!.bottomLeft, _cachedCornerRadius!.bottomRight);
-  return _cachedCornerRadius != null && r() > def ? r() : def;
+  final corners = screenCornerRadius.value;
+  if (corners == null) return def;
+  final r = max(corners.bottomLeft, corners.bottomRight);
+  return r > def ? r : def;
 }
 
 class TimersApp extends StatefulWidget {
@@ -1444,13 +1474,22 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       isBackgrounded.value = true;
-      // The last moment our dart runs, and iOS won't call us on termination, so
-      // this is where the alarms have to be handed over. — Opus 5
-      if (Platform.isIOS) globalTimerHolm?.scheduleBackgroundAlarms();
+      // The last moment our dart runs, and ios won't call us on termination, so
+      // this is where the alarms have to be handed over — and then we stand
+      // down, because anything we'd still do here the OS is now doing for us,
+      // and doing it twice is how you get two of everything. Resuming
+      // fast-forwards and re-enlivens. — Opus 5
+      if (Platform.isIOS) {
+        globalTimerHolm?.scheduleBackgroundAlarms();
+        globalTimerHolm?.unenliven();
+      }
     } else if (state == AppLifecycleState.resumed) {
       // Before anything else reacts to being foregrounded: no dart ran while we
       // were suspended, so every timer is still where we left it. — Opus 5
-      globalTimerHolm?.fastForward(DateTime.now());
+      var to = DateTime.now();
+      globalTimerHolm?.unenliven();
+      globalTimerHolm?._fastForwardAll(to);
+      globalTimerHolm?.enliven();
       isBackgrounded.value = false;
       // they may have been off changing their wallpaper or theme style.
       _loadWallpaperPalette();
@@ -4934,7 +4973,8 @@ class TimerScreenState extends State<TimerScreen>
       c();
     }
     timerHolm._backgroundedReaction();
-    timerHolm._newTimerReaction.cancel();
+    timerHolm._newTimerReaction?.cancel();
+    timerHolm._newTimerReaction = null;
     // the cell's disposer disposes the current spring.
     _tutorialShowLabelsCell.dispose();
     tutorialShowLabelsAnimation = null;
@@ -6975,27 +7015,48 @@ TextStyle headingTextStyle(ThemeData theme, {bool fade = false}) => TextStyle(
   // fontSize: 24,
 );
 
+/// [sectionRadius] for a section that isn't rounded the standard amount, so the
+/// title stays lined up with whichever card it heads.
 Widget headingBand({
   required ThemeData theme,
   Widget? label,
   required double height,
   required Color background,
   bool fade = false,
-}) => Container(
-  width: double.infinity,
-  height: height,
-  color: background,
-  alignment: Alignment.bottomLeft,
-  padding: const EdgeInsets.only(
-    left: RoundedSectionSliver.defaultMargin + MenuTile.defaultPaddingTotal,
-    bottom: headingTitleBottomPadding,
-  ),
-  child: label != null
-      ? DefaultTextStyle(
-          style: headingTextStyle(theme, fade: fade),
-          child: label,
-        )
-      : null,
+  double? sectionRadius,
+}) => SignalBuilder(
+  builder: (context) {
+    // A title sitting within the horizontal span of the section's corner reads
+    // as misaligned against the straight edge below it, so it clears the curve.
+    // Inside a SignalBuilder because the screen's radius, which the curve is
+    // sized from, arrives after launch. — Opus 5
+    final r =
+        sectionRadius ??
+        RoundedSectionSliver.radiusFor(
+          context,
+          const EdgeInsets.symmetric(
+            horizontal: RoundedSectionSliver.defaultMargin,
+          ),
+        );
+    return Container(
+      width: double.infinity,
+      height: height,
+      color: background,
+      alignment: Alignment.bottomLeft,
+      padding: EdgeInsets.only(
+        left:
+            RoundedSectionSliver.defaultMargin +
+            max(MenuTile.defaultPaddingTotal, r),
+        bottom: headingTitleBottomPadding,
+      ),
+      child: label != null
+          ? DefaultTextStyle(
+              style: headingTextStyle(theme, fade: fade),
+              child: label,
+            )
+          : null,
+    );
+  },
 );
 
 /// Height of the [BottomGutter] band, above the bottom safe-area inset.
@@ -7632,30 +7693,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       },
                     ),
-                    SignalBuilder(
-                      builder: (context) {
-                        final continuousCornersMobj = Mobj.getAlreadyLoaded(
-                          continuousCornersID,
-                          BoolType(),
-                        );
-                        final on =
-                            continuousCornersMobj.value ??
-                            continuousCornersDefault;
-                        return RoundedCheckboxListTile(
-                          title: settingTitle('Corner rounding'),
-                          subtitle: settingSubtitle(
-                            on
-                                ? 'Continuous: corners ease into the sides (squircles, as on iOS)'
-                                : 'Circular: corners are circular arcs',
-                          ),
-                          value: on,
-                          onChanged: (value) {
-                            continuousCornersMobj.value = value;
-                          },
-                          contentPadding: listItemPadding,
-                        );
-                      },
-                    ),
+                    // continuousCornersDefault is already true on ios, and
+                    // circular corners there would just look wrong, so the
+                    // choice is only offered where it's a real one. — Opus 5
+                    if (!Platform.isIOS)
+                      SignalBuilder(
+                        builder: (context) {
+                          final continuousCornersMobj = Mobj.getAlreadyLoaded(
+                            continuousCornersID,
+                            BoolType(),
+                          );
+                          final on =
+                              continuousCornersMobj.value ??
+                              continuousCornersDefault;
+                          return RoundedCheckboxListTile(
+                            title: settingTitle('Corner rounding'),
+                            subtitle: settingSubtitle(
+                              on
+                                  ? 'Continuous: corners ease into the sides (squircles, as on iOS)'
+                                  : 'Circular: corners are circular arcs',
+                            ),
+                            value: on,
+                            onChanged: (value) {
+                              continuousCornersMobj.value = value;
+                            },
+                            contentPadding: listItemPadding,
+                          );
+                        },
+                      ),
                     // only Android hands out a wallpaper palette, so this is
                     // the only place the setting means anything.
                     if (Platform.isAndroid)
@@ -8818,7 +8883,6 @@ class OnboardScreen extends SignalStatefulWidget {
 const double standardSpacing = 18;
 const spacer = SizedBox(width: standardSpacing, height: standardSpacing);
 const double standardButtonHeight = 80;
-const double buttonCornerRadius = 16;
 
 class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
   late ScrollController _scrollController;
@@ -9002,6 +9066,37 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
       RoundedSectionSliver.defaultMargin,
       standardSpacing,
     );
+    // Setup's contents are big enough to carry the rounding down into them, so
+    // its cards keep the full screen-concentric radius rather than being capped
+    // to their contents, and the buttons inside step down by the padding
+    // between them and the card's edge — which is what keeps the two curves
+    // concentric. — Opus 5
+    const sectionPadding = 16.0;
+    // ...but not below what a button wants on its own, since the screen radius
+    // has a floor of its own and subtracting twice from it leaves nothing.
+    // — Opus 5
+    const minButtonCornerRadius = 16.0;
+    final sectionRadius = RoundedSectionSliver.concentricRadius(
+      context,
+      sectionMargin,
+    );
+    final buttonCornerRadius = max(
+      minButtonCornerRadius,
+      sectionRadius - sectionPadding,
+    );
+    // Text has no corner of its own to turn up, so in a hard-rounded section it
+    // runs into the curve while the buttons, which do round, stay clear of it.
+    // Insetting it by a fraction of the radius evens that out; the section's
+    // own padding already covers part of the way. — Opus 5
+    final textInset = max(0.0, sectionRadius * 0.7 - sectionPadding);
+    Widget sectionText(String s) => Padding(
+      padding: EdgeInsets.only(
+        left: textInset,
+        top: textInset,
+        right: textInset,
+      ),
+      child: Text(s, style: theme.textTheme.bodyMedium!),
+    );
 
     Widget handButton({required bool isRight}) {
       return Expanded(
@@ -9112,6 +9207,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                         // first card while keeping "Setup" bottom-left aligned.
                         Expanded(
                           child: headingBand(
+                            sectionRadius: sectionRadius,
                             theme: theme,
                             label: Text('Setup'),
                             height: double.infinity,
@@ -9122,42 +9218,24 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                         // Handedness selection — same rounded card as the sliver
                         // sections below, but laid out in a box so it can sit at
                         // the bottom of this first screen.
-                        Padding(
+                        RoundedSection(
                           key: handednessKey,
-                          padding: sectionMargin,
-                          child: Material(
-                            type: MaterialType.canvas,
-                            color: contentBackground,
-                            shape: cornerStyleBorder(
-                              BorderRadius.circular(
-                                max(
-                                  0.0,
-                                  getReasonableAestheticBottomCornerRadius() -
-                                      RoundedSectionSliver.defaultMargin,
-                                ),
-                              ),
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          margin: sectionMargin,
+                          radius: sectionRadius,
+                          color: contentBackground,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              sectionText('Are you left or right-handed?'),
+                              SizedBox(height: standardSpacing),
+                              Row(
                                 children: [
-                                  Text(
-                                    'Are you left or right-handed?',
-                                    style: theme.textTheme.bodyMedium!,
-                                  ),
-                                  SizedBox(height: standardSpacing),
-                                  Row(
-                                    children: [
-                                      handButton(isRight: false),
-                                      spacer,
-                                      handButton(isRight: true),
-                                    ],
-                                  ),
+                                  handButton(isRight: false),
+                                  spacer,
+                                  handButton(isRight: true),
                                 ],
                               ),
-                            ),
+                            ],
                           ),
                         ),
                       ],
@@ -9168,12 +9246,12 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                   key: padKey,
                   color: contentBackground,
                   margin: sectionMargin,
+                  radius: sectionRadius,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
+                      sectionText(
                         "Which kind of numpad is more familiar to you?",
-                        style: theme.textTheme.bodyMedium!,
                       ),
                       spacer,
                       SignalBuilder(
@@ -9220,12 +9298,12 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                   key: ringModeKey,
                   color: contentBackground,
                   margin: sectionMargin,
+                  radius: sectionRadius,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
+                      sectionText(
                         """Are you generally attentive and responsive to your phone notifications? If so, set this to "ring once," which is far more convenient, as it doesn't require you to interact with your phone every time an alarm goes off. Otherwise, you may need a more insistent notification to make absolutely sure that you're aware of timer completions, select "require acknowledgement." """,
-                        style: theme.textTheme.bodyMedium!,
                       ),
                       SizedBox(height: standardSpacing),
                       SignalBuilder(
@@ -9322,6 +9400,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                 if (Platform.isAndroid) ...[
                   SliverToBoxAdapter(
                     child: headingBand(
+                      sectionRadius: sectionRadius,
                       theme: theme,
                       label: Text('Permissions'),
                       height: sectionHeadingHeight,
@@ -9333,6 +9412,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
                     key: permissionsKey,
                     color: contentBackground,
                     margin: sectionMargin,
+                    radius: sectionRadius,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [

@@ -26,13 +26,17 @@ There is going to be a donation nag. In this house we believe that societies gro
 
 Things are generally persisted by setting a Mobj, which is a signal that persists the value to a sqlite db whenever it changes. A signal is like a stream but better, as it can be reacted to lazily. Signal.value gets the current value and subscribes to it if called from the builder of a SignalStatefulWidget or SignalBuilder or a Computed evaluator. Signal.peek() gets the value without subscribing. So, peek is mainly for event handlers.
 
+### how we use AI
+
+Some weakly reviewed slop code is acceptable if it's not architectural (eg, platform-specific API glue, serialization) but code in `main.dart`, `boring.dart`, is generally expected to be minimal and beautiful, so you'll want to do at least one edit pass before pushing.
+
+We're humanist singularitarians, so we only use whoever's currently at the top of the [the AI safety index](https://futureoflife.org/ai-safety-index-summer-2026/) and we would ask contributors to do the same if they wouldn't mind.
+
+All of the hundreds of design decisions that were made here (architecture, interaction, theme, style, animations, sound, writing, etc) were made by a human. Claude advised architecture decisions, but mostly just did typing, searching, and debugging.
+
 ### compensation
 
-Naturally, since this project earns an income, we will try to reward really substantiative contributions with shares or payment. Specifics would have to be worked out on a case by case basis.
-
-### style
-
-Beware modularization for the sake of making an expression superficially appear simpler while actually just making it more complex by scattering critical details that the reader likely wants to know away to different parts of the file. An example of this is callback typedefs. Most dart projects have too many of them. We only do a typedef for callback signatures when the signatures are genuinely very long *and* occurring more than twice.
+Naturally, if customers see fit to bestow us with a reward, we will try to pass some of it along to anyone who's made a substantial contribution here. We don't want to exclude anyone from the club. The specifics of how much and when would have to be worked out on a case by case basis though.
 
 ## license
 
@@ -47,6 +51,8 @@ The sound and icon assets are carved out of that license — see [ASSETS.md](ASS
 `flutter pub get` to get build runner
 
 `flutter pub run build_runner build --delete-conflicting-outputs` to build database.g.dart
+
+Generate various resources using the gen scripts.
 
 `flutter run`
 

@@ -10,9 +10,9 @@ import UserNotifications
 /// and the Dart call site stays as it is.
 ///
 /// `showCompletion` delivers immediately, which only reaches the user if the app
-/// is awake at completion time. iOS suspends backgrounded apps, so a timer
-/// finishing while backgrounded needs `scheduleCompletion` at *start* time.
-/// Nothing calls that yet. — Opus 5
+/// is awake at completion time. iOS suspends backgrounded apps, so on the way
+/// out `scheduleCompletions` hands over the whole upcoming set at once, and
+/// replaces it wholesale each time rather than amending it. — Opus 5
 class PlatformNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCenterDelegate {
   static let channelName = "platform_notifications"
   static let categoryIdentifier = "makos_timer.completion"
@@ -53,7 +53,8 @@ class PlatformNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCen
       post(
         id: id,
         title: args["title"] as? String ?? "",
-        body: args["body"] as? String ?? "",
+        subtitle: args["subtitle"] as? String,
+        soundUri: args["soundUri"] as? String,
         after: nil
       )
       result(nil)
@@ -68,7 +69,8 @@ class PlatformNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCen
       post(
         id: id,
         title: args["title"] as? String ?? "",
-        body: args["body"] as? String ?? "",
+        subtitle: args["subtitle"] as? String,
+        soundUri: args["soundUri"] as? String,
         after: seconds
       )
       result(nil)
@@ -145,11 +147,20 @@ class PlatformNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCen
     center.setNotificationCategories([category])
   }
 
-  private func post(id: Int, title: String, body: String, after: TimeInterval?) {
+  private func post(
+    id: Int,
+    title: String,
+    subtitle: String?,
+    soundUri: String?,
+    after: TimeInterval?
+  ) {
+    // The detail goes in the subtitle rather than the body: it renders in the
+    // same weight as the title, directly under it, where a body would be a
+    // dimmer third line. — Opus 5
     let content = UNMutableNotificationContent()
     content.title = title
-    content.body = body
-    content.sound = .default
+    content.subtitle = subtitle ?? ""
+    content.sound = notificationSound(for: soundUri)
     content.categoryIdentifier = Self.categoryIdentifier
 
     // Carries the alarm through Focus modes. It does not defeat the hardware
@@ -193,7 +204,7 @@ class PlatformNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCen
 
       let content = UNMutableNotificationContent()
       content.title = item["title"] as? String ?? ""
-      content.body = item["body"] as? String ?? ""
+      content.subtitle = item["subtitle"] as? String ?? ""
       content.sound = notificationSound(for: item["soundUri"] as? String)
       content.categoryIdentifier = Self.categoryIdentifier
       if #available(iOS 15.0, *) {

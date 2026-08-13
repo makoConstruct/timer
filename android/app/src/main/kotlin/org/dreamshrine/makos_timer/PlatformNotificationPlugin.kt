@@ -98,7 +98,7 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
                     call.argument<Int>("id")!!,
                     call.argument<String>("channelKey")!!,
                     call.argument<String>("title") ?: "",
-                    call.argument<String>("body") ?: "",
+                    call.argument<String>("subtitle"),
                 )
                 result.success(null)
             }
@@ -137,7 +137,13 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
         )
     }
 
-    private fun showCompletion(id: Int, channelKey: String, title: String, body: String) {
+    /**
+     * [subtitle] is appended to the title after a colon rather than becoming
+     * content text: android has no second prominent line the way iOS's subtitle
+     * is, and as body text it reads as an aside rather than as part of the
+     * statement. — Opus 5
+     */
+    private fun showCompletion(id: Int, channelKey: String, title: String, subtitle: String?) {
         val smallIcon = resId("res_notification_icon")
         val bigPicture = loadBitmap("res_large_notification_icon")
 
@@ -148,8 +154,9 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
         val builder = NotificationCompat.Builder(context, channelKey)
             .setSmallIcon(smallIcon)
             .setColor(NOTIFICATION_ACCENT_COLOR)
-            .setContentTitle(title)
-            .setContentText(body)
+            .setContentTitle(
+                if (subtitle.isNullOrBlank()) title else "$title: $subtitle",
+            )
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true)

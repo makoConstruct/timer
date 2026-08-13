@@ -38,14 +38,16 @@ class PlatformNotifications {
     required int id,
     required String channelKey,
     required String title,
-    required String body,
+    String? subtitle,
+    String? soundUri,
   }) async {
     try {
       await _channel.invokeMethod('showCompletion', {
         'id': id,
         'channelKey': channelKey,
         'title': title,
-        'body': body,
+        'subtitle': subtitle,
+        'soundUri': soundUri,
       });
     } on PlatformException catch (e) {
       debugPrint('showCompletion failed: ${e.message}');
