@@ -4,6 +4,11 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoPageRoute,
+        CupertinoPageTransition,
+        CupertinoRouteTransitionMixin;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +31,8 @@ import 'package:makos_timer/size_reporter.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:universal_back_gesture/back_gesture_config.dart';
+import 'package:universal_back_gesture/back_gesture_page_transitions_builder.dart';
 import 'package:vibration/vibration.dart';
 import 'package:vibration/vibration_presets.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
@@ -2580,6 +2587,393 @@ class ScreenCornerClippedRoute extends MaterialPageRoute {
   }
 }
 
+bool applePlatform() =>
+    defaultTargetPlatform == TargetPlatform.iOS ||
+    defaultTargetPlatform == TargetPlatform.macOS;
+
+/// The back gesture that wraps whichever transition the platform gets.
+///
+/// [swipeTransitionRange] is the full width so the page tracks the finger 1:1;
+/// the package's own default is 150px, which whips the page off the screen on a
+/// short drag. [swipeVelocityThreshold] is about one screen width a second,
+/// which is the fling threshold we had before.
+///
+/// [commitAnimationDuration] is what the package was adopted for: how long the
+/// page takes to finish travelling once the swipe is released, flat rather than
+/// scaled by how far the drag got. That's what UIKit does, and what Flutter's
+/// own Cupertino code has done since 3.26 replaced its distance-scaled version
+/// (up to 800ms) with a flat 350ms — a fix `swipeable_page_route` never picked
+/// up, because it carries its own copy of the pre-3.26 code.
+///
+/// The number is worth spending a moment on, because for its whole length
+/// *nothing on screen accepts input*: [ModalRoute] ignores pointers while
+/// `navigator.userGestureInProgress`, and that flag is held until the settle
+/// finishes, deliberately (flutter#39989), on the grounds that iOS blocks touch
+/// during a back swipe. iOS does, during the drag. It doesn't after release,
+/// and hasn't since iOS 18 made transitions continuously interactive. Until we
+/// take the gesture over ourselves, this duration *is* the dead window.
+/// —Opus 5
+const BackGestureConfig _kBackGesture = BackGestureConfig(
+  swipeTransitionRange: GestureMeasurement.percentage(1),
+  swipeVelocityThreshold: 420,
+  commitAnimationDuration: _kWipeReverseDuration,
+);
+
+/// Every screen is pushed on one of these: a [CupertinoPageRoute] whose back
+/// gesture is taken over by [BackGesturePageTransitionsBuilder] — so that it
+/// can be swiped from anywhere on the page rather than only from its edge, and
+/// so that the settle after release is ours to set — carrying
+/// [wipePageTransition] everywhere but Apple platforms, which keep the iOS one.
+class OurPageRoute<T> extends CupertinoPageRoute<T> {
+  OurPageRoute({required super.builder, super.settings, super.title});
+
+  static const _appleTransitions = BackGesturePageTransitionsBuilder(
+    parentTransitionBuilder: _CupertinoTransitions(),
+    config: _kBackGesture,
+  );
+  static const _wipeTransitions = BackGesturePageTransitionsBuilder(
+    parentTransitionBuilder: _WipeTransitions(),
+    config: _kBackGesture,
+  );
+
+  /// Cupertino's own 500ms is the duration the iOS transition was tuned as.
+  /// Nothing else is tuned to it.
+  @override
+  Duration get transitionDuration =>
+      applePlatform() ? super.transitionDuration : _kWipeDuration;
+
+  @override
+  Duration get reverseTransitionDuration =>
+      applePlatform() ? super.reverseTransitionDuration : _kWipeReverseDuration;
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => (applePlatform() ? _appleTransitions : _wipeTransitions)
+      .buildTransitions(this, context, animation, secondaryAnimation, child);
+}
+
+/// The iOS transition, without the edge-only back gesture
+/// [CupertinoPageTransitionsBuilder] would install alongside it — the gesture
+/// is [_kBackGesture]'s job now, and two recognizers contesting the same drag
+/// is not a thing to discover later.
+class _CupertinoTransitions extends PageTransitionsBuilder {
+  const _CupertinoTransitions();
+
+  @override
+  Duration get transitionDuration =>
+      CupertinoRouteTransitionMixin.kTransitionDuration;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => CupertinoPageTransition(
+    primaryRouteAnimation: animation,
+    secondaryRouteAnimation: secondaryAnimation,
+    linearTransition: route.popGestureInProgress,
+    child: child,
+  );
+}
+
+class _WipeTransitions extends PageTransitionsBuilder {
+  const _WipeTransitions();
+
+  @override
+  Duration get transitionDuration => _kWipeDuration;
+
+  @override
+  Duration get reverseTransitionDuration => _kWipeReverseDuration;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => wipePageTransition(
+    context,
+    animation,
+    secondaryAnimation,
+    route.popGestureInProgress,
+    child,
+  );
+}
+
+/// How long the sweep takes. Shorter than the 500ms iOS wants because the two
+/// transitions spend their time differently: the iOS one is mostly a page
+/// gliding to a stop, and easing into that stop is most of what you're
+/// watching, where ours crosses the screen at speed and leaves. Coming back is
+/// quicker again, as everything that closes in this app is.
+const Duration _kWipeDuration = Duration(milliseconds: 310);
+const Duration _kWipeReverseDuration = Duration(milliseconds: 200);
+
+/// How far the page being covered slides left, and how far the arriving page's
+/// contents slide in from the right, as fractions of the screen's width. The
+/// arriving page's *edge* is tied to neither: it crosses the whole screen.
+const double _kWipeOutgoingTravel = 0.17;
+const double _kWipeIncomingTravel = 0.27;
+
+/// The widest the reveal's soft edge gets, and how far through the sweep it
+/// takes to get there.
+const double _kWipeFeather = 170.0;
+const double _kWipeFeatherBy = 0.7;
+
+/// How wide the soft edge is at [p] through the sweep, as a fraction of
+/// [_kWipeFeather]: out of nothing at the start — the arriving edge is crisp
+/// where it starts — up to its full width by [_kWipeFeatherBy], and held there
+/// for the rest. It doesn't close again at the end; the sweep finishes with the
+/// boundary's opaque side landing on the left of the screen and the gradient
+/// itself carried off past it.
+double _wipeFeather(double p) =>
+    Curves.easeInOutSine.transform(unlerpUnit(0.0, _kWipeFeatherBy, p));
+
+/// The easing the two page slides settle on, Material 3's emphasized curve.
+/// Skipped entirely while a back-swipe is driving the animation, which has to
+/// track the finger.
+// const Curve _kWipeCurve = Curves.easeInOutCubicEmphasized;
+// const Curve _kWipeCurve = Curves.easeOut;
+// const Curve _kWipeCurve = Curves.easeOutCirc;
+// const Curve _kWipeCurve = Cubic(0.15, 0.68, 0.49, 1);
+// const Curve _kWipeCurve = Cubic(0.08, 0.88, 0.29, 1);
+const Curve _kWipeCurve = Cubic(0.12, 1, 0.29, 1);
+
+/// it's not clear these can be distinct, the wipe always has to be ahead of the sweep
+const Curve _kWipeSweepCurve = _kWipeCurve;
+
+/// My take on android's contemporary page transition. The older slides out a bit, the upper slides in a bit, but instead of cross-fading, we have a gradient wipe. To make that work, you have to start with gradient width 0, to avoid revealing the extended vertical/space behind the lower route.
+Widget wipePageTransition(
+  BuildContext context,
+  Animation<double> animation,
+  Animation<double> secondaryAnimation,
+  bool isSwipeGesture,
+  Widget child,
+) => _WipePageTransition(
+  animation: animation,
+  secondaryAnimation: secondaryAnimation,
+  linear: isSwipeGesture,
+  child: child,
+);
+
+class _WipePageTransition extends StatelessWidget {
+  final Animation<double> animation;
+  final Animation<double> secondaryAnimation;
+  final bool linear;
+  final Widget child;
+
+  const _WipePageTransition({
+    required this.animation,
+    required this.secondaryAnimation,
+    required this.linear,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final corners = getCachedCornerRadius();
+    return AnimatedBuilder(
+      animation: Listenable.merge([animation, secondaryAnimation]),
+      child: child,
+      builder: (context, child) {
+        final double raw = animation.value.clamp(0.0, 1.0);
+        final double p = linear ? raw : _kWipeSweepCurve.transform(raw);
+        final double slid = linear ? raw : _kWipeCurve.transform(raw);
+        final double s = secondaryAnimation.value.clamp(0.0, 1.0);
+        final double covered = linear ? s : _kWipeCurve.transform(s);
+        return FractionalTranslation(
+          translation: Offset(-_kWipeOutgoingTravel * covered, 0),
+          transformHitTests: false,
+          child: _WipeReveal(
+            front: 1.0 - p,
+            feather: _kWipeFeather * _wipeFeather(p),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(corners.topLeft),
+              topRight: Radius.circular(corners.topRight),
+              bottomLeft: Radius.circular(corners.bottomLeft),
+              bottomRight: Radius.circular(corners.bottomRight),
+            ),
+            continuousCorners: continuousCornersOn(),
+            child: FractionalTranslation(
+              translation: Offset(_kWipeIncomingTravel * (1.0 - slid), 0),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The arriving page seen through the sweep. [front] is the boundary's opaque
+/// side, a fraction of the width from the left; the [feather] pixels ahead of
+/// it are the gradient the page fades up across, and the page is clipped to its
+/// own rounded edge there, at the leading end of the gradient rather than at
+/// [front], so that nothing cuts the fade short.
+///
+/// A render object rather than a `ClipPath`/`ShaderMask` pair because at rest
+/// it has to cost nothing at all — the page under it lives here for as long as
+/// the route does — and because the widgets it replaces can't be swapped out
+/// once they're spent: the shape of the tree above a page can't change frame to
+/// frame without the page being re-inflated (see [screenCornerScaleDown]).
+class _WipeReveal extends SingleChildRenderObjectWidget {
+  final double front;
+  final double feather;
+  final BorderRadius borderRadius;
+  final bool continuousCorners;
+
+  const _WipeReveal({
+    required this.front,
+    required this.feather,
+    required this.borderRadius,
+    required this.continuousCorners,
+    required super.child,
+  });
+
+  @override
+  _RenderWipeReveal createRenderObject(BuildContext context) =>
+      _RenderWipeReveal(
+        front: front,
+        feather: feather,
+        borderRadius: borderRadius,
+        continuousCorners: continuousCorners,
+      );
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderWipeReveal r) {
+    r
+      ..front = front
+      ..feather = feather
+      ..borderRadius = borderRadius
+      ..continuousCorners = continuousCorners;
+  }
+}
+
+class _RenderWipeReveal extends RenderProxyBox {
+  _RenderWipeReveal({
+    required double front,
+    required double feather,
+    required BorderRadius borderRadius,
+    required bool continuousCorners,
+  }) : _front = front,
+       _feather = feather,
+       _borderRadius = borderRadius,
+       _continuousCorners = continuousCorners;
+
+  double get front => _front;
+  double _front;
+  set front(double value) {
+    if (value == _front) return;
+    final wasSweeping = _sweeping;
+    _front = value;
+    if (_sweeping != wasSweeping) markNeedsCompositingBitsUpdate();
+    markNeedsPaint();
+  }
+
+  double get feather => _feather;
+  double _feather;
+  set feather(double value) {
+    if (value == _feather) return;
+    _feather = value;
+    markNeedsPaint();
+  }
+
+  BorderRadius get borderRadius => _borderRadius;
+  BorderRadius _borderRadius;
+  set borderRadius(BorderRadius value) {
+    if (value == _borderRadius) return;
+    _borderRadius = value;
+    markNeedsPaint();
+  }
+
+  bool get continuousCorners => _continuousCorners;
+  bool _continuousCorners;
+  set continuousCorners(bool value) {
+    if (value == _continuousCorners) return;
+    _continuousCorners = value;
+    markNeedsPaint();
+  }
+
+  /// Whether the sweep is underway. Off either end of it the child is painted
+  /// straight through, so the route costs nothing once it's arrived.
+  bool get _sweeping => _front > 0.0;
+
+  @override
+  bool get alwaysNeedsCompositing => child != null && _sweeping;
+
+  final LayerHandle<ClipPathLayer> _clipLayer = LayerHandle<ClipPathLayer>();
+  final LayerHandle<ShaderMaskLayer> _maskLayer =
+      LayerHandle<ShaderMaskLayer>();
+
+  @override
+  void dispose() {
+    _clipLayer.layer = null;
+    _maskLayer.layer = null;
+    super.dispose();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final RenderBox? child = this.child;
+    if (child == null) return;
+    if (!_sweeping) {
+      _clipLayer.layer = null;
+      _maskLayer.layer = null;
+      context.paintChild(child, offset);
+      return;
+    }
+    // Held at the start (a back-swipe can hold it here indefinitely): the edge
+    // is on the right of the screen with nothing revealed behind it.
+    if (_front >= 1.0) return;
+
+    final double x = _front * size.width - _feather;
+    // Screen-sized, but never narrower than the screen: the edge sweeps past
+    // x=0 by the width of the feather, and a right edge dragged along with it
+    // would clip a strip off the right of the screen.
+    final Path edge = cornerStyleBorder(
+      _borderRadius,
+      continuous: _continuousCorners,
+    ).getOuterPath(Rect.fromLTRB(x, 0, size.width, size.height));
+
+    _clipLayer.layer = context.pushClipPath(
+      needsCompositing,
+      offset,
+      Offset.zero & size,
+      edge,
+      (PaintingContext context, Offset offset) {
+        if (_feather <= 0.5) {
+          _maskLayer.layer = null;
+          context.paintChild(child, offset);
+          return;
+        }
+        final layer = _maskLayer.layer ??= ShaderMaskLayer();
+        layer
+          // The shader's origin is the mask rect's top left, so it's drawn in
+          // our own coordinates, and clamps to fully opaque past the feather —
+          // behind the boundary the page is solid, never a wash.
+          ..shader = const LinearGradient(
+            colors: [Color(0x00FFFFFF), Color(0xFFFFFFFF)],
+          ).createShader(Rect.fromLTWH(x, 0, _feather, size.height))
+          ..maskRect = offset & size
+          ..blendMode = BlendMode.dstIn;
+        context.pushLayer(
+          layer,
+          (PaintingContext context, Offset offset) =>
+              context.paintChild(child, offset),
+          offset,
+        );
+      },
+      oldLayer: _clipLayer.layer,
+    );
+  }
+}
+
 Shader createRadialRevealShader({
   required Rect bounds,
   required Alignment center,
@@ -4295,13 +4689,24 @@ GlassOptions ourGlassOptions({
   double? bevelThickness,
   GlassMode mode = GlassMode.glass,
   double blendRadius = 18,
+  double? childRefractionIntensity,
 }) => GlassOptions(
   mode: mode,
   bevelThickness: bevelThickness ?? 18,
   blendRadius: blendRadius,
   blurRadius: blurRadius,
   edgeTint: edgeTint,
+  childRefractionIntensity: childRefractionIntensity,
 );
+
+/// How much the content on a glass surface should bend through the bevel part
+/// way through that surface's reveal ([openp] 0 -> 1): strong while the glass
+/// is still forming and liquid, gone by the time the reveal lands, so settled
+/// glass presents its labels and icons flat and legible. 0 at the end is also
+/// the cheap path — [GlassLayer] skips the child's refraction pass entirely
+/// there. Feed [ourGlassOptions]'s [GlassOptions.childRefractionIntensity].
+double openingChildRefraction(double openp, {double from = 90}) =>
+    from * (1 - Curves.easeOut.transform(openp));
 
 /// Eases [options] between a flat fill and full glass: at [glassiness] 0 the
 /// refraction, shine, blur and bevel all vanish, leaving just the blobs' flat
@@ -4315,6 +4720,9 @@ GlassOptions glassLerpedToFlat(GlassOptions options, double glassiness) =>
       motionShine: options.motionShine,
       shineIntensity: options.shineIntensity * glassiness,
       refractionIntensity: options.refractionIntensity * glassiness,
+      // effectiveChildRefraction rather than the raw field so a null (follow
+      // refractionIntensity) still lands on the scaled value here.
+      childRefractionIntensity: options.effectiveChildRefraction * glassiness,
       blurRadius: options.blurRadius * glassiness,
       edgeTint: options.edgeTint.withValues(
         alpha: options.edgeTint.a * glassiness,

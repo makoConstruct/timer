@@ -28,15 +28,15 @@ Things are generally persisted by setting a Mobj, which is a signal that persist
 
 ### how we use AI
 
-Some weakly reviewed slop code is acceptable if it's not architectural (eg, platform-specific API glue, serialization) but code in `main.dart`, `boring.dart`, is generally expected to be minimal and beautiful, so you'll want to do at least one edit pass before pushing.
+Some weakly reviewed slop code is acceptable if it's not architectural (eg, platform-specific API glue, ~leaf-code which no other code rests on) but code in `main.dart`, `boring.dart`, is generally expected to be minimal and beautiful, so you'll want to do at least one edit pass before pushing.
 
-We're humanist singularitarians, so we only use whoever's currently at the top of the [the AI safety index](https://futureoflife.org/ai-safety-index-summer-2026/) and we would ask contributors to do the same if they wouldn't mind.
+We're humanist singularitarians, so we only buy whoever's currently at the top of the [the AI safety index](https://futureoflife.org/ai-safety-index-summer-2026/) and we would ask contributors to do the same if they wouldn't mind.
 
 All of the hundreds of design decisions that were made here (architecture, interaction, theme, style, animations, sound, writing, etc) were made by a human. Claude advised architecture decisions, but mostly just did typing, searching, and debugging.
 
 ### compensation
 
-Naturally, if customers see fit to bestow us with a reward, we will try to pass some of it along to anyone who's made a substantial contribution here. We don't want to exclude anyone from the club. The specifics of how much and when would have to be worked out on a case by case basis though.
+Naturally, if customers see fit to reward us, we will try to pass some of it along to anyone who's made a substantial contribution here. We don't want to exclude anyone from the club. The specifics of how much and when would have to be worked out on a case by case basis though.
 
 ## license
 

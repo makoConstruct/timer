@@ -48,11 +48,11 @@ dependencies:
   url_launcher: ^6.3.1
   dynamic_color: ^1.8.1
   material_color_utilities: ^0.13.0
-  swipeable_page_route: ^0.4.8
+  universal_back_gesture: ^2.1.0
 
-# dependency_overrides:
-#   just_liquid_glass:
-#     path: ../just_liquid_glass
+dependency_overrides:
+  just_liquid_glass:
+    path: ../just_liquid_glass
 
 dev_dependencies:
   flutter_test:

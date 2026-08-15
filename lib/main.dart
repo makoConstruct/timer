@@ -21,7 +21,6 @@ import 'package:just_liquid_glass/just_liquid_glass.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
-import 'package:swipeable_page_route/swipeable_page_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter/scheduler.dart' hide Priority;
@@ -1542,16 +1541,14 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
             darkTheme: makeTheme(Brightness.light, wallpaper),
             onGenerateRoute: (settings) {
               if (settings.name == '/') {
-                return SwipeablePageRoute(builder: (context) => TimerScreen());
+                return OurPageRoute(builder: (context) => TimerScreen());
               }
               if (settings.name == '/onboard') {
-                return SwipeablePageRoute(
-                  builder: (context) => OnboardScreen(),
-                );
+                return OurPageRoute(builder: (context) => OnboardScreen());
               }
               // abandoned on journey_game branch
               // if (settings.name == '/journeying') {
-              //   return SwipeablePageRoute(
+              //   return OurPageRoute(
               //     builder: (context) => const JourneyingGameScreen(),
               //   );
               // }
@@ -1560,7 +1557,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
             onGenerateInitialRoutes: (initialRouteName) {
               // if (initialRouteName == '/journeying') {
               //   return <Route<dynamic>>[
-              //     SwipeablePageRoute(
+              //     OurPageRoute(
               //       builder: (context) => const JourneyingGameScreen(),
               //     ),
               //   ];
@@ -1573,9 +1570,9 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                     Mobj.getAlreadyLoaded(trainscapeModeID, BoolType()).value ??
                     false;
                 return <Route<dynamic>>[
-                  SwipeablePageRoute(builder: (context) => TimerScreen()),
+                  OurPageRoute(builder: (context) => TimerScreen()),
                   if (trainscapeMode)
-                    SwipeablePageRoute(
+                    OurPageRoute(
                       builder: (context) => const TrainscapeScreen(),
                     ),
                 ];
@@ -1591,7 +1588,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                     ),
                     transitionDuration: Duration.zero,
                   ),
-                  SwipeablePageRoute(
+                  OurPageRoute(
                     builder: (context) => OnboardScreen(isRootal: true),
                   ),
                 ];
@@ -1782,7 +1779,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             final revealProgress = unlerpUnit(0, 0.7, upp);
             final downwardProgress = downp;
             final contentOpacity = Curves.easeInOut.transform(
-              unlerpUnit(0.35, 1, upp),
+              unlerpUnit(0.1, 0.6, upp),
             );
             // happens to make the origin be the center of the clockface
             final origin = arrowCenter - Offset(left, top);
@@ -1894,6 +1891,9 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
         bevelThickness: bevelThickness,
         blurRadius: mt.glassBlurRadius,
         edgeTint: mt.edgeTint,
+        // the items ride the bevel while the body is still liquid and flatten
+        // onto it as the reveal lands.
+        childRefractionIntensity: openingChildRefraction(p),
       ),
       blobs: const [],
       // Blobs are placed in the content's coordinate space, so they need the
@@ -4393,6 +4393,9 @@ class DragActionRingState extends State<DragActionRing>
                 blendRadius: blendRadius,
                 blurRadius: mt.glassBlurRadius,
                 edgeTint: mt.edgeTint,
+                // icons and pill labels bend through the rims as the ring
+                // grows out, flat by the time it's out.
+                childRefractionIntensity: openingChildRefraction(baseGrow),
               ),
               glassiness,
             ),
@@ -5155,7 +5158,7 @@ class TimerScreenState extends State<TimerScreen>
                         WidgetsBinding.instance.addPostFrameCallback((_) async {
                           final result = await Navigator.push<AudioInfo?>(
                             this.context,
-                            SwipeablePageRoute(
+                            OurPageRoute(
                               builder: (context) => AlarmSoundPickerScreen(
                                 perTimerMode: true,
                                 initialPerTimerSelection: td.soundEffect,
@@ -5499,6 +5502,9 @@ class TimerScreenState extends State<TimerScreen>
                   blendRadius: lerp(34, 26, budp),
                   blurRadius: mt.glassBlurRadius,
                   edgeTint: mt.edgeTint,
+                  // knurl and controls bend with the disc as it forms, flat
+                  // once it has settled.
+                  childRefractionIntensity: openingChildRefraction(p),
                 ),
                 blobs: blobs,
                 child: SizedBox(
@@ -5674,7 +5680,7 @@ class TimerScreenState extends State<TimerScreen>
       onPanEnd: () {
         Navigator.push(
           context,
-          SwipeablePageRoute(builder: (context) => SettingsScreen()),
+          OurPageRoute(builder: (context) => SettingsScreen()),
         );
       },
     );
@@ -5748,6 +5754,9 @@ class TimerScreenState extends State<TimerScreen>
                       mode: GlassMode.glass,
                       blurRadius: mt.glassBlurRadius,
                       edgeTint: mt.edgeTint,
+                      // the backing has no child (the numerals sit above it),
+                      // so keep it on the plain-mask path throughout.
+                      childRefractionIntensity: 0,
                     ),
                     shadowp,
                   ),
@@ -6758,7 +6767,7 @@ class _NumeralButtonState extends State<NumeralButton> {
       ),
       radialActivatorPositions: numericRadialActivatorPositions,
       radialActivatorIcons: [
-        PaintedPlayIcon(size: 14),
+        PaintedPlayIcon(size: 16),
         Column(
           mainAxisSize: MainAxisSize.min,
           spacing: 4,
@@ -7359,7 +7368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onTap: () {
         Navigator.push(
           context,
-          SwipeablePageRoute(builder: (context) => OnboardScreen()),
+          OurPageRoute(builder: (context) => OnboardScreen()),
         );
       },
     );
@@ -7457,7 +7466,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              SwipeablePageRoute(
+                              OurPageRoute(
                                 builder: (context) =>
                                     AlarmSoundPickerScreen(iconKey: iconKey),
                               ),
@@ -7796,7 +7805,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              SwipeablePageRoute(
+                              OurPageRoute(
                                 builder: (context) =>
                                     AboutScreen(iconKey: iconKey),
                               ),
@@ -7829,7 +7838,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              SwipeablePageRoute(
+                              OurPageRoute(
                                 builder: (context) =>
                                     ThankAuthorScreen(iconKey: iconKey),
                               ),
@@ -7896,7 +7905,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              SwipeablePageRoute(
+                              OurPageRoute(
                                 builder: (context) =>
                                     CrankGameScreen(iconKey: iconKey),
                               ),
@@ -7941,7 +7950,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              SwipeablePageRoute(
+                              OurPageRoute(
                                 builder: (context) => const TrainscapeScreen(),
                               ),
                             );
@@ -8005,7 +8014,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              SwipeablePageRoute(
+                              OurPageRoute(
                                 builder: (context) =>
                                     BinScreen(iconKey: iconKey),
                               ),
@@ -8335,7 +8344,7 @@ class _AboutScreenState extends State<AboutScreen> {
   void _openHowMade() {
     Navigator.push(
       context,
-      SwipeablePageRoute(
+      OurPageRoute(
         builder: (context) => HowMadeScreen(iconKey: _howMadeIconKey),
       ),
     );
@@ -9043,7 +9052,7 @@ class _OnboardScreenState extends State<OnboardScreen> with EffectsMixin {
         // we're now ready to create timerscreen, replace the blank placeholder below us with it
         navigator.replaceRouteBelow(
           anchorRoute: currentRoute,
-          newRoute: SwipeablePageRoute(builder: (context) => TimerScreen()),
+          newRoute: OurPageRoute(builder: (context) => TimerScreen()),
         );
       }
       navigator.pop();
