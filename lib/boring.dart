@@ -4460,6 +4460,8 @@ class OurThemeData {
   final double glassBlurRadius;
   static const double defaultGlassBlurRadius = 12;
 
+  static const Color defaultEdgeTint = Color(0x09000000);
+
   /// Rim-darkening tint for liquid-glass surfaces; feed into [ourGlassOptions]'s
   /// [GlassOptions.edgeTint].
   final Color edgeTint;
@@ -4485,7 +4487,7 @@ class OurThemeData {
     this.hardEdges = false,
     this.timerculeBackingCornerRadius = 23,
     this.glassBlurRadius = defaultGlassBlurRadius,
-    this.edgeTint = const Color(0x26000000),
+    this.edgeTint = defaultEdgeTint,
   });
 
   /// Fill for a glass-like surface: the translucent [glassColor] when liquid
@@ -4570,7 +4572,7 @@ class OurThemeData {
             nonGlassOnSurface: Colors.black,
             nonGlassPopupMenu: Colors.white,
             onNonGlassPopupMenu: Colors.black,
-            edgeTint: Colors.white.withValues(alpha: 0.7),
+            edgeTint: Colors.white.withValues(alpha: defaultEdgeTint.a),
           )
         : OurThemeData(
             lowestBackColor: cs.surfaceContainerHighest,
@@ -4593,7 +4595,7 @@ class OurThemeData {
             nonGlassOnSurface: Colors.white,
             nonGlassPopupMenu: Colors.black,
             onNonGlassPopupMenu: Colors.white,
-            edgeTint: HSLColor.fromAHSL(0.16, 0, 0, 0.2).toColor(),
+            edgeTint: defaultEdgeTint,
           );
   }
 
@@ -4688,7 +4690,7 @@ GlassOptions ourGlassOptions({
   required Color edgeTint,
   double? bevelThickness,
   GlassMode mode = GlassMode.glass,
-  double blendRadius = 18,
+  double blendRadius = 20,
   double? childRefractionIntensity,
 }) => GlassOptions(
   mode: mode,
@@ -4696,7 +4698,7 @@ GlassOptions ourGlassOptions({
   blendRadius: blendRadius,
   blurRadius: blurRadius,
   edgeTint: edgeTint,
-  childRefractionIntensity: childRefractionIntensity,
+  childRefractionIntensity: childRefractionIntensity ?? 0,
 );
 
 /// How much the content on a glass surface should bend through the bevel part
@@ -4722,8 +4724,10 @@ GlassOptions glassLerpedToFlat(GlassOptions options, double glassiness) =>
       refractionIntensity: options.refractionIntensity * glassiness,
       // effectiveChildRefraction rather than the raw field so a null (follow
       // refractionIntensity) still lands on the scaled value here.
-      childRefractionIntensity: options.effectiveChildRefraction * glassiness,
+      childRefractionIntensity: options.childRefractionIntensity * glassiness,
       blurRadius: options.blurRadius * glassiness,
+      shadowIntensity: options.shadowIntensity * glassiness,
+      shadowRadius: options.shadowRadius * glassiness,
       edgeTint: options.edgeTint.withValues(
         alpha: options.edgeTint.a * glassiness,
       ),

@@ -42,7 +42,7 @@ dependencies:
   vibration: ^3.1.8
   shadow_widget: ^0.1.1
   flutter_svg: ^2.0.9
-  just_liquid_glass: ^0.6.0
+  just_liquid_glass: ^0.7.0
   flutter_markdown_plus: ^1.0.3
   markdown: ^7.3.1
   url_launcher: ^6.3.1
@@ -50,9 +50,9 @@ dependencies:
   material_color_utilities: ^0.13.0
   universal_back_gesture: ^2.1.0
 
-dependency_overrides:
-  just_liquid_glass:
-    path: ../just_liquid_glass
+# dependency_overrides:
+#   just_liquid_glass:
+#     path: ../just_liquid_glass
 
 dev_dependencies:
   flutter_test:
