@@ -2703,6 +2703,36 @@ class OurPageRoute<T>({required super.builder, super.settings, super.title})
       .buildTransitions(this, context, animation, secondaryAnimation, child);
 }
 
+/// A [SelectionArea] that doesn't swallow the page's back swipe.
+///
+/// [SelectableRegion] gives touch devices a [TapAndHorizontalDragGestureRecognizer],
+/// and everywhere but iOS that recognizer takes eager victory in the gesture
+/// arena the instant a drag passes the touch slop. It sits deeper in the tree
+/// than [OurPageRoute]'s back-gesture recognizer, so it sees the move events
+/// first and wins outright — and then does nothing with what it won: selection
+/// dragging returns immediately for any non-precise pointer, so on a phone the
+/// drag half of that recognizer is inert. It's there to stop [SelectableRegion]
+/// from stealing scrolls in a horizontal list, and it steals the back gesture
+/// instead. Selection on touch runs on long press, which is timed and doesn't
+/// care.
+///
+/// Nothing turns the recognizer off, but its threshold comes from the ambient
+/// [MediaQueryData.gestureSettings], and it only ever *raises* one, so an
+/// unreachable touch slop over this subtree is enough to keep it out of the
+/// arena. Only [SelectableRegion]'s own three recognizers read it — link taps
+/// come from recognizers a [RenderParagraph] owns, which are given no gesture
+/// settings at all — and of those three, the two that can still fire are a tap
+/// (no threshold to cross) and a long press (which a real back swipe beats to
+/// the arena anyway).
+Widget dragThroughSelectionArea({required Widget child}) => Builder(
+  builder: (context) => MediaQuery(
+    data: MediaQuery.of(
+      context,
+    ).copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: 1e9)),
+    child: SelectionArea(child: child),
+  ),
+);
+
 /// The iOS transition, without the edge-only back gesture
 /// [CupertinoPageTransitionsBuilder] would install alongside it — the gesture
 /// is [_kBackGesture]'s job now, and two recognizers contesting the same drag
@@ -2755,8 +2785,8 @@ class const _WipeTransitions() extends PageTransitionsBuilder {
 /// gliding to a stop, and easing into that stop is most of what you're
 /// watching, where ours crosses the screen at speed and leaves. Coming back is
 /// quicker again, as everything that closes in this app is.
-const Duration _kWipeDuration = Duration(milliseconds: 310);
-const Duration _kWipeReverseDuration = Duration(milliseconds: 200);
+const Duration _kWipeDuration = Duration(milliseconds: 370);
+const Duration _kWipeReverseDuration = Duration(milliseconds: 240);
 
 /// How far the page being covered slides left, and how far the arriving page's
 /// contents slide in from the right, as fractions of the screen's width. The
@@ -7207,7 +7237,7 @@ class const RoundedSectionSliver({
   ),
   final EdgeInsetsGeometry padding = const EdgeInsets.all(16),
 }) extends StatelessWidget {
-  static const double defaultMargin = 12;
+  static const double defaultMargin = 15;
 
   static const double contentRadius =
       MenuTile.trailingSlotSpan / 2 + defaultMargin;

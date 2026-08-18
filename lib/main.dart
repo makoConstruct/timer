@@ -39,6 +39,7 @@ import 'package:makos_timer/trainscape.dart'
 // import 'package:makos_timer/journeying_game.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/size_reporter.dart';
+import 'package:makos_timer/timer_intent.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
@@ -377,8 +378,20 @@ void main() async {
       // Dismissing or acting on a completion notification dismisses the alarm.
       PlatformNotifications.setActionListener(_sendDismissAlarms);
     }),
+    TimerIntents.listen(receiveTimerIntent),
   ]);
   runApp(const TimersApp());
+}
+
+/// Timer intents that haven't been acted on yet. A cold start from the intent is
+/// the normal case, so they routinely arrive before there's a screen to act on
+/// them; [TimerScreenState] drains this once it's laid out.
+final List<TimerIntentRequest> pendingTimerIntents = [];
+void Function()? _timerIntentDrain;
+
+void receiveTimerIntent(TimerIntentRequest request) {
+  pendingTimerIntents.add(request);
+  _timerIntentDrain?.call();
 }
 
 void _sendDismissAlarms() {
@@ -1150,6 +1163,62 @@ Iterable<({DateTime at, Mobj<TimerData> timer})> upcomingFires(
         i++;
       }
   }
+}
+
+double nextRandomHue() {
+  final nextHueMobj = Mobj.getAlreadyLoaded(nextHueID, DoubleType());
+  final ret = nextHueMobj.value!;
+  final increment = 0.1 + Random().nextDouble() * 0.15;
+  nextHueMobj.value = (ret + increment) % 1;
+  return ret;
+}
+
+/// The mobj half of creating a timer, with none of [TimerScreenState]'s UI work,
+/// so that the foreground service's isolate — which has the registry but no
+/// widgets — can create timers too when an intent arrives with the app closed.
+MobjID<TimerData> createTimerMobj({
+  int runningState = TimerData.completed,
+  bool selected = false,
+  List<int> digits = const [],
+  String? title,
+}) {
+  final ntid = UuidV4().generate();
+  // we leak this. By not deleting it, it will stay in the db and registry as a root object
+  Mobj<TimerData>.clobberCreate(
+    ntid,
+    type: TimerDataType(),
+    initial: TimerData(
+      startTime: null,
+      runningState: runningState,
+      hue: nextRandomHue(),
+      selected: selected,
+      digits: digits,
+      ranTime: Duration.zero,
+      parentId: timerListID,
+      isGoingOff: false,
+      title: title,
+    ),
+  );
+  Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
+  final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
+  n.value = n.peek()! + 1;
+  final timerList = Mobj.getAlreadyLoaded(timerListID, timerListType);
+  timerList.value = timerList.peek()!.toList()..add(ntid);
+  return ntid;
+}
+
+/// Creates a running timer for a `setTimer` intent that arrived with no app to
+/// show it in. The screen's own path goes through [TimerScreenState.addNewTimer]
+/// instead, which does the same thing plus the animating and tidying that only
+/// mean something when someone's looking.
+void createAndStartIntentTimer(TimerIntentRequest request) {
+  final duration = request.duration;
+  if (duration == null) return;
+  final id = createTimerMobj(
+    digits: durationToDigits(duration.inSeconds.toDouble()),
+    title: request.message,
+  );
+  startTimer(Mobj.getAlreadyLoaded(id, TimerDataType()), reset: true);
 }
 
 bool startTimer(
@@ -3812,7 +3881,7 @@ class DragActionRingState extends State<DragActionRing>
           final controller = UpDownAnimationController(
             vsync: this,
             riseDuration: Duration(
-              milliseconds: glassOn ? 1100 : nonGlassBlobRise,
+              milliseconds: glassOn ? 700 : nonGlassBlobRise,
             ),
             fallDuration: Duration(milliseconds: 200),
           );
@@ -4656,10 +4725,6 @@ class TimerScreenState extends State<TimerScreen>
   );
   // final Mobj<List<MobjID<TimerData>>> transientTimerListMobj =
   //     Mobj.getAlreadyLoaded(transientTimerListID, timerListType);
-  late final Mobj<double> nextHueMobj = Mobj.getAlreadyLoaded(
-    nextHueID,
-    DoubleType(),
-  );
   late final Mobj<bool> buttonScaleDialOn = Mobj.getAlreadyLoaded(
     buttonScaleDialOnID,
     BoolType(),
@@ -5060,6 +5125,9 @@ class TimerScreenState extends State<TimerScreen>
       }
       return next;
     });
+    _timerIntentDrain = _drainTimerIntents;
+    _drainTimerIntents();
+
     // watching the selected timer
     createEffect(() {
       final sv = selectedTimer.value;
@@ -5073,8 +5141,39 @@ class TimerScreenState extends State<TimerScreen>
     });
   }
 
+  /// Acts on whatever android's timer intents have asked for. Deferred until the
+  /// list is laid out, because [addNewTimer] scrolls it and a cold start from an
+  /// intent gets here before there's anything to scroll.
+  void _drainTimerIntents() {
+    if (!mounted) return;
+    if (!timersScroller.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _drainTimerIntents());
+      return;
+    }
+    final requests = pendingTimerIntents.toList();
+    pendingTimerIntents.clear();
+    for (final request in requests) {
+      switch (request.action) {
+        case 'setTimer':
+          final duration = request.duration;
+          // Lengthless, so the ask was only for the numpad, which is already here.
+          if (duration == null) break;
+          final id = addNewTimer(
+            digits: durationToDigits(duration.inSeconds.toDouble()),
+            title: request.message,
+          );
+          startTimer(Mobj.getAlreadyLoaded(id, TimerDataType()), reset: true);
+        case 'showTimers':
+          break;
+        case 'dismissTimer':
+          timerHolm.dismissAlarms();
+      }
+    }
+  }
+
   @override
   void dispose() {
+    if (_timerIntentDrain == _drainTimerIntents) _timerIntentDrain = null;
     squishPanelController.dispose();
     timersScroller.removeListener(_updateNumeralBackshadow);
     numeralBackshadowController.dispose();
@@ -5341,13 +5440,6 @@ class TimerScreenState extends State<TimerScreen>
     }
     modeActivationPulse.add(null);
     _selectTimer(null);
-  }
-
-  double nextRandomHue() {
-    final ret = nextHueMobj.value!;
-    final increment = 0.1 + Random().nextDouble() * 0.15;
-    nextHueMobj.value = (ret + increment) % 1;
-    return ret;
   }
 
   void numeralPressed(List<int> number) {
@@ -6416,33 +6508,23 @@ class TimerScreenState extends State<TimerScreen>
     return (bud.root! - face.center) * (1 - PadBud.travel(bud.progress.value));
   }
 
-  void addNewTimer({int? runningState, bool? selected, List<int>? digits}) {
-    final ntid = UuidV4().generate();
-    _pendingPadBud = ntid;
-
+  MobjID<TimerData> addNewTimer({
+    int? runningState,
+    bool? selected,
+    List<int>? digits,
+    String? title,
+  }) {
     bool selecting = selected ?? false;
 
-    // we leak this. By not deleting it, it will stay in the db and registry as a root object
-    Mobj<TimerData>.clobberCreate(
-      ntid,
-      type: TimerDataType(),
-      initial: TimerData(
-        startTime: null,
-        runningState: runningState ?? TimerData.completed,
-        hue: nextRandomHue(),
-        selected: selecting,
-        digits: digits ?? const [],
-        ranTime: Duration.zero,
-        parentId: timerListMobj.id,
-        isGoingOff: false,
-      ),
+    final ntid = createTimerMobj(
+      runningState: runningState ?? TimerData.completed,
+      selected: selecting,
+      digits: digits ?? const [],
+      title: title,
     );
-    Mobj.getAlreadyLoaded(hasCreatedTimerID, BoolType()).value = true;
+    _pendingPadBud = ntid;
     ensureNotificationPermission();
-    final n = Mobj.getAlreadyLoaded(numberOfTimersCreatedID, IntType());
-    n.value = n.peek()! + 1;
 
-    timerListMobj.value = peekTimers().toList()..add(ntid);
     if (selecting) {
       _selectTimer(ntid);
     }
@@ -6454,6 +6536,7 @@ class TimerScreenState extends State<TimerScreen>
       duration: Duration(milliseconds: 180),
       curve: Curves.easeInOutCubic,
     );
+    return ntid;
   }
 
   void addNewStopwatch() {
@@ -7427,7 +7510,7 @@ Widget markdownPageSliver(
             duration: const Duration(milliseconds: 200),
             builder: (context, value, child) =>
                 Opacity(opacity: value, child: child),
-            child: SelectionArea(
+            child: dragThroughSelectionArea(
               child: markdownBody(theme, md, imageBuilder: imageBuilder),
             ),
           ),

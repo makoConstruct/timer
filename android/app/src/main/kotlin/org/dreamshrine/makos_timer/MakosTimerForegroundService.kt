@@ -193,6 +193,7 @@ class MakosTimerForegroundService : Service() {
         // what CustomPluginRegistrant used to do for the foreground engine.
         engine.plugins.add(PlatformAudioPlugin())
         engine.plugins.add(PlatformNotificationPlugin())
+        engine.plugins.add(TimerIntentPlugin(isMainEngine = false))
 
         val channel = MethodChannel(engine.dartExecutor.binaryMessenger, TASK_CHANNEL)
         channel.setMethodCallHandler { call, result ->

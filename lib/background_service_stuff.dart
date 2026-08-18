@@ -15,7 +15,9 @@ import 'package:makos_timer/main.dart'
         mainNotificationPortName,
         isBackgrounded,
         foregroundServiceOpen,
+        createAndStartIntentTimer,
         TimerHolm;
+import 'package:makos_timer/timer_intent.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart';
 import 'package:signals/signals_flutter.dart';
@@ -283,6 +285,36 @@ class ForegroundTaskRunner {
     }
   }
 
+  /// Timer intents that arrived while this isolate wasn't the live tracker. The
+  /// native side only routes here when the app's engine is gone, but that can be
+  /// up to a heartbeat ahead of this isolate noticing, and reloading the registry
+  /// takes a moment — so they wait rather than writing mobjs we don't own.
+  final List<TimerIntentRequest> _pendingIntents = [];
+
+  void _receiveIntent(TimerIntentRequest request) {
+    _pendingIntents.add(request);
+    // A non-null holm is exactly "we're the live tracker and the registry is
+    // ours" — !appActive is true well before that, both at construction and
+    // across _reinitialize's reload. Otherwise _startTimerHolm drains it as part
+    // of becoming the tracker.
+    if (_timerHolm.peek() != null) _drainIntents();
+  }
+
+  void _drainIntents() {
+    final requests = _pendingIntents.toList();
+    _pendingIntents.clear();
+    for (final request in requests) {
+      backthreadLog("acting on a ${request.action} intent");
+      switch (request.action) {
+        case 'setTimer':
+          createAndStartIntentTimer(request);
+          updateRunningTimersNotification();
+        case 'dismissTimer':
+          dismissAllAlarms();
+      }
+    }
+  }
+
   void _setIdleNotification() {
     // null title + text => icon-only, non-expandable notification (see
     // MakosTimerForegroundService.buildNotification).
@@ -302,6 +334,11 @@ class ForegroundTaskRunner {
       const Duration(seconds: 1),
       (_) => updateRunningTimersNotification(),
     );
+    // Anything an intent asked for while we were coming up has to be created
+    // before the holm counts what's active, for the same reason — otherwise a
+    // service woken purely to serve that intent stops itself for having nothing
+    // to track, a beat before the timer it was woken to make.
+    _drainIntents();
     // Build the holm first (its constructor synchronously populates activeTimers
     // via enlivenTimer), then publish it — so the self-stop effect this assign
     // re-triggers sees an accurate activeTimers.
@@ -344,6 +381,11 @@ class ForegroundTaskRunner {
     debugPrint("foreground runner start b");
     jukeBox = JukeBox.create();
     await MobjRegistry.initialize(TheDatabase(), preload: true);
+
+    // Before the holm is started below, so that an intent which is the whole
+    // reason this service woke up is already buffered when _startTimerHolm
+    // drains — otherwise the self-stop effect sees nothing to track and stops us.
+    await TimerIntents.listen(_receiveIntent);
 
     final servicePort = ReceivePort();
     _servicePort = servicePort;

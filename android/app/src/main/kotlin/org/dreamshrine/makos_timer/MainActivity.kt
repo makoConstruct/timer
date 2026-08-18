@@ -13,6 +13,7 @@ class MainActivity : FlutterActivity() {
         flutterEngine.plugins.add(PlatformAudioPlugin())
         flutterEngine.plugins.add(PlatformNotificationPlugin())
         flutterEngine.plugins.add(ForegroundControlPlugin())
+        flutterEngine.plugins.add(TimerIntentPlugin(isMainEngine = true))
 
         // The foreground engine's custom plugins are registered directly in
         // MakosTimerForegroundService.bootstrapEngine (not here), so they're present
