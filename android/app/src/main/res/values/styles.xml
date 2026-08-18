@@ -15,6 +15,14 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+    <!-- TimerIntentActivity relays the system's timer intents and finishes before
+         drawing, so it must never flash a window of its own. -->
+    <style name="InvisibleRelayTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
     <!-- needed to enable 120hz on non-pixel/samsung devices (recommended by flutter_refresh_rate_control) -->
     <style name="frameRatePowerSavingsBalancedDisabled">
         <item name="android:windowIsFrameRatePowerSavingsBalanced">false</item>
