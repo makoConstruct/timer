@@ -74,13 +74,15 @@ mixin EffectsMixin<T extends StatefulWidget> on State<T> {
 /// is otherwise retained — [compute] only re-runs when a signal it read changes,
 /// so unrelated rebuilds reuse it. Reads of [value] register a dependency, so a
 /// reactive context re-runs when the value is replaced.
-class ComputedWithDisposer<T> {
-  final void Function(T value) _disposer;
+class ComputedWithDisposer<T>(
+  final void Function(T value) _disposer,
+  T Function() compute,
+) {
   late final Computed<T> _computed;
   bool _hasValue = false;
   late T _value;
 
-  ComputedWithDisposer(this._disposer, T Function() compute) {
+  this {
     _computed = Computed(() {
       if (_hasValue) {
         _disposer(_value);
@@ -502,10 +504,11 @@ void getStateMaybeDeferring<T extends State>(
 
 /// a FutureBuilder that basically assumes it wont have to show a loading image, and has a way of displaying errors.
 /// shows a red screen on error or during loading. (I'll probably change the loading behavior)
-class FutureAssumer<T> extends StatelessWidget {
-  final Future<T> future;
-  final Widget Function(BuildContext, T) builder;
-  const FutureAssumer({super.key, required this.future, required this.builder});
+class const FutureAssumer<T>({
+  super.key,
+  required final Future<T> future,
+  required final Widget Function(BuildContext, T) builder,
+}) extends StatelessWidget {
   @override
   build(BuildContext context) => FutureBuilder(
     future: future,
@@ -523,18 +526,13 @@ class FutureAssumer<T> extends StatelessWidget {
   );
 }
 
-class DraggableWidget<T> extends StatefulWidget {
-  final Widget child;
-  final T? data;
-  final Function()? onDragStarted;
-  final Function()? onDragEnd;
-  const DraggableWidget({
-    super.key,
-    required this.child,
-    this.data,
-    this.onDragStarted,
-    this.onDragEnd,
-  });
+class const DraggableWidget<T>({
+  super.key,
+  required final Widget child,
+  final T? data,
+  final Function()? onDragStarted,
+  final Function()? onDragEnd,
+}) extends StatefulWidget {
   @override
   State<DraggableWidget> createState() => _DraggableWidgetState();
 }
@@ -547,19 +545,17 @@ Duration normalizeDuration(Duration duration, Duration interval) {
   return Duration(microseconds: normalizedMs);
 }
 
-class PeriodicTimerFromEpoch implements Timer {
-  final Duration period;
+class PeriodicTimerFromEpoch({
+  required final Duration period,
 
   /// epoch is allowed to be in the past, we'll correctly trigger on the modulo since then
-  final DateTime epoch;
-  final Function(Timer) callback;
+  required final DateTime epoch,
+  required final Function(Timer) callback,
+}) implements Timer {
   Timer? firstTickTimer;
   Timer? periodicTimer;
-  PeriodicTimerFromEpoch({
-    required this.period,
-    required this.epoch,
-    required this.callback,
-  }) {
+
+  this {
     firstTickTimer = Timer(
       normalizeDuration(epoch.difference(DateTime.now()), period),
       () {
@@ -615,14 +611,11 @@ void moveAnimationTowardsState(AnimationController animation, bool forward) {
 }
 
 // automatically removes children when the associated animation is dismissed
-class SelfRemovalHost extends StatefulWidget {
-  final List<Widget> initialChildren;
-  final Widget Function(List<Widget>, BuildContext) builder;
-  const SelfRemovalHost({
-    super.key,
-    this.initialChildren = const [],
-    required this.builder,
-  });
+class const SelfRemovalHost({
+  super.key,
+  final List<Widget> initialChildren = const [],
+  required final Widget Function(List<Widget>, BuildContext) builder,
+}) extends StatefulWidget {
   @override
   State<SelfRemovalHost> createState() => SelfRemovalHostState();
 }
@@ -994,12 +987,9 @@ double softmax(double a, double b) {
 /// constant speed, clockwise from the top edge's left end, wrapping at
 /// [length], and [nearest] is its inverse for an arbitrary point. Note the
 /// corners are circular, not continuous. — Opus 5
-class RoundRectPerimeter {
-  RoundRectPerimeter(this.rect, double corner)
-    : corner = clampDouble(corner, 0, min(rect.width, rect.height) / 2);
-
-  final Rect rect;
+class RoundRectPerimeter(final Rect rect, double corner) {
   final double corner;
+  this : corner = clampDouble(corner, 0, min(rect.width, rect.height) / 2);
 
   /// Where the four corner arcs are centred.
   late final Rect _inner = rect.deflate(corner);
@@ -1189,7 +1179,11 @@ double progressOverInterval(Duration interval, DateTime startTime) {
 
 /// tracks two components, a rise time and a fall time. Sometimes you want an animation to look different on the way down. Use the second component (the falling one) of the animation value to smoothly overrule the rising component so that there's no stutter or interruption when the animation changes direction. However, when the animation goes from falling to rising, there will be a discontinuity.
 /// when you call forward(), the rise component will start to move towards 1. When you call reverse(), the fall component will start to move towards 1. The next time you call forward, the rise component will start from roughly min(rise, fall), and the fall component will be 0.
-class UpDownAnimationController extends ValueListenable<(double, double)>
+class UpDownAnimationController({
+  required Duration riseDuration,
+  required Duration fallDuration,
+  required TickerProvider vsync,
+}) extends ValueListenable<(double, double)>
     with ChangeNotifier
     implements Animation<(double, double)> {
   // falltime overrides risetime, so reversing while the forward is still happening always looks fine (special), but there can be glitches when going forward while reverse is in progress.
@@ -1204,12 +1198,7 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
   AnimationStatus _lastStatus = AnimationStatus.dismissed;
   late final Ticker _ticker;
 
-  UpDownAnimationController({
-    required Duration riseDuration,
-    required Duration fallDuration,
-    required TickerProvider vsync,
-  }) : rawRiseDuration = riseDuration,
-       rawFallDuration = fallDuration {
+  this : rawRiseDuration = riseDuration, rawFallDuration = fallDuration {
     _ticker = vsync.createTicker(_tick);
   }
 
@@ -1418,13 +1407,9 @@ class UpDownAnimationController extends ValueListenable<(double, double)>
 }
 
 /// Adapter that converts `Animation<(double, double)>` to `Animation<double>` by computing min(rise, 1 - fall)
-class _UpDownToDoubleAdapter extends Animation<double>
+class _UpDownToDoubleAdapter(@override final Animation<(double, double)> parent)
+    extends Animation<double>
     with AnimationWithParentMixin<(double, double)> {
-  _UpDownToDoubleAdapter(this.parent);
-
-  @override
-  final Animation<(double, double)> parent;
-
   @override
   double get value {
     final (rise, fall) = parent.value;
@@ -1433,14 +1418,16 @@ class _UpDownToDoubleAdapter extends Animation<double>
 }
 
 /// Critically-damped spring with an initial-velocity kick on forward-from-rest so the response shape resembles easeOut instead of the lazy exponential critical damping gives a step input. Mid-flight re-targets preserve velocity.
-class SpringExpansionController extends Animation<double>
+class SpringExpansionController({
+  required TickerProvider vsync,
+  final SpringDescription spring = SpringExpansionController.defaultSpring,
+  final double kickSpeed = 25.0,
+  final double restThreshold = 0.01,
+}) extends Animation<double>
     with
         AnimationLazyListenerMixin,
         AnimationLocalListenersMixin,
         AnimationLocalStatusListenersMixin {
-  final SpringDescription spring;
-  final double kickSpeed;
-  final double restThreshold;
   late final AnimationController _controller;
   final List<VoidCallback> _closedListeners = [];
   double _target = 0;
@@ -1451,12 +1438,7 @@ class SpringExpansionController extends Animation<double>
     damping: 50,
   );
 
-  SpringExpansionController({
-    required TickerProvider vsync,
-    this.spring = defaultSpring,
-    this.kickSpeed = 25.0,
-    this.restThreshold = 0.01,
-  }) {
+  this {
     _controller = AnimationController.unbounded(vsync: vsync);
     _controller.addListener(_onTick);
   }
@@ -1537,7 +1519,19 @@ SpringDescription defaultReverseSpringFor(
   damping: spring.damping * factor,
 );
 
-class LabelSpring extends Animation<double>
+class LabelSpring({
+  required TickerProvider vsync,
+  SpringDescription spring = const SpringDescription(
+    mass: 1,
+    stiffness: 625,
+    damping: 40,
+  ),
+  SpringDescription? reverseSpring,
+  final double kickSpeed = 0.0,
+
+  /// how long [forward] waits before the rise actually launches.
+  final Duration delay = Duration.zero,
+}) extends Animation<double>
     with
         AnimationLazyListenerMixin,
         AnimationLocalListenersMixin,
@@ -1548,26 +1542,13 @@ class LabelSpring extends Animation<double>
   /// [defaultReverseSpringFor] of [spring] (1.6 the speed). Pass it explicitly
   /// to give the reverse a different feel.
   final SpringDescription reverseSpring;
-  final double kickSpeed;
-
-  /// how long [forward] waits before the rise actually launches.
-  final Duration delay;
   late final AnimationController _controller;
   Timer? _delayTimer;
   double _target = 0;
 
-  LabelSpring({
-    required TickerProvider vsync,
-    SpringDescription spring = const SpringDescription(
-      mass: 1,
-      stiffness: 625,
-      damping: 40,
-    ),
-    SpringDescription? reverseSpring,
-    this.kickSpeed = 0.0,
-    this.delay = Duration.zero,
-  }) : spring = spring,
-       reverseSpring = reverseSpring ?? defaultReverseSpringFor(spring) {
+  this
+    : spring = spring,
+      reverseSpring = reverseSpring ?? defaultReverseSpringFor(spring) {
     _controller = AnimationController.unbounded(vsync: vsync);
     _controller.addListener(notifyListeners);
     _controller.addStatusListener(_handleControllerStatus);
@@ -1661,24 +1642,25 @@ class LabelSpring extends Animation<double>
 }
 
 /// Spring-driven scalar that tracks an arbitrary target — like [SpringExpansionController] but the target isn't pinned to 0 or 1. Useful for chasing a position (e.g. an angle) where the rest value can be anywhere on the number line. Mid-flight retargets preserve velocity; retargets from rest get a velocity kick in the direction of motion so the response leads instead of dribbling out of the slow exponential a critically damped spring gives a step input.
-class TargetSpring extends Animation<double>
+class TargetSpring({
+  required TickerProvider vsync,
+  required double initial,
+  final SpringDescription spring = const SpringDescription(
+    mass: 1,
+    stiffness: 625,
+    damping: 50,
+  ),
+  final double kickSpeed = 8.0,
+  final double restThreshold = 0.001,
+}) extends Animation<double>
     with
         AnimationLazyListenerMixin,
         AnimationLocalListenersMixin,
         AnimationLocalStatusListenersMixin {
-  final SpringDescription spring;
-  final double kickSpeed;
-  final double restThreshold;
   late final AnimationController _controller;
   double _target;
 
-  TargetSpring({
-    required TickerProvider vsync,
-    required double initial,
-    this.spring = const SpringDescription(mass: 1, stiffness: 625, damping: 50),
-    this.kickSpeed = 8.0,
-    this.restThreshold = 0.001,
-  }) : _target = initial {
+  this : _target = initial {
     _controller = AnimationController.unbounded(value: initial, vsync: vsync);
     _controller.addListener(notifyListeners);
   }
@@ -2146,25 +2128,18 @@ double defaultPulserFunction(double v) => v < _bumpMidpoint
 
 /// Animates multiple overlapping pulses triggered by events from a stream.
 /// Each pulse progresses from 0 to 1 over [duration], and is removed once complete.
-class PulserAnimation extends StatefulWidget {
-  final Stream<void> pulses;
-  final Duration duration;
-  final Widget? child;
-  final Widget Function(
+class const PulserAnimation({
+  super.key,
+  required final Stream<void> pulses,
+  required final Duration duration,
+  final Widget? child,
+  required final Widget Function(
     BuildContext context,
     Widget? child,
     List<double> progresses,
   )
-  builder;
-
-  const PulserAnimation({
-    super.key,
-    required this.pulses,
-    required this.duration,
-    this.child,
-    required this.builder,
-  });
-
+  builder,
+}) extends StatefulWidget {
   @override
   State<PulserAnimation> createState() => _PulserAnimationState();
 }
@@ -2236,12 +2211,8 @@ class _PulserAnimationState extends State<PulserAnimation>
   }
 }
 
-class PiePainter extends CustomPainter {
-  final double value;
-  final Color color;
-
-  PiePainter({required this.value, required this.color});
-
+class PiePainter({required final double value, required final Color color})
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
@@ -2282,18 +2253,12 @@ class PiePainter extends CustomPainter {
 List<T> reverseIfNot<T>(bool condition, List<T> list) =>
     !condition ? list.reversed.toList() : list;
 
-class SweepGradientCirclePainter extends CustomPainter {
-  final Color a;
-  final Color b;
-  final double angle;
-  final double holeRadius;
-  SweepGradientCirclePainter(
-    this.a,
-    this.b, {
-    this.angle = 0,
-    this.holeRadius = 0,
-  });
-
+class SweepGradientCirclePainter(
+  final Color a,
+  final Color b, {
+  final double angle = 0,
+  final double holeRadius = 0,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
@@ -2340,23 +2305,16 @@ class SweepGradientCirclePainter extends CustomPainter {
   }
 }
 
-class Pie extends StatelessWidget {
-  final double value;
-  final Color backgroundColor;
-  final Color color;
-  final double size;
+class const Pie({
+  super.key,
+  required final double value,
+  required final Color backgroundColor,
+  required final Color color,
 
   /// the proportion of the radius of the filled pie relative to the background
-  final double innerRadp;
-  const Pie({
-    super.key,
-    required this.value,
-    required this.backgroundColor,
-    required this.color,
-    this.innerRadp = 1,
-    required this.size,
-  });
-
+  final double innerRadp = 1,
+  required final double size,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
@@ -2390,12 +2348,10 @@ class Pie extends StatelessWidget {
   }
 }
 
-class DragIndicatorPainter extends CustomPainter {
-  final Color color;
-  final double radius;
-
-  DragIndicatorPainter({required this.color, required this.radius});
-
+class DragIndicatorPainter({
+  required final Color color,
+  required final double radius,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
@@ -2454,10 +2410,8 @@ int? recognizeDigitPress(LogicalKeyboardKey k) {
 /// [Focus] is there because key events are only routed to widgets on the focus
 /// chain — without it, a screen where nothing has taken focus yet would never
 /// see the keystroke.
-class EscapeToPop extends StatelessWidget {
-  final Widget child;
-  const EscapeToPop({super.key, required this.child});
-
+class const EscapeToPop({super.key, required final Widget child})
+    extends StatelessWidget {
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
@@ -2492,16 +2446,16 @@ double rectPointDistance(Rect r, Offset p) {
 
 /// A RectTween that wraps another RectTween but delays the start of movement,
 /// staying at `begin` until `delay` fraction of the animation has passed.
-class DelayedRectTween extends Tween<Rect?> {
-  final double delay;
+class DelayedRectTween({
+  required super.begin,
+  required super.end,
+  final double delay = 0.0,
+  RectTween? innerTween,
+}) extends Tween<Rect?> {
   final RectTween _innerTween;
 
-  DelayedRectTween({
-    required super.begin,
-    required super.end,
-    this.delay = 0.0,
-    RectTween? innerTween,
-  }) : _innerTween = innerTween ?? MaterialRectArcTween(begin: begin, end: end);
+  this
+    : _innerTween = innerTween ?? MaterialRectArcTween(begin: begin, end: end);
 
   @override
   Rect? lerp(double t) {
@@ -2525,21 +2479,13 @@ CreateRectTween delayedHeroRectTween(double delay) {
 /// Copyright 2021 Alexander Zhdanov
 /// Licensed under Apache 2.0: http://www.apache.org/licenses/LICENSE-2.0
 /// Custom clipper for circular/oval reveal effect. Circle grows/shrinks from a center point.
-class CircularRevealClipper extends CustomClipper<Path> {
-  final double fraction;
-  final Alignment? centerAlignment;
-  final Offset? centerOffset;
-  final double? minRadius;
-  final double? maxRadius;
-
-  CircularRevealClipper({
-    required this.fraction,
-    this.centerAlignment,
-    this.centerOffset,
-    this.minRadius,
-    this.maxRadius,
-  });
-
+class CircularRevealClipper({
+  required final double fraction,
+  final Alignment? centerAlignment,
+  final Offset? centerOffset,
+  final double? minRadius,
+  final double? maxRadius,
+}) extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
     final Offset center =
@@ -2674,9 +2620,8 @@ Widget screenCornerScaleDown(
 }
 
 /// Route for pages that should clip to screen corners and scale when covered
-class ScreenCornerClippedRoute extends MaterialPageRoute {
-  ScreenCornerClippedRoute({required super.builder});
-
+class ScreenCornerClippedRoute({required super.builder})
+    extends MaterialPageRoute {
   @override
   Widget buildTransitions(
     BuildContext context,
@@ -2727,9 +2672,8 @@ const BackGestureConfig _kBackGesture = BackGestureConfig(
 /// can be swiped from anywhere on the page rather than only from its edge, and
 /// so that the settle after release is ours to set — carrying
 /// [wipePageTransition] everywhere but Apple platforms, which keep the iOS one.
-class OurPageRoute<T> extends CupertinoPageRoute<T> {
-  OurPageRoute({required super.builder, super.settings, super.title});
-
+class OurPageRoute<T>({required super.builder, super.settings, super.title})
+    extends CupertinoPageRoute<T> {
   static const _appleTransitions = BackGesturePageTransitionsBuilder(
     parentTransitionBuilder: _CupertinoTransitions(),
     config: _kBackGesture,
@@ -2763,9 +2707,7 @@ class OurPageRoute<T> extends CupertinoPageRoute<T> {
 /// [CupertinoPageTransitionsBuilder] would install alongside it — the gesture
 /// is [_kBackGesture]'s job now, and two recognizers contesting the same drag
 /// is not a thing to discover later.
-class _CupertinoTransitions extends PageTransitionsBuilder {
-  const _CupertinoTransitions();
-
+class const _CupertinoTransitions() extends PageTransitionsBuilder {
   @override
   Duration get transitionDuration =>
       CupertinoRouteTransitionMixin.kTransitionDuration;
@@ -2785,9 +2727,7 @@ class _CupertinoTransitions extends PageTransitionsBuilder {
   );
 }
 
-class _WipeTransitions extends PageTransitionsBuilder {
-  const _WipeTransitions();
-
+class const _WipeTransitions() extends PageTransitionsBuilder {
   @override
   Duration get transitionDuration => _kWipeDuration;
 
@@ -2865,19 +2805,12 @@ Widget wipePageTransition(
   child: child,
 );
 
-class _WipePageTransition extends StatelessWidget {
-  final Animation<double> animation;
-  final Animation<double> secondaryAnimation;
-  final bool linear;
-  final Widget child;
-
-  const _WipePageTransition({
-    required this.animation,
-    required this.secondaryAnimation,
-    required this.linear,
-    required this.child,
-  });
-
+class const _WipePageTransition({
+  required final Animation<double> animation,
+  required final Animation<double> secondaryAnimation,
+  required final bool linear,
+  required final Widget child,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final corners = getCachedCornerRadius();
@@ -2925,20 +2858,13 @@ class _WipePageTransition extends StatelessWidget {
 /// the route does — and because the widgets it replaces can't be swapped out
 /// once they're spent: the shape of the tree above a page can't change frame to
 /// frame without the page being re-inflated (see [screenCornerScaleDown]).
-class _WipeReveal extends SingleChildRenderObjectWidget {
-  final double front;
-  final double feather;
-  final BorderRadius borderRadius;
-  final bool continuousCorners;
-
-  const _WipeReveal({
-    required this.front,
-    required this.feather,
-    required this.borderRadius,
-    required this.continuousCorners,
-    required super.child,
-  });
-
+class const _WipeReveal({
+  required final double front,
+  required final double feather,
+  required final BorderRadius borderRadius,
+  required final bool continuousCorners,
+  required super.child,
+}) extends SingleChildRenderObjectWidget {
   @override
   _RenderWipeReveal createRenderObject(BuildContext context) =>
       _RenderWipeReveal(
@@ -2958,17 +2884,12 @@ class _WipeReveal extends SingleChildRenderObjectWidget {
   }
 }
 
-class _RenderWipeReveal extends RenderProxyBox {
-  _RenderWipeReveal({
-    required double front,
-    required double feather,
-    required BorderRadius borderRadius,
-    required bool continuousCorners,
-  }) : _front = front,
-       _feather = feather,
-       _borderRadius = borderRadius,
-       _continuousCorners = continuousCorners;
-
+class _RenderWipeReveal({
+  required this._front,
+  required this._feather,
+  required this._borderRadius,
+  required this._continuousCorners,
+}) extends RenderProxyBox {
   double get front => _front;
   double _front;
   set front(double value) {
@@ -3197,35 +3118,26 @@ Shader linearRevealShader({
   ).createShader(bounds);
 }
 
-class RelAlignment {
+class const RelAlignment({
   /// Alignment value (-1 to 1 on each axis, where 0 means center)
-  final double? originAlignX;
+  final double? originAlignX,
 
   /// Alignment value (-1 to 1 on each axis, where 0 means center)
-  final double? originAlignY;
+  final double? originAlignY,
 
   /// Origin rightwards from the left edge of the child (can be negative)
-  final double? originLeft;
+  final double? originLeft,
 
   /// Origin leftwards from the right edge of the child (can be negative)
-  final double? originRight;
+  final double? originRight,
 
   /// Origin downwards from the top edge of the child (can be negative)
-  final double? originTop;
+  final double? originTop,
 
   /// Origin upwards from the bottom edge of the child (can be negative)
-  final double? originBottom;
-
+  final double? originBottom,
+}) {
   static const center = RelAlignment();
-
-  const RelAlignment({
-    this.originAlignX,
-    this.originAlignY,
-    this.originLeft,
-    this.originRight,
-    this.originTop,
-    this.originBottom,
-  });
 
   static RelAlignment fromOffset(Offset offset) {
     return RelAlignment(originLeft: offset.dx, originTop: offset.dy);
@@ -3292,30 +3204,22 @@ class RelAlignment {
   }
 }
 
-class FuzzyCircleReveal extends StatelessWidget {
+// ignore: prefer_const_constructors_in_immutables, we have to do the asserts
+class FuzzyCircleReveal({
+  super.key,
+
   /// where the reveal emanates from
-  final RelAlignment origin;
-  final Animation<double> animation;
-  final Widget child;
-  final double fuzzyEdgeWidth;
+  required final RelAlignment origin,
+  required final Animation<double> animation,
+  required final Widget child,
+  final double fuzzyEdgeWidth = 20.0,
 
   /// Minimum radius to start from. Defaults to distance from center to nearest edge.
-  final double? minRadius;
+  final double? minRadius,
 
   /// inverts the gradient so that the transparent side is inside the focus. The smaller side of the animation is still the fully transparent state.
-  final bool invertGradient;
-
-  // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
-  FuzzyCircleReveal({
-    super.key,
-    required this.origin,
-    required this.animation,
-    required this.child,
-    this.fuzzyEdgeWidth = 20.0,
-    this.minRadius,
-    this.invertGradient = false,
-  });
-
+  final bool invertGradient = false,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -3358,24 +3262,16 @@ double computeAlignmentAxis(
   }
 }
 
-class FuzzyCircleClip extends StatelessWidget {
-  final double progress;
-  final RelAlignment origin;
-  final double? fuzzyEdgeWidth;
-  final double? minRadius;
-  final bool invertGradient;
-  final Widget child;
-  // ignore: prefer_const_constructors_in_immutables, we have to do the asserts
-  FuzzyCircleClip({
-    super.key,
-    required this.origin,
-    required this.progress,
-    required this.child,
-    this.fuzzyEdgeWidth = 20.0,
-    this.minRadius,
-    this.invertGradient = false,
-  });
-
+// ignore: prefer_const_constructors_in_immutables, we have to do the asserts
+class FuzzyCircleClip({
+  super.key,
+  required final RelAlignment origin,
+  required final double progress,
+  required final Widget child,
+  final double? fuzzyEdgeWidth = 20.0,
+  final double? minRadius,
+  final bool invertGradient = false,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (progress == 0.0) {
@@ -3403,26 +3299,17 @@ class FuzzyCircleClip extends StatelessWidget {
   }
 }
 
-class FuzzyLinearClip extends StatelessWidget {
-  final double progress;
-  final double angle; // angle in radians
-  final double? fuzzyEdgeWidth;
-  final bool sphericalSweepLength;
-  final double margin;
-  final Widget child;
-
-  /// [margin] currently isn't actually working it seems.
-  // ignore: prefer_const_constructors_in_immutables
-  FuzzyLinearClip({
-    super.key,
-    required this.angle,
-    required this.progress,
-    required this.child,
-    this.margin = 0.0,
-    this.fuzzyEdgeWidth = 20.0,
-    this.sphericalSweepLength = false,
-  });
-
+/// [margin] currently isn't actually working it seems.
+// ignore: prefer_const_constructors_in_immutables
+class FuzzyLinearClip({
+  super.key,
+  required final double angle, // angle in radians
+  required final double progress,
+  required final Widget child,
+  final double margin = 0.0,
+  final double? fuzzyEdgeWidth = 20.0,
+  final bool sphericalSweepLength = false,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (progress == 0.0) {
@@ -3455,17 +3342,11 @@ class FuzzyLinearClip extends StatelessWidget {
 /// [ClipOval] rather than a gradient mask, so nothing here needs a saveLayer or
 /// a shader to be compiled, and the whole thing can be dropped from the tree
 /// the moment it finishes.
-class _ClipRevealRouteTransition extends StatelessWidget {
-  final Animation<double> animation;
-  final Offset origin;
-  final Widget child;
-
-  const _ClipRevealRouteTransition({
-    required this.animation,
-    required this.origin,
-    required this.child,
-  });
-
+class const _ClipRevealRouteTransition({
+  required final Animation<double> animation,
+  required final Offset origin,
+  required final Widget child,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -3566,12 +3447,10 @@ class _ClipRevealRouteTransition extends StatelessWidget {
 /// the center is on screen, so a tap origin starts from a point, but an origin
 /// off below the screen starts as a circle just touching it, as the gradient
 /// version did), at 1 it's the smallest one that covers the screen.
-class _RevealCircleClipper extends CustomClipper<Rect> {
-  final Offset center;
-  final double fraction;
-
-  const _RevealCircleClipper({required this.center, required this.fraction});
-
+class const _RevealCircleClipper({
+  required final Offset center,
+  required final double fraction,
+}) extends CustomClipper<Rect> {
   @override
   Rect getClip(Size size) => Rect.fromCircle(
     center: center,
@@ -3591,19 +3470,12 @@ class _RevealCircleClipper extends CustomClipper<Rect> {
 /// Known issue: it can't drop the shadermask even when the animation is
 /// complete, because it causes a one-frame flicker in which text fails to
 /// render. [_ClipRevealRouteTransition] doesn't have that problem.
-class _CircularRevealRouteTransition extends StatefulWidget {
-  final Animation<double> animation;
-  final Offset revealOrigin;
-
-  final Widget child;
-
-  const _CircularRevealRouteTransition({
-    // super.key,
-    required this.animation,
-    required this.revealOrigin,
-    required this.child,
-  });
-
+class const _CircularRevealRouteTransition({
+  // super.key,
+  required final Animation<double> animation,
+  required final Offset revealOrigin,
+  required final Widget child,
+}) extends StatefulWidget {
   @override
   State<_CircularRevealRouteTransition> createState() =>
       _CircularRevealRouteTransitionState();
@@ -3800,16 +3672,13 @@ void writeBackChildren(Mobj host, List<MobjID<TimerData>> children) {
 ///
 /// The widget itself takes up the full space given by its parent constraints,
 /// but the child is visually scaled to maintain the aspect ratio.
-class ScalingAspectRatio extends SingleChildRenderObjectWidget {
-  final double aspectRatio;
-  final Alignment alignment;
-
-  const ScalingAspectRatio({
-    super.key,
-    this.aspectRatio = 1,
-    required Widget child,
-    this.alignment = Alignment.center,
-  }) : super(child: child);
+class const ScalingAspectRatio({
+  super.key,
+  final double aspectRatio = 1,
+  required Widget child,
+  final Alignment alignment = Alignment.center,
+}) extends SingleChildRenderObjectWidget {
+  this : super(child: child);
 
   @override
   RenderScalingAspectRatio createRenderObject(BuildContext context) {
@@ -3830,13 +3699,10 @@ class ScalingAspectRatio extends SingleChildRenderObjectWidget {
   }
 }
 
-class RenderScalingAspectRatio extends RenderProxyBox {
-  RenderScalingAspectRatio({
-    required double aspectRatio,
-    Alignment alignment = Alignment.center,
-  }) : _aspectRatio = aspectRatio,
-       _alignment = alignment;
-
+class RenderScalingAspectRatio({
+  required this._aspectRatio,
+  this._alignment = Alignment.center,
+}) extends RenderProxyBox {
   double _aspectRatio;
   double get aspectRatio => _aspectRatio;
   set aspectRatio(double value) {
@@ -3955,35 +3821,24 @@ class RenderScalingAspectRatio extends RenderProxyBox {
 /// A button with fuzzy circle ink animation. Ink wells from touch point on press,
 /// fades out on tap confirm. Behaves like a proper button (cancels on drag out, etc).
 /// todo: remove the automatic downfade at the end of the initial well animation, supercede with one that happens at max(animation end, finger release)
-class InkButton extends StatefulWidget {
-  final Color? backgroundColor;
-  final Widget? child;
-  final Widget Function(BuildContext context, bool isOn)? builder;
-  final VoidCallback? onTap;
-  final ValueChanged<Offset>? onTapUpGlobalPosition;
-  final Duration wellDuration;
-  final Duration fadeDuration;
-  final double fuzzyEdgeWidth;
-  final Color? inkColor;
-  final Color? inkColorFaded;
+class InkButton({
+  super.key,
+  final VoidCallback? onTap,
+  final ValueChanged<Offset>? onTapUpGlobalPosition,
+  final Duration wellDuration = const Duration(milliseconds: 290),
+  final Duration fadeDuration = const Duration(milliseconds: 170),
+  final Duration fadeDelay = const Duration(milliseconds: 50),
+  final double fuzzyEdgeWidth = 12.0,
+  final Color? backgroundColor,
+  final Color? inkColor,
+  final Color? inkColorFaded,
+  final BorderRadius? borderRadius,
+  final Widget? child,
+  final Widget Function(BuildContext context, bool isOn)? builder,
+}) extends StatefulWidget {
   final earlyFadeDuration = const Duration(milliseconds: 170);
-  final BorderRadius? borderRadius;
-  final Duration fadeDelay;
-  InkButton({
-    super.key,
-    this.onTap,
-    this.onTapUpGlobalPosition,
-    this.wellDuration = const Duration(milliseconds: 290),
-    this.fadeDuration = const Duration(milliseconds: 170),
-    this.fadeDelay = const Duration(milliseconds: 50),
-    this.fuzzyEdgeWidth = 12.0,
-    this.backgroundColor,
-    this.inkColor,
-    this.inkColorFaded,
-    this.borderRadius,
-    this.child,
-    this.builder,
-  }) {
+
+  this {
     if (builder != null && child != null) {
       throw ArgumentError.value(
         child,
@@ -4094,30 +3949,18 @@ class _InkButtonState extends State<InkButton> with TickerProviderStateMixin {
   }
 }
 
-class InkWelling extends StatefulWidget {
-  final RelAlignment origin;
-  final Color color;
-  final double fuzzyEdgeWidth;
-  final AnimationController bloomController;
-  final AnimationController fadeController;
-  final Widget? child;
-  final Color? fadeColor;
-  final BorderRadius? borderRadius;
-  final VoidCallback onFinished;
-
-  const InkWelling({
-    super.key,
-    required this.origin,
-    required this.color,
-    this.fuzzyEdgeWidth = 12.0,
-    this.borderRadius,
-    this.fadeColor,
-    required this.onFinished,
-    required this.bloomController,
-    required this.fadeController,
-    this.child,
-  });
-
+class const InkWelling({
+  super.key,
+  required final RelAlignment origin,
+  required final Color color,
+  final double fuzzyEdgeWidth = 12.0,
+  final BorderRadius? borderRadius,
+  final Color? fadeColor,
+  required final VoidCallback onFinished,
+  required final AnimationController bloomController,
+  required final AnimationController fadeController,
+  final Widget? child,
+}) extends StatefulWidget {
   /// Reverse the bloom iff the bloom is still visible (early cancel).
   void cancel() {
     // if (bloomController.value < 0.5) {
@@ -4200,21 +4043,15 @@ class InkWellingState extends State<InkWelling> with TickerProviderStateMixin {
 
 /// animates from the previous state using an inkwell from epicenter
 /// trivial to implement, so included mostly for illustrative purposes, but also because a lot of you are going to want it
-class InvertToggleButton extends StatelessWidget {
-  final bool isOn;
+class const InvertToggleButton({
+  super.key,
+  final Duration duration = const Duration(milliseconds: 140),
+  required final bool isOn,
 
   /// the place at which the toggle was touched, or from which the
-  final RelAlignment? epicenter;
-  final Duration duration;
-  final Widget Function(BuildContext context, bool isOn) builder;
-  const InvertToggleButton({
-    super.key,
-    this.duration = const Duration(milliseconds: 140),
-    required this.isOn,
-    this.epicenter,
-    required this.builder,
-  });
-
+  final RelAlignment? epicenter,
+  required final Widget Function(BuildContext context, bool isOn) builder,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final animation = Tween<double>(begin: 0.0, end: 1.0);
@@ -4235,19 +4072,13 @@ class InvertToggleButton extends StatelessWidget {
 }
 
 /// animates over the previous content, then when the animation is done, drops the previous contents from the state/build
-class TweenAnimationReplacementStack extends StatefulWidget {
-  final Tween animation;
-  final ValueWidgetBuilder builder;
-  final Duration duration;
-  final Widget? child;
-  const TweenAnimationReplacementStack({
-    super.key,
-    required this.animation,
-    required this.builder,
-    required this.duration,
-    this.child,
-  });
-
+class const TweenAnimationReplacementStack({
+  super.key,
+  required final Tween animation,
+  required final ValueWidgetBuilder builder,
+  required final Duration duration,
+  final Widget? child,
+}) extends StatefulWidget {
   @override
   State<TweenAnimationReplacementStack> createState() =>
       _TweenAnimationReplacementStackState();
@@ -4312,22 +4143,15 @@ class _TweenAnimationReplacementStackState
   }
 }
 
-class RadioItem<T> extends StatefulWidget {
-  final Function()? onTap;
-  final Widget Function(BuildContext context, bool isOn) builder;
-  final bool Function(T a, T b)? equalityComparison;
-  final Signal<T> selection;
-  final T me;
-  final Duration duration;
-  const RadioItem({
-    super.key,
-    this.onTap,
-    required this.builder,
-    required this.selection,
-    this.duration = const Duration(milliseconds: 170),
-    required this.me,
-    this.equalityComparison,
-  });
+class const RadioItem<T>({
+  super.key,
+  final Function()? onTap,
+  required final Widget Function(BuildContext context, bool isOn) builder,
+  required final Signal<T> selection,
+  final Duration duration = const Duration(milliseconds: 170),
+  required final T me,
+  final bool Function(T a, T b)? equalityComparison,
+}) extends StatefulWidget {
   @override
   State<RadioItem<T>> createState() => _RadioItemState<T>();
 }
@@ -4507,91 +4331,68 @@ ColorScheme colorSchemeFromCorePalette(
   );
 }
 
-class OurThemeData {
-  final Color lowestBackColor;
+class OurThemeData({
+  required final Color lowestBackColor,
 
   /// indent colors are for subtle details like dividers, they don't have to contrast very well, only enough to *acknowledge*.
-  final Color lowestIndentColor;
-  final Color midBackColor;
-  final Color foreBackColor;
-  final Color foreIndentColor;
-  final Color inkColor;
-  final Color reducedProminenceColor;
+  required final Color lowestIndentColor,
+  required final Color midBackColor,
+  required final Color foreBackColor,
+  required final Color foreIndentColor,
+  required final Color reducedProminenceColor,
 
   /// Color of the special-timer-create drag ring while collapsed (its idle,
   /// unexpanded state). [reducedProminenceColor] everywhere except
   /// [materialYou], where it's [ColorScheme.primary] so the ring picks up the
   /// wallpaper tint instead of reading as a flat neutral.
-  final Color collapsedSpecialDragRingColor;
+  required final Color collapsedSpecialDragRingColor,
+  required final Color inkColor,
   // todo: remove?
-  final Color harderForeIndentColor;
-  final Color hintTextColor;
-  final Color veryLowProminenceColor;
-  final bool hardEdges;
+  required final Color harderForeIndentColor,
+  required final Color veryLowProminenceColor,
+  required final Color hintTextColor,
 
   /// Fill for a liquid-glass surface (the timer menu, drag rings). Already
   /// carries the translucency a glass tint wants, so it goes straight into a
   /// [GlassBlob]/fill — no extra alpha juggling. Content on top uses
   /// [onGlassColor]. When glass is off, use [nonGlassColor] instead; see
   /// [glassFill].
-  final Color glassColor;
-  final Color onGlassColor;
+  required final Color glassColor,
+  required final Color onGlassColor,
 
   /// Solid fill for those same surfaces when liquid glass is switched off:
   /// black on light theme, white on dark theme. Content on top uses
   /// [nonGlassOnSurface].
-  final Color nonGlassColor;
-  final Color nonGlassOnSurface;
+  required final Color nonGlassColor,
+  required final Color nonGlassOnSurface,
 
   /// Fill for a popup menu when liquid glass is off. [nonGlassColor]
   /// everywhere except [materialYou], where it's [ColorScheme.secondary] so
   /// the menu picks up the wallpaper tint instead of reading as flat
   /// black/white. Content on top uses [onNonGlassPopupMenu].
-  final Color nonGlassPopupMenu;
-  final Color onNonGlassPopupMenu;
+  required final Color nonGlassPopupMenu,
+  required final Color onNonGlassPopupMenu,
+  final bool hardEdges = false,
 
   /// Corner radius of a timercule's backing panel. Roughly a quarter of a
   /// timercule's height; decoupled from buttonSpan so it doesn't scale with the
   /// control buttons.
-  final double timerculeBackingCornerRadius;
+  final double timerculeBackingCornerRadius = 23,
 
   /// Backdrop blur radius for liquid-glass surfaces; feed into [ourGlassOptions]
   /// so the app's glass look stays themeable rather than hardcoded per call site.
   /// The light theme takes it down (glass over a light background needs less
   /// blur to read as glass); the initializations that don't say otherwise get
   /// [defaultGlassBlurRadius].
-  final double glassBlurRadius;
-  static const double defaultGlassBlurRadius = 12;
-
-  static const Color defaultEdgeTint = Color(0x09000000);
+  final double glassBlurRadius = OurThemeData.defaultGlassBlurRadius,
 
   /// Rim-darkening tint for liquid-glass surfaces; feed into [ourGlassOptions]'s
   /// [GlassOptions.edgeTint].
-  final Color edgeTint;
+  final Color edgeTint = OurThemeData.defaultEdgeTint,
+}) {
+  static const double defaultGlassBlurRadius = 12;
 
-  OurThemeData({
-    required this.lowestBackColor,
-    required this.lowestIndentColor,
-    required this.midBackColor,
-    required this.foreBackColor,
-    required this.foreIndentColor,
-    required this.reducedProminenceColor,
-    required this.collapsedSpecialDragRingColor,
-    required this.inkColor,
-    required this.harderForeIndentColor,
-    required this.veryLowProminenceColor,
-    required this.hintTextColor,
-    required this.glassColor,
-    required this.onGlassColor,
-    required this.nonGlassColor,
-    required this.nonGlassOnSurface,
-    required this.nonGlassPopupMenu,
-    required this.onNonGlassPopupMenu,
-    this.hardEdges = false,
-    this.timerculeBackingCornerRadius = 23,
-    this.glassBlurRadius = defaultGlassBlurRadius,
-    this.edgeTint = defaultEdgeTint,
-  });
+  static const Color defaultEdgeTint = Color(0x09000000);
 
   /// Fill for a glass-like surface: the translucent [glassColor] when liquid
   /// glass is on, the solid [nonGlassColor] when it's off.
@@ -4840,19 +4641,18 @@ Positioned positionedAt(Offset offset, Widget child) {
   return Positioned(left: offset.dx, top: offset.dy, child: child);
 }
 
-class BoolSignalTween extends StatelessWidget {
-  final ReadonlySignal<bool> signal;
-  final Duration duration;
-  final Widget Function(BuildContext context, double value, Widget? child)
-  builder;
-  final Widget? child;
-  const BoolSignalTween({
-    super.key,
-    required this.signal,
-    required this.builder,
-    this.child,
-    this.duration = const Duration(milliseconds: 300),
-  });
+class const BoolSignalTween({
+  super.key,
+  required final ReadonlySignal<bool> signal,
+  required final Widget Function(
+    BuildContext context,
+    double value,
+    Widget? child,
+  )
+  builder,
+  final Widget? child,
+  final Duration duration = const Duration(milliseconds: 300),
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SignalBuilder(
@@ -4869,10 +4669,11 @@ class BoolSignalTween extends StatelessWidget {
   }
 }
 
-class PinAnimation extends StatelessWidget {
-  final Widget child;
-  final ReadonlySignal<bool> isPinned;
-  const PinAnimation({super.key, required this.child, required this.isPinned});
+class const PinAnimation({
+  super.key,
+  required final Widget child,
+  required final ReadonlySignal<bool> isPinned,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BoolSignalTween(
@@ -4993,18 +4794,12 @@ List<T> intersperse<T>(T spacer, List<T> between) {
 /// Places [container] within padding of [shrunkBy], but positions [child]
 /// so that it overflows the container by [shrunkBy] on all sides,
 /// effectively filling the original (pre-shrunk) space.
-class ContainerShrunk extends StatelessWidget {
-  final Widget Function(Widget child) container;
-  final Widget child;
-  final double shrunkBy;
-
-  const ContainerShrunk({
-    super.key,
-    required this.container,
-    required this.child,
-    required this.shrunkBy,
-  });
-
+class const ContainerShrunk({
+  super.key,
+  required final Widget Function(Widget child) container,
+  required final Widget child,
+  required final double shrunkBy,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -5035,11 +4830,11 @@ class ContainerShrunk extends StatelessWidget {
 /// the child's size when unbounded—so small children sit centered when there is
 /// slack (including from negative insets opening extra space), instead of
 /// top-start alignment at [EdgeInsets.left]/[top] alone.
-class SignedPadding extends SingleChildRenderObjectWidget {
-  final EdgeInsets insets;
-
-  const SignedPadding({super.key, required this.insets, super.child});
-
+class const SignedPadding({
+  super.key,
+  required final EdgeInsets insets,
+  super.child,
+}) extends SingleChildRenderObjectWidget {
   @override
   RenderObject createRenderObject(BuildContext context) =>
       _RenderSignedPadding(padding: insets);
@@ -5050,10 +4845,9 @@ class SignedPadding extends SingleChildRenderObjectWidget {
   }
 }
 
-class _RenderSignedPadding extends RenderShiftedBox {
-  _RenderSignedPadding({required EdgeInsets padding, RenderBox? child})
-    : _padding = padding,
-      super(child);
+class _RenderSignedPadding({required this._padding, RenderBox? child})
+    extends RenderShiftedBox {
+  this : super(child);
 
   EdgeInsets get padding => _padding;
   EdgeInsets _padding;
@@ -5196,21 +4990,17 @@ class _RenderSignedPadding extends RenderShiftedBox {
 /// Sizing follows [Align] with no size factors: fills the incoming maxima on
 /// each axis where they're bounded, shrink-wraps the child where they aren't
 /// (so this is usable in a scrollview). The child sits on the bottom edge.
-class TaperedAlign extends SingleChildRenderObjectWidget {
+class const TaperedAlign({
+  super.key,
+
   /// Fraction of the free space placed on the *left* of the child, as with
   /// [FractionalOffset.dx]. 0 is left-aligned, 1 right-aligned.
-  final double bias;
+  required final double bias,
 
   /// How much free space is left when the child is fully centered.
-  final double centeringSlack;
-
-  const TaperedAlign({
-    super.key,
-    required this.bias,
-    this.centeringSlack = 30,
-    super.child,
-  });
-
+  final double centeringSlack = 30,
+  super.child,
+}) extends SingleChildRenderObjectWidget {
   @override
   RenderObject createRenderObject(BuildContext context) =>
       _RenderTaperedAlign(bias: bias, centeringSlack: centeringSlack);
@@ -5223,14 +5013,12 @@ class TaperedAlign extends SingleChildRenderObjectWidget {
   }
 }
 
-class _RenderTaperedAlign extends RenderShiftedBox {
-  _RenderTaperedAlign({
-    required double bias,
-    required double centeringSlack,
-    RenderBox? child,
-  }) : _bias = bias,
-       _centeringSlack = centeringSlack,
-       super(child);
+class _RenderTaperedAlign({
+  required this._bias,
+  required this._centeringSlack,
+  RenderBox? child,
+}) extends RenderShiftedBox {
+  this : super(child);
 
   double get bias => _bias;
   double _bias;
@@ -5342,31 +5130,22 @@ class _RenderTaperedAlign extends RenderShiftedBox {
 /// have been container padding, not just the end caps. Reporting sibling edges
 /// (with [padSibling]) lets the inter-item gaps live inside the items too.
 @immutable
-class ExtraPadding {
+class const ExtraPadding({
   /// Whether each edge abuts the flex's outer edge (`true`) rather than a
   /// neighbouring child (`false`).
-  final bool top;
-  final bool bottom;
-  final bool left;
-  final bool right;
+  final bool top = false,
+  final bool bottom = false,
+  final bool left = false,
+  final bool right = false,
 
   /// Amount applied to edge sides (unless [resolve] overrides it).
-  final double padEdge;
+  final double padEdge = 0,
 
   /// The *full* gap between two neighbours. Each of the two abutting children
   /// gets half of it (they share the gap), so a [padSibling] equal to [padEdge]
   /// makes the inter-item gaps match the end caps.
-  final double padSibling;
-
-  const ExtraPadding({
-    this.top = false,
-    this.bottom = false,
-    this.left = false,
-    this.right = false,
-    this.padEdge = 0,
-    this.padSibling = 0,
-  });
-
+  final double padSibling = 0,
+}) {
   /// The fallback when there's no enclosing flex: every edge a sibling.
   static const outsideFlex = ExtraPadding();
 
@@ -5428,10 +5207,10 @@ class ExtraPadding {
 /// Per-slot scope an [EvenPadFlex] wraps around each child, carrying that
 /// child's [ExtraPadding]. Interior children get one too so an [EvenPadBuilder]
 /// always reads the *nearest* flex, never a farther ancestor.
-class _EvenPadScope extends InheritedWidget {
-  final ExtraPadding padding;
-  const _EvenPadScope({required this.padding, required super.child});
-
+class const _EvenPadScope({
+  required final ExtraPadding padding,
+  required super.child,
+}) extends InheritedWidget {
   static ExtraPadding of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<_EvenPadScope>()?.padding ??
       ExtraPadding.outsideFlex;
@@ -5444,11 +5223,11 @@ class _EvenPadScope extends InheritedWidget {
 /// Reads the [ExtraPadding] from the nearest enclosing [EvenPadColumn]/
 /// [EvenPadRow] and hands it to [builder]. Outside any of those it gets
 /// [ExtraPadding.outsideFlex].
-class EvenPadBuilder extends StatelessWidget {
+class const EvenPadBuilder(
   final Widget Function(BuildContext context, ExtraPadding extraPadding)
-  builder;
-  const EvenPadBuilder(this.builder, {super.key});
-
+  builder, {
+  super.key,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       builder(context, _EvenPadScope.of(context));
@@ -5460,31 +5239,19 @@ class EvenPadBuilder extends StatelessWidget {
 /// amounts for this child; the per-edge/per-axis/[all] amounts further override
 /// the edge-side amount, with the same priority as [ExtraPadding.resolve]. This
 /// is just [EvenPadBuilder] + that call without the closure.
-class EvenPadding extends StatelessWidget {
-  final double? padEdge;
-  final double? padSibling;
-  final double? all;
-  final double? horizontal;
-  final double? vertical;
-  final double? top;
-  final double? bottom;
-  final double? left;
-  final double? right;
-  final Widget child;
-  const EvenPadding({
-    super.key,
-    this.padEdge,
-    this.padSibling,
-    this.all,
-    this.horizontal,
-    this.vertical,
-    this.top,
-    this.bottom,
-    this.left,
-    this.right,
-    required this.child,
-  });
-
+class const EvenPadding({
+  super.key,
+  final double? padEdge,
+  final double? padSibling,
+  final double? all,
+  final double? horizontal,
+  final double? vertical,
+  final double? top,
+  final double? bottom,
+  final double? left,
+  final double? right,
+  required final Widget child,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: _EvenPadScope.of(context)
@@ -5509,15 +5276,15 @@ class EvenPadding extends StatelessWidget {
 /// Children may still be [Expanded]/[Flexible] — the per-slot scope is an
 /// [InheritedWidget] (no render object), so flex parent data still reaches the
 /// [RenderFlex] unchanged.
-class EvenPadFlex extends StatelessWidget {
-  final Axis direction;
-  final List<Widget> children;
-  final MainAxisAlignment mainAxisAlignment;
-  final MainAxisSize mainAxisSize;
-  final CrossAxisAlignment crossAxisAlignment;
-  final TextDirection? textDirection;
-  final VerticalDirection verticalDirection;
-  final TextBaseline? textBaseline;
+class const EvenPadFlex({
+  super.key,
+  required final Axis direction,
+  final MainAxisAlignment mainAxisAlignment = MainAxisAlignment.start,
+  final MainAxisSize mainAxisSize = MainAxisSize.max,
+  final CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment.center,
+  final TextDirection? textDirection,
+  final VerticalDirection verticalDirection = VerticalDirection.down,
+  final TextBaseline? textBaseline,
 
   /// [padEdge] is the space beyond each end item (the edges that abut this
   /// flex's outer edge); [padSibling] is the *full* gap between two neighbours,
@@ -5526,23 +5293,10 @@ class EvenPadFlex extends StatelessWidget {
   /// [padEdge] caps the ends only, just [padSibling] spaces between items only,
   /// and one value for both makes the end caps and inter-item gaps match. A
   /// child's [EvenPadding] can override these per item.
-  final double? padEdge;
-  final double? padSibling;
-
-  const EvenPadFlex({
-    super.key,
-    required this.direction,
-    this.mainAxisAlignment = MainAxisAlignment.start,
-    this.mainAxisSize = MainAxisSize.max,
-    this.crossAxisAlignment = CrossAxisAlignment.center,
-    this.textDirection,
-    this.verticalDirection = VerticalDirection.down,
-    this.textBaseline,
-    this.padEdge,
-    this.padSibling,
-    this.children = const [],
-  });
-
+  final double? padEdge,
+  final double? padSibling,
+  final List<Widget> children = const [],
+}) extends StatelessWidget {
   double get _edge => padEdge ?? padSibling ?? 0;
   double get _sibling => padSibling ?? padEdge ?? 0;
 
@@ -5598,36 +5352,36 @@ class EvenPadFlex extends StatelessWidget {
 
 /// A [Column] whose leading/trailing children can pad themselves via
 /// [EvenPadBuilder]. See [EvenPadFlex]/[ExtraPadding].
-class EvenPadColumn extends EvenPadFlex {
-  const EvenPadColumn({
-    super.key,
-    super.mainAxisAlignment,
-    super.mainAxisSize,
-    super.crossAxisAlignment,
-    super.textDirection,
-    super.verticalDirection,
-    super.textBaseline,
-    super.padEdge,
-    super.padSibling,
-    super.children,
-  }) : super(direction: Axis.vertical);
+class const EvenPadColumn({
+  super.key,
+  super.mainAxisAlignment,
+  super.mainAxisSize,
+  super.crossAxisAlignment,
+  super.textDirection,
+  super.verticalDirection,
+  super.textBaseline,
+  super.padEdge,
+  super.padSibling,
+  super.children,
+}) extends EvenPadFlex {
+  this : super(direction: Axis.vertical);
 }
 
 /// A [Row] whose leading/trailing children can pad themselves via
 /// [EvenPadBuilder]. See [EvenPadFlex]/[ExtraPadding].
-class EvenPadRow extends EvenPadFlex {
-  const EvenPadRow({
-    super.key,
-    super.mainAxisAlignment,
-    super.mainAxisSize,
-    super.crossAxisAlignment,
-    super.textDirection,
-    super.verticalDirection,
-    super.textBaseline,
-    super.padEdge,
-    super.padSibling,
-    super.children,
-  }) : super(direction: Axis.horizontal);
+class const EvenPadRow({
+  super.key,
+  super.mainAxisAlignment,
+  super.mainAxisSize,
+  super.crossAxisAlignment,
+  super.textDirection,
+  super.verticalDirection,
+  super.textBaseline,
+  super.padEdge,
+  super.padSibling,
+  super.children,
+}) extends EvenPadFlex {
+  this : super(direction: Axis.horizontal);
 }
 
 void vibrationSampleBoard() async {
@@ -5662,20 +5416,13 @@ void vibrateAlertOnce() async {
   }
 }
 
-class HintToast extends SignalStatefulWidget {
-  final Widget? child;
-  final String? message;
-  final ReadonlySignal<bool> showCondition;
-  final bool startOpen;
-
-  const HintToast({
-    super.key,
-    this.child,
-    required this.showCondition,
-    this.message,
-    this.startOpen = false,
-  });
-
+class const HintToast({
+  super.key,
+  final Widget? child,
+  required final ReadonlySignal<bool> showCondition,
+  final String? message,
+  final bool startOpen = false,
+}) extends SignalStatefulWidget {
   @override
   State<HintToast> createState() => _HintToastState();
 }
@@ -5783,11 +5530,11 @@ class _HintToastState extends State<HintToast>
   }
 }
 
-class SeparatorGradient extends StatelessWidget {
-  final Color? color;
-  final double height;
-  const SeparatorGradient({super.key, this.color, this.height = 14});
-
+class const SeparatorGradient({
+  super.key,
+  final Color? color,
+  final double height = 14,
+}) extends StatelessWidget {
   static double _easeInOut(double t) =>
       t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
@@ -5949,12 +5696,10 @@ void timerculeIconScaling(
   canvas.scale(scale, scale);
 }
 
-class TimerculeParallelPainter extends CustomPainter {
-  final bool? rightJustified;
-  TimerculeParallelPainter({this.color = Colors.black, this.rightJustified});
-
-  final Color color;
-
+class TimerculeParallelPainter({
+  final Color color = Colors.black,
+  final bool? rightJustified,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final contentH = 2 * timerculeIconRectHeight + timerculeIconGap;
@@ -5996,11 +5741,8 @@ class TimerculeParallelPainter extends CustomPainter {
       oldDelegate.rightJustified != rightJustified;
 }
 
-class TimerculeSerialPainter extends CustomPainter {
-  TimerculeSerialPainter({this.color = Colors.black});
-
-  final Color color;
-
+class TimerculeSerialPainter({final Color color = Colors.black})
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // decided we want them to be square
@@ -6084,11 +5826,8 @@ Offset? rayCircleIntersection(
   return p + dir * d;
 }
 
-class TimerculeCyclePainter extends CustomPainter {
-  TimerculeCyclePainter({this.color = Colors.black});
-
-  final Color color;
-
+class TimerculeCyclePainter({final Color color = Colors.black})
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final cr = timerculeIconRounding;
@@ -6143,11 +5882,8 @@ class TimerculeCyclePainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
-class TimerculeFlatterCyclePainter extends CustomPainter {
-  TimerculeFlatterCyclePainter({this.color = Colors.black});
-
-  final Color color;
-
+class TimerculeFlatterCyclePainter({final Color color = Colors.black})
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // how much the top of the loop bows: the angle the top arc sweeps. Zero
@@ -6288,12 +6024,11 @@ Widget timerKindIcon(
   }
 }
 
-class SquishBoundaryPlane extends StatelessWidget {
-  const SquishBoundaryPlane({super.key, required this.theme, required this.mt});
-
-  final ThemeData theme;
-  final OurThemeData mt;
-
+class const SquishBoundaryPlane({
+  super.key,
+  required final ThemeData theme,
+  required final OurThemeData mt,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -6324,10 +6059,8 @@ class SquishBoundaryPlane extends StatelessWidget {
   }
 }
 
-class SpecialTimerShapesPainter extends CustomPainter {
-  SpecialTimerShapesPainter({required this.color});
-  final Color color;
-
+class SpecialTimerShapesPainter({required final Color color})
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final hub = Offset(size.width / 2, size.height / 2);
@@ -6401,9 +6134,8 @@ class SpecialTimerShapesPainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
-class SpecialTimerShapesLabel extends StatelessWidget {
-  const SpecialTimerShapesLabel({required super.key});
-
+class const SpecialTimerShapesLabel({required super.key})
+    extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color =
@@ -6470,11 +6202,10 @@ Path mirrorPathHorizontally(Path path, double axisX) {
   return path.transform(m.storage);
 }
 
-class ManyIconPainter extends CustomPainter {
-  ManyIconPainter({required this.color, required this.isRightHanded});
-  final Color color;
-  final bool isRightHanded;
-
+class ManyIconPainter({
+  required final Color color,
+  required final bool isRightHanded,
+}) extends CustomPainter {
   /// Ring thickness as a fraction of the arc's radius: 1 collapses the inner  radius to the center. The right vertical edge of the shape always sits  thickness/2 of the radius to the right of the center.
   static const double thickness = 0.65;
 
@@ -6507,9 +6238,7 @@ class ManyIconPainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.isRightHanded != isRightHanded;
 }
 
-class ManyIcon extends SignalWidget {
-  const ManyIcon({super.key});
-
+class const ManyIcon({super.key}) extends SignalWidget {
   @override
   Widget build(BuildContext context) {
     final color =
@@ -6528,20 +6257,14 @@ class ManyIcon extends SignalWidget {
   }
 }
 
-class HamburgerIconPainter extends CustomPainter {
-  HamburgerIconPainter({
-    required this.color,
-    required this.lineWidthp,
-    required this.radiusp,
-    this.hardEdge = false,
-  });
-  final Color color;
-  final double lineWidthp;
-  final double radiusp;
+class HamburgerIconPainter({
+  required final Color color,
+  required final double lineWidthp,
+  required final double radiusp,
 
   /// Whether the bars use a square cap (true) or a round cap (false).
-  final bool hardEdge;
-
+  final bool hardEdge = false,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final md = min(size.width, size.height);
@@ -6572,11 +6295,10 @@ class HamburgerIconPainter extends CustomPainter {
 
 /// A back chevron rendered as line art — a sideways "v" (`<`) of the given
 /// stroke thickness, matching the rest of mako's line-art icons.
-class ChevronBackIconPainter extends CustomPainter {
-  ChevronBackIconPainter({required this.color, required this.lineWidth});
-  final Color color;
-  final double lineWidth;
-
+class ChevronBackIconPainter({
+  required final Color color,
+  required final double lineWidth,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -6606,17 +6328,12 @@ class ChevronBackIconPainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.lineWidth != lineWidth;
 }
 
-class ChevronBackIcon extends StatelessWidget {
-  const ChevronBackIcon({
-    super.key,
-    required this.lineWidth,
-    this.color,
-    this.size,
-  });
-  final double lineWidth;
-  final Color? color;
-  final Size? size;
-
+class const ChevronBackIcon({
+  super.key,
+  required final double lineWidth,
+  final Color? color,
+  final Size? size,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c =
@@ -6631,14 +6348,14 @@ class ChevronBackIcon extends StatelessWidget {
 }
 
 /// actually only renders two bars rather than 3
-class HamburgerIcon extends StatelessWidget {
-  const HamburgerIcon({super.key, this.color, this.hardEdge = false});
+class const HamburgerIcon({
+  super.key,
   // todo: remove
-  final Color? color;
+  final Color? color,
 
   /// Whether the bars use a square cap (true) or a round cap (false).
-  final bool hardEdge;
-
+  final bool hardEdge = false,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
@@ -6656,18 +6373,13 @@ class HamburgerIcon extends StatelessWidget {
 }
 
 /// A line-art "×", for close/dismiss affordances.
-class CrossIconPainter extends CustomPainter {
-  CrossIconPainter({
-    required this.color,
-    required this.lineWidth,
-    this.radiusp = 0.24,
-  });
-  final Color color;
-  final double lineWidth;
+class CrossIconPainter({
+  required final Color color,
+  required final double lineWidth,
 
   /// Half-length of each arm, as a fraction of the box's shorter side.
-  final double radiusp;
-
+  final double radiusp = 0.24,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -6688,11 +6400,11 @@ class CrossIconPainter extends CustomPainter {
       oldDelegate.radiusp != radiusp;
 }
 
-class CrossIcon extends StatelessWidget {
-  const CrossIcon({super.key, required this.lineWidth, this.color});
-  final double lineWidth;
-  final Color? color;
-
+class const CrossIcon({
+  super.key,
+  required final double lineWidth,
+  final Color? color,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
@@ -6710,22 +6422,16 @@ class CrossIcon extends StatelessWidget {
 /// Two stacked bars: the usual "grab me and move me" grip marking. Unlike
 /// [HamburgerIcon] (a menu affordance) the bars are short and close together,
 /// so it reads as a handle rather than a list.
-class GripBarsIconPainter extends CustomPainter {
-  GripBarsIconPainter({
-    required this.color,
-    required this.lineWidth,
-    this.radiusp = 0.26,
-    this.gapp = 0.16,
-  });
-  final Color color;
-  final double lineWidth;
+class GripBarsIconPainter({
+  required final Color color,
+  required final double lineWidth,
 
   /// Half-length of each bar, as a fraction of the box's shorter side.
-  final double radiusp;
+  final double radiusp = 0.26,
 
   /// Half the distance between the two bars, same units.
-  final double gapp;
-
+  final double gapp = 0.16,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -6749,11 +6455,11 @@ class GripBarsIconPainter extends CustomPainter {
       oldDelegate.gapp != gapp;
 }
 
-class GripBarsIcon extends StatelessWidget {
-  const GripBarsIcon({super.key, required this.lineWidth, this.color});
-  final double lineWidth;
-  final Color? color;
-
+class const GripBarsIcon({
+  super.key,
+  required final double lineWidth,
+  final Color? color,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
@@ -6787,14 +6493,10 @@ void _drawRoundedPolygon(
   canvas.drawPath(path, Paint()..color = color);
 }
 
-class PaintedBackspaceIconPainter extends CustomPainter {
-  PaintedBackspaceIconPainter({
-    required this.color,
-    required this.cornerRadius,
-  });
-  final Color color;
-  final double cornerRadius;
-
+class PaintedBackspaceIconPainter({
+  required final Color color,
+  required final double cornerRadius,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final path = leftwardsArrowBox(Offset.zero, size, cornerRadius);
@@ -6864,11 +6566,11 @@ Path rightwardsArrowBoxWithoutCr(
   return r;
 }
 
-class PaintedBackspaceIcon extends StatelessWidget {
-  const PaintedBackspaceIcon({super.key, this.size = 24, this.color});
-  final double size;
-  final Color? color;
-
+class const PaintedBackspaceIcon({
+  super.key,
+  final double size = 24,
+  final Color? color,
+}) extends StatelessWidget {
   /// Width as a fraction of [size].
   static const double aspect = 1.2;
 
@@ -6891,11 +6593,10 @@ class PaintedBackspaceIcon extends StatelessWidget {
   }
 }
 
-class PaintedPlayIconPainter extends CustomPainter {
-  PaintedPlayIconPainter({required this.color, required this.cornerRadius});
-  final Color color;
-  final double cornerRadius;
-
+class PaintedPlayIconPainter({
+  required final Color color,
+  required final double cornerRadius,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // Inscribe an equilateral triangle pointing right inside the box.
@@ -6946,11 +6647,11 @@ double playIconDimensionRatio = playIconDimensionRatioForRoundingp(
   playIconDimensionRoundingp,
 );
 
-class PaintedPlayIcon extends StatelessWidget {
-  const PaintedPlayIcon({super.key, this.size = 24, this.color});
-  final double size;
-  final Color? color;
-
+class const PaintedPlayIcon({
+  super.key,
+  final double size = 24,
+  final Color? color,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c =
@@ -6987,13 +6688,12 @@ Path _closedPolygon(List<Offset> points) {
 /// right bar's top-right and bottom-right corners. The pieces overlap slightly
 /// at the seam in the play state so the rounded stroke leaves no notch where it
 /// crosses the hypotenuse.
-class PausePlayIconPainter extends CustomPainter {
-  PausePlayIconPainter({required this.color, required this.t});
-  final Color color;
+class PausePlayIconPainter({
+  required final Color color,
 
   /// 0 = play triangle, 1 = pause bars.
-  final double t;
-
+  required final double t,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final triH = min(size.height, size.width * playIconDimensionRatio);
@@ -7059,19 +6759,13 @@ class PausePlayIconPainter extends CustomPainter {
 }
 
 /// Play icon that tweens to a pause icon while [playing] is true (and back).
-class PausePlayIcon extends StatelessWidget {
-  const PausePlayIcon({
-    super.key,
-    required this.playing,
-    this.size = 24,
-    this.color,
-    this.duration = const Duration(milliseconds: 125),
-  });
-  final bool playing;
-  final double size;
-  final Color? color;
-  final Duration duration;
-
+class const PausePlayIcon({
+  super.key,
+  required final bool playing,
+  final double size = 24,
+  final Color? color,
+  final Duration duration = const Duration(milliseconds: 125),
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c =
@@ -7093,29 +6787,23 @@ class PausePlayIcon extends StatelessWidget {
   }
 }
 
-class Thumbspan {
+class Thumbspan(
   /// measured in logical pixels
-  double thumbspan;
-  Thumbspan(this.thumbspan);
+  var double thumbspan,
+) {
   static double of(BuildContext context, {bool listen = false}) {
     return Provider.of<Thumbspan>(context, listen: listen).thumbspan;
   }
 }
 
 /// We use a checkbox other than the native one, because the native one will feel dated due to the slider fad, but we're sure as shit not using sliders
-class RoundedCheckbox extends StatelessWidget {
-  const RoundedCheckbox({
-    super.key,
-    required this.value,
-    required this.onChanged,
-    this.dimWhenFalse = false,
-    this.size = 20.0,
-  });
-
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final double size;
-  final bool dimWhenFalse;
+class const RoundedCheckbox({
+  super.key,
+  required final bool value,
+  required final ValueChanged<bool> onChanged,
+  final bool dimWhenFalse = false,
+  final double size = 20.0,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.onSurface;
@@ -7160,23 +6848,14 @@ class RoundedCheckbox extends StatelessWidget {
   }
 }
 
-class _RoundedCheckboxPainter extends CustomPainter {
-  const _RoundedCheckboxPainter({
-    required this.innerScale,
-    required this.color,
-    required this.borderColor,
-    required this.radius,
-    required this.innerInset,
-    required this.continuous,
-  });
-
-  final double innerScale;
-  final Color color;
-  final Color borderColor;
-  final Radius radius;
-  final double innerInset;
-  final bool continuous;
-
+class const _RoundedCheckboxPainter({
+  required final double innerScale,
+  required final Color color,
+  required final Color borderColor,
+  required final Radius radius,
+  required final double innerInset,
+  required final bool continuous,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final strokeWidth = size.width * 0.1;
@@ -7248,18 +6927,12 @@ enum CheckboxFill {
 /// [CheckboxFill] — empty, fully/partly filled, or a half. Purely
 /// presentational; tapping just calls [onTap] and the owner decides the next
 /// state.
-class ManyStateCheckbox extends StatelessWidget {
-  const ManyStateCheckbox({
-    super.key,
-    required this.fill,
-    required this.onTap,
-    this.size = 20.0,
-  });
-
-  final CheckboxFill fill;
-  final VoidCallback onTap;
-  final double size;
-
+class const ManyStateCheckbox({
+  super.key,
+  required final CheckboxFill fill,
+  required final VoidCallback onTap,
+  final double size = 20.0,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.onSurface;
@@ -7299,24 +6972,15 @@ class ManyStateCheckbox extends StatelessWidget {
   }
 }
 
-class _ManyStateCheckboxPainter extends CustomPainter {
-  const _ManyStateCheckboxPainter({
-    required this.fillFractions,
-    required this.color,
-    required this.borderColor,
-    required this.radius,
-    required this.innerInset,
-    required this.continuous,
-  });
-
+class const _ManyStateCheckboxPainter({
   /// The fill rectangle in inner-area fractions (see [CheckboxFill]).
-  final Rect fillFractions;
-  final Color color;
-  final Color borderColor;
-  final Radius radius;
-  final double innerInset;
-  final bool continuous;
-
+  required final Rect fillFractions,
+  required final Color color,
+  required final Color borderColor,
+  required final Radius radius,
+  required final double innerInset,
+  required final bool continuous,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final strokeWidth = size.width * 0.1;
@@ -7374,26 +7038,18 @@ class _ManyStateCheckboxPainter extends CustomPainter {
 /// rows need no Material ancestor and their feedback can't leak onto the wrong
 /// canvas. [InkButton] wraps its child in an [IgnorePointer], so a [trailing]
 /// widget is display-only; the whole row toggles via [onTap].
-class MenuTile extends StatelessWidget {
-  final Widget? title;
-  final Widget? subtitle;
-  final Widget? trailing;
-  final VoidCallback? onTap;
+class const MenuTile({
+  super.key,
+  final Widget? title,
+  final Widget? subtitle,
+  final Widget? trailing,
+  final VoidCallback? onTap,
 
   /// Receives the global tap position before [onTap] fires — used where the tap
   /// point seeds a transition origin (e.g. a [CircularRevealRoute]).
-  final ValueChanged<Offset>? onTapUpGlobalPosition;
-  final EdgeInsetsGeometry? contentPadding;
-  const MenuTile({
-    super.key,
-    this.title,
-    this.subtitle,
-    this.trailing,
-    this.onTap,
-    this.onTapUpGlobalPosition,
-    this.contentPadding,
-  });
-
+  final ValueChanged<Offset>? onTapUpGlobalPosition,
+  final EdgeInsetsGeometry? contentPadding,
+}) extends StatelessWidget {
   static const double defaultPaddingTotal = 16;
   static const double defaultPaddingInside = 8;
 
@@ -7469,22 +7125,14 @@ class MenuTile extends StatelessWidget {
   }
 }
 
-class RoundedCheckboxListTile extends StatelessWidget {
-  const RoundedCheckboxListTile({
-    super.key,
-    required this.value,
-    required this.onChanged,
-    this.title,
-    this.subtitle,
-    this.contentPadding,
-  });
-
-  final bool value;
-  final ValueChanged<bool?> onChanged;
-  final Widget? title;
-  final Widget? subtitle;
-  final EdgeInsetsGeometry? contentPadding;
-
+class const RoundedCheckboxListTile({
+  super.key,
+  required final bool value,
+  required final ValueChanged<bool?> onChanged,
+  final Widget? title,
+  final Widget? subtitle,
+  final EdgeInsetsGeometry? contentPadding,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MenuTile(
@@ -7501,22 +7149,17 @@ class RoundedCheckboxListTile extends StatelessWidget {
   }
 }
 
-class FutureSliver<T> extends StatefulWidget {
-  final Future<T> future;
-  final Widget Function(BuildContext, T) builder;
-  final Widget loading;
-  const FutureSliver({
-    super.key,
-    required this.future,
-    required this.builder,
-    this.loading = const SliverToBoxAdapter(
-      child: Padding(
-        padding: EdgeInsets.all(24.0),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+class const FutureSliver<T>({
+  super.key,
+  required final Future<T> future,
+  required final Widget Function(BuildContext, T) builder,
+  final Widget loading = const SliverToBoxAdapter(
+    child: Padding(
+      padding: EdgeInsets.all(24.0),
+      child: Center(child: CircularProgressIndicator()),
     ),
-  });
-
+  ),
+}) extends StatefulWidget {
   @override
   State<FutureSliver<T>> createState() => _FutureSliverState<T>();
 }
@@ -7550,29 +7193,24 @@ class _FutureSliverState<T> extends State<FutureSliver<T>> {
 /// sections are small, so that costs no meaningful laziness. [color] fills the
 /// card, [padding] insets the content, and [margin] is the gap to the screen
 /// edges and to the card above.
-class RoundedSectionSliver extends StatelessWidget {
-  final Widget child;
-  final Color color;
+class const RoundedSectionSliver({
+  super.key,
+  required final Widget child,
+  required final Color color,
 
   /// Corner radius of the card. Defaults to the screen's corner radius minus the
   /// horizontal [margin], so the card's rounding sits concentric with the
   /// rounded screen corners it's inset from.
-  final double? radius;
-  final EdgeInsetsGeometry margin;
-  final EdgeInsetsGeometry padding;
-
+  final double? radius,
+  final EdgeInsetsGeometry margin = const EdgeInsets.symmetric(
+    horizontal: RoundedSectionSliver.defaultMargin,
+  ),
+  final EdgeInsetsGeometry padding = const EdgeInsets.all(16),
+}) extends StatelessWidget {
   static const double defaultMargin = 12;
 
   static const double contentRadius =
       MenuTile.trailingSlotSpan / 2 + defaultMargin;
-  const RoundedSectionSliver({
-    super.key,
-    required this.child,
-    required this.color,
-    this.radius,
-    this.margin = const EdgeInsets.symmetric(horizontal: defaultMargin),
-    this.padding = const EdgeInsets.all(16),
-  });
 
   /// Concentric with the rounded screen corners this is inset from.
   static double concentricRadius(
@@ -7610,29 +7248,20 @@ class RoundedSectionSliver extends StatelessWidget {
 /// The same card as [RoundedSectionSliver] for places that aren't building a
 /// sliver. Shares the shape rather than restating it, so a card can't quietly
 /// end up rounder than the sections around it. — Opus 5
-class RoundedSection extends StatelessWidget {
-  final Widget child;
-  final Color color;
-  final double? radius;
-  final EdgeInsetsGeometry margin;
-  final EdgeInsetsGeometry padding;
+class const RoundedSection({
+  super.key,
+  required final Widget child,
+  required final Color color,
+  final double? radius,
+  final EdgeInsetsGeometry margin = const EdgeInsets.symmetric(
+    horizontal: RoundedSectionSliver.defaultMargin,
+  ),
+  final EdgeInsetsGeometry padding = const EdgeInsets.all(16),
 
   /// What the radius is reckoned against when [margin] has already been applied
   /// by an enclosing sliver.
-  final EdgeInsetsGeometry? marginForRadius;
-
-  const RoundedSection({
-    super.key,
-    required this.child,
-    required this.color,
-    this.radius,
-    this.margin = const EdgeInsets.symmetric(
-      horizontal: RoundedSectionSliver.defaultMargin,
-    ),
-    this.padding = const EdgeInsets.all(16),
-    this.marginForRadius,
-  });
-
+  final EdgeInsetsGeometry? marginForRadius,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r =
@@ -7655,10 +7284,10 @@ class RoundedSection extends StatelessWidget {
   }
 }
 
-class PadStateIcon extends StatelessWidget {
-  final ReadonlySignal<bool> signal;
-  const PadStateIcon({super.key, required this.signal});
-
+class const PadStateIcon({
+  super.key,
+  required final ReadonlySignal<bool> signal,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BoolSignalTween(
@@ -7739,26 +7368,20 @@ class PadStateIcon extends StatelessWidget {
 ///
 /// The flip isn't a crossfade: the strike retracts into its own tip, up and to
 /// the right, taking its slot with it and leaving the disc to speak for itself.
-class MaterialYouIcon extends StatelessWidget {
-  final bool on;
+class const MaterialYouIcon({
+  super.key,
+  required final bool on,
 
   /// The scheme the *disc* is drawn from — always the Material You one (see
   /// [materialYouScheme]), on or off, since the disc shows what the setting is
   /// offering rather than what's currently in force. The line art isn't part of
   /// that offer, so it stays in the ambient theme.
-  final ColorScheme scheme;
-  final double span;
+  required final ColorScheme scheme,
+  final double span = 30,
 
   /// The line art's colour. Defaults to the ambient [ColorScheme.onSurface].
-  final Color? strokeColor;
-  const MaterialYouIcon({
-    super.key,
-    required this.on,
-    required this.scheme,
-    this.span = 30,
-    this.strokeColor,
-  });
-
+  final Color? strokeColor,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lineColor = strokeColor ?? Theme.of(context).colorScheme.onSurface;
@@ -7777,18 +7400,12 @@ class MaterialYouIcon extends StatelessWidget {
   }
 }
 
-class MaterialYouIconPainter extends CustomPainter {
-  MaterialYouIconPainter({
-    required this.progress,
-    required this.scheme,
-    required this.strokeColor,
-  });
-
+class MaterialYouIconPainter({
   /// 0 is off (struck through), 1 is on (bare).
-  final double progress;
-  final ColorScheme scheme;
-  final Color strokeColor;
-
+  required final double progress,
+  required final ColorScheme scheme,
+  required final Color strokeColor,
+}) extends CustomPainter {
   /// The direction the strike points — up and to the right. Canvas angles run
   /// clockwise from east, so up is negative.
   static const double _tipAngle = -pi / 4;
@@ -7888,15 +7505,16 @@ class MaterialYouIconPainter extends CustomPainter {
 /// switch in [RenderParagraph]), and assert on anything that isn't a tap,
 /// double-tap or long-press recognizer. A wrapper class fails that assert once
 /// per link whenever semantics is on.
-class _TapAndLongPressRecognizer extends TapGestureRecognizer {
-  _TapAndLongPressRecognizer({
-    required VoidCallback onTap,
-    required VoidCallback onLongPress,
-  }) : _longPress = (LongPressGestureRecognizer()..onLongPress = onLongPress) {
+class _TapAndLongPressRecognizer({
+  required VoidCallback onTap,
+  required VoidCallback onLongPress,
+}) extends TapGestureRecognizer {
+  final LongPressGestureRecognizer _longPress;
+
+  this
+    : _longPress = (LongPressGestureRecognizer()..onLongPress = onLongPress) {
     this.onTap = onTap;
   }
-
-  final LongPressGestureRecognizer _longPress;
 
   @override
   void addPointer(PointerDownEvent event) {
@@ -7921,12 +7539,10 @@ class _TapAndLongPressRecognizer extends TapGestureRecognizer {
 /// (not a widget/WidgetSpan) so it shares the surrounding paragraph's exact text
 /// metrics, wrapping and scaling; [baseStyle] is passed in explicitly rather
 /// than relying on the sometimes-sizeless inherited [parentStyle].
-class LinkElementBuilder extends MarkdownElementBuilder {
-  LinkElementBuilder({required this.baseStyle, required this.linkStyle});
-
-  final TextStyle baseStyle;
-  final TextStyle linkStyle;
-
+class LinkElementBuilder({
+  required final TextStyle baseStyle,
+  required final TextStyle linkStyle,
+}) extends MarkdownElementBuilder {
   @override
   Widget? visitElementAfterWithContext(
     BuildContext context,
@@ -7990,19 +7606,13 @@ const _lineBoxCenterEm = 0.126;
 double inkBandDy(InkBand band, double fontSize) =>
     (_bandCenterEm[band]! - _lineBoxCenterEm) * fontSize;
 
-class BandCenteredText extends StatelessWidget {
-  const BandCenteredText(
-    this.data, {
-    super.key,
-    this.style,
-    this.band = InkBand.lowercase,
-    this.overflow,
-  });
-  final String data;
-  final TextStyle? style;
-  final InkBand band;
-  final TextOverflow? overflow;
-
+class const BandCenteredText(
+  final String data, {
+  super.key,
+  final TextStyle? style,
+  final InkBand band = InkBand.lowercase,
+  final TextOverflow? overflow,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fontSize =

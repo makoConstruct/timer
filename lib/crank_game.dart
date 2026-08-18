@@ -21,29 +21,21 @@ TextStyle _crankGameText(
   fontWeight: fontWeight,
 );
 
-class CrankGameScreen extends StatefulWidget {
-  final GlobalKey? iconKey;
-  final bool byAngularSpeed;
-
-  const CrankGameScreen({super.key, this.iconKey, this.byAngularSpeed = false});
-
+class const CrankGameScreen({
+  super.key,
+  final GlobalKey? iconKey,
+  final bool byAngularSpeed = false,
+}) extends StatefulWidget {
   @override
   State<CrankGameScreen> createState() => _CrankGameScreenState();
 }
 
-class CrankGameTheme {
-  final Color tooSlowColor;
-  final Color withinBoundsColor;
-  final Color wonColor;
-  final Color tooFastColor;
-
-  CrankGameTheme({
-    required this.tooSlowColor,
-    required this.withinBoundsColor,
-    required this.wonColor,
-    required this.tooFastColor,
-  });
-
+class CrankGameTheme({
+  required final Color tooSlowColor,
+  required final Color withinBoundsColor,
+  required final Color wonColor,
+  required final Color tooFastColor,
+}) {
   static CrankGameTheme light = CrankGameTheme(
     tooSlowColor: const Color(0xff5bcef5),
     withinBoundsColor: const Color(0xff17e351),
@@ -268,7 +260,6 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     final crankGameTheme = CrankGameTheme.fromContext(context);
     final mako = OurThemeData.fromTheme(theme);
     final backgroundColorA = mako.menuSurfaceFore;
-    final backgroundColorB = mako.menuSurfaceBack;
     final mq = MediaQuery.of(context);
     final screenWidth = mq.size.width;
     final screenHeight = mq.size.height;
@@ -528,30 +519,16 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   }
 }
 
-class _AngleSample {
-  final DateTime time;
-  final double angle;
+class _AngleSample(final DateTime time, final double angle);
 
-  _AngleSample(this.time, this.angle);
-}
-
-class _CrankDialPainter extends CustomPainter {
-  final double angle;
-  final double outerDiameter;
-  final double innerDiameter;
-  final Color surfaceColor;
-  final Color backgroundColor;
-  final bool isDragging;
-
-  _CrankDialPainter({
-    required this.angle,
-    required this.outerDiameter,
-    required this.innerDiameter,
-    required this.surfaceColor,
-    required this.backgroundColor,
-    required this.isDragging,
-  });
-
+class _CrankDialPainter({
+  required final double angle,
+  required final double outerDiameter,
+  required final double innerDiameter,
+  required final Color surfaceColor,
+  required final Color backgroundColor,
+  required final bool isDragging,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
@@ -583,21 +560,13 @@ class _CrankDialPainter extends CustomPainter {
   }
 }
 
-class _ProgressBar extends StatelessWidget {
-  final double progress;
-  final bool isWithinBounds;
-  final bool isTooSlow;
-  final bool hasWon;
-  final double thickness;
-
-  const _ProgressBar({
-    required this.progress,
-    required this.isWithinBounds,
-    required this.isTooSlow,
-    required this.hasWon,
-    this.thickness = 24,
-  });
-
+class const _ProgressBar({
+  required final double progress,
+  required final bool isWithinBounds,
+  required final bool isTooSlow,
+  required final bool hasWon,
+  final double thickness = 24,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -649,21 +618,13 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
-class _SpeedArrow extends StatelessWidget {
-  final double currentSpeed;
-  final double targetSpeed;
-  final double errorMargin;
-  final CrankGameTheme crankGameTheme;
-  final double size;
-
-  const _SpeedArrow({
-    required this.currentSpeed,
-    required this.targetSpeed,
-    required this.errorMargin,
-    required this.crankGameTheme,
-    this.size = 60,
-  });
-
+class const _SpeedArrow({
+  required final double currentSpeed,
+  required final double targetSpeed,
+  required final double errorMargin,
+  required final CrankGameTheme crankGameTheme,
+  final double size = 60,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final speedDifference = currentSpeed - targetSpeed;
@@ -695,12 +656,10 @@ class _SpeedArrow extends StatelessWidget {
   }
 }
 
-class _ArrowPainter extends CustomPainter {
-  final double t; // -1 (pointing up) to 1 (pointing down)
-  final Color color;
-
-  _ArrowPainter({required this.t, required this.color});
-
+class _ArrowPainter({
+  required final double t, // -1 (pointing up) to 1 (pointing down)
+  required final Color color,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -766,18 +725,13 @@ class _ArrowPainter extends CustomPainter {
   }
 }
 
-class _DifficultySlider extends StatelessWidget {
-  final double value;
-  final ValueChanged<double> onChanged;
-  final double thickness;
+class const _DifficultySlider({
+  required final double value,
+  required final ValueChanged<double> onChanged,
+  final double thickness = 24,
+}) extends StatelessWidget {
   static const double minError = 0.01; // 1%
   static const double maxError = 0.20; // 20%
-
-  const _DifficultySlider({
-    required this.value,
-    required this.onChanged,
-    this.thickness = 24,
-  });
 
   // Logarithmic interpolation: convert normalized 0-1 to error margin
   static double _toErrorMargin(double normalized) {

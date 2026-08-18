@@ -31,12 +31,11 @@ int _typeHelpDescriptionDeepHash(Object o) {
 }
 
 /// these are just parser combinators. They used to be self-describing so that we could put type descriptions in the DB and use those to pre-parse any root objects, but it turned out that's impossible in dart (you can't construct a new generic type at runtime, which, since dart has runtime type information, means you also can't construct values of that type), and would only be elegant with dependent types.
-abstract class TypeHelp<T> {
-  final Object typeDescription;
+/// couldn't be const because of the late final _hashCode cached value
+abstract class TypeHelp<T>(final Object typeDescription) {
   late final int _hashCode;
 
-  /// couldn't be const because of the late final _hashCode cached value
-  TypeHelp(this.typeDescription) {
+  this {
     _hashCode = _typeHelpDescriptionDeepHash(typeDescription);
   }
 
@@ -152,10 +151,8 @@ class StringType extends TypeHelp<String> {
   Object? toJsonValue(String object) => object;
 }
 
-class Nullable<T> extends TypeHelp<T?> {
-  final TypeHelp<T> innerType;
-
-  Nullable(this.innerType) : super(['nullable', innerType.typeDescription]);
+class Nullable<T>(final TypeHelp<T> innerType) extends TypeHelp<T?> {
+  this : super(['nullable', innerType.typeDescription]);
 
   @override
   T? fromJsonValue(Object? json) {
@@ -170,10 +167,8 @@ class Nullable<T> extends TypeHelp<T?> {
   }
 }
 
-class ListType<T> extends TypeHelp<List<T>> {
-  final TypeHelp<T> itemConverter;
-
-  ListType(this.itemConverter) : super(['list', itemConverter.typeDescription]);
+class ListType<T>(final TypeHelp<T> itemConverter) extends TypeHelp<List<T>> {
+  this : super(['list', itemConverter.typeDescription]);
 
   @override
   List<T> fromJsonValue(Object? json) {
@@ -189,16 +184,14 @@ class ListType<T> extends TypeHelp<List<T>> {
   }
 }
 
-class MapType<K, V> extends TypeHelp<Map<K, V>> {
-  final TypeHelp<K> keyConverter;
-  final TypeHelp<V> valueConverter;
-
-  MapType(this.keyConverter, this.valueConverter)
-    : super([
-        'map',
-        keyConverter.typeDescription,
-        valueConverter.typeDescription,
-      ]);
+class MapType<K, V>(final TypeHelp<K> keyConverter, final TypeHelp<V> valueConverter)
+    extends TypeHelp<Map<K, V>> {
+  this
+      : super([
+          'map',
+          keyConverter.typeDescription,
+          valueConverter.typeDescription,
+        ]);
 
   @override
   Map<K, V> fromJsonValue(Object? json) {
@@ -370,28 +363,20 @@ class MobjRegistry {
   }
 }
 
-class QueryTrack<T> {
-  final Mobj<T> m;
-  final Function() unsubscribe;
-  QueryTrack(this.m, this.unsubscribe);
-}
+class QueryTrack<T>(final Mobj<T> m, final Function() unsubscribe);
 
 bool alwaysTrue(dynamic v) {
   return true;
 }
 
-class QuerySet<T> {
+class QuerySet<T>(final TypeHelp<T> requiredType, [final bool Function(T) predicate = alwaysTrue]) {
   final Map<MobjID, QueryTrack<T>> inSet = {};
-  final TypeHelp<T> requiredType;
-  final bool Function(T) predicate;
   late final StreamController<Mobj<T>> _onAdded =
       StreamController<Mobj<T>>.broadcast();
   Stream<Mobj<T>> get onAdded => _onAdded.stream;
   late final StreamController<Mobj<T>> _onRemoved =
       StreamController<Mobj<T>>.broadcast();
   Stream<Mobj<T>> get onRemoved => _onRemoved.stream;
-
-  QuerySet(this.requiredType, [this.predicate = alwaysTrue]);
 
   void add(Mobj<T> mobj) {
     if (!inSet.containsKey(mobj.id)) {
@@ -433,10 +418,7 @@ class QuerySet<T> {
   }
 }
 
-class MobjTypeMismatchError extends Error {
-  final String message;
-  MobjTypeMismatchError(this.message);
-}
+class MobjTypeMismatchError(final String message) extends Error;
 
 /// Modular Object, but not actually belonging to the Modular Web protocol, this is a crappy approximation. Can be subscribed, and is automatically persisted to disk.
 /// The Mobj system is a little reactive KV database that uses Signals for reactivity (which are better than streams) and sqlite for persistence.

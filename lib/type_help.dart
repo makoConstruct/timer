@@ -377,10 +377,7 @@ TimerData cloneTimerDataWithChanges(
   );
 }
 
-class Coord {
-  final int x;
-  final int y;
-  const Coord(this.x, this.y);
+class const Coord(final int x, final int y) {
   Coord withChanges({int? x, int? y}) => Coord(x ?? this.x, y ?? this.y);
   @override
   String toString() => 'Coord(x: $x, y: $y)';
@@ -419,10 +416,7 @@ class CoordType extends TypeHelp<Coord> {
   };
 }
 
-class JourneyPlayer {
-  final Coord pos;
-  final List<MobjID?> inventory;
-  const JourneyPlayer({required this.pos, required this.inventory});
+class const JourneyPlayer({required final Coord pos, required final List<MobjID?> inventory}) {
   JourneyPlayer withChanges({Coord? pos, List<MobjID?>? inventory}) =>
       JourneyPlayer(
         pos: pos ?? this.pos,

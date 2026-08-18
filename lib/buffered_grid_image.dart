@@ -12,16 +12,14 @@ int _mod(int a, int b) => ((a % b) + b) % b;
 /// boundary, only the newly visible tiles are painted over the existing
 /// composite (using BlendMode.src to fully replace). The buffer wraps in both
 /// axes, so rendering to screen requires up to 4 drawImageRect calls.
-class BufferedGridImage extends CustomPainter {
-  final void Function(Canvas canvas, Coord tileCoord) paintTile;
-
+class BufferedGridImage({
+  required final void Function(Canvas canvas, Coord tileCoord) paintTile,
+}) extends CustomPainter {
   int tilePixelSize = 0;
   int bufferW = 0;
   int bufferH = 0;
   ui.Image? composite;
   int _visMinX = 0, _visMaxX = 0, _visMinY = 0, _visMaxY = 0;
-
-  BufferedGridImage({required this.paintTile});
 
   /// Call when viewport size or resolution changes.
   /// [viewWidth]/[viewHeight] in world units (tiles).

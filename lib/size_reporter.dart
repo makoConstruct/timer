@@ -5,15 +5,12 @@ import 'package:flutter/rendering.dart';
 /// A widget that sets the ValueNotifier when the layout dimensions of its child change, and also when it's first assigned.
 /// Differs from SizeChangedLayoutNotifier in that it also sets the ValueNotifier on the first frame.
 /// (we use this for )
-class SizeReporter extends SingleChildRenderObjectWidget {
+class const SizeReporter({
+  super.key,
+  super.child,
   /// note, it's a stateless widget, so you have to dispose of the notifier
-  final ValueNotifier<Size?> previousSize;
-  const SizeReporter({
-    super.key,
-    super.child,
-    required this.previousSize,
-  });
-
+  required final ValueNotifier<Size?> previousSize,
+}) extends SingleChildRenderObjectWidget {
   @override
   RenderObject createRenderObject(BuildContext context) {
     return _RenderSizeChangedWithCallback(
@@ -51,14 +48,11 @@ class _RenderSizeChangedWithCallback extends RenderProxyBox {
   }
 }
 
-class SizeFollower extends StatelessWidget {
-  final ValueListenable<Size?> sizeNotifier;
-  final Widget? child;
-  const SizeFollower({
-    super.key,
-    required this.sizeNotifier,
-    this.child,
-  });
+class const SizeFollower({
+  super.key,
+  required final ValueListenable<Size?> sizeNotifier,
+  final Widget? child,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(

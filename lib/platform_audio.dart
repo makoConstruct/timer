@@ -2,18 +2,12 @@ import 'package:flutter/services.dart';
 
 enum PlatformAudioType { ringtone, notification, alarm }
 
-class AudioInfo {
+class const AudioInfo({
   /// a null uri means "use the default for the given category"
-  final String? url;
-  final String name;
-  final bool isLong;
-
-  const AudioInfo({
-    required this.url,
-    required this.name,
-    required this.isLong,
-  });
-
+  required final String? url,
+  required final String name,
+  required final bool isLong,
+}) {
   static const defaultRingtone = AudioInfo(
     url: null,
     name: 'Default Ringtone',

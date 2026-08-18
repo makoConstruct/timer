@@ -82,11 +82,8 @@ List<T> shuffledClone<T>(GameRng rng, List<T> list) {
 
 /// Draws from a shuffled bag, refilling and reshuffling once it runs dry — so
 /// everything comes up once before anything comes up twice.
-class _Bag<T> {
-  final GameRng _rng;
-  final List<T> _source;
+class _Bag<T>(final GameRng _rng, final List<T> _source) {
   List<T> _left = [];
-  _Bag(this._rng, this._source);
   T draw() {
     if (_left.isEmpty) _left = shuffledClone(_rng, _source);
     return _left.removeLast();
@@ -177,10 +174,9 @@ List<dynamic> _jsonList(Object? json, String what) {
 
 /// An enum written by name, so that reordering a declaration doesn't silently
 /// reinterpret every save that came before it.
-class EnumType<T extends Enum> extends TypeHelp<T> {
-  final String name;
-  final List<T> values;
-  EnumType(this.name, this.values) : super(['enum', name]);
+class EnumType<T extends Enum>(final String name, final List<T> values)
+    extends TypeHelp<T> {
+  this : super(['enum', name]);
 
   @override
   T fromJsonValue(Object? json) {
@@ -219,11 +215,9 @@ class OffsetType extends TypeHelp<Offset> {
 
 /// A two-field record. The weighted lists and the (low, high) ranges in
 /// [Parameters] are all this shape.
-class PairType<A, B> extends TypeHelp<(A, B)> {
-  final TypeHelp<A> first;
-  final TypeHelp<B> second;
-  PairType(this.first, this.second)
-    : super(['pair', first.typeDescription, second.typeDescription]);
+class PairType<A, B>(final TypeHelp<A> first, final TypeHelp<B> second)
+    extends TypeHelp<(A, B)> {
+  this : super(['pair', first.typeDescription, second.typeDescription]);
 
   @override
   (A, B) fromJsonValue(Object? json) {
@@ -371,9 +365,8 @@ class ItemCatalogType extends TypeHelp<ItemCatalog> {
 /// Items are interned per level, so everything holding one writes down which
 /// slot it is — (tier, index) — rather than a copy of it. Eudaimonia sits one
 /// tier above the last, which is exactly what its own [Item.tier] says.
-class ItemRefType extends TypeHelp<Item> {
-  final ItemCatalog catalog;
-  ItemRefType(this.catalog) : super('itemRef');
+class ItemRefType(final ItemCatalog catalog) extends TypeHelp<Item> {
+  this : super('itemRef');
 
   @override
   Item fromJsonValue(Object? json) {
@@ -387,11 +380,9 @@ class ItemRefType extends TypeHelp<Item> {
   Object? toJsonValue(Item object) => [object.tier, object.iInTier];
 }
 
-class QuantityType extends TypeHelp<Quantity> {
+class QuantityType(ItemCatalog catalog) extends TypeHelp<Quantity> {
   final ItemRefType item;
-  QuantityType(ItemCatalog catalog)
-    : item = ItemRefType(catalog),
-      super('quantity');
+  this : item = ItemRefType(catalog), super('quantity');
 
   @override
   Quantity fromJsonValue(Object? json) {
@@ -644,17 +635,18 @@ class ParametersType extends TypeHelp<Parameters> {
 /// catalogue slot and nodes by their index in the level's node list; this
 /// holds both directions, since saving needs object → index and loading needs
 /// index → object.
-class LevelRefs {
-  final ItemCatalog catalog;
+class LevelRefs(
+  final ItemCatalog catalog,
 
   /// grows as a level is read; complete before anything is asked to resolve a
   /// node reference
-  final List<Node> nodes;
+  final List<Node> nodes,
+) {
   late final ItemRefType item = ItemRefType(catalog);
   late final QuantityType quantity = QuantityType(catalog);
   final Map<Node, int> _index = {};
 
-  LevelRefs(this.catalog, this.nodes) {
+  this {
     reindex();
   }
 
@@ -669,9 +661,8 @@ class LevelRefs {
   Node node(Object? json) => nodes[IntType().fromJson(json)];
 }
 
-class FacilityType extends TypeHelp<Facility> {
-  final LevelRefs refs;
-  FacilityType(this.refs) : super('trainscapeFacility');
+class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
+  this : super('trainscapeFacility');
 
   @override
   Facility fromJsonValue(Object? json) {
@@ -817,9 +808,8 @@ Object? _scheduleToJson(TrainSchedule s) => switch (s) {
   },
 };
 
-class NodeType extends TypeHelp<Node> {
-  final LevelRefs refs;
-  NodeType(this.refs) : super('trainscapeNode');
+class NodeType(final LevelRefs refs) extends TypeHelp<Node> {
+  this : super('trainscapeNode');
 
   /// Reads the node itself and nothing that points elsewhere: its facilities,
   /// and the stations a train serves, are references to other nodes, so they
@@ -925,9 +915,8 @@ class NodeType extends TypeHelp<Node> {
   }
 }
 
-class PlayerType extends TypeHelp<Player> {
-  final LevelRefs refs;
-  PlayerType(this.refs) : super('trainscapePlayer');
+class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
+  this : super('trainscapePlayer');
 
   @override
   Player fromJsonValue(Object? json) {

@@ -1447,9 +1447,7 @@ double getReasonableAestheticBottomCornerRadius() {
   return r > def ? r : def;
 }
 
-class TimersApp extends StatefulWidget {
-  const TimersApp({super.key});
-
+class const TimersApp({super.key}) extends StatefulWidget {
   @override
   State<TimersApp> createState() => _TimersAppState();
 }
@@ -1616,21 +1614,24 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
   }
 }
 
-class TimerMenu extends StatefulWidget {
-  final MobjID<TimerData> timerID;
-  final Rect centerOn;
-  final List<Widget> items;
-  final double? estimatedWidth;
-  final Animation<double> animation;
+class const TimerMenu({
+  super.key,
+  final double? estimatedWidth,
+  required final MobjID<TimerData> timerID,
+  required final Rect centerOn,
+  required final List<Widget> items,
+  required final Animation<double> animation,
+
+  /// Duration of the upward reveal. The downward (closing) swing is a separate,
+  /// faster shrink — see [_TimerMenuState._reveal] and [_kMenuDownDuration].
+  required final Duration revealDuration,
+  required final double arrowHeight,
 
   /// Goes on the body's [GlassLayer] so that items can inject their press
   /// highlight into the same merged surface; see [GlassMenuButton]. Created by
   /// whoever builds [items], since they need it too. —Opus 5
-  final GlobalKey<GlassLayerState> glassLayerKey;
-
-  /// Duration of the upward reveal. The downward (closing) swing is a separate,
-  /// faster shrink — see [_TimerMenuState._reveal] and [_kMenuDownDuration].
-  final Duration revealDuration;
+  required final GlobalKey<GlassLayerState> glassLayerKey,
+}) extends StatefulWidget {
   static const double buttonHeight = 40;
 
   /// Padding around each menu item's content (its icon box spans
@@ -1641,18 +1642,6 @@ class TimerMenu extends StatefulWidget {
   /// The arrow nub's width as a fraction of [arrowHeight]. Shared between the
   /// blob that draws it and the clamp that keeps its center on screen.
   static const double arrowThicknessFactor = 0.52;
-  final double arrowHeight;
-  const TimerMenu({
-    super.key,
-    this.estimatedWidth,
-    required this.timerID,
-    required this.centerOn,
-    required this.items,
-    required this.animation,
-    required this.revealDuration,
-    required this.arrowHeight,
-    required this.glassLayerKey,
-  });
 
   @override
   State<TimerMenu> createState() => _TimerMenuState();
@@ -2014,17 +2003,12 @@ const double _glassMenuTopPad = 32;
 /// —Opus 5
 const double _glassMenuBulgePad = GlassMenuButton.swellDepth + 7;
 
-abstract class TimerBase extends SignalStatefulWidget {
-  final Mobj<TimerData> mobj;
-  final bool animateIn;
-  final void Function()? onTap;
-  const TimerBase({
-    super.key,
-    required this.mobj,
-    this.animateIn = true,
-    this.onTap,
-  });
-}
+abstract class const TimerBase({
+  super.key,
+  required final Mobj<TimerData> mobj,
+  final bool animateIn = true,
+  final void Function()? onTap,
+}) extends SignalStatefulWidget;
 
 abstract class TimerBaseState<T extends TimerBase> extends State<T>
     with TickerProviderStateMixin {
@@ -2427,13 +2411,15 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
 }
 
 /// Timer widget, contrast with Timer row from the database orm
-class Timer extends TimerBase {
-  Timer({super.key, required super.mobj, super.animateIn = true}) {
-    assert(
-      !mobj.peek()!.isComposite,
-      "For composite timers, use a Timercule rather than a Timer",
-    );
-  }
+// ignored because need to assert
+// ignore: prefer_const_constructors_in_immutables
+class Timer({super.key, required super.mobj, super.animateIn = true})
+    extends TimerBase {
+  this
+    : assert(
+        !mobj.peek()!.isComposite,
+        "For composite timers, use a Timercule rather than a Timer",
+      );
 
   @override
   State<Timer> createState() => TimerState();
@@ -2995,9 +2981,8 @@ class TimerState extends TimerBaseState<Timer> {
   }
 }
 
-class Timercule extends TimerBase {
-  const Timercule({super.key, required super.mobj, super.animateIn = true});
-
+class const Timercule({super.key, required super.mobj, super.animateIn = true})
+    extends TimerBase {
   @override
   State<Timercule> createState() => TimerculeState();
 }
@@ -3243,22 +3228,15 @@ class TimerculeState extends TimerBaseState<Timercule> {
   }
 }
 
-class FadingDial extends AnimatedWidget {
-  final double angle;
-  final double radius;
-  final Color topColor;
-  final Color bottomColor;
-  final double holeRadius;
-  const FadingDial({
-    super.key,
-    required super.listenable,
-    required this.angle,
-    required this.radius,
-    required this.topColor,
-    required this.bottomColor,
-    this.holeRadius = 0,
-  });
-
+class const FadingDial({
+  super.key,
+  required super.listenable,
+  required final double angle,
+  required final double radius,
+  required final Color topColor,
+  required final Color bottomColor,
+  final double holeRadius = 0,
+}) extends AnimatedWidget {
   Animation<double> get visibility => listenable as Animation<double>;
   @override
   Widget build(BuildContext context) {
@@ -3292,34 +3270,25 @@ final timerListType = ListType(StringType());
 
 /// A widget that displays a sequence of timers with drag and drop functionality.
 /// Can optionally be displayed within a scrollview.
-class TimerTray extends StatefulWidget {
+class const TimerTray({
+  super.key,
+
   /// The Mobj that stores the timer data list. Replacing this with a MobjID wouldn't be a big deal
-  final Mobj<List<MobjID<TimerData>>> mobj;
+  required final Mobj<List<MobjID<TimerData>>> mobj,
 
   /// Background color for the sequence container
-  final Color backgroundColor;
-
-  final Computed<TimerWidgets> timerWidgets;
+  required final Color backgroundColor,
+  required final Computed<TimerWidgets> timerWidgets,
 
   /// Icon widget that displays above the sequence
-  final Widget? icon;
+  final Widget? icon,
 
   /// Whether this sequence should render within a scrollview
-  final bool useScrollView;
+  final bool useScrollView = true,
 
   /// Callback for when a timer is dropped into this sequence
-  final Function(MobjID<TimerData> timerId)? onTimerDropped;
-
-  const TimerTray({
-    super.key,
-    required this.mobj,
-    required this.backgroundColor,
-    required this.timerWidgets,
-    this.icon,
-    this.useScrollView = true,
-    this.onTimerDropped,
-  });
-
+  final Function(MobjID<TimerData> timerId)? onTimerDropped,
+}) extends StatefulWidget {
   @override
   State<TimerTray> createState() => TimerTrayState();
 }
@@ -3378,9 +3347,7 @@ class TimerTrayState extends State<TimerTray> {
   }
 }
 
-class TimerScreen extends SignalStatefulWidget {
-  const TimerScreen({super.key});
-
+class const TimerScreen({super.key}) extends SignalStatefulWidget {
   @override
   State<TimerScreen> createState() => TimerScreenState();
 }
@@ -3507,16 +3474,20 @@ final List<Function(TimerScreenState)> numericRadialActivatorFunctions = [
   );
 }
 
-class DragActionRing extends SignalStatefulWidget {
-  final Offset position;
-  final Signal<int?> dragEvents;
+class const DragActionRing({
+  super.key,
+  required final Offset position,
+  required final Signal<int?> dragEvents,
 
   /// used to close the ring if another one opens
-  final Listenable? suppressionBus;
-  final List<Widget> radialActivatorIcons;
+  final Listenable? suppressionBus,
 
-  final List<String>? radialActivatorLabels;
-  final List<double> radialActivatorPositions;
+  /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
+  required final Offset visualPosition,
+  final bool? shuntRight,
+  required final List<Widget> radialActivatorIcons,
+  final List<String>? radialActivatorLabels,
+  required final List<double> radialActivatorPositions,
 
   /// which graphic this ring renders (see the blob-building branch in
   /// [buildWithGivenAnimationParameters]): the special-timer menu's sliding arc
@@ -3526,46 +3497,23 @@ class DragActionRing extends SignalStatefulWidget {
   /// label presence) keys off it. Either way the blobs render as a liquid-glass
   /// [GlassLayer] (subject to the [liquidGlassOnID] setting; in flat mode the
   /// blobs still do the masking).
-  final bool arcModeNotBlobMode;
-
-  /// position represents the touch origin, visualPosition is where the visual should be centered. The reason we distinguish these things is it looks wrong or imprecise if the visual origin doesn't come from the UI element it's associated with, while the touch origin also absolutely needs to be correct or else you're injecting random error to the user choice.
-  final Offset visualPosition;
-  final bool? shuntRight;
+  required final bool arcModeNotBlobMode,
 
   /// when true, the ring is rendered permanently (its collapsed phase is the
   /// button itself) instead of being added/removed ephemerally: it starts
   /// closed, opens on pan-down, and returns to rest instead of self-removing.
-  final bool persistent;
+  final bool persistent = false,
 
   /// set true (by the persistent host) on the ring that's bowing out after a selection. The ring stops taking input and plays its [completionAnimation] down — thinning its arc to nothing while its selection keeps sliding home — then calls [onRetireComplete] so the host drops it.
-  final bool retiring;
+  final bool retiring = false,
 
   /// a persistent live ring calls this when its selection lands, so the host can retire it and stand up a fresh live ring in its place.
-  final VoidCallback? onRetire;
+  final VoidCallback? onRetire,
 
   /// a retiring ring calls this once its completion animation finishes, so its container can remove it.
-  final VoidCallback? onRetireComplete;
-
-  final bool useSpringExpansion;
-
-  const DragActionRing({
-    super.key,
-    required this.position,
-    required this.dragEvents,
-    this.suppressionBus,
-    required this.visualPosition,
-    this.shuntRight,
-    required this.radialActivatorIcons,
-    this.radialActivatorLabels,
-    required this.radialActivatorPositions,
-    required this.arcModeNotBlobMode,
-    this.persistent = false,
-    this.retiring = false,
-    this.onRetire,
-    this.onRetireComplete,
-    this.useSpringExpansion = false,
-  });
-
+  final VoidCallback? onRetireComplete,
+  final bool useSpringExpansion = false,
+}) extends SignalStatefulWidget {
   /// each activator icon disc's box side, as a fraction of thumbSpan. The arc
   /// band's half-thickness is half of this.
   static const double actionRadiusFraction = 0.6;
@@ -4559,12 +4507,11 @@ TimerBase getOrCreateTimerWidget(
 }
 
 /// stuff controlling how timers bud out of the numeral pad
-class PadBud {
-  PadBud({required this.timer, required this.face, required this.progress});
-
-  final MobjID<TimerData> timer;
-  final GlobalKey face;
-  final Animation<double> progress;
+class PadBud({
+  required final MobjID<TimerData> timer,
+  required final GlobalKey face,
+  required final Animation<double> progress,
+}) {
   double faceRadius = 0;
 
   Offset? offsetFromFace;
@@ -6766,9 +6713,35 @@ class TimerScreenState extends State<TimerScreen>
 
 /// manages a drag action ring. Use by calling the onPanDown, onPanUpdate, and onPanEnd methods from yours. Assumes that there's a SelfRemovalHostState above the given context, for the DragActionRing to live in.
 /// dispose when you're done with it
-class DragActionRingController {
+class DragActionRingController({
   /// just visually closes the ring on trigger. Doesn't really need to be in controller but whatever.
-  final ChangeNotifier? suppressingNotifier;
+  final ChangeNotifier? suppressingNotifier,
+  required final List<Function()> radialActivatorFunctions,
+  required final List<double> radialActivatorPositions,
+  final List<String>? radialActivatorLabels,
+  required final List<Widget> radialActivatorIcons,
+
+  /// forwarded to [DragActionRing.arcModeNotBlobMode]: the sliding arc band
+  /// (true) versus the numeral ring's per-item circles (false).
+  required final bool arcModeNotBlobMode,
+
+  /// when true, the ring is rendered permanently by [buildPersistentRing]
+  /// instead of being added to a SelfRemovalHost on pan-down.
+  final bool persistent = false,
+
+  /// whether to shunt text to the right or to the left, when the angle is close to a vertical position. Important for radial menus that're closer to the side of the screen. It's with respect to handedness, the meaning flips when the handedness flips.
+  final bool? shuntRight,
+  final bool useSpringExpansion = false,
+}) {
+  this
+    : assert(
+        radialActivatorIcons.length == radialActivatorPositions.length,
+        'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length',
+      ),
+      assert(
+        radialActivatorFunctions.length == radialActivatorIcons.length,
+        'DragActionRingController: radialActivatorFunctions and radialActivatorIcons should have the same length',
+      );
 
   /// -1 means nothing is selected, number means item has been selected, null means dismissed
   late final Signal<int?> _dragEvents = Signal(
@@ -6783,44 +6756,6 @@ class DragActionRingController {
   // GlobalKey<NumeralDragActionRingState>? numeralDragActionRing;
   Offset _startDrag = Offset.zero;
   bool dragActionRingDisabled = false;
-  final List<Function()> radialActivatorFunctions;
-  final List<double> radialActivatorPositions;
-  final List<String>? radialActivatorLabels;
-  final List<Widget> radialActivatorIcons;
-
-  /// forwarded to [DragActionRing.arcModeNotBlobMode]: the sliding arc band
-  /// (true) versus the numeral ring's per-item circles (false).
-  final bool arcModeNotBlobMode;
-
-  /// when true, the ring is rendered permanently by [buildPersistentRing]
-  /// instead of being added to a SelfRemovalHost on pan-down.
-  final bool persistent;
-
-  /// whether to shunt text to the right or to the left, when the angle is close to a vertical position. Important for radial menus that're closer to the side of the screen. It's with respect to handedness, the meaning flips when the handedness flips.
-  final bool? shuntRight;
-
-  final bool useSpringExpansion;
-
-  DragActionRingController({
-    this.suppressingNotifier,
-    required this.radialActivatorFunctions,
-    required this.radialActivatorPositions,
-    this.radialActivatorLabels,
-    required this.radialActivatorIcons,
-    required this.arcModeNotBlobMode,
-    this.persistent = false,
-    this.shuntRight,
-    this.useSpringExpansion = false,
-  }) {
-    assert(
-      radialActivatorIcons.length == radialActivatorPositions.length,
-      'DragActionRingController: radialActivatorIcons and radialActivatorPositions should have the same length',
-    );
-    assert(
-      radialActivatorFunctions.length == radialActivatorIcons.length,
-      'DragActionRingController: radialActivatorFunctions and radialActivatorIcons should have the same length',
-    );
-  }
 
   void disable() {
     dragActionRingDisabled = true;
@@ -6943,14 +6878,11 @@ class DragActionRingController {
 }
 
 /// hosts a persistent drag ring: one live ring (rebuilt each frame so it tracks [visualCenter]) plus any rings that committed and are now thinning themselves away. On a commit the live ring keeps its element/state (matched by key) and slides into the retiring list, while a fresh live ring is stood up in its place.
-class _PersistentDragRingHost extends StatefulWidget {
-  final DragActionRingController controller;
-  final Offset visualCenter;
-  const _PersistentDragRingHost({
-    super.key,
-    required this.controller,
-    required this.visualCenter,
-  });
+class const _PersistentDragRingHost({
+  super.key,
+  required final DragActionRingController controller,
+  required final Offset visualCenter,
+}) extends StatefulWidget {
   @override
   State<_PersistentDragRingHost> createState() =>
       _PersistentDragRingHostState();
@@ -6997,16 +6929,12 @@ class _PersistentDragRingHostState extends State<_PersistentDragRingHost> {
   }
 }
 
-class NumeralButton extends StatefulWidget {
-  final List<int> digits;
-  final GlobalKey<TimersButtonState>? timerButtonKey;
-  final ChangeNotifier otherDragActionRingStarted;
-  const NumeralButton({
-    super.key,
-    required this.digits,
-    this.timerButtonKey,
-    required this.otherDragActionRingStarted,
-  });
+class const NumeralButton({
+  super.key,
+  required final List<int> digits,
+  final GlobalKey<TimersButtonState>? timerButtonKey,
+  required final ChangeNotifier otherDragActionRingStarted,
+}) extends StatefulWidget {
   @override
   State<NumeralButton> createState() => _NumeralButtonState();
 }
@@ -7118,27 +7046,18 @@ final TextStyle controlPadNumeralTextStyle = controlPadTextStyle.copyWith(
   leadingDistribution: TextLeadingDistribution.even,
 );
 
-class TimersButton extends StatefulWidget {
+class const TimersButton({
+  super.key,
+
   /// either a String or a Widget
-  final Object label;
-  final VoidCallback? onTap;
-  final Function(Offset globalPosition)? onPanDown;
-  final Function(Offset globalPosition)? onPanUpdate;
-  final Function()? onPanEnd;
-  final bool solidColor;
-  final Animation<double>? dialBloomAnimation;
-
-  const TimersButton({
-    super.key,
-    required this.label,
-    this.onTap,
-    this.solidColor = false,
-    this.onPanDown,
-    this.onPanUpdate,
-    this.onPanEnd,
-    this.dialBloomAnimation,
-  });
-
+  required final Object label,
+  final VoidCallback? onTap,
+  final bool solidColor = false,
+  final Function(Offset globalPosition)? onPanDown,
+  final Function(Offset globalPosition)? onPanUpdate,
+  final Function()? onPanEnd,
+  final Animation<double>? dialBloomAnimation,
+}) extends StatefulWidget {
   @override
   State<TimersButton> createState() => TimersButtonState();
 }
@@ -7229,18 +7148,12 @@ class TimersButtonState extends State<TimersButton> {
   }
 }
 
-class NumpadTypeIndicator extends StatelessWidget {
-  final bool isAscending;
-  final Color? color;
-  final double width;
-
-  const NumpadTypeIndicator({
-    super.key,
-    required this.isAscending,
-    this.color,
-    this.width = 100.0,
-  });
-
+class const NumpadTypeIndicator({
+  super.key,
+  required final bool isAscending,
+  final Color? color,
+  final double width = 100.0,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -7360,10 +7273,8 @@ const bottomGutterHeight = 72.0;
 /// Sits above the bottom safe-area inset, which it also reserves room for. Pass
 /// [background] to tint the band so it reads as part of the page's frame rather
 /// than as more content.
-class BottomGutter extends StatelessWidget {
-  final Color? background;
-  const BottomGutter({super.key, this.background});
-
+class const BottomGutter({super.key, final Color? background})
+    extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
@@ -7379,10 +7290,8 @@ class BottomGutter extends StatelessWidget {
 }
 
 /// Translucent gradient for contrast
-class StatusBarBackdrop extends StatelessWidget {
-  final Color background;
-  const StatusBarBackdrop({super.key, required this.background});
-
+class const StatusBarBackdrop({super.key, required final Color background})
+    extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     double topInset = MediaQuery.of(context).viewPadding.top;
@@ -7411,10 +7320,8 @@ class StatusBarBackdrop extends StatelessWidget {
 /// transparent system nav bar (contrast enforcement is off), so this fades the
 /// page [background] up from the bottom to keep the gesture pill / nav icons
 /// legible. Renders nothing when there's no bottom inset.
-class NavBarBackdrop extends StatelessWidget {
-  final Color background;
-  const NavBarBackdrop({super.key, required this.background});
-
+class const NavBarBackdrop({super.key, required final Color background})
+    extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     double bottomInset = MediaQuery.of(context).viewPadding.bottom;
@@ -7548,12 +7455,13 @@ Widget aboutImageBuilder(ThemeData theme, Uri uri, String? title, String? alt) {
 /// [StatusBarBackdrop]. The page's own content [slivers] sit between the title band
 /// and the bottom gutter. Back navigation is the system's (and Escape, via
 /// [EscapeToPop]).
-class InfoScaffold extends StatelessWidget {
-  /// Heading-band label — usually [headingBandLabel] or a plain [Text].
-  final Widget title;
-  final List<Widget> slivers;
-  const InfoScaffold({super.key, required this.title, required this.slivers});
+class const InfoScaffold({
+  super.key,
 
+  /// Heading-band label — usually [headingBandLabel] or a plain [Text].
+  required final Widget title,
+  required final List<Widget> slivers,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -7598,9 +7506,7 @@ class InfoScaffold extends StatelessWidget {
   }
 }
 
-class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
-
+class const SettingsScreen({super.key}) extends StatefulWidget {
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -8335,10 +8241,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 /// playing it, because the timers are inactive (see the tap handler in
 /// [TimerBaseState.buildShell] and the restore-vs-play split keyed on
 /// [Mobj.isActive]).
-class BinScreen extends StatefulWidget {
-  final GlobalKey? iconKey;
-  const BinScreen({super.key, this.iconKey});
-
+class const BinScreen({super.key, final GlobalKey? iconKey})
+    extends StatefulWidget {
   @override
   State<BinScreen> createState() => BinScreenState();
 }
@@ -8561,10 +8465,8 @@ class BinScreenState extends State<BinScreen> {
   }
 }
 
-class ThankAuthorScreen extends StatelessWidget {
-  const ThankAuthorScreen({super.key, this.iconKey});
-  final GlobalKey? iconKey;
-
+class const ThankAuthorScreen({super.key, final GlobalKey? iconKey})
+    extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -8593,10 +8495,8 @@ class ThankAuthorScreen extends StatelessWidget {
   }
 }
 
-class AboutScreen extends StatefulWidget {
-  final GlobalKey? iconKey;
-  const AboutScreen({super.key, this.iconKey});
-
+class const AboutScreen({super.key, final GlobalKey? iconKey})
+    extends StatefulWidget {
   @override
   State<AboutScreen> createState() => _AboutScreenState();
 }
@@ -8681,10 +8581,8 @@ class _AboutScreenState extends State<AboutScreen> {
   }
 }
 
-class HowMadeScreen extends StatefulWidget {
-  final GlobalKey? iconKey;
-  const HowMadeScreen({super.key, this.iconKey});
-
+class const HowMadeScreen({super.key, final GlobalKey? iconKey})
+    extends StatefulWidget {
   @override
   State<HowMadeScreen> createState() => _HowMadeScreenState();
 }
@@ -8715,20 +8613,16 @@ class _HowMadeScreenState extends State<HowMadeScreen> {
   }
 }
 
-class AlarmSoundPickerScreen extends StatefulWidget {
+class const AlarmSoundPickerScreen({
+  super.key,
+  final GlobalKey? iconKey,
+
   /// When true, the picker is choosing a per-timer sound override.
   /// It adds a "Default" entry and pops with the selected AudioInfo?
   /// (null = default). When false, it edits the global selectedAudioID Mobj.
-  final bool perTimerMode;
-  final AudioInfo? initialPerTimerSelection;
-  const AlarmSoundPickerScreen({
-    super.key,
-    this.iconKey,
-    this.perTimerMode = false,
-    this.initialPerTimerSelection,
-  });
-  final GlobalKey? iconKey;
-
+  final bool perTimerMode = false,
+  final AudioInfo? initialPerTimerSelection,
+}) extends StatefulWidget {
   @override
   State<AlarmSoundPickerScreen> createState() => _AlarmSoundPickerScreenState();
 }
@@ -9163,11 +9057,12 @@ Future<bool> hasBackgroundPermission() {
   }
 }
 
-class OnboardScreen extends SignalStatefulWidget {
-  /// whether it's kind of the root screen, which is the case when it's the first run. in this case, it has to do something special before it pops, creating the TimerScreen. If it's not rootal, then a new timer screen would likely be a duplicate and cause problems.
-  final bool isRootal;
-  const OnboardScreen({super.key, this.isRootal = false});
+class const OnboardScreen({
+  super.key,
 
+  /// whether it's kind of the root screen, which is the case when it's the first run. in this case, it has to do something special before it pops, creating the TimerScreen. If it's not rootal, then a new timer screen would likely be a duplicate and cause problems.
+  final bool isRootal = false,
+}) extends SignalStatefulWidget {
   @override
   State<OnboardScreen> createState() => _OnboardScreenState();
 }
@@ -9918,22 +9813,17 @@ const double glassTintAlphaStrenghteningOnSelection = 1.26;
 /// through the release instead of flipping direction — which is why this
 /// composes [GlassSwell] rather than using the library's simpler
 /// [GlassPressSwell].
-class GlassMenuButton extends StatefulWidget {
-  final GlobalKey<GlassLayerState> layerKey;
-  final Widget child;
+class const GlassMenuButton(
+  final GlobalKey<GlassLayerState> layerKey,
+  final Widget child, {
+  super.key,
 
   /// [child]'s own padding, taken back off so the swell follows the part of the
   /// row that reads as a button rather than the whole tap target — a tap target
   /// usually reaches further than what the eye calls the button, and a leading
   /// item's can reach a lot further.
-  final EdgeInsets insets;
-  const GlassMenuButton(
-    this.layerKey,
-    this.child, {
-    super.key,
-    this.insets = EdgeInsets.zero,
-  });
-
+  final EdgeInsets insets = EdgeInsets.zero,
+}) extends StatefulWidget {
   /// The blob stays up at least this long after a press begins, no matter how
   /// brief the tap was — a tap that came and went in 40ms should still read as
   /// a press, and the down swing is delayed to make up the difference.

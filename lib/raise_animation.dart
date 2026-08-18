@@ -4,16 +4,18 @@ import 'package:flutter/material.dart';
 /// to the `childs` size along the `axis`.
 ///
 /// This can be used as a item transition in an [ImplicitlyAnimatedReorderableList].
-class RaiseAnimation extends StatefulWidget {
+class const RaiseAnimation({
+  super.key,
+
   /// The animation to be used.
-  final Animation<double> animation;
+  required final Animation<double> animation,
 
   /// The curve of the animation.
-  final Curve curve;
+  final Curve curve = Curves.easeOut,
 
   /// [Axis.horizontal] modifies the width,
   /// [Axis.vertical] modifies the height.
-  final Axis axis;
+  final Axis axis = Axis.vertical,
 
   /// Describes how to align the child along the axis the [animation] is
   /// modifying.
@@ -26,19 +28,11 @@ class RaiseAnimation extends StatefulWidget {
   /// A value of 1.0 indicates the bottom or end, depending upon the [axis].
   ///
   /// A value of 0.0 (the default) indicates the center for either [axis] value.
-  final double axisAlignment;
+  final double axisAlignment = -1.0,
 
   /// The child widget.
-  final Widget? child;
-  const RaiseAnimation({
-    super.key,
-    required this.animation,
-    this.curve = Curves.easeOut,
-    this.axis = Axis.vertical,
-    this.axisAlignment = -1.0,
-    this.child,
-  });
-
+  final Widget? child,
+}) extends StatefulWidget {
   @override
   State<RaiseAnimation> createState() => _RaiseAnimationState();
 }

@@ -1,19 +1,13 @@
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
-class MarginShaderMask extends SingleChildRenderObjectWidget {
-  const MarginShaderMask({
-    super.key,
-    required this.shaderCallback,
-    this.blendMode = BlendMode.modulate,
-    this.margin = 0.0,
-    super.child,
-  });
-
-  final ShaderCallback shaderCallback;
-  final BlendMode blendMode;
-  final double margin;
-
+class const MarginShaderMask({
+  super.key,
+  required final ShaderCallback shaderCallback,
+  final BlendMode blendMode = BlendMode.modulate,
+  final double margin = 0.0,
+  super.child,
+}) extends SingleChildRenderObjectWidget {
   @override
   RenderMarginShaderMask createRenderObject(BuildContext context) {
     return RenderMarginShaderMask(
@@ -24,7 +18,10 @@ class MarginShaderMask extends SingleChildRenderObjectWidget {
   }
 
   @override
-  void updateRenderObject(BuildContext context, RenderMarginShaderMask renderObject) {
+  void updateRenderObject(
+    BuildContext context,
+    RenderMarginShaderMask renderObject,
+  ) {
     renderObject
       ..shaderCallback = shaderCallback
       ..blendMode = blendMode
@@ -32,16 +29,13 @@ class MarginShaderMask extends SingleChildRenderObjectWidget {
   }
 }
 
-class RenderMarginShaderMask extends RenderProxyBox {
-  RenderMarginShaderMask({
-    RenderBox? child,
-    required ShaderCallback shaderCallback,
-    BlendMode blendMode = BlendMode.modulate,
-    double margin = 0.0,
-  })  : _shaderCallback = shaderCallback,
-        _blendMode = blendMode,
-        _margin = margin,
-        super(child);
+class RenderMarginShaderMask({
+  RenderBox? child,
+  required this._shaderCallback,
+  this._blendMode = BlendMode.modulate,
+  this._margin = 0.0,
+}) extends RenderProxyBox {
+  this : super(child);
 
   @override
   ShaderMaskLayer? get layer => super.layer as ShaderMaskLayer?;

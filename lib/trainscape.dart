@@ -58,22 +58,22 @@ const edgeGrey = Color(0xFFebebeb);
 ///
 /// Item colours are deliberately not in here: an item is known by its colour,
 /// and a thing that changes colour at dusk isn't recognisable.
-class Palette {
+class const Palette({
   /// what the world is drawn on; everything that has to recede is mixed
   /// towards this rather than made transparent
-  final Color ground;
+  required final Color ground,
 
   /// chips, slots and name plates — the things that sit on the ground holding
   /// a mark without belonging to a node. The ones that do belong to a node
   /// (its facilities' lozenges, and the tooltip they raise) are filled from
   /// that node's colour instead; see [lozengeFill].
-  final Color surface;
+  required final Color surface,
 
   /// the controls strip those surfaces sit on
-  final Color panel;
+  required final Color panel,
 
   /// the drag pad's face, which reads as recessed rather than raised
-  final Color pad;
+  required final Color pad,
 
   /// The two colours an ordinary node comes in — [NodeTone.plain] and
   /// [NodeTone.deeper] — and so the two colours an ordinary wire can be, since
@@ -84,45 +84,46 @@ class Palette {
   ///
   /// "Darker" is the light scheme's word for it. In the dark scheme the deeper
   /// tone steps up rather than down, since that's where the room is.
-  final Color node, nodeDarker;
+  required final Color node,
+  required final Color nodeDarker,
 
   /// the same pair for a train's node, the graph's colour warmed. A train's
   /// rails take it too: a train and its line are the same thing seen twice.
-  final Color trainNode, trainNodeDarker;
+  required final Color trainNode,
+  required final Color trainNodeDarker,
 
   /// A node standing in the way of something that can hurt you — a blight. The
   /// one colour on the map that isn't a shade of the graph, and the one that
   /// overrides a node's tone rather than being drawn alongside it: where a
   /// blight will strike is the thing a player has to be able to read across
   /// the whole map without tapping anything, so it can't be left to a roll.
-  final Color hazardNode;
+  required final Color hazardNode,
 
   /// slot, chip and pad borders
-  final Color outline;
+  required final Color outline,
 
   /// the tooltip's border, which has to hold its own over the map
-  final Color outlineStrong;
+  required final Color outlineStrong,
 
   /// text and icons
-  final Color ink;
+  required final Color ink,
 
   /// the marks that want the most contrast they can get: numerals sitting on
   /// item icons, cooldown pies
-  final Color inkStrong;
+  required final Color inkStrong,
 
   /// corner hints and the drag pad's arrow
-  final Color inkFaint;
-
-  final Color shadow;
+  required final Color inkFaint,
+  required final Color shadow,
 
   /// How far a blight's red is washed out towards [ground]. Its territory is a
   /// region rather than a mark, so it sits barely off the ground and behind
   /// everything. Night washes it less: the same fraction against a dark ground
   /// takes the red past "faint" and into "gone".
-  final double blightWash;
+  required final double blightWash,
 
   /// what the world is veiled with once the game is over
-  final Color scrim;
+  required final Color scrim,
 
   /// The lozenge a node's facilities render into carries that node's colour,
   /// but as a wash rather than at strength: the node's saturation scaled by
@@ -134,33 +135,10 @@ class Palette {
   /// to know which way that is. Against a white ground it darkens the lozenge,
   /// against a near-black one it lifts it, and the two schemes stay tunable
   /// apart. It desaturates a little on the way, which a lozenge wants anyway.
-  final Color lozengeTint;
-  final double lozengeTintp;
-  final double lozengeSaturation;
-
-  const Palette({
-    required this.ground,
-    required this.surface,
-    required this.panel,
-    required this.pad,
-    required this.node,
-    required this.nodeDarker,
-    required this.trainNode,
-    required this.trainNodeDarker,
-    required this.hazardNode,
-    required this.outline,
-    required this.outlineStrong,
-    required this.ink,
-    required this.inkStrong,
-    required this.inkFaint,
-    required this.shadow,
-    required this.blightWash,
-    required this.scrim,
-    required this.lozengeTint,
-    required this.lozengeTintp,
-    required this.lozengeSaturation,
-  });
-}
+  required final Color lozengeTint,
+  required final double lozengeTintp,
+  required final double lozengeSaturation,
+});
 
 const dayPalette = Palette(
   ground: Colors.white,
@@ -314,13 +292,9 @@ sealed class Interval {
   double remainingAt(double t);
 }
 
-class ArbitraryInterval extends Interval {
-  @override
-  final double period;
-
+class ArbitraryInterval(@override final double period) extends Interval {
   /// game time the current span began; whatever triggers it calls [start]
   double startedAt = -1e9;
-  ArbitraryInterval(this.period);
 
   @override
   double remainingAt(double t) => max(0.0, startedAt + period - t);
@@ -328,22 +302,17 @@ class ArbitraryInterval extends Interval {
   bool elapsedAt(double t) => startedAt > -1e8 && t >= startedAt + period;
 }
 
-class ClockInterval extends Interval {
-  final double dayLength;
+class ClockInterval({
+  required final double dayLength,
 
   /// exactly one of these is > 1: the period is a whole multiple of the day,
   /// or a whole fraction of it
-  final int multiple, division;
+  final int multiple = 1,
+  final int division = 1,
 
   /// where in the period it fires, in seconds
-  final double offset;
-  ClockInterval({
-    required this.dayLength,
-    this.multiple = 1,
-    this.division = 1,
-    required this.offset,
-  });
-
+  required final double offset,
+}) extends Interval {
   @override
   double get period => dayLength * multiple / division;
 
@@ -401,51 +370,51 @@ class RedFlash {
 /// answers written down together, not a couple of edits to an implied one. The
 /// levels themselves are the static methods at the bottom — [levelOne] is the
 /// one being played and tuned, [urLevel] the one it started as.
-class Parameters {
-  final int seed;
+class Parameters({
+  required final int seed,
 
   // goal
-  final double globalTime;
-  final int eudaimoniaGoal;
+  required final double globalTime,
+  required final int eudaimoniaGoal,
 
   // day/night: the first half of each day is day, the second half night
-  final double dayLength;
-  final double facilityDayOnlyp;
-  final double muggerNightOnlyp;
+  required final double dayLength,
+  required final double facilityDayOnlyp,
+  required final double muggerNightOnlyp,
 
   // players
-  final int nPlayers;
-  final int inventoryCap;
-  final double playerSpeed; // units/second
-  final bool playersHaveMoveAction;
+  required final int nPlayers,
+  required final int inventoryCap,
+  required final double playerSpeed, // units/second
+  required final bool playersHaveMoveAction,
 
   // grid & graph (levelgen section of the doc)
-  final int gridSizeN;
-  final double gridSpacing;
-  final double gridSizeDistortionCountStartp;
-  final double gridSizeDistortionCountVariancep;
-  final double gridSizeDistortionp;
-  final double lineRemovalProb; // doc: acts when rng > prob
-  final double pointRemovalProb; // ditto
-  final double middleNodeProb; // ditto
-  final double splitNodeMinDistance;
+  required final int gridSizeN,
+  required final double gridSpacing,
+  required final double gridSizeDistortionCountStartp,
+  required final double gridSizeDistortionCountVariancep,
+  required final double gridSizeDistortionp,
+  required final double lineRemovalProb, // doc: acts when rng > prob
+  required final double pointRemovalProb, // ditto
+  required final double middleNodeProb, // ditto
+  required final double splitNodeMinDistance,
 
   // items
-  final List<Color> itemColors;
-  final List<int> tierCount; // length = number of item tiers
-  final List<TraderGeneratorsForTier> traderGeneratorsPerTier;
-  final double iconNestingp; // chance a host icon absorbs each later part
+  required final List<Color> itemColors,
+  required final List<int> tierCount, // length = number of item tiers
+  required final List<TraderGeneratorsForTier> traderGeneratorsPerTier,
+  required final double iconNestingp, // chance a host icon absorbs each later part
   /// chance a nesting squircle is willing to take a 2x2 footprint, so that its
   /// inner grid gets full-size cells; it falls back to 1x1 where that won't fit
-  final double squircleTryEmbeddingLargep;
+  required final double squircleTryEmbeddingLargep,
 
   /// when an icon has both a big and a small footprint available, the chance
   /// the big one is the one tried first
-  final double iconGridPlacementBigp;
+  required final double iconGridPlacementBigp,
 
   // rendering: node widgets drop to NodeZoomLevel.small when zoomed out
   // beyond this multiple of the default zoom
-  final double farZoomThreshold;
+  required final double farZoomThreshold,
 
   // facility strewing: one bucket per node (incl. train nodes); sizes follow
   // bucketSizeWeights closely (apportioned, not sampled); all generated
@@ -453,119 +422,58 @@ class Parameters {
   // Every parameter that divides something up is a set of weights with an
   // arbitrary total, never proportions that have to sum to one — weights are
   // what a human can actually sit down and tweak.
-  final List<double> bucketSizeWeights; // index = bucket size, starting at 0
-  final Map<FacilityKind, double> nonTraderWeights;
+  required final List<double> bucketSizeWeights, // index = bucket size, starting at 0
+  required final Map<FacilityKind, double> nonTraderWeights,
 
   /// how often each of the three node colourings comes up. See [NodeTone].
-  final List<(double, NodeTone)> nodeToneWeights;
+  required final List<(double, NodeTone)> nodeToneWeights,
 
   // trees
-  final double treeRegenTime; // arbitrary-interval trees
-  final double treeClockIntervalp; // else the regen is a daily clock interval
-  final double treeSecondItemProb; // "an item or two"
-  final double treeTier1Prob; // else tier 0 ("first or second tier")
+  required final double treeRegenTime, // arbitrary-interval trees
+  required final double treeClockIntervalp, // else the regen is a daily clock interval
+  required final double treeSecondItemProb, // "an item or two"
+  required final double treeTier1Prob, // else tier 0 ("first or second tier")
 
   // traders
-  final double traderInstantProb;
-  final (double, double) tradeDurationRange;
-  final double traderCooldownProb;
-  final (double, double) traderCooldownRange;
+  required final double traderInstantProb,
+  required final (double, double) tradeDurationRange,
+  required final double traderCooldownProb,
+  required final (double, double) traderCooldownRange,
 
   // muggers
-  final double muggerIncapTime;
-  final List<(double, MuggerKind)> muggerKindWeights;
+  required final double muggerIncapTime,
+  required final List<(double, MuggerKind)> muggerKindWeights,
 
   // storage
-  final (int, int) storageCapacityRange; // log-distributed
-  final double storageSecurep; // secured storages are safe from blight
+  required final (int, int) storageCapacityRange, // log-distributed
+  required final double storageSecurep, // secured storages are safe from blight
 
   // blights
   /// The sizes a blight comes in, drawn from uniformly. Discrete rather than a
   /// range: a blight's radius is something the player has to judge by eye from
   /// across the map, and a handful of recognisable sizes can be learned where
   /// a continuum of them can only be guessed at.
-  final List<double> blightRadii;
-  final double blightMitigablep;
-  final double blightHungryp; // of the mitigable ones
-  final (int, int) blightDaysRange; // its clock interval, in whole days
+  required final List<double> blightRadii,
+  required final double blightMitigablep,
+  required final double blightHungryp, // of the mitigable ones
+  required final (int, int) blightDaysRange, // its clock interval, in whole days
 
   // trains
-  final int nTrains;
-  final int stationsPerTrain;
+  required final int nTrains,
+  required final int stationsPerTrain,
 
-  final Map<TrainSpeed, double> trainSpeedUnitsPerSec;
-  final List<(double, TrainSpeed)> trainSpeedWeights;
-  final double trainActivationProb; // requires a held Quantity to move
-  final double trainActivationConsumedProb; // of those: an actual cost
-  final double trainActivationTwoProb; // quantity 2 instead of 1
-  final List<(double, TrainScheduleKind)> scheduleDistribution;
-  final List<int> trainCycleDivisions; // shuttles this many times a day
-  final double movableFromInsideProb; // of manually movable trains
-  final List<(double, StationControl)> stationControlWeights;
-  final double trainTerminusDistance;
-  final double oneWayReturnDelay;
-
-  Parameters({
-    required this.seed,
-    required this.globalTime,
-    required this.eudaimoniaGoal,
-    required this.dayLength,
-    required this.facilityDayOnlyp,
-    required this.muggerNightOnlyp,
-    required this.nPlayers,
-    required this.inventoryCap,
-    required this.playerSpeed,
-    required this.playersHaveMoveAction,
-    required this.gridSizeN,
-    required this.gridSpacing,
-    required this.gridSizeDistortionCountStartp,
-    required this.gridSizeDistortionCountVariancep,
-    required this.gridSizeDistortionp,
-    required this.lineRemovalProb,
-    required this.pointRemovalProb,
-    required this.middleNodeProb,
-    required this.splitNodeMinDistance,
-    required this.itemColors,
-    required this.tierCount,
-    required this.traderGeneratorsPerTier,
-    required this.iconNestingp,
-    required this.squircleTryEmbeddingLargep,
-    required this.iconGridPlacementBigp,
-    required this.farZoomThreshold,
-    required this.bucketSizeWeights,
-    required this.nonTraderWeights,
-    required this.nodeToneWeights,
-    required this.treeRegenTime,
-    required this.treeClockIntervalp,
-    required this.treeSecondItemProb,
-    required this.treeTier1Prob,
-    required this.traderInstantProb,
-    required this.tradeDurationRange,
-    required this.traderCooldownProb,
-    required this.traderCooldownRange,
-    required this.muggerIncapTime,
-    required this.muggerKindWeights,
-    required this.storageCapacityRange,
-    required this.storageSecurep,
-    required this.blightRadii,
-    required this.blightMitigablep,
-    required this.blightHungryp,
-    required this.blightDaysRange,
-    required this.nTrains,
-    required this.stationsPerTrain,
-    required this.trainSpeedUnitsPerSec,
-    required this.trainSpeedWeights,
-    required this.trainActivationProb,
-    required this.trainActivationConsumedProb,
-    required this.trainActivationTwoProb,
-    required this.scheduleDistribution,
-    required this.trainCycleDivisions,
-    required this.movableFromInsideProb,
-    required this.stationControlWeights,
-    required this.trainTerminusDistance,
-    required this.oneWayReturnDelay,
-  });
-
+  required final Map<TrainSpeed, double> trainSpeedUnitsPerSec,
+  required final List<(double, TrainSpeed)> trainSpeedWeights,
+  required final double trainActivationProb, // requires a held Quantity to move
+  required final double trainActivationConsumedProb, // of those: an actual cost
+  required final double trainActivationTwoProb, // quantity 2 instead of 1
+  required final List<(double, TrainScheduleKind)> scheduleDistribution,
+  required final List<int> trainCycleDivisions, // shuttles this many times a day
+  required final double movableFromInsideProb, // of manually movable trains
+  required final List<(double, StationControl)> stationControlWeights,
+  required final double trainTerminusDistance,
+  required final double oneWayReturnDelay,
+}) {
   /// The level being played and tuned. Started as a straight copy of
   /// [urLevel] — which is the point of urLevel: this one is free to move.
   /// Unlike urLevel it's allowed to name live things ([defaultItemColors],
@@ -791,10 +699,7 @@ sealed class ItemIcon {
   const ItemIcon();
 }
 
-class BasicIcon extends ItemIcon {
-  final BasicShape shape;
-  final Color color;
-  const BasicIcon(this.shape, this.color);
+class const BasicIcon(final BasicShape shape, final Color color) extends ItemIcon {
   @override
   bool operator ==(Object other) =>
       other is BasicIcon && other.shape == shape && other.color == color;
@@ -810,15 +715,15 @@ class HeartIcon extends ItemIcon {
   int get hashCode => 0x48454152;
 }
 
-class IconPlacement {
-  final Coord pos; // top-left cell of the footprint in the containing grid
+class const IconPlacement(
+  final Coord pos, // top-left cell of the footprint in the containing grid
 
   /// how many cells it took, untilted. Size is settled per placement, not per
   /// icon: a rod is 1x2 or 1x1, a squircle 2x2 or 1x1, whichever fit.
-  final Coord footprint;
-  final bool tilted; // irregular footprints may rotate 90°
-  final ItemIcon icon;
-  const IconPlacement(this.pos, this.footprint, this.tilted, this.icon);
+  final Coord footprint,
+  final bool tilted, // irregular footprints may rotate 90°
+  final ItemIcon icon,
+) {
   @override
   bool operator ==(Object other) =>
       other is IconPlacement &&
@@ -833,24 +738,18 @@ class IconPlacement {
 const _placementsEq = ListEquality<IconPlacement>();
 
 /// parts nested into a basic shape's inner grid
-class NestingIcon extends ItemIcon {
-  final BasicIcon container;
-  final Coord dims;
+class const NestingIcon(
+  final BasicIcon container,
+  final Coord dims,
+  final List<IconPlacement> children, {
 
   /// Whether this squircle is willing to take a 2x2 footprint in the grid it
   /// sits in, so that its own 2x2 inner grid gets full-size cells rather than
   /// quarter-size ones. Only an eligibility — whether it actually gets one is
   /// settled where it's placed — and not part of the icon's identity, which is
   /// why [==] ignores it.
-  final bool mayEmbedLarge;
-  final List<IconPlacement> children;
-  const NestingIcon(
-    this.container,
-    this.dims,
-    this.children, {
-    this.mayEmbedLarge = false,
-  });
-
+  final bool mayEmbedLarge = false,
+}) extends ItemIcon {
   @override
   bool operator ==(Object other) =>
       other is NestingIcon &&
@@ -865,10 +764,8 @@ class NestingIcon extends ItemIcon {
 /// The outer grid; only ever occurs at the root of an icon. Were one ever
 /// placed inside a nesting it would be gutted through (its children spilled
 /// out and used directly).
-class RootGridIcon extends ItemIcon {
-  final Coord dims;
-  final List<IconPlacement> children;
-  const RootGridIcon(this.dims, this.children);
+class const RootGridIcon(final Coord dims, final List<IconPlacement> children)
+    extends ItemIcon {
   @override
   bool operator ==(Object other) =>
       other is RootGridIcon &&
@@ -1229,19 +1126,15 @@ void _paintHeart(Canvas canvas, Rect rect) {
 
 /// Items are canonical per level — interned in the ItemCatalog, so equality
 /// is identity. Never construct an Item outside catalog generation.
-class Item {
-  final int tier; // 0 = basic; eudaimonia sits above the final tier
-  final int iInTier;
-  final bool isEudaimonia;
+class Item(
+  final int tier, // 0 = basic; eudaimonia sits above the final tier
+  final int iInTier, {
+  final bool isEudaimonia = false,
+}) {
   late final ItemIcon icon; // basics at construction, composites late-assigned
-  Item(this.tier, this.iInTier, {this.isEudaimonia = false});
 }
 
-class Quantity {
-  final Item item;
-  final int n;
-  const Quantity(this.item, this.n);
-}
+class const Quantity(final Item item, final int n);
 
 /// sums duplicate items into single quantities, preserving first-seen order
 List<Quantity> mergeQuantities(List<Quantity> qs) {
@@ -1254,10 +1147,10 @@ List<Quantity> mergeQuantities(List<Quantity> qs) {
   return [for (final it in order) Quantity(it, counts[it]!)];
 }
 
-class ItemCatalog {
-  final List<List<Item>> tiers; // tiers[tier][i]; lengths = params.tierCount
-  final Item eudaimonia;
-  ItemCatalog(this.tiers, this.eudaimonia);
+class ItemCatalog(
+  final List<List<Item>> tiers, // tiers[tier][i]; lengths = params.tierCount
+  final Item eudaimonia,
+) {
   List<Item> get finalTier => tiers.last;
 
   static ItemCatalog generate(GameRng rng, Parameters p) {
@@ -1678,16 +1571,12 @@ RootGridIcon _packRootGrid(GameRng rng, Parameters p, List<ItemIcon> parts) {
   ]);
 }
 
-class ItemWidget extends StatelessWidget {
-  final Item item;
-  final double size;
-  final bool outlineOn;
-  const ItemWidget(
-    this.item, {
-    super.key,
-    this.size = 13,
-    this.outlineOn = false,
-  });
+class const ItemWidget(
+  final Item item, {
+  super.key,
+  final double size = 13,
+  final bool outlineOn = false,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // grow past the requested size, up to maxIconGrowth, so that leaf shapes
@@ -1706,10 +1595,8 @@ class ItemWidget extends StatelessWidget {
   }
 }
 
-class ItemIconPainter extends CustomPainter {
-  final ItemIcon icon;
-  final bool outlineOn;
-  ItemIconPainter(this.icon, [this.outlineOn = false]);
+class ItemIconPainter(final ItemIcon icon, [final bool outlineOn = false])
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) =>
       paintItemIcon(canvas, icon, Offset.zero & size, outlineOn: outlineOn);
@@ -1732,16 +1619,11 @@ typedef RequiredTraderGen =
 typedef SupplementalTraderGen =
     Trader? Function(GameRng rng, ItemCatalog cat, int iTier);
 
-class TraderGeneratorsForTier {
-  final List<(double, RequiredTraderGen)> requiredGenerators;
-  final int supplementalRuns;
-  final List<(double, SupplementalTraderGen)> supplementalGenerators;
-  const TraderGeneratorsForTier({
-    required this.requiredGenerators,
-    required this.supplementalRuns,
-    required this.supplementalGenerators,
-  });
-}
+class const TraderGeneratorsForTier({
+  required final List<(double, RequiredTraderGen)> requiredGenerators,
+  required final int supplementalRuns,
+  required final List<(double, SupplementalTraderGen)> supplementalGenerators,
+});
 
 int otherItemIndex(GameRng rng, int iItem, int tierLength) {
   while (true) {
@@ -2339,13 +2221,14 @@ Color lozengeFill(Color tone) {
 /// [NodeTone.tinted] and come out looking like it drew [NodeTone.plain].
 bool hasHue(Color c) => HSLuvColor.fromColor(c).saturation > 20;
 
-class Edge {
-  final Node a, b;
+class Edge(
+  final Node a,
+  final Node b, {
 
   /// non-null for the temporary station↔train edge that exists while [dockTrain]
   /// is docked; players walk it to board
-  final TrainNode? dockTrain;
-  Edge(this.a, this.b, {this.dockTrain});
+  final TrainNode? dockTrain,
+}) {
   double get length => (a.pos - b.pos).distance;
   Node other(Node n) => identical(n, a) ? b : a;
   double angleFromNode(Node n) => offsetAngle(other(n).pos - n.pos);
@@ -2367,9 +2250,7 @@ class MovePath {
   }
 }
 
-class Player extends Thing {
-  final String name;
-  final Color color;
+class Player(final String name, final Color color) extends Thing {
   final Signal<List<Item>> inventory = signal(const []);
   final Signal<double> incapacitatedFor = signal(0.0); // > 0 blocks everything
   /// flashes their inventory red — muggings and blights
@@ -2378,7 +2259,6 @@ class Player extends Thing {
   Edge? traversing;
   Node? traversalTarget;
   double traversalProgress = 0;
-  Player(this.name, this.color);
 
   Offset worldPos() {
     if (traversing != null) {
@@ -2464,9 +2344,8 @@ class OneWaySchedule extends TrainSchedule {
 
 /// shuttles on its own, on a division clock interval — so many departures a
 /// day, always at the same times ('sc(12.5)'); can't be controlled
-class CycleSchedule extends TrainSchedule {
-  final ClockInterval interval;
-  const CycleSchedule(this.interval);
+class const CycleSchedule(final ClockInterval interval)
+    extends TrainSchedule {
   double get seconds => interval.period;
 }
 
@@ -2476,14 +2355,16 @@ class CycleSchedule extends TrainSchedule {
 /// shortcut between termini is theirs alone. A train takes its colour from the
 /// scheme like every other node — see [Palette.trainNode] — and its rails take
 /// it from the train.
-class TrainNode extends Node {
-  final TrainSpeed speed;
-  final Quantity? activation; // must be held by the mover
-  final bool activationConsumed; // true (an actual cost) less often
-  final bool movableFromInside;
-  final TrainSchedule schedule;
-  final List<Node> stationNodes;
-  final Map<Node, Offset> terminusFor;
+class TrainNode({
+  required Offset pos,
+  required final TrainSpeed speed,
+  required final Quantity? activation, // must be held by the mover
+  required final bool activationConsumed, // true (an actual cost) less often
+  required final bool movableFromInside,
+  required final TrainSchedule schedule,
+  required final List<Node> stationNodes,
+  required final Map<Node, Offset> terminusFor,
+}) extends Node {
   final Signal<Node?> dockedAt = signal(null);
   final Signal<double> transitRemaining = signal(0.0);
   double _transitTotal = 0;
@@ -2494,16 +2375,7 @@ class TrainNode extends Node {
   /// countdown to an automatic departure while docked; -1 = none
   final Signal<double> waitRemaining = signal(-1.0);
 
-  TrainNode({
-    required Offset pos,
-    required this.speed,
-    required this.activation,
-    required this.activationConsumed,
-    required this.movableFromInside,
-    required this.schedule,
-    required this.stationNodes,
-    required this.terminusFor,
-  }) : super(pos);
+  this : super(pos);
 
   Node get homeStation => stationNodes.first;
 
@@ -2693,11 +2565,8 @@ double itemSizeFor(NodeZoomLevel level) => switch (level) {
   _ => 11, // the standard shrunk width
 };
 
-class Station extends Facility {
-  final TrainNode train;
-  final StationControl control;
-  Station(this.train, this.control);
-
+class Station(final TrainNode train, final StationControl control)
+    extends Facility {
   @override
   Widget badge(Game g, NodeZoomLevel level) => explainTap(
     g,
@@ -2775,19 +2644,19 @@ class Station extends Facility {
   }
 }
 
-class Tree extends Facility {
-  final List<Quantity> produces; // one or two tier-0/1 items
+class Tree(
+  final List<Quantity> produces, // one or two tier-0/1 items
 
   /// Either kind of interval: an arbitrary one regrows that many seconds after
   /// it's picked, a clock one regrows at its times of day however long ago it
   /// was picked.
-  final Interval regen;
+  final Interval regen,
+) extends Facility {
   final Signal<bool> picked = signal(false);
 
   /// for clock regen: which repetition it was picked in — it's back once the
   /// interval has come round again
   int _pickedInCycle = 0;
-  Tree(this.produces, this.regen);
 
   bool get ready => !picked.value;
 
@@ -2887,9 +2756,8 @@ class Tree extends Facility {
   ];
 }
 
-class Trader extends Facility {
-  final List<Quantity> takes, gives;
-
+class Trader(final List<Quantity> takes, final List<Quantity> gives)
+    extends Facility {
   @override
   List<Item> get requiredItems => [for (final q in takes) q.item];
 
@@ -2899,7 +2767,6 @@ class Trader extends Facility {
   final Signal<double> cooldownRemaining = signal(0.0);
   final Signal<List<Quantity>> pendingOutput = signal(const []);
   Player? _worker;
-  Trader(this.takes, this.gives);
 
   bool get busy => workRemaining.value > 0;
   bool get cooling => cooldownRemaining.value > 0;
@@ -3072,14 +2939,10 @@ class Trader extends Facility {
   ];
 }
 
-class Mugger extends Facility {
-  final Item item;
-  final MuggerKind kind;
-
+class Mugger(final Item item, final MuggerKind kind) extends Facility {
   /// flashes red when it strikes; subscribing to the clock only while it's
   /// flashing keeps idle muggers from rebuilding every frame
   final RedFlash flash = RedFlash();
-  Mugger(this.item, this.kind);
 
   bool get _requires => kind != MuggerKind.c;
   bool get _takes => kind != MuggerKind.r;
@@ -3162,12 +3025,14 @@ class Mugger extends Facility {
   };
 }
 
-class Storage extends Facility {
-  final int capacity; // 2..12, log-distributed
-  /// secured storages are out of the blight's reach
-  final bool secured;
+class Storage(
+  final int capacity, // 2..12, log-distributed
+  {
+    /// secured storages are out of the blight's reach
+    final bool secured = false,
+  }
+) extends Facility {
   final Signal<List<Item>> contents = signal(const []);
-  Storage(this.capacity, {this.secured = false});
 
   @override
   Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(builder: (context) {
@@ -3231,11 +3096,12 @@ class Storage extends Facility {
 /// items carried by players and anything sitting in unsecured storage. Plants
 /// keep their fruit. Most blights can be bought off with a particular item;
 /// hungry ones ('R') want another one every cycle.
-class Blight extends Facility {
-  final double radius;
-  final ClockInterval interval; // one to three days, firing at night
-  final Item? mitigator; // null when nothing placates it
-  final bool hungry; // wants feeding again after every wave
+class Blight({
+  required final double radius,
+  required final ClockInterval interval, // one to three days, firing at night
+  required final Item? mitigator, // null when nothing placates it
+  required final bool hungry, // wants feeding again after every wave
+}) extends Facility {
   final Signal<bool> satiated = signal(false);
 
   @override
@@ -3246,12 +3112,6 @@ class Blight extends Facility {
 
   final RedFlash flash = RedFlash();
   int _lastCycle = -1 << 30;
-  Blight({
-    required this.radius,
-    required this.interval,
-    required this.mitigator,
-    required this.hungry,
-  });
 
   @override
   ClockInterval? get clockSchedule => interval;
@@ -3387,14 +3247,14 @@ class Blight extends Facility {
 
 // ────────────────────────────── game ──────────────────────────────
 
-class Game {
-  final Parameters params;
-  final ItemCatalog catalog;
-  final List<Node> nodes; // includes TrainNodes
-  final List<Edge> edges;
-  final List<Player> players;
-  final List<TrainNode> trains;
-
+class Game({
+  required final Parameters params,
+  required final ItemCatalog catalog,
+  required final List<Node> nodes, // includes TrainNodes
+  required final List<Edge> edges,
+  required final List<Player> players,
+  required final List<TrainNode> trains,
+}) {
   double gameTime = 0; // the pausable clock; ALL timers tick on this
   /// gameTime mirrored as a signal, for the few things that animate off it
   /// reactively (the mugger pulse); most rendering rides the frame notifier
@@ -3453,14 +3313,7 @@ class Game {
   /// moment the tooltip closes or the player leaves would undo that mid-glance.
   void raiseNode(Node n) => n.stackRank = ++_stackTop;
 
-  Game({
-    required this.params,
-    required this.catalog,
-    required this.nodes,
-    required this.edges,
-    required this.players,
-    required this.trains,
-  }) : timeLeft = signal(params.globalTime) {
+  this : timeLeft = signal(params.globalTime) {
     selectedPlayer = signal(players.first);
     blights = [for (final n in nodes) ...n.facilities.whereType<Blight>()];
   }
@@ -4078,10 +3931,7 @@ String describeClock(ClockInterval c) => c.isDaily
 ///
 /// The sun is an eight-pointed star with a round hole punched out of it, so
 /// what reads at small sizes is the ring of spikes rather than a blob.
-class _SunPainter extends CustomPainter {
-  final Color color;
-  const _SunPainter(this.color);
-
+class const _SunPainter(final Color color) extends CustomPainter {
   /// how far the star's valleys and its hole sit out from the centre, as
   /// fractions of the point radius. The hole is inside the valleys, leaving a
   /// thin band of solid ring holding the points together.
@@ -4121,10 +3971,7 @@ class _SunPainter extends CustomPainter {
 /// whereas thinning it to a proper sickle keeps it distinct from the pies and
 /// dots it shares a row with. The horns very nearly reach the top and right
 /// edges, so the shape still fills its box despite hugging the lower-left.
-class _MoonPainter extends CustomPainter {
-  final Color color;
-  const _MoonPainter(this.color);
-
+class const _MoonPainter(final Color color) extends CustomPainter {
   /// the biting disc, as a fraction of the outer radius, and how far its centre
   /// sits up-right of the outer centre. The crescent's thickest point measures
   /// (1 - _innerR + _innerOff) outer radii, so these two together are the dial
@@ -4318,24 +4165,17 @@ Widget withPie(Widget child, {required Widget pie}) => Stack(
 /// clock interval, and with the seconds remaining otherwise — one or the
 /// other, never both. Both kinds shrink. Ticks on game time via its signal —
 /// never wall clock — so pausing pauses pies.
-class CountdownPie extends StatelessWidget {
-  final Signal<double> remaining;
-  final double total;
-  final bool isCooldown;
+class const CountdownPie({
+  super.key,
+  required final Signal<double> remaining,
+  required final double total,
+  required final bool isCooldown,
 
   /// set when the countdown runs on a clock interval: its time of day is the
   /// more useful label, so it's shown in place of the seconds
-  final ClockInterval? clock;
-  final double size;
-  const CountdownPie({
-    super.key,
-    required this.remaining,
-    required this.total,
-    required this.isCooldown,
-    this.clock,
-    this.size = 11,
-  });
-
+  final ClockInterval? clock,
+  final double size = 11,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SignalBuilder(builder: (context) {
@@ -4373,10 +4213,8 @@ class CountdownPie extends StatelessWidget {
   }
 }
 
-class _PiePainter extends CustomPainter {
-  final double fraction;
-  final Color color;
-  _PiePainter({required this.fraction, required this.color});
+class _PiePainter({required final double fraction, required final Color color})
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
@@ -4439,20 +4277,14 @@ Widget slotBox({Item? item, VoidCallback? onTap, double dim = 26}) {
 
 /// The move control: tap and drag in the direction of the wire you want.
 /// Used for player moves and for scheduling trains from stations/inside.
-class DragDirectionPad extends StatefulWidget {
-  final void Function(double angle) onAngle;
-  final bool enabled;
-  final Widget? label; // centered
-  final String? cornerText; // bottom right, e.g. 'drag to move'
-  final double? dimension; // null = expand
-  const DragDirectionPad({
-    super.key,
-    required this.onAngle,
-    this.enabled = true,
-    this.label,
-    this.cornerText,
-    this.dimension,
-  });
+class const DragDirectionPad({
+  super.key,
+  required final void Function(double angle) onAngle,
+  final bool enabled = true,
+  final Widget? label, // centered
+  final String? cornerText, // bottom right, e.g. 'drag to move'
+  final double? dimension, // null = expand
+}) extends StatefulWidget {
   @override
   State<DragDirectionPad> createState() => _DragDirectionPadState();
 }
@@ -4508,21 +4340,14 @@ class _DragDirectionPadState extends State<DragDirectionPad> {
 
 /// colored orb with the name over it inside a white container outlined in the
 /// orb's color; renders at node-icon scale everywhere (it never zooms)
-class PlayerOrb extends StatelessWidget {
-  final Game game;
-  final Player player;
-  final double orbSize;
-  final bool showName;
-  final VoidCallback? onTap;
-  const PlayerOrb(
-    this.game,
-    this.player, {
-    super.key,
-    this.orbSize = nodeIconSize * 1.4,
-    this.showName = true,
-    this.onTap,
-  });
-
+class const PlayerOrb(
+  final Game game,
+  final Player player, {
+  super.key,
+  final double orbSize = nodeIconSize * 1.4,
+  final bool showName = true,
+  final VoidCallback? onTap,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -4638,11 +4463,13 @@ List<InlineSpan> describeTrain(TrainNode t) {
 
 // ────────────────────────────── screen ──────────────────────────────
 
-class TrainscapeScreen extends StatefulWidget {
+class const TrainscapeScreen({
+  super.key,
+
   /// generate this level rather than picking up the saved one. Passing a seed
   /// is asking for a particular map, which a save would only get in the way of
-  final int? seed;
-  const TrainscapeScreen({super.key, this.seed});
+  final int? seed,
+}) extends StatefulWidget {
   @override
   State<TrainscapeScreen> createState() => _TrainscapeScreenState();
 }
@@ -4947,15 +4774,11 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
 
 // ────────────────────────────── controls panel ──────────────────────────────
 
-class ControlsPanel extends StatelessWidget {
-  final Game game;
-  final ValueNotifier<int> recenterNudge;
-  const ControlsPanel({
-    super.key,
-    required this.game,
-    required this.recenterNudge,
-  });
-
+class const ControlsPanel({
+  super.key,
+  required final Game game,
+  required final ValueNotifier<int> recenterNudge,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -5102,16 +4925,12 @@ class ControlsPanel extends StatelessWidget {
 
 // ────────────────────────────── world view ──────────────────────────────
 
-class WorldView extends StatefulWidget {
-  final Game game;
-  final Listenable frame;
-  final ValueNotifier<int> recenterNudge;
-  const WorldView({
-    super.key,
-    required this.game,
-    required this.frame,
-    required this.recenterNudge,
-  });
+class const WorldView({
+  super.key,
+  required final Game game,
+  required final Listenable frame,
+  required final ValueNotifier<int> recenterNudge,
+}) extends StatefulWidget {
   @override
   State<WorldView> createState() => _WorldViewState();
 }
@@ -5404,22 +5223,15 @@ class GraphRecording {
   ui.Picture? picture;
 }
 
-class _WorldPainter extends CustomPainter {
-  final Game game;
-  final Offset cam;
-  final double zoom;
-  final Offset viewCenter;
+class _WorldPainter({
+  required final Game game,
+  required final Offset cam,
+  required final double zoom,
+  required final Offset viewCenter,
 
   /// non-null only when the zoomed-out overlay is going to want a copy
-  final GraphRecording? recording;
-  _WorldPainter({
-    required this.game,
-    required this.cam,
-    required this.zoom,
-    required this.viewCenter,
-    this.recording,
-  });
-
+  final GraphRecording? recording,
+}) extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (recording == null) {
@@ -5574,11 +5386,8 @@ class _WorldPainter extends CustomPainter {
 /// translucent parts: draw the ops at [opacity] each and every place two edges
 /// cross comes out darker than the rest of the graph, which is precisely where
 /// the structure the overlay exists to show is hardest to read.
-class _OverGraphPainter extends CustomPainter {
-  final GraphRecording recording;
-  final double opacity;
-  _OverGraphPainter(this.recording, this.opacity);
-
+class _OverGraphPainter(final GraphRecording recording, final double opacity)
+    extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final picture = recording.picture;
@@ -5691,17 +5500,12 @@ GlobalKey badgeKey(Object of) => _badgeKeys[of] ??= GlobalKey();
 /// either sits on the dot. Straddling rather than centring one wide row keeps
 /// each side's inner edge anchored to the dot regardless of what the other side
 /// is doing. Rerenders via the playersPresent signal.
-class NodeContentWidget extends StatelessWidget {
-  final Game game;
-  final Node node;
-  final Signal<bool> farZoom;
-  const NodeContentWidget({
-    super.key,
-    required this.game,
-    required this.node,
-    required this.farZoom,
-  });
-
+class const NodeContentWidget({
+  super.key,
+  required final Game game,
+  required final Node node,
+  required final Signal<bool> farZoom,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SignalBuilder(
