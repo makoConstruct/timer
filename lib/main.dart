@@ -382,12 +382,10 @@ void main() async {
 }
 
 void _sendDismissAlarms() {
-  IsolateNameServer.lookupPortByName(
-    mainNotificationPortName,
-  )?.send('dismissAlarms');
-  IsolateNameServer.lookupPortByName(
-    foregroundServicePortName,
-  )?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(mainNotificationPortName)
+      ?.send('dismissAlarms');
+  IsolateNameServer.lookupPortByName(foregroundServicePortName)
+      ?.send('dismissAlarms');
 }
 
 /// Drives the persistent notification from the main isolate while the app is
@@ -553,8 +551,7 @@ class TimerHolm {
         'identifier': 'slots-exhausted',
         'seconds': ranOutAt.difference(now).inMilliseconds / 1000.0,
         'title': 'notification limit reached',
-        'subtitle':
-            'iOS prevents us from cycling indefinitely, you must open the app to continue',
+        'subtitle': 'iOS prevents us from cycling indefinitely, you must open the app to continue',
         'soundUri': PlatformAudio.alert.url,
       });
     }
@@ -752,6 +749,23 @@ class TimerHolm {
     }
   }
 
+  static Future<void> _destroyMaybeUnloadedTimer(MobjID<TimerData> id) async {
+    final Mobj<TimerData> m;
+    try {
+      m = await Mobj.fetch(id, type: TimerDataType());
+    } catch (_) {
+      // no such row; it was already destroyed
+      return;
+    }
+    final t = m.value;
+    m.value = null;
+    if (t != null && t.isComposite) {
+      for (MobjID c in t.children) {
+        unawaited(_destroyMaybeUnloadedTimer(c));
+      }
+    }
+  }
+
   /// how each timer is subscribed to and responded to, imbued with spirit and voice
   /// I'm not sure how I really feel about this approach, where everything is reactions. There are many situations where we had to fully understand how this reaction converges with itself when it causes reactions in the process of doing its thing. Yet, there was always a way to make it converge.
   void Function() enlivenTimer(
@@ -782,10 +796,11 @@ class TimerHolm {
         );
       }
       if (d == null) {
-        // delete its children too if it has any
+        // delete its children too if it has any. One destroyed out of the bin
+        // may never have had its children loaded.
         if (prev?.isComposite ?? false) {
           for (final childId in prev!.children) {
-            Mobj.getAlreadyLoaded(childId, TimerDataType()).value = null;
+            unawaited(_destroyMaybeUnloadedTimer(childId));
           }
         }
         //remove it from its parent
@@ -1582,9 +1597,9 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                 return <Route>[
                   PageRouteBuilder(
                     pageBuilder: (context, __, ___) => ColoredBox(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerLowest,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerLowest,
                     ),
                     transitionDuration: Duration.zero,
                   ),
@@ -2032,6 +2047,10 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   EffectCleanup? _dataEffect;
 
   late final AnimationController _appearanceAnimation;
+  PadBud? padBud;
+  TimerScreenState? _padBudScreen;
+  bool _appearanceStarted = false;
+  final GlobalKey clockfaceKey = GlobalKey();
   late final AnimationController _unpinnedIndicatorShowing;
   late final AnimationController _unpinnedIndicatorFullyShowing;
   // currently inactive. I was considering using this for doing a deletion where most of the deletion animation happens in-place and then it's shunted out into another layer just for the end.
@@ -2085,6 +2104,45 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _subscribeToParentDepth();
+    _startAppearance();
+  }
+
+  void _startAppearance() {
+    if (_appearanceStarted) return;
+    _appearanceStarted = true;
+    if (!widget.animateIn) {
+      _appearanceAnimation.value = 1;
+      return;
+    }
+    final screen = context.findAncestorStateOfType<TimerScreenState>();
+    final bud = screen?.claimPadBud(
+      widget.mobj.id,
+      face: clockfaceKey,
+      progress: _appearanceAnimation,
+    );
+    if (bud != null) {
+      _padBudScreen = screen;
+      padBud = bud;
+      _appearanceAnimation.duration = PadBud.duration;
+      _appearanceAnimation.addStatusListener((status) {
+        if (status == AnimationStatus.completed && padBud != null && mounted) {
+          setState(() => padBud = null);
+        }
+      });
+    }
+    _appearanceAnimation.forward();
+  }
+
+  Offset budDisplacement(PadBud bud) {
+    final screen = _padBudScreen;
+    if (screen == null) return Offset.zero;
+    final face = boxRectRelativeTo(
+      boring.renderBox(clockfaceKey),
+      screen.context.findRenderObject() as RenderBox?,
+    );
+    final offset = face == null ? null : screen.padBudOffset(bud, face);
+    bud.offsetFromFace = offset;
+    return offset ?? Offset.zero;
   }
 
   /// called after base animations are initialized, before the reactive effect is created
@@ -2094,7 +2152,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   void onTimerDataChanged(TimerData d, TimerData? prev) {}
 
   bool parentIsTimercule() {
-    final parentId = widget.mobj.value!.parentId;
+    final parentId = presentData.parentId;
     return parentId != null &&
         MobjRegistry.seekTyped(parentId, TimerDataType()) != null;
   }
@@ -2111,11 +2169,6 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       duration: const Duration(milliseconds: 180),
       vsync: this,
     );
-    if (widget.animateIn) {
-      _appearanceAnimation.forward();
-    } else {
-      _appearanceAnimation.value = 1;
-    }
     _unpinnedIndicatorShowing = AnimationController(
       duration: const Duration(milliseconds: 150),
       vsync: this,
@@ -2156,6 +2209,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
     _parentDepthDispose?.call();
     _deletionAnimation?.dispose();
     _deletionAnimation = null;
+    if (padBud != null) _padBudScreen?.endPadBud(padBud!);
     _appearanceAnimation.dispose();
     _dataEffect?.call();
     _dataEffect = null;
@@ -2295,17 +2349,22 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
       (next) => AnimatedBuilder(
         animation: _appearanceAnimation,
         child: next,
-        builder: (context, child) => FractionalTranslation(
-          translation: Offset(
-            0,
-            0.6 * (1.0 - Curves.easeOut.transform(_appearanceAnimation.value)),
-          ),
-          child: FuzzyLinearClip(
-            angle: pi / 2,
-            progress: _appearanceAnimation.value,
-            child: child!,
-          ),
-        ),
+        builder: (context, child) {
+          final p = _appearanceAnimation.value;
+          if (padBud != null) {
+            return Opacity(
+              opacity: Curves.easeInOut.transform(
+                unlerpUnit(0.2, 0.4, PadBud.budPhase(p)),
+              ),
+              child: child!,
+            );
+          } else {
+            return FractionalTranslation(
+              translation: Offset(0, 0.6 * (1.0 - Curves.easeOut.transform(p))),
+              child: FuzzyLinearClip(angle: pi / 2, progress: p, child: child!),
+            );
+          }
+        },
       ),
       (next) {
         if (!_deleted ||
@@ -2883,6 +2942,20 @@ class TimerState extends TimerBaseState<Timer> {
       },
       // size: 90),
     );
+
+    final bud = padBud;
+    if (bud != null) {
+      clockDial = SizedBox.square(
+        key: clockfaceKey,
+        dimension: 2 * clockRadius,
+        child: AnimatedBuilder(
+          animation: _appearanceAnimation,
+          child: clockDial,
+          builder: (context, child) =>
+              Transform.translate(offset: budDisplacement(bud), child: child),
+        ),
+      );
+    }
 
     return buildShell(
       context,
@@ -4485,6 +4558,106 @@ TimerBase getOrCreateTimerWidget(
   return widget;
 }
 
+/// stuff controlling how timers bud out of the numeral pad
+class PadBud {
+  PadBud({required this.timer, required this.face, required this.progress});
+
+  final MobjID<TimerData> timer;
+  final GlobalKey face;
+  final Animation<double> progress;
+  double faceRadius = 0;
+
+  Offset? offsetFromFace;
+  Offset? root;
+
+  /// Everywhere the blob has been or is going, which the pad's layer has to
+  /// cover — it clips its own shading, and the timer the blob is headed for is
+  /// generally clear across the screen from the pad. Only ever grows, so the
+  /// layer doesn't resize every frame while the tray settles.
+  Rect? bounds;
+
+  void reach(Rect face) {
+    final r = Rect.fromPoints(
+      root!,
+      face.center,
+    ).inflate(faceRadius + blend + 8);
+    bounds = bounds?.expandToInclude(r) ?? r;
+  }
+
+  RoundRectPerimeter? _rim;
+  double _rimFrom = 0;
+
+  void traceRim(Rect rect, double cornerRadius, Offset from) {
+    final rim = RoundRectPerimeter(rect, cornerRadius);
+    _rim = rim;
+    _rimFrom = rim.nearest(from);
+  }
+
+  /// The pair of swells running opposite ways around the pad's rim from where
+  /// the blob left it, sinking back inside the panel as they go.
+  List<GlassBlob> ripple(Offset origin, Color tint) {
+    final rim = _rim;
+    if (rim == null) return const [];
+    final p = ripplePhase(progress.value);
+    final radius = lerp(-lift, rippleRadius, easeOut(unlerpUnit(0, 0.2, p)));
+    final sink = (rippleRadius + lift) * unlerpUnit(0.12, 1, p);
+    final travelled = rippleTravel * easeOut(unlerpUnit(_rippleRunsFrom, 1, p));
+    GlassBlob forDirection(double travel) {
+      final (position, outward) = rim.at(_rimFrom + travel);
+      return GlassBlob(
+        center: position - outward * sink - origin,
+        radii: Size.square(radius),
+        tint: tint,
+      );
+    }
+
+    return [forDirection(-travelled), forDirection(travelled)];
+  }
+
+  /// How long each part of the arrival runs for. They all start together and
+  /// the controller runs for the longest, so each part takes its own slice off
+  /// the front of [progress] — see [budPhase] and [ripplePhase].
+  static const Duration budDuration = Duration(milliseconds: 500);
+  static const Duration rippleDuration = Duration(milliseconds: 1500);
+  static final Duration duration = [
+    budDuration,
+    rippleDuration,
+  ].reduce((a, b) => a > b ? a : b);
+
+  static double _phase(Duration part, double p) =>
+      unlerpUnit(0, part.inMicroseconds / duration.inMicroseconds, p);
+
+  /// [progress] through the blob's own journey, and through the ripple's.
+  static double budPhase(double p) => _phase(budDuration, p);
+  static double ripplePhase(double p) => _phase(rippleDuration, p);
+
+  /// Where in [budPhase] the blob has broken clear of the pad's rim, which is
+  /// what the ripple is a reaction to.
+  static const double budBreachCompletep = 0.4;
+
+  /// The same moment in [ripplePhase]: the parts start together, so crossing
+  /// from one to the other is just the ratio of their durations.
+  static final double _rippleRunsFrom =
+      budBreachCompletep *
+      budDuration.inMicroseconds /
+      rippleDuration.inMicroseconds;
+
+  /// The pad layer's blend radius, and how far past zero a blob's radius is
+  /// carried at either end of its life: lifted past the blend it has exactly no
+  /// influence, so it can appear and be dropped without the pad's silhouette
+  /// twitching. See GlassBlob's "animating a blob out".
+  static const double blend = 20;
+  static const double lift = blend + 2;
+
+  /// How big each of the two rim swells gets, and how far around the rim it
+  /// runs before sinking back into the panel.
+  static const double rippleRadius = 8;
+  static const double rippleTravel = 160;
+
+  static double travel(double p) =>
+      Curves.easeOutCubic.transform(unlerpUnit(0.1, 0.8, budPhase(p)));
+}
+
 class TimerScreenState extends State<TimerScreen>
     with TickerProviderStateMixin, EffectsMixin {
   late final Signal<MobjID?> selectedTimer = Signal(null);
@@ -4508,7 +4681,11 @@ class TimerScreenState extends State<TimerScreen>
     isRightHandedID,
     BoolType(),
   );
-  late final Signal<Rect> numPadBounds = Signal(Rect.zero);
+
+  Rect numPadBounds = Rect.zero;
+  double numPadCorner = 0;
+  final List<PadBud> padBuds = [];
+  MobjID<TimerData>? _pendingPadBud;
   late final JukeBox jukeBox = JukeBox.create();
   late final TimerHolm timerHolm;
   // note this subscribes to the mobj
@@ -4943,8 +5120,7 @@ class TimerScreenState extends State<TimerScreen>
       if (sv != null) {
         final svm = Mobj.getAlreadyLoaded(sv, TimerDataType()).value;
         if (svm == null || svm.selected == false) {
-          selectedTimer.value =
-              null; // note, this will recurse on this effect handler, we don't want that, but it's harmless
+          selectedTimer.value = null; // note, this will recurse on this effect handler, we don't want that, but it's harmless
         }
       }
     });
@@ -4962,7 +5138,7 @@ class TimerScreenState extends State<TimerScreen>
     buttonScaleDialAngle.dispose();
     actionMode.dispose();
     onNewNumeralDragActionRing.dispose();
-    numPadBounds.dispose();
+    padBuds.clear();
     selectedTimer.dispose();
     actionMode.dispose();
     isFirstPressForSelectedTimer.dispose();
@@ -5320,8 +5496,8 @@ class TimerScreenState extends State<TimerScreen>
               final p = (up ? Curves.easeInOut : Curves.easeInOut).transform(t);
               // final double p = 1;
               return Opacity(
-                // opacity: lerp(0.56, 1, p),
-                opacity: lerp(0.56, 1, 1),
+                // opacity: lerp(0.56, 1, 1),
+                opacity: 1,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
@@ -5697,8 +5873,13 @@ class TimerScreenState extends State<TimerScreen>
     // would be cut off. The flat path pads back in by the same amount, so the
     // pad lands in the same place either way.
     const double numeralBackingPadding = 26.0;
+    final Rect numeralBackingBox = numeralBackingRect.inflate(
+      numeralBackingPadding,
+    );
+    numPadBounds = numeralBackingRect;
+    numPadCorner = numeralBackingRadius;
     Widget numeralBacking = Positioned.fromRect(
-      rect: numeralBackingRect.inflate(numeralBackingPadding),
+      rect: numeralBackingBox,
       child: SignalBuilder(
         builder: (context) {
           final continuous = continuousCornersOn();
@@ -5707,78 +5888,132 @@ class TimerScreenState extends State<TimerScreen>
             BoolType(),
           ).value!;
           return AnimatedBuilder(
-            animation: numeralBackshadowController,
+            animation: Listenable.merge([
+              numeralBackshadowController,
+              for (final bud in padBuds) bud.progress,
+            ]),
             builder: (context, child) {
               final shadowp = Curves.easeInOut.transform(
                 numeralBackshadowController.scalarValue,
               );
-              if (!glassOn) {
-                return Padding(
-                  padding: const EdgeInsets.all(numeralBackingPadding),
-                  child: Container(
-                    constraints: BoxConstraints.expand(),
-                    decoration: BoxDecoration(
-                      color: mt.foreBackColor,
-                      borderRadius: BorderRadius.circular(numeralBackingRadius),
-                      boxShadow: shadowp <= 0
-                          ? null
-                          : [
-                              BoxShadow(
-                                color: Colors.black.withValues(
-                                  alpha: 0.17 * shadowp,
-                                ),
-                                blurRadius: 20,
-                                spreadRadius: 1,
+              final double glassiness = glassOn ? shadowp : 0;
+              final Color padTint = mt.foreBackColor.withValues(
+                // deliberately not mt.glassColor: the pad keeps its own
+                // surface color and only picks up a little transparency,
+                // so going to glass barely disturbs the layout's colors.
+                alpha: lerp(1, 0.65, glassiness),
+              );
+              Widget flatPad() => Padding(
+                padding: const EdgeInsets.all(numeralBackingPadding),
+                child: Container(
+                  constraints: BoxConstraints.expand(),
+                  decoration: BoxDecoration(
+                    color: mt.foreBackColor,
+                    borderRadius: BorderRadius.circular(numeralBackingRadius),
+                    boxShadow: shadowp <= 0
+                        ? null
+                        : [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: 0.17 * shadowp,
                               ),
-                            ],
-                    ).cornerStyledWith(continuous),
-                  ),
-                );
-              } else if (shadowp <= 0) {
-                return Padding(
-                  padding: const EdgeInsets.all(numeralBackingPadding),
-                  child: Container(
-                    constraints: BoxConstraints.expand(),
-                    decoration: BoxDecoration(
-                      color: mt.foreBackColor,
-                      borderRadius: BorderRadius.circular(numeralBackingRadius),
-                      boxShadow: null,
-                    ).cornerStyledWith(continuous),
-                  ),
-                );
-              } else {
-                return GlassLayer(
-                  backdropGroupKey: ourGlassBackdropKey,
-                  options: glassLerpedToFlat(
-                    ourGlassOptions(
-                      mode: GlassMode.glass,
-                      blurRadius: mt.glassBlurRadius,
-                      edgeTint: mt.edgeTint,
-                      // the backing has no child (the numerals sit above it),
-                      // so keep it on the plain-mask path throughout.
-                      childRefractionIntensity: 0,
-                    ),
-                    shadowp,
-                  ),
-                  blobs: [
-                    GlassBlob(
-                      center:
-                          Offset(numeralBackingPadding, numeralBackingPadding) +
-                          sizeToOffset(numeralBackingRect.size / 2),
-                      radii: numeralBackingRect.size / 2,
-                      cornerRadius: numeralBackingRadius,
-                      cornerContinuity: continuous ? 1 : 0,
-                      // deliberately not mt.glassColor: the pad keeps its own
-                      // surface color and only picks up a little transparency,
-                      // so going to glass barely disturbs the layout's colors.
-                      tint: mt.foreBackColor.withValues(
-                        alpha: lerp(1, 0.65, shadowp),
-                      ),
-                    ),
-                  ],
-                  child: const SizedBox.expand(),
-                );
+                              blurRadius: 20,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                  ).cornerStyledWith(continuous),
+                ),
+              );
+              if (padBuds.isEmpty && glassiness <= 0) return flatPad();
+              var layerRect = numeralBackingBox;
+              for (final bud in padBuds) {
+                final b = bud.bounds;
+                if (b != null) layerRect = layerRect.expandToInclude(b);
               }
+              final Offset origin = layerRect.topLeft;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (glassiness <= 0) flatPad(),
+                  Positioned.fromRect(
+                    rect: layerRect.shift(-numeralBackingBox.topLeft),
+                    child: GlassLayer(
+                      backdropGroupKey: ourGlassBackdropKey,
+                      options: glassLerpedToFlat(
+                        ourGlassOptions(
+                          mode: GlassMode.glass,
+                          blurRadius: mt.glassBlurRadius,
+                          blendRadius: PadBud.blend,
+                          edgeTint: mt.edgeTint,
+                          // the backing has no child (the numerals sit above
+                          // it), so keep it on the plain-mask path throughout.
+                          childRefractionIntensity: 0,
+                        ),
+                        glassiness,
+                      ),
+                      blobs: [
+                        GlassBlob(
+                          center: numeralBackingRect.center - origin,
+                          radii: numeralBackingRect.size / 2,
+                          cornerRadius: numeralBackingRadius,
+                          cornerContinuity: continuous ? 1 : 0,
+                          tint: padTint,
+                        ),
+                      ],
+                      blobBuilder: padBuds.isEmpty
+                          ? null
+                          : (size) {
+                              // this.context: the buds are measured against the
+                              // screen, like everything else here, not against
+                              // the pad box the builder's context sits in
+                              final screenBox =
+                                  this.context.findRenderObject() as RenderBox?;
+                              final blobs = <GlassBlob>[];
+                              for (final bud in padBuds) {
+                                final offset = bud.offsetFromFace;
+                                final face = boxRectRelativeTo(
+                                  boring.renderBox(bud.face),
+                                  screenBox,
+                                );
+                                // final h = lerp(
+                                //   -PadBud.lift,
+                                //   bud.faceRadius,
+                                //   PadBud.radius(bud.progress.value),
+                                // );
+                                if (offset == null ||
+                                    face == null ||
+                                    bud.faceRadius <= -PadBud.lift) {
+                                  continue;
+                                }
+                                blobs.add(
+                                  GlassBlob(
+                                    center: face.center + offset - origin,
+                                    radii: Size.square(bud.faceRadius),
+                                    holeRadius: bud.faceRadius,
+                                    blendRadius:
+                                        PadBud.blend *
+                                        (1 -
+                                            Curves.easeOut.transform(
+                                              unlerpUnit(
+                                                0.7,
+                                                1,
+                                                PadBud.budPhase(
+                                                  bud.progress.value,
+                                                ),
+                                              ),
+                                            )),
+                                    tint: padTint,
+                                  ),
+                                );
+                                blobs.addAll(bud.ripple(origin, padTint));
+                              }
+                              return blobs;
+                            },
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ],
+              );
             },
           );
         },
@@ -5938,13 +6173,11 @@ class TimerScreenState extends State<TimerScreen>
           ),
           HintToast(
             showCondition: hasntUsedMenuTwiceHint,
-            message:
-                "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
+            message: "you can press and hold (and release) a timer to bring open a menu that allows additional actions (such as deleting or editing it)",
           ),
           HintToast(
             showCondition: hintDoesntGetCompositeTimersCondition,
-            message:
-                "'Timercules' like 'cycle' and 'series' allow you to drag other timers into them. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings.",
+            message: "'Timercules' like 'cycle' and 'series' allow you to drag other timers into them. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings.",
           ),
         ],
       ),
@@ -6189,8 +6422,56 @@ class TimerScreenState extends State<TimerScreen>
     }
   }
 
+  PadBud? claimPadBud(
+    MobjID<TimerData> id, {
+    required GlobalKey face,
+    required Animation<double> progress,
+  }) {
+    if (_pendingPadBud != id) return null;
+    _pendingPadBud = null;
+    final bud = PadBud(timer: id, face: face, progress: progress);
+    padBuds.add(bud);
+    _padBudsChanged();
+    void whenDone(AnimationStatus status) {
+      if (status != AnimationStatus.completed) return;
+      progress.removeStatusListener(whenDone);
+      endPadBud(bud);
+    }
+
+    progress.addStatusListener(whenDone);
+    return bud;
+  }
+
+  void endPadBud(PadBud bud) {
+    if (!padBuds.remove(bud)) return;
+    _padBudsChanged();
+  }
+
+  void _padBudsChanged() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Offset? padBudOffset(PadBud bud, Rect face) {
+    if (numPadBounds.isEmpty) return null;
+    bud.faceRadius = face.shortestSide / 2;
+    if (bud.root == null) {
+      bud.root = rectEdgeArrow(
+        numPadBounds.deflate(
+          min(face.shortestSide, numPadBounds.shortestSide / 2),
+        ),
+        face.center,
+      ).$1;
+      bud.traceRim(numPadBounds, numPadCorner, face.center);
+    }
+    bud.reach(face);
+    return (bud.root! - face.center) * (1 - PadBud.travel(bud.progress.value));
+  }
+
   void addNewTimer({int? runningState, bool? selected, List<int>? digits}) {
     final ntid = UuidV4().generate();
+    _pendingPadBud = ntid;
 
     bool selecting = selected ?? false;
 
@@ -6230,6 +6511,7 @@ class TimerScreenState extends State<TimerScreen>
 
   void addNewStopwatch() {
     final ntid = UuidV4().generate();
+    _pendingPadBud = ntid;
 
     // we leak this. By not deleting it, it will stay in the db and registry as a root object
     Mobj<TimerData>.clobberCreate(
@@ -6441,8 +6723,9 @@ class TimerScreenState extends State<TimerScreen>
       }
     }
     if (nextEntries.length > binMaxRetained) {
-      removedEntries.addAll(nextEntries.slice(binMaxRetained));
-      nextEntries = nextEntries.slice(0, binMaxRetained);
+      final overflow = nextEntries.length - binMaxRetained;
+      removedEntries.addAll(nextEntries.slice(0, overflow));
+      nextEntries = nextEntries.slice(overflow);
     }
     // no update if nothing was dropped
     if (nextEntries.length != binListMobj.peek()!.length) {

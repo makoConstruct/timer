@@ -462,7 +462,7 @@ RenderBox? renderBox(GlobalKey key) {
 /// Gets the Rect of a widget relative to an ancestor RenderBox
 /// This avoids distortion from route transforms by not using global coordinates
 Rect? boxRectRelativeTo(RenderBox? key, RenderBox? ancestor) {
-  if (key == null || ancestor == null) {
+  if (key == null || ancestor == null || !key.hasSize || !ancestor.hasSize) {
     return null;
   }
   final globalPos = key.localToGlobal(Offset.zero);
@@ -987,6 +987,108 @@ double softmax(double a, double b) {
             Offset(towards.dx, r.center.dy + rs.dy * tr.dy.sign),
             Offset(0, tr.dy.sign),
           );
+  }
+}
+
+/// A rounded rect's outline parameterised by arc length: [at] walks it at a
+/// constant speed, clockwise from the top edge's left end, wrapping at
+/// [length], and [nearest] is its inverse for an arbitrary point. Note the
+/// corners are circular, not continuous. — Opus 5
+class RoundRectPerimeter {
+  RoundRectPerimeter(this.rect, double corner)
+    : corner = clampDouble(corner, 0, min(rect.width, rect.height) / 2);
+
+  final Rect rect;
+  final double corner;
+
+  /// Where the four corner arcs are centred.
+  late final Rect _inner = rect.deflate(corner);
+  late final double _straightX = rect.width - 2 * corner;
+  late final double _straightY = rect.height - 2 * corner;
+  late final double _arc = corner * pi / 2;
+
+  // where each of the eight pieces begins
+  late final double _topRightAt = _straightX;
+  late final double _rightAt = _topRightAt + _arc;
+  late final double _bottomRightAt = _rightAt + _straightY;
+  late final double _bottomAt = _bottomRightAt + _arc;
+  late final double _bottomLeftAt = _bottomAt + _straightX;
+  late final double _leftAt = _bottomLeftAt + _arc;
+  late final double _topLeftAt = _leftAt + _straightY;
+
+  /// All the way round.
+  late final double length = _topLeftAt + _arc;
+
+  /// The point [s] along the outline and the outward normal there.
+  (Offset, Offset) at(double s) {
+    final t = s % length;
+    if (t < _topRightAt) {
+      return (Offset(_inner.left + t, rect.top), const Offset(0, -1));
+    }
+    if (t < _rightAt) {
+      return _onArc(_inner.topRight, -pi / 2 + (t - _topRightAt) / corner);
+    }
+    if (t < _bottomRightAt) {
+      return (
+        Offset(rect.right, _inner.top + (t - _rightAt)),
+        const Offset(1, 0),
+      );
+    }
+    if (t < _bottomAt) {
+      return _onArc(_inner.bottomRight, (t - _bottomRightAt) / corner);
+    }
+    if (t < _bottomLeftAt) {
+      return (
+        Offset(_inner.right - (t - _bottomAt), rect.bottom),
+        const Offset(0, 1),
+      );
+    }
+    if (t < _leftAt) {
+      return _onArc(_inner.bottomLeft, pi / 2 + (t - _bottomLeftAt) / corner);
+    }
+    if (t < _topLeftAt) {
+      return (
+        Offset(rect.left, _inner.bottom - (t - _leftAt)),
+        const Offset(-1, 0),
+      );
+    }
+    return _onArc(_inner.topLeft, pi + (t - _topLeftAt) / corner);
+  }
+
+  (Offset, Offset) _onArc(Offset centre, double angle) {
+    final normal = Offset(cos(angle), sin(angle));
+    return (centre + normal * corner, normal);
+  }
+
+  /// How far along the outline the point nearest [to] lies.
+  double nearest(Offset to) {
+    final x = clampDouble(to.dx, _inner.left, _inner.right);
+    final y = clampDouble(to.dy, _inner.top, _inner.bottom);
+    if (x != to.dx && y != to.dy) {
+      // past a corner in both axes, so the nearest point is on its arc, and
+      // which arc is exactly which quarter turn the point lies off in
+      final angle = (to - Offset(x, y)).direction;
+      if (angle < -pi / 2) return _topLeftAt + (angle + pi) * corner;
+      if (angle < 0) return _topRightAt + (angle + pi / 2) * corner;
+      if (angle < pi / 2) return _bottomRightAt + angle * corner;
+      return _bottomLeftAt + (angle - pi / 2) * corner;
+    }
+    // otherwise it's beside a straight — or inside, where the nearest edge is
+    // whichever is closest. Distances go negative outside, so one comparison
+    // covers both.
+    final top = to.dy - rect.top;
+    final bottom = rect.bottom - to.dy;
+    final left = to.dx - rect.left;
+    final right = rect.right - to.dx;
+    final side = min(min(top, bottom), min(left, right));
+    if (side == top) return clampDouble(to.dx - _inner.left, 0, _straightX);
+    if (side == right) {
+      return _rightAt + clampDouble(to.dy - _inner.top, 0, _straightY);
+    }
+    if (side == bottom) {
+      return _bottomAt + clampDouble(_inner.right - to.dx, 0, _straightX);
+    }
+    return _leftAt + clampDouble(_inner.bottom - to.dy, 0, _straightY);
   }
 }
 
@@ -2464,22 +2566,23 @@ class CircularRevealClipper extends CustomClipper<Path> {
 /// animates out), and as it's covered/uncovered by a route pushed on top of it
 /// ([secondaryAnimation]). Same signature as [PageRoute.buildTransitions], plus
 /// the route, which some stock transitions want.
-typedef RouteTransitionBuilder =
-    Widget Function(
-      BuildContext context,
-      PageRoute<dynamic> route,
-      Animation<double> animation,
-      Animation<double> secondaryAnimation,
-      Widget child,
-    );
+typedef RouteTransitionBuilder = Widget Function(
+  BuildContext context,
+  PageRoute<dynamic> route,
+  Animation<double> animation,
+  Animation<double> secondaryAnimation,
+  Widget child,
+);
 
 /// A transition, parameterized by where it comes from: [origin] is the point
 /// the new screen emanates from (route-local coordinates, which is screen
 /// coordinates for a fullscreen route), [motionDirection] is a unit vector
 /// pointing the way it travels. Radial transitions ignore the direction; it's
 /// there for directional ones.
-typedef RouteTransitionAnimation =
-    RouteTransitionBuilder Function(Offset origin, Offset motionDirection);
+typedef RouteTransitionAnimation = RouteTransitionBuilder Function(
+  Offset origin,
+  Offset motionDirection,
+);
 
 /// The transition every [CircularRevealRoute] uses, indirected through a
 /// variable so it can be swapped per platform, or swapped out entirely while
@@ -4566,7 +4669,7 @@ class OurThemeData {
             glassColor: lightenColor(
               cs.surfaceContainerHighest,
               0.1,
-            ).withValues(alpha: 0.65),
+            ).withValues(alpha: 0.4),
             onGlassColor: cs.onSurface,
             nonGlassColor: Colors.white,
             nonGlassOnSurface: Colors.black,
@@ -4588,7 +4691,7 @@ class OurThemeData {
             hintTextColor: lightenColor(cs.onSurface, 0.375),
             // glassColor: cs.primary.withValues(alpha: 0.8),
             // onGlassColor: cs.onPrimary,
-            glassColor: HSLColor.fromAHSL(0.68, 0, 0, 1).toColor(),
+            glassColor: HSLColor.fromAHSL(0.5, 0, 0, 1).toColor(),
             onGlassColor: cs.onSurfaceVariant,
             // onGlassColor: theme.colorScheme.onSurface,
             nonGlassColor: Colors.black,
@@ -4655,9 +4758,8 @@ class OurThemeData {
       onNonGlassPopupMenu: cs.onSecondary,
       edgeTint: dark
           ? tint(Colors.white, 0.2).withValues(alpha: 0.7)
-          : tint(
-              HSLColor.fromAHSL(1, 0, 0, 0.2).toColor(),
-            ).withValues(alpha: 0.16),
+          : tint(HSLColor.fromAHSL(1, 0, 0, 0.2).toColor())
+                .withValues(alpha: 0.16),
     );
   }
 
@@ -5631,9 +5733,8 @@ class _HintToastState extends State<HintToast>
 
   Widget infoText(BuildContext context, String content) {
     final hintColor = OurThemeData.fromContext(context).hintTextColor;
-    final hintTextStyle = Theme.of(
-      context,
-    ).textTheme.bodyMedium!.copyWith(color: hintColor);
+    final hintTextStyle = Theme.of(context).textTheme.bodyMedium!
+        .copyWith(color: hintColor);
     return RichText(
       text: TextSpan(
         children: [
@@ -7846,9 +7947,8 @@ class LinkElementBuilder extends MarkdownElementBuilder {
             await Clipboard.setData(ClipboardData(text: href));
             HapticFeedback.mediumImpact();
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Copied "$href"')));
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text('Copied "$href"')));
             }
           },
         ),
