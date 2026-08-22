@@ -84,7 +84,7 @@ const databaseName = 'mako_timer_db';
 const double defaultTimerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(23);
+final Signal<double> timerWidgetRadius = Signal(25);
 
 const double standardLineWidth = 6;
 
@@ -1966,7 +1966,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
 
     final p = Curves.easeOut.transform(progress * (1 - downwardProgress));
 
-    final deblubbingp = Curves.easeOut.transform(unlerpUnit(0.16, 1, p));
+    final deblubbingp = Curves.easeOut.transform(unlerpUnit(0.6, 1, p));
     final blendRadius = widget.arrowHeight * lerp(4, 1.15, deblubbingp);
     final bevelThickness = lerp(30, 19, deblubbingp);
 
@@ -4683,8 +4683,8 @@ class PadBud({
 
   /// How big each of the two rim swells gets, and how far around the rim it
   /// runs before sinking back into the panel.
-  static const double rippleRadius = 8;
-  static const double rippleTravel = 160;
+  static const double rippleRadius = 7;
+  static const double rippleTravel = 50;
 
   static double travel(double p) =>
       Curves.easeOutCubic.transform(unlerpUnit(0.1, 0.8, budPhase(p)));
