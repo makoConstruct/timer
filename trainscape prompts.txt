@@ -161,18 +161,20 @@ Trains should not move automatically
 replace the plane takeoff icon with flight_rounded, it currently looks too similar to the landing icon otherwise. Similarly, the inbox and outbox look almost identical at small sizes. For the inbox icon, make it Icons.inbox with an arrow above it, column above. For the outbox, outbox_rounded
 you can make trader stuff the original way
 when the player jumps, reset the camera to center on the new player position, otherwise their movement causes the camera to essentially fly off
---
-there's a lot of variation in facility representation sizes (or, specifically, widths), so we should use a more space-efficient layout. Use a pretty efficient packing algorithm, but keep it simple if possible.
+remove outlines from control elements, just keep this subtle contrast that I think is probably already adequate.
+there's a lot of variation in facility representation sizes (or, specifically, widths), so we should use a more space-efficient layout. Use a pretty efficient packing algorithm to minimize rectangular space of the cluster, but keep it simple if possible.
+add a control above the pause icon, a zoom icon. If tapped, it cycles between three zoom levels (high, medium (constants we can tweak), full-map), If dragged up or down, it zooms out or in respectively.
+get rid of the size change to facilities when player enters a node (it's tricky for us to make the size change animate)
 When something happens to a player who's off-screen, it needs to mention them in the popup message, like "<Rudy icon> MUGGED", or else it's sheer confusion.
-
-Add the ability to carry other players piggyback.
-
-Big new feature. We need to do time shit. Controlling two characters simultaneously while dealing with time limits doesn't really work unless it's turn based, believe it or not. Moving characters in alternation sucks, so you want to be able to move one independently for a while then only move the second to follow once they need to cross paths. So we're going to do that by, when you wanna move the second player, rewind to the last time they moved, which will rewind the first player's actions, then as the second player moves, the first one's actions replay in parallel. This means the actions later moving characters take can interfere with the actions of the first character, in some cases invalidating them, but we can detect that. So:
-	there has to be a time dial that can turn time forwards and backwards
-	time needs to advance only when the player does things, such as walking, or riding a train, or turning the time dial forward
+center camera when it's in full map view. when cycling zoom mode, cycle one up from the zoom level that's closest to the current zoom level.
+--
+Big new feature. We need to do time shit. Controlling two characters simultaneously while dealing with time limits doesn't really work well gameplaywise unless it's turn based, believe it or not. Moving characters in alternation sucks, so you want to be able to move one independently for a while then only move the second to follow once they need to cross paths/interact. So we're going to do that by, when you wanna move the second player, rewind to the last time they moved, which will rewind the first player's actions, then as the second player moves, the first one's actions replay in parallel. This means the actions later moving characters take can interfere with the actions of the first character, in some cases invalidating them, but we can detect that. So:
+	there has to be a time dial that can turn time forwards and backwards. Move the clock to the lower left side of the map, and make it bigger. When the player turns it, it turns time back and forth.
+	time needs to advance only when the player does things (or if playing, during ticks), such as walking, or riding a train, or turning the time dial forward
 	we need to be able to record action histories so that we can replay them after rewinding
-		Actions can become invalid against a state, which stops that player's action history from replaying any further.
-	needs to be easy to take periodic snapshots of state so that we can "rewind" to any state by playing action histories forward to it.
+		scheduled actions can become invalid, for instance if a player is about to take an item from a container that doesn't have anything in it, or move on to a train that's not at this station, which stops that player's action history from replaying any further, and shows a minor alert message.
+	make sure that nothing is framerate dependent, so, there's a strict ordering of events to come that's knowable in advance. If a player is moving towards a node, their arrival time and trajectory is known, anything that acts on space knows whether they will be within range at the time it will fire.
+	actions/events must be reversible, which is to say, if they destroy state, the action must keep the state it destroyed, so that it can restore it if reversed.
 
 time stuff
 	since the player is controlling two characters at once, and since there is such a long planning phase to get to know the facility and the goals, it can't really be realtime, it's really expected to be played as turn based at high sweat levels. So start the game paused (most players will never unpause).
@@ -185,3 +187,4 @@ time stuff
 
 later
 	create an encoding for actions players can take. Allow scheduling arbitrary action
+Add the ability to carry other players piggyback.

@@ -256,6 +256,27 @@ const double overGraphMaxOpacity = 1.0;
 // show. It's fully opaque by the time you're all the way out.
 const double overGraphFadeOverp = 0.5;
 
+/// The stops the map's zoom button cycles through, as the span of world the
+/// short side of the view covers at each — smaller is closer in. Only these two
+/// are fixed; the third stop is whatever it takes to fit the whole map in the
+/// view, so the cycle reads in → medium → the lot → in again.
+const double zoomHighSpan = 6.0;
+const double zoomMediumSpan = 16.0;
+
+/// What a pixel of vertical drag on the zoom button is worth, as a factor on
+/// the zoom: dragging up pulls the view out, down pushes it in. It's a factor
+/// per pixel rather than a step, so the whole range is a drag of the same
+/// length wherever you start from.
+const double zoomDragPerPixel = 1 / 160;
+
+/// The little square controls stacked against the map's bottom right corner —
+/// see [mapButton] — and the gaps they're laid out on.
+const double mapButtonIcon = 22.0;
+const double mapButtonPad = 6.0;
+const double mapButtonExtent = mapButtonIcon + mapButtonPad * 2;
+const double mapButtonInset = 10.0;
+const double mapButtonGap = 8.0;
+
 /// How long the camera takes to settle on whatever it's seeking. It eases in
 /// and out over that whole span — the motion is what tells the player the view
 /// moved rather than cut, so it's leisurely.
@@ -328,9 +349,8 @@ enum ActivePhase { always, dayOnly, nightOnly }
 /// rc: requires and confiscates the same item.
 enum MuggerKind { r, rc }
 
-/// how a node widget displays, decided by the world view + player presence
+/// how a node widget displays, decided by the world view
 enum NodeZoomLevel {
-  selected, // a player is in this node: item icons at full size
   normal, // icons shrunk to a standard width
   small, // badges collapse to their leading icon, item icons hidden
 }
@@ -2693,11 +2713,8 @@ abstract class Facility {
   );
 }
 
-/// item icon size for a badge at the given zoom level
-double itemSizeFor(NodeZoomLevel level) => switch (level) {
-  NodeZoomLevel.selected => defaultItemSpan, // full size, legible
-  _ => 11, // the standard shrunk width
-};
+/// item icon size for a badge — the standard shrunk width
+const double _facilityItemSize = 11;
 
 class Station(final TrainNode train, final StationControl control)
     extends Facility {
@@ -2847,7 +2864,7 @@ class Tree(
             badgeIcon(Icons.local_florist),
             if (level != NodeZoomLevel.small)
               for (final q in produces)
-                quantityWidget(q, size: itemSizeFor(level)),
+                quantityWidget(q, size: _facilityItemSize),
           ]),
           pie: CountdownPie(
             remaining: regenRemaining,
@@ -2993,7 +3010,7 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
             if (level == NodeZoomLevel.small)
               badgeText('T')
             else
-              _exchangeRow(g, itemSize: itemSizeFor(level)),
+              _exchangeRow(g, itemSize: _facilityItemSize),
             if (hasPending) badgeIcon(Icons.outbox, size: 12),
           ]),
           pie: working
@@ -3108,7 +3125,7 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
         p.inventory.value = const [];
         p.flash.trigger(g.gameTime);
       }
-      g.announce('MUGGED');
+      g.announce('MUGGED', who: [p]);
       return;
     }
     // The toll: taken from anyone who has it, including the ones who were
@@ -3140,7 +3157,7 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
           badgeIcon(Icons.savings, color: color),
           if (level != NodeZoomLevel.small) ...[
             badgeText(kind.name),
-            ItemWidget(item, size: itemSizeFor(level)),
+            ItemWidget(item, size: _facilityItemSize),
           ],
         ]),
       );
@@ -3193,7 +3210,7 @@ class Storage(
           if (level == NodeZoomLevel.small || c.length > 3)
             badgeText('${c.length}/$capacity')
           else
-            for (final it in c) ItemWidget(it, size: itemSizeFor(level)),
+            for (final it in c) ItemWidget(it, size: _facilityItemSize),
         ]),
       );
     },
@@ -3356,7 +3373,7 @@ class Inbox({
       if (level == NodeZoomLevel.small)
         _mark()
       else
-        _costRow(itemSize: itemSizeFor(level)),
+        _costRow(itemSize: _facilityItemSize),
     ]),
   );
 
@@ -3487,7 +3504,7 @@ class JumpStation({
           if (level == NodeZoomLevel.small)
             badgeIcon(Icons.flight_rounded)
           else
-            _row(itemSize: itemSizeFor(level)),
+            _row(itemSize: _facilityItemSize),
         ]),
         pie: CountdownPie(
           remaining: cooldownRemaining,
@@ -3604,12 +3621,12 @@ class Blight({
     }
     flash.trigger(g.gameTime);
     bool within(Offset o) => (o - node.pos).distance <= radius;
-    var struck = false;
+    final struck = <Player>[];
     for (final p in g.players) {
       if (!within(p.worldPos())) continue;
       p.inventory.value = const [];
       p.flash.trigger(g.gameTime);
-      struck = true;
+      struck.add(p);
     }
     for (final n in g.nodes) {
       if (!within(n.pos)) continue;
@@ -3617,7 +3634,7 @@ class Blight({
         if (!s.secured) s.contents.value = const [];
       }
     }
-    if (struck) g.announce('BLIGHTSTRUCK');
+    if (struck.isNotEmpty) g.announce('BLIGHTSTRUCK', who: struck);
   }
 
   bool canFeed(Game g, Player p) =>
@@ -3653,7 +3670,7 @@ class Blight({
               if (mitigator != null)
                 Opacity(
                   opacity: fed ? 0.4 : 1,
-                  child: ItemWidget(mitigator!, size: itemSizeFor(level)),
+                  child: ItemWidget(mitigator!, size: _facilityItemSize),
                 ),
             ],
           ]),
@@ -3750,8 +3767,10 @@ class Game({
   /// Placeholders until the first layout.
   double zoomMin = 1, zoomMax = 1;
 
-  /// the big transient caps message: MUGGED, BLIGHTSTRUCK…
-  final Signal<(String text, double at)?> announcement = signal(null);
+  /// the big transient caps message: MUGGED, BLIGHTSTRUCK… along with whoever
+  /// it happened to, who is shown beside it
+  final Signal<(String text, List<Player> who, double at)?> announcement =
+      signal(null);
 
   /// every blight in the level, for painting their radii
   late final List<Blight> blights;
@@ -3759,7 +3778,24 @@ class Game({
   double get timeOfDay => gameTime % gameDay;
   int get daysRemaining => (timeLeft.value / gameDay).floor();
 
-  void announce(String text) => announcement.value = (text, gameTime);
+  /// [who] it happened to is part of the message, not decoration: the camera is
+  /// rarely on every player at once, and a bare MUGGED with the victim off
+  /// screen is sheer confusion. Two players struck by the same thing while the
+  /// message is still up merge into one announcement rather than one silently
+  /// overwriting the other.
+  void announce(String text, {List<Player> who = const []}) {
+    final prev = announcement.value;
+    final all =
+        (prev != null &&
+            prev.$1 == text &&
+            gameTime - prev.$3 <= params.announcementSpan)
+        ? [
+            ...prev.$2,
+            ...who.where((p) => !prev.$2.any((q) => identical(p, q))),
+          ]
+        : who;
+    announcement.value = (text, all, gameTime);
+  }
 
   /// the current explanation tooltip: the facility (or train) that was tapped,
   /// which node it's anchored to, and its spans
@@ -3841,7 +3877,7 @@ class Game({
     final night = timeOfDay >= gameDay / 2;
     if (night != isNight.value) isNight.value = night;
     final ann = announcement.value;
-    if (ann != null && gameTime - ann.$2 > params.announcementSpan) {
+    if (ann != null && gameTime - ann.$3 > params.announcementSpan) {
       announcement.value = null;
     }
 
@@ -5066,7 +5102,6 @@ Widget actionChip({
         decoration: BoxDecoration(
           color: paletteSignal.value.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: paletteSignal.value.outline),
         ),
         child: child,
       ),
@@ -5092,7 +5127,6 @@ Widget slotBox({
       decoration: BoxDecoration(
         color: paletteSignal.value.surface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: paletteSignal.value.outline),
       ),
       child: item != null
           ? Center(
@@ -5127,7 +5161,6 @@ class _DragDirectionPadState extends State<DragDirectionPad> {
       decoration: BoxDecoration(
         color: paletteSignal.value.pad,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: paletteSignal.value.outline),
       ),
       child: Stack(
         children: [
@@ -5252,7 +5285,7 @@ Widget trainBadge(Game g, TrainNode t, NodeZoomLevel level) {
         badgeText(t.speed.name),
         if (level != NodeZoomLevel.small) ...[
           if (t.activation != null)
-            quantityWidget(t.activation!, size: itemSizeFor(level)),
+            quantityWidget(t.activation!, size: _facilityItemSize),
           if (t.movableFromInside) badgeIcon(Icons.swipe_right_alt),
           if (t.schedule is OneWaySchedule) badgeText('sc(o)'),
           if (t.schedule case CycleSchedule c)
@@ -5449,8 +5482,8 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                         ),
                         Positioned(left: 10, right: 10, top: 3, child: _hud()),
                         Positioned(
-                          right: 10,
-                          bottom: 10,
+                          right: mapButtonInset,
+                          bottom: mapButtonInset,
                           child: _pauseButton(),
                         ),
                         Positioned.fill(child: _announcement()),
@@ -5492,45 +5525,46 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
       if (a == null) return const SizedBox.shrink();
       return IgnorePointer(
         child: Center(
-          child: Text(
-            a.$1,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 3,
-              color: paletteSignal.value.ink,
-              shadows: [
-                Shadow(color: paletteSignal.value.ground, blurRadius: 8),
-                Shadow(color: paletteSignal.value.ground, blurRadius: 14),
-              ],
-            ),
+          // the victims lead the message in the same orbs they're drawn with on
+          // the map, so it reads as one line: <Rudy> MUGGED
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final p in a.$2)
+                PlayerOrb(game, p, orbSize: nodeIconSize * 1.2),
+              Text(
+                a.$1,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 3,
+                  color: paletteSignal.value.ink,
+                  shadows: [
+                    Shadow(color: paletteSignal.value.ground, blurRadius: 8),
+                    Shadow(color: paletteSignal.value.ground, blurRadius: 14),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       );
     },
   );
 
-  /// Sits in the world's bottom right corner, against the map rather than the
-  /// HUD line, so it wears the controls' panel colour to read as a control and
-  /// not as one more thing drawn on the ground.
+  /// The bottom one of the stack in the world's bottom right corner; the zoom
+  /// button the world view puts up sits directly above it.
   Widget _pauseButton() => SignalBuilder(
     builder: (context) {
       final paused = game.paused.value;
       return GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: () => game.paused.value = !paused,
-        child: Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: paletteSignal.value.panel,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(
-            paused ? Icons.play_arrow : Icons.pause,
-            size: 22,
-            color: paletteSignal.value.ink,
-          ),
-        ),
+        child: mapButton(paused ? Icons.play_arrow : Icons.pause),
       );
     },
   );
@@ -5833,6 +5867,19 @@ class const ControlsPanel({
 
 // ────────────────────────────── world view ──────────────────────────────
 
+/// The face of one of the buttons stacked in the world's bottom right corner,
+/// against the map rather than the HUD line: it wears the controls' panel
+/// colour so it reads as a control and not as one more thing drawn on the
+/// ground. The caller supplies the gesture handling.
+Widget mapButton(IconData icon) => Container(
+  padding: const EdgeInsets.all(mapButtonPad),
+  decoration: BoxDecoration(
+    color: paletteSignal.value.panel,
+    borderRadius: BorderRadius.circular(8),
+  ),
+  child: Icon(icon, size: mapButtonIcon, color: paletteSignal.value.ink),
+);
+
 class const WorldView({
   super.key,
   required final Game game,
@@ -5926,11 +5973,95 @@ class _WorldViewState extends State<WorldView> {
 
   /// Drops the user's pan and seeks the followed point again. The follow point
   /// itself hasn't moved, so [_seekCam] wouldn't notice on its own — clearing
-  /// it is what asks for the new segments.
+  /// it is what asks for the new segments. Also drops any zoom button's claim
+  /// on where the camera looks — a recenter always means "follow the selected
+  /// player" again, which is what asked for it.
   void _recenter() {
     _userPan = Offset.zero;
     _camFollow = null;
+    _forcedCamTarget = null;
   }
+
+  /// Set by [_cycleZoom] when it lands on the whole-map stop, so the camera
+  /// looks at the map's center instead of following the selected player —
+  /// otherwise the player's position within the map, not the map itself,
+  /// would decide what's on screen. Cleared by any other stop, and by
+  /// [_recenter].
+  Offset? _forcedCamTarget;
+
+  /// The one way the zoom is set outside the pinch, which owns its own
+  /// clamping: everything the button does goes through here.
+  void _setZoom(Game game, double zoom) {
+    _zoom = zoom.clamp(game.zoomMin, game.zoomMax).toDouble();
+    _updateFarZoom();
+  }
+
+  /// The button's three stops, from closest in to furthest out. The last is the
+  /// whole map — as much of it as the view can hold at once — which is why
+  /// these are worked out against the live size rather than being constants:
+  /// what fits depends on the level's bounds and the shape of the screen.
+  List<double> _zoomStops(Game game, Size size) {
+    final viewShort = min(size.width, size.height);
+    final fullMap = min(
+      size.width / _worldRect.width,
+      size.height / _worldRect.height,
+    );
+    return [
+      viewShort / zoomHighSpan,
+      viewShort / zoomMediumSpan,
+      fullMap,
+    ].map((z) => z.clamp(game.zoomMin, game.zoomMax).toDouble()).toList();
+  }
+
+  /// A tap advances one step from wherever the view actually is, rather than
+  /// off a count of its own: it finds the stop closest to the current zoom —
+  /// in log space, since zoom is a ratio, not a distance — and moves to the
+  /// one after it, wrapping past the far stop back to the near one. That way a
+  /// pinch or a drag that's left the stops behind still gets a sensible next
+  /// step, wherever it landed, rather than a jump decided by which side of a
+  /// threshold it happened to be on.
+  void _cycleZoom(Game game, Size size) {
+    final stops = _zoomStops(game, size);
+    final logZoom = log(_zoom!);
+    var nearest = 0;
+    var nearestDist = double.infinity;
+    for (var i = 0; i < stops.length; i++) {
+      final dist = (log(stops[i]) - logZoom).abs();
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = i;
+      }
+    }
+    final next = (nearest + 1) % stops.length;
+    _setZoom(game, stops[next]);
+    // the last stop is however much zoom fits the whole map, so landing on it
+    // is asking to see the whole thing — centered on it, not on wherever the
+    // selected player happens to be standing within it
+    if (next == stops.length - 1) {
+      _forcedCamTarget = _worldRect.center;
+    } else {
+      _forcedCamTarget = null;
+    }
+  }
+
+  /// dy accumulated over the drag in flight, so the zoom is always a factor on
+  /// what it was when the finger went down: a drag that runs into the far end
+  /// of the range and comes back gives back exactly what it took.
+  double _zoomDragDy = 0;
+
+  Widget _zoomButton(Game game, Size size) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: () => _cycleZoom(game, size),
+    onVerticalDragStart: (_) {
+      _zoomAtGestureStart = _zoom!;
+      _zoomDragDy = 0;
+    },
+    onVerticalDragUpdate: (d) {
+      _zoomDragDy += d.primaryDelta ?? 0;
+      _setZoom(game, _zoomAtGestureStart * exp(_zoomDragDy * zoomDragPerPixel));
+    },
+    child: mapButton(Icons.zoom_out_map),
+  );
 
   void _updateFarZoom() {
     final far = _defaultZoom / _zoom! > widget.game.params.farZoomThreshold;
@@ -5957,149 +6088,159 @@ class _WorldViewState extends State<WorldView> {
         _updateFarZoom();
         // the pan is the map's; there's the HUD's back arrow for leaving
         return NoBackSwipe(
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapUp: (d) => _tapWorld(game, d.localPosition, size),
-            onScaleStart: (d) => _zoomAtGestureStart = _zoom!,
-            onScaleUpdate: (d) {
-              // both gestures amplified 3x: pans move three times as far,
-              // pinches zoom as scale cubed (about the view center for now)
-              _panCam(-d.focalPointDelta * 3 / _zoom!);
-              if (d.scale != 1) {
-                _zoom = (_zoomAtGestureStart * pow(d.scale, 3))
-                    .clamp(game.zoomMin, game.zoomMax)
-                    .toDouble();
-                _updateFarZoom();
-              }
-            },
-            child: ClipRect(
-              child: ListenableBuilder(
-                listenable: widget.frame,
-                builder: (context, _) {
-                  // the camera heads straight for the node the selected player is
-                  // moving to, rather than tracking them along the wire. While a
-                  // jump is being aimed it stops following altogether: the
-                  // player is deliberately looking somewhere else on the map,
-                  // and a camera that pulled them back to their own feet would
-                  // be arguing with them about it.
-                  final sel = game.selectedPlayer.value;
-                  final aiming = game.jumping.value != null;
-                  final wanted = game.recenterWanted.peek();
-                  if (_recenterSeen != wanted) {
-                    _recenterSeen = wanted;
-                    _recenter();
-                  }
-                  final cam = aiming
-                      ? Offset(_camX.endValue, _camY.endValue)
-                      : _seekCam(sel.traversalTarget?.pos ?? sel.worldPos());
-                  _lastCam = cam;
-                  final zoom = _zoom!;
-                  final viewCenter = size.center(Offset.zero);
-                  Offset project(Offset world) =>
-                      (world - cam) * zoom + viewCenter;
-                  final cullRect = (Offset.zero & size).inflate(
-                    nodeIconSize * 5,
-                  );
-
-                  // nodes that have been raised — walked into, or tapped for a
-                  // tooltip — are shunted to the end in the order it happened, so
-                  // they render on top of the others; global keys keep their
-                  // widget state stable across the reordering
-                  final raised =
-                      game.nodes.where((x) => x.stackRank > 0).toList()
-                        ..sort((a, b) => a.stackRank - b.stackRank);
-                  final orderedNodes = [
-                    ...game.nodes.where((x) => x.stackRank == 0),
-                    ...raised,
-                  ];
-                  final tip = game.tooltip.value;
-                  // Once the map is small enough that the badges cover the graph
-                  // they're standing on, a second copy of the graph fades in over
-                  // the top of them. Only recorded when it's going to be used.
-                  // Measured in log zoom, so the fade tracks how far out the
-                  // pinch has taken you rather than the raw scale, which spends
-                  // most of its range near the far end.
-                  final overGraphp =
-                      overGraphMaxOpacity *
-                      unlerpUnit(
-                        log(_defaultZoom),
-                        log(game.zoomMin),
-                        log(zoom),
-                      );
-                  final recording = overGraphp > 0 ? _graphRecording : null;
-                  // Everything anchored to a node goes inside one moving layer,
-                  // laid out in world units scaled by the zoom and shifted whole
-                  // by the camera. The nodes used to be positioned individually
-                  // at wherever the camera projected them, which meant a pan
-                  // moved every one of them relative to their parent, and the
-                  // [Animove]s around the badges read that as the badges moving.
-                  // Panning the container instead leaves them still inside it.
-                  final layerOrigin = project(_worldRect.topLeft);
-                  Offset inLayer(Offset world) =>
-                      (world - _worldRect.topLeft) * zoom;
-
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      CustomPaint(
-                        size: size,
-                        painter: _WorldPainter(
-                          game: game,
-                          cam: cam,
-                          zoom: zoom,
-                          viewCenter: viewCenter,
-                          recording: recording,
-                        ),
-                      ),
-                      Positioned(
-                        left: layerOrigin.dx,
-                        top: layerOrigin.dy,
-                        width: _worldRect.width * zoom,
-                        height: _worldRect.height * zoom,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            // node widgets are still culled every frame, and
-                            // still don't scale with the zoom — only their places
-                            // in the layer do
-                            for (final node in orderedNodes)
-                              if (cullRect.contains(project(node.pos)))
-                                _positioned(
-                                  inLayer(node.pos),
-                                  _contentCache[node] ??= NodeContentWidget(
-                                    game: game,
-                                    node: node,
-                                    farZoom: farZoom,
-                                  ),
-                                  key: GlobalObjectKey(node),
-                                ),
-                          ],
-                        ),
-                      ),
-                      if (recording != null)
-                        CustomPaint(
-                          size: size,
-                          painter: _OverGraphPainter(recording, overGraphp),
-                        ),
-                      // players in transit stay above the overlay: they're what
-                      // the eye is following
-                      for (final p in game.players)
-                        if (p.traversing != null &&
-                            cullRect.contains(project(p.worldPos())))
-                          _positioned(
-                            project(p.worldPos()),
-                            PlayerOrb(game, p),
-                          ),
-                      if (tip != null && cullRect.contains(project(tip.$2.pos)))
-                        _tooltipBubble(project(tip.$2.pos), tip.$3, tip.$2),
-                    ],
-                  );
-                },
+          Stack(
+            children: [
+              Positioned.fill(child: _map(game, size)),
+              // one gap above the pause button, which the screen puts at the
+              // same inset in the corner this view fills
+              Positioned(
+                right: mapButtonInset,
+                bottom: mapButtonInset + mapButtonExtent + mapButtonGap,
+                child: _zoomButton(game, size),
               ),
-            ),
+            ],
           ),
         );
       },
+    );
+  }
+
+  Widget _map(Game game, Size size) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (d) => _tapWorld(game, d.localPosition, size),
+      onScaleStart: (d) => _zoomAtGestureStart = _zoom!,
+      onScaleUpdate: (d) {
+        // both gestures amplified 3x: pans move three times as far,
+        // pinches zoom as scale cubed (about the view center for now)
+        _panCam(-d.focalPointDelta * 3 / _zoom!);
+        // a pinch or a manual pan on the map itself is the player taking the
+        // camera back from whatever the zoom button asked for
+        _forcedCamTarget = null;
+        if (d.scale != 1) {
+          _zoom = (_zoomAtGestureStart * pow(d.scale, 3))
+              .clamp(game.zoomMin, game.zoomMax)
+              .toDouble();
+          _updateFarZoom();
+        }
+      },
+      child: ClipRect(
+        child: ListenableBuilder(
+          listenable: widget.frame,
+          builder: (context, _) {
+            // the camera heads straight for the node the selected player is
+            // moving to, rather than tracking them along the wire. While a
+            // jump is being aimed it stops following altogether: the
+            // player is deliberately looking somewhere else on the map,
+            // and a camera that pulled them back to their own feet would
+            // be arguing with them about it.
+            final sel = game.selectedPlayer.value;
+            final aiming = game.jumping.value != null;
+            final wanted = game.recenterWanted.peek();
+            if (_recenterSeen != wanted) {
+              _recenterSeen = wanted;
+              _recenter();
+            }
+            final cam = aiming
+                ? Offset(_camX.endValue, _camY.endValue)
+                : _seekCam(
+                    _forcedCamTarget ??
+                        sel.traversalTarget?.pos ??
+                        sel.worldPos(),
+                  );
+            _lastCam = cam;
+            final zoom = _zoom!;
+            final viewCenter = size.center(Offset.zero);
+            Offset project(Offset world) => (world - cam) * zoom + viewCenter;
+            final cullRect = (Offset.zero & size).inflate(nodeIconSize * 5);
+
+            // nodes that have been raised — walked into, or tapped for a
+            // tooltip — are shunted to the end in the order it happened, so
+            // they render on top of the others; global keys keep their
+            // widget state stable across the reordering
+            final raised = game.nodes.where((x) => x.stackRank > 0).toList()
+              ..sort((a, b) => a.stackRank - b.stackRank);
+            final orderedNodes = [
+              ...game.nodes.where((x) => x.stackRank == 0),
+              ...raised,
+            ];
+            final tip = game.tooltip.value;
+            // Once the map is small enough that the badges cover the graph
+            // they're standing on, a second copy of the graph fades in over
+            // the top of them. Only recorded when it's going to be used.
+            // Measured in log zoom, so the fade tracks how far out the
+            // pinch has taken you rather than the raw scale, which spends
+            // most of its range near the far end.
+            final overGraphp =
+                overGraphMaxOpacity *
+                unlerpUnit(log(_defaultZoom), log(game.zoomMin), log(zoom));
+            final recording = overGraphp > 0 ? _graphRecording : null;
+            // Everything anchored to a node goes inside one moving layer,
+            // laid out in world units scaled by the zoom and shifted whole
+            // by the camera. The nodes used to be positioned individually
+            // at wherever the camera projected them, which meant a pan
+            // moved every one of them relative to their parent, and the
+            // [Animove]s around the badges read that as the badges moving.
+            // Panning the container instead leaves them still inside it.
+            final layerOrigin = project(_worldRect.topLeft);
+            Offset inLayer(Offset world) => (world - _worldRect.topLeft) * zoom;
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CustomPaint(
+                  size: size,
+                  painter: _WorldPainter(
+                    game: game,
+                    cam: cam,
+                    zoom: zoom,
+                    viewCenter: viewCenter,
+                    recording: recording,
+                  ),
+                ),
+                Positioned(
+                  left: layerOrigin.dx,
+                  top: layerOrigin.dy,
+                  width: _worldRect.width * zoom,
+                  height: _worldRect.height * zoom,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // node widgets are still culled every frame, and
+                      // still don't scale with the zoom — only their places
+                      // in the layer do
+                      for (final node in orderedNodes)
+                        if (cullRect.contains(project(node.pos)))
+                          _positioned(
+                            inLayer(node.pos),
+                            _contentCache[node] ??= NodeContentWidget(
+                              game: game,
+                              node: node,
+                              farZoom: farZoom,
+                            ),
+                            key: GlobalObjectKey(node),
+                          ),
+                    ],
+                  ),
+                ),
+                if (recording != null)
+                  CustomPaint(
+                    size: size,
+                    painter: _OverGraphPainter(recording, overGraphp),
+                  ),
+                // players in transit stay above the overlay: they're what
+                // the eye is following
+                for (final p in game.players)
+                  if (p.traversing != null &&
+                      cullRect.contains(project(p.worldPos())))
+                    _positioned(project(p.worldPos()), PlayerOrb(game, p)),
+                if (tip != null && cullRect.contains(project(tip.$2.pos)))
+                  _tooltipBubble(project(tip.$2.pos), tip.$3, tip.$2),
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -6484,11 +6625,11 @@ const Size clusterFrameSize = Size(600, 400);
 final Expando<GlobalKey> _badgeKeys = Expando('badge keys');
 GlobalKey badgeKey(Object of) => _badgeKeys[of] ??= GlobalKey();
 
-/// The facilities in a column left of the node's dot and the players present in
-/// a column right of it — but only while both are there to straddle it; alone,
-/// either sits on the dot. Straddling rather than centring one wide row keeps
-/// each side's inner edge anchored to the dot regardless of what the other side
-/// is doing. Rerenders via the playersPresent signal.
+/// The facilities packed into a block left of the node's dot and the players
+/// present in a column right of it — but only while both are there to straddle
+/// it; alone, either sits on the dot. Straddling rather than centring one wide
+/// row keeps each side's inner edge anchored to the dot regardless of what the
+/// other side is doing. Rerenders via the playersPresent signal.
 class const NodeContentWidget({
   super.key,
   required final Game game,
@@ -6504,11 +6645,7 @@ class const NodeContentWidget({
   @override
   Widget build(BuildContext context) {
     final players = node.playersPresent.value;
-    final level = players.isNotEmpty
-        ? NodeZoomLevel.selected
-        : farZoom.value
-        ? NodeZoomLevel.small
-        : NodeZoomLevel.normal;
+    final level = farZoom.value ? NodeZoomLevel.small : NodeZoomLevel.normal;
     // Every badge is wrapped in an [Animove] so that when the column
     // rearranges under it — a player arriving and shoving the facilities
     // off the dot, a badge changing width as the zoom level changes what
@@ -6522,22 +6659,23 @@ class const NodeContentWidget({
       for (final f in node.facilities)
         Animove(key: badgeKey(f), child: f.badge(game, level)),
     ];
-    final facilityColumn = facilityBadges.isEmpty
+    // Packed rather than stacked in a column: badge widths vary by a lot —
+    // a landing station is one icon wide and a stocked trader is a row of
+    // half a dozen — so a column of them is as wide as the widest badge, as
+    // tall as all of them put together, and mostly empty. [PackedBox] fits
+    // them into the smallest roughly-square box it can find instead, which
+    // for a node carrying more than two facilities is a fraction of the area.
+    //
+    // Right-aligned while a player column is beside it, so the badges' right
+    // edges line up on the dot and the ragged edge faces away from it; with
+    // the node to themselves the whole box is centred on the dot anyway, so
+    // the packer's own left-alignment is the tidier way round.
+    final facilityCluster = facilityBadges.isEmpty
         ? null
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            // badges of unequal width line their right edges up on the dot
-            // while they're beside a player column, but stack centred on it
-            // once they have the node to themselves
-            crossAxisAlignment: players.isEmpty
-                ? CrossAxisAlignment.center
-                : CrossAxisAlignment.end,
-            children: [
-              for (var i = 0; i < facilityBadges.length; i++) ...[
-                if (i > 0) const SizedBox(height: 2),
-                facilityBadges[i],
-              ],
-            ],
+        : PackedBox(
+            gap: 2,
+            rightAligned: players.isNotEmpty,
+            children: facilityBadges,
           );
     final playerColumn = players.isEmpty
         ? null
@@ -6564,8 +6702,8 @@ class const NodeContentWidget({
     // wide the other one came out — and unlike translating the halves out
     // of place, everything stays inside the stack, where taps still reach
     // it.
-    final content = facilityColumn == null || playerColumn == null
-        ? facilityColumn ?? playerColumn ?? const SizedBox.shrink()
+    final content = facilityCluster == null || playerColumn == null
+        ? facilityCluster ?? playerColumn ?? const SizedBox.shrink()
         : Stack(
             clipBehavior: Clip.none,
             alignment: Alignment.center,
@@ -6575,7 +6713,7 @@ class const NodeContentWidget({
                 widthFactor: 2,
                 child: Padding(
                   padding: const EdgeInsets.only(right: _nodeSplitGap),
-                  child: facilityColumn,
+                  child: facilityCluster,
                 ),
               ),
               Align(

@@ -5341,6 +5341,286 @@ class _RenderTaperedAlign({
   }
 }
 
+// ──────────────────────────── rectangle packing ────────────────────────────
+
+/// Sub-pixel slack, so that two edges that arithmetic put a hair apart still
+/// count as meeting.
+const double _packSlop = 0.01;
+
+/// One run of the packing skyline: everything above [top] over the horizontal
+/// span `[start, end)` is free.
+typedef _SkyRun = (double start, double end, double top);
+
+/// Where each of [sizes] goes when they're packed into one rectangle, and how
+/// big that rectangle came out. [gap] is left between neighbours (never around
+/// the outside), and [rightAligned] flips the result so the ragged edge is on
+/// the left and the parts line up against the box's right edge.
+///
+/// Bottom-left skyline packing — tallest part first, each one dropping into
+/// the lowest place it fits — run once for every width worth trying, keeping
+/// whichever result has the shortest diagonal. Skyline packing is what makes a
+/// short part able to sit beside a tall one rather than under it; the width
+/// sweep is what decides how many rows deep the thing ends up, which a single
+/// pass can't, since it has to be told a width before it starts.
+///
+/// The diagonal, and not the area, because what a cluster costs is its *reach*
+/// — how far it gets from the point it's centred on, which is what runs it into
+/// whatever is drawn around it. The space left empty inside it costs nothing:
+/// nothing is painted there. So the measure is the radius of the circle the
+/// box fits in, and the corner is the furthest point of a box from its middle.
+///
+/// It also happens to be the score that needs no tie-breaking. The area can't
+/// decide anything at all when the parts are the same height — n equal-height
+/// parts in one row, two rows or three cover the same area every time, so every
+/// arrangement ties — and worse, it's indifferent to which way round a box is,
+/// so it'll gladly stick one more part on the end of an already long row. The
+/// diagonal charges for that: the long side is the dominant term, so growing it
+/// costs more than growing the short one, right up until the two are even.
+///
+/// Not optimal — optimal rectangle packing is NP-hard — but the candidate
+/// widths cover every arrangement that's plausibly the best one, so for the
+/// handful of parts a cluster holds it lands on a good packing in practice.
+(List<Offset> offsets, Size size) packRects(
+  List<Size> sizes, {
+  double gap = 0,
+  bool rightAligned = false,
+}) {
+  if (sizes.isEmpty) return (const [], Size.zero);
+
+  // Every part carries its own gutter — one gap on its right and one below —
+  // so the packer itself never has to think about spacing. The box it hands
+  // back is then a gap wider and taller than the cluster really is, since the
+  // parts along the far edges brought gutters that nothing sits in.
+  final boxes = [for (final s in sizes) Size(s.width + gap, s.height + gap)];
+
+  // Tallest first, widest among equals: the parts that are hardest to place
+  // get their pick while the skyline is still flat, and the short ones left
+  // over are the ones that can fill in whatever notches that left behind.
+  final order = List.generate(sizes.length, (i) => i)
+    ..sort((a, b) {
+      final byHeight = boxes[b].height.compareTo(boxes[a].height);
+      if (byHeight != 0) return byHeight;
+      final byWidth = boxes[b].width.compareTo(boxes[a].width);
+      return byWidth != 0 ? byWidth : a.compareTo(b);
+    });
+
+  var totalWidth = 0.0, widest = 0.0;
+  for (final b in boxes) {
+    totalWidth += b.width;
+    widest = max(widest, b.width);
+  }
+  // The widths worth trying. Two families: a row's worth split k ways, which
+  // is the width that asks for an arrangement about k rows deep; and every
+  // prefix of the packing order, which are the widths at which the first row's
+  // break point moves — the packing only changes at those, so sweeping evenly
+  // spaced widths instead would both miss some and try the same result twice.
+  // Nothing narrower than the widest part is worth trying, or can even hold
+  // it. A [Set] because the two families overlap heavily.
+  final limits = <double>{
+    widest,
+    for (var k = 1; k <= boxes.length; k++) max(widest, totalWidth / k),
+  };
+  var prefix = 0.0;
+  for (final i in order) {
+    prefix += boxes[i].width;
+    limits.add(max(widest, prefix));
+  }
+
+  List<Offset> best = const [];
+  var bestSize = Size.zero;
+  var bestScore = double.infinity;
+  // Ascending, and ties go to the incumbent, so the narrowest width that
+  // achieves the best packing wins — the wider ones only had slack left over.
+  for (final limit in limits.toList()..sort()) {
+    final (offsets, packed) = _packInto(boxes, order, limit);
+    final w = max(0.0, packed.width - gap), h = max(0.0, packed.height - gap);
+    // the diagonal, squared — the root is monotonic, so it'd only cost time
+    final score = w * w + h * h;
+    if (score < bestScore) {
+      bestScore = score;
+      best = offsets;
+      bestSize = Size(w, h);
+    }
+  }
+
+  if (!rightAligned) return (best, bestSize);
+  return (
+    [
+      for (var i = 0; i < sizes.length; i++)
+        Offset(bestSize.width - best[i].dx - sizes[i].width, best[i].dy),
+    ],
+    bestSize,
+  );
+}
+
+/// One packing pass into a strip [limit] wide, taking [boxes] in [order]: each
+/// one drops into the lowest place it fits, leftmost among ties. Returns the
+/// offsets (indexed as [boxes] is, not as [order] is) and the bounding box.
+(List<Offset>, Size) _packInto(
+  List<Size> boxes,
+  List<int> order,
+  double limit,
+) {
+  var sky = <_SkyRun>[(0.0, limit, 0.0)];
+  final offsets = List.filled(boxes.length, Offset.zero);
+  var right = 0.0, bottom = 0.0;
+  for (final i in order) {
+    final b = boxes[i];
+    // Seeded with the left edge rather than starting from nothing: a run's
+    // left edge is the only place worth landing on (anywhere further right
+    // within the same run is the same height but wastes the space to its
+    // left), and seeding with x = 0 means a part too wide for the strip still
+    // gets placed instead of falling off the end of the search.
+    var bestX = 0.0;
+    var bestY = _skyTop(sky, 0, b.width);
+    for (final (start, _, _) in sky) {
+      if (start + b.width > limit + _packSlop) continue;
+      final y = _skyTop(sky, start, start + b.width);
+      if (y < bestY - _packSlop) {
+        bestX = start;
+        bestY = y;
+      }
+    }
+    offsets[i] = Offset(bestX, bestY);
+    sky = _skyRaise(sky, bestX, bestX + b.width, bestY + b.height);
+    right = max(right, bestX + b.width);
+    bottom = max(bottom, bestY + b.height);
+  }
+  return (offsets, Size(right, bottom));
+}
+
+/// The highest the skyline reaches anywhere under `[from, to)` — where a part
+/// spanning that much width would have to sit.
+double _skyTop(List<_SkyRun> sky, double from, double to) {
+  var top = 0.0;
+  for (final (start, end, runTop) in sky) {
+    final overlaps = end > from + _packSlop && start < to - _packSlop;
+    if (overlaps) top = max(top, runTop);
+  }
+  return top;
+}
+
+/// The skyline with `[from, to)` raised to [top], the rest left as it was.
+List<_SkyRun> _skyRaise(List<_SkyRun> sky, double from, double to, double top) {
+  final out = <_SkyRun>[];
+  for (final (start, end, runTop) in sky) {
+    if (end <= from || start >= to) {
+      out.add((start, end, runTop));
+      continue;
+    }
+    // the parts of this run the new one doesn't cover survive at their own
+    // height; the covered middle is gone
+    if (start < from) out.add((start, from, runTop));
+    if (end > to) out.add((to, end, runTop));
+  }
+  out.add((from, to, top));
+  return out..sort((a, b) => a.$1.compareTo(b.$1));
+}
+
+/// Lays its children out packed into one rectangle — see [packRects] — kept as
+/// small and as close to square as the packer can manage, instead of in a line.
+/// For a set of things whose widths vary a lot, where a column comes out as
+/// wide as the widest of them and as tall as all of them put together, and most
+/// of the box is empty.
+///
+/// Shrink-wraps: the size is whatever the packing came to, constrained.
+class const PackedBox({
+  super.key,
+
+  /// space between neighbouring children, and nowhere else
+  final double gap = 0,
+
+  /// pack against the right edge — the children's right edges line up on the
+  /// box's, and the ragged edge is the left one
+  final bool rightAligned = false,
+  required super.children,
+}) extends MultiChildRenderObjectWidget {
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderPackedBox(gap: gap, rightAligned: rightAligned);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderObject renderObject) {
+    (renderObject as _RenderPackedBox)
+      ..gap = gap
+      ..rightAligned = rightAligned;
+  }
+}
+
+class _PackedParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderPackedBox({required this._gap, required this._rightAligned})
+    extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _PackedParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _PackedParentData> {
+  double get gap => _gap;
+  double _gap;
+  set gap(double value) {
+    if (value == _gap) {
+      return;
+    }
+    _gap = value;
+    markNeedsLayout();
+  }
+
+  bool get rightAligned => _rightAligned;
+  bool _rightAligned;
+  set rightAligned(bool value) {
+    if (value == _rightAligned) {
+      return;
+    }
+    _rightAligned = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _PackedParentData) {
+      child.parentData = _PackedParentData();
+    }
+  }
+
+  @override
+  @protected
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final inner = constraints.loosen();
+    final sizes = <Size>[];
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      sizes.add(child.getDryLayout(inner));
+    }
+    return constraints.constrain(packRects(sizes, gap: _gap).$2);
+  }
+
+  @override
+  void performLayout() {
+    final inner = constraints.loosen();
+    final sizes = <Size>[];
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      child.layout(inner, parentUsesSize: true);
+      sizes.add(child.size);
+    }
+    final (offsets, packed) = packRects(
+      sizes,
+      gap: _gap,
+      rightAligned: _rightAligned,
+    );
+    var i = 0;
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      (child.parentData! as _PackedParentData).offset = offsets[i++];
+    }
+    size = constraints.constrain(packed);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
+}
+
 /// Tells a child what each of its edges abuts inside the enclosing
 /// [EvenPadColumn]/[EvenPadRow], plus the flex's `padEdge`/`padSibling`
 /// amounts. Each edge either abuts the flex's outer edge (`true`) or a
