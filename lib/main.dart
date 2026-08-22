@@ -912,17 +912,26 @@ class TimerHolm {
   }
 }
 
+/// Puts the whole timercule [ki] belongs to back to its start, not just [ki].
+///
+/// A member has no run of its own to rewind: where the structure stands is the
+/// composite's startTime, and rewinding one member while the composite runs on
+/// leaves that startTime describing a run that never happened — which the next
+/// [fastForwardTimer] faithfully restores, undoing the reset. — Opus 5
 void resetTimer(MobjID ki) {
-  final mobj = Mobj.getAlreadyLoaded(ki, TimerDataType());
+  _resetSubtree(rootTimer(Mobj.getAlreadyLoaded(ki, TimerDataType())));
+}
+
+void _resetSubtree(Mobj<TimerData> mobj) {
   mobj.value = mobj.peek()!.withChanges(
     ranTime: Duration.zero,
     runningState: TimerData.completed,
     startTime: DateTime.now(),
     completedRecently: false,
   );
-  // also reset children
   for (final childId in mobj.peek()!.children) {
-    resetTimer(childId);
+    final child = Mobj.seekTypedAlreadyLoaded(childId, TimerDataType());
+    if (child != null) _resetSubtree(child);
   }
 }
 
@@ -1041,7 +1050,13 @@ void _fastForwardSequence(TimerData parent, double pos, DateTime to) {
     final cd = child?.peek();
     if (child == null || cd == null) continue;
     if (placed) {
-      child.value = cd.withChanges(runningState: TimerData.paused);
+      // only the ones still claiming to run need shutting off; leaving the rest
+      // alone keeps them completed, which is what a member not yet reached this
+      // pass looks like. Marking them paused meant several members claiming to
+      // be the resume point, and [_startChildren]'s scan takes the last one it
+      // sees — so a pause and play after a resume jumped to the end of the
+      // cycle. — Opus 5
+      if (cd.isRunning) child.value = _completed(cd);
     } else {
       final td = totalDuration(cd);
       if (remaining < td) {
