@@ -1,4 +1,5 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/database.dart';
@@ -373,22 +374,26 @@ class _CrankGameScreenState extends State<CrankGameScreen>
           Positioned(
             left: dialCenterX - outerDiameter / 2,
             bottom: dialCenterY - outerDiameter / 2,
-            child: GestureDetector(
-              onPanStart: _onPanStart,
-              onPanUpdate: (details) =>
-                  _onPanUpdate(details, dialCenter, outerDiameter / 2),
-              onPanEnd: _onPanEnd,
-              child: SizedBox(
-                width: outerDiameter,
-                height: outerDiameter,
-                child: CustomPaint(
-                  painter: _CrankDialPainter(
-                    angle: _crankAngle,
-                    outerDiameter: outerDiameter,
-                    innerDiameter: innerDiameter,
-                    backgroundColor: theme.colorScheme.surfaceContainerLow,
-                    surfaceColor: theme.colorScheme.surfaceContainerHighest,
-                    isDragging: _isDragging,
+            // cranking sweeps sideways as often as not, and the page's back
+            // swipe would take it
+            child: NoBackSwipe(
+              GestureDetector(
+                onPanStart: _onPanStart,
+                onPanUpdate: (details) =>
+                    _onPanUpdate(details, dialCenter, outerDiameter / 2),
+                onPanEnd: _onPanEnd,
+                child: SizedBox(
+                  width: outerDiameter,
+                  height: outerDiameter,
+                  child: CustomPaint(
+                    painter: _CrankDialPainter(
+                      angle: _crankAngle,
+                      outerDiameter: outerDiameter,
+                      innerDiameter: innerDiameter,
+                      backgroundColor: theme.colorScheme.surfaceContainerLow,
+                      surfaceColor: theme.colorScheme.surfaceContainerHighest,
+                      isDragging: _isDragging,
+                    ),
                   ),
                 ),
               ),

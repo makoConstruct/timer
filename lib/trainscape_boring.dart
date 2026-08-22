@@ -48,12 +48,16 @@ double rangeIn(GameRng rng, double low, double high) =>
     low + rng.nextDouble() * (high - low);
 
 /// log-distributed int in [low, high]
-int logUniformInt(GameRng rng, int low, int high) => exp(
-  rangeIn(rng, log(low.toDouble()), log(high.toDouble())),
-).round().clamp(low, high);
+int logUniformInt(GameRng rng, int low, int high) =>
+    exp(rangeIn(rng, log(low.toDouble()), log(high.toDouble())))
+        .round()
+        .clamp(low, high);
 
-/// durations are whole seconds throughout
-double roundToSecond(double v) => v.roundToDouble();
+/// Rolled durations land on a whole game minute. A game second is far finer
+/// than anything the player can perceive or that a readout shows, so leaving
+/// them unquantised would only mean two nominally identical traders resting
+/// for imperceptibly different spans.
+double roundToMinute(double v) => (v / gameMinute).roundToDouble() * gameMinute;
 
 T weightedPick<T>(GameRng rng, List<(double, T)> options) {
   final total = options.fold(0.0, (a, o) => a + o.$1);
@@ -119,20 +123,20 @@ List<int> apportionCounts(List<double> weights, int total) {
 String fmt1(double v) =>
     v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
-/// seconds are never shown with a fraction — round up so a real span never
-/// reads as 0s
-String fmtSec(double v) => v.ceil().toString();
-
-String fmtClock(double s) {
-  final t = s.ceil();
-  return '${t ~/ 60}:${(t % 60).toString().padLeft(2, '0')}';
+/// A span of game time, in whichever of the game's units carries it: minutes
+/// under an hour, hours under a day, days above that. Never rounds down to
+/// nothing — a real span that reads as zero is indistinguishable from no span
+/// at all.
+String fmtSpan(double t) {
+  final mins = max(1, (t / gameMinute).ceil());
+  if (mins < 60) return '${mins}m';
+  String rounded(double v) => fmt1((v * 10).roundToDouble() / 10);
+  return t < gameDay ? '${rounded(t / gameHour)}h' : '${rounded(t / gameDay)}d';
 }
 
-/// a moment in the day as a 24-hour clock time — the whole day maps onto the
-/// whole clock face
-String fmtTimeOfDay(double secondsIntoDay, double dayLength) {
-  final frac = (secondsIntoDay / dayLength) % 1;
-  final mins = (frac * 24 * 60).floor();
+/// a moment in the day as a 24-hour clock time
+String fmtTimeOfDay(double t) {
+  final mins = ((t % gameDay) / gameMinute).floor();
   return '${mins ~/ 60}:${(mins % 60).toString().padLeft(2, '0')}';
 }
 
@@ -402,7 +406,6 @@ class IntervalType extends TypeHelp<Interval> {
     final j = _jsonMap(json, 'Interval');
     if (StringType().fromJson(j['kind']) == 'clock') {
       return ClockInterval(
-        dayLength: DoubleType().fromJson(j['dayLength']),
         multiple: IntType().fromJson(j['multiple']),
         division: IntType().fromJson(j['division']),
         offset: DoubleType().fromJson(j['offset']),
@@ -416,7 +419,6 @@ class IntervalType extends TypeHelp<Interval> {
   Object? toJsonValue(Interval object) => switch (object) {
     ClockInterval c => {
       'kind': 'clock',
-      'dayLength': c.dayLength,
       'multiple': c.multiple,
       'division': c.division,
       'offset': c.offset,
@@ -447,9 +449,7 @@ class ParametersType extends TypeHelp<Parameters> {
       seed: IntType().fromJson(j['seed']),
       globalTime: DoubleType().fromJson(j['globalTime']),
       eudaimoniaGoal: IntType().fromJson(j['eudaimoniaGoal']),
-      dayLength: DoubleType().fromJson(j['dayLength']),
-      facilityDayOnlyp: DoubleType().fromJson(j['facilityDayOnlyp']),
-      muggerNightOnlyp: DoubleType().fromJson(j['muggerNightOnlyp']),
+      dayRealSeconds: DoubleType().fromJson(j['dayRealSeconds']),
       nPlayers: IntType().fromJson(j['nPlayers']),
       inventoryCap: IntType().fromJson(j['inventoryCap']),
       playerSpeed: DoubleType().fromJson(j['playerSpeed']),
@@ -474,12 +474,14 @@ class ParametersType extends TypeHelp<Parameters> {
       ),
       iconGridPlacementBigp: DoubleType().fromJson(j['iconGridPlacementBigp']),
       farZoomThreshold: DoubleType().fromJson(j['farZoomThreshold']),
-      bucketSizeWeights: ListType(DoubleType()).fromJson(j['bucketSizeWeights']),
+      bucketSizeWeights: ListType(DoubleType())
+          .fromJson(j['bucketSizeWeights']),
       nonTraderWeights: MapType(
         _facilityKindType,
         DoubleType(),
       ).fromJson(j['nonTraderWeights']),
-      nodeToneWeights: weightsType(_nodeToneType).fromJson(j['nodeToneWeights']),
+      nodeToneWeights: weightsType(_nodeToneType)
+          .fromJson(j['nodeToneWeights']),
       treeRegenTime: DoubleType().fromJson(j['treeRegenTime']),
       treeClockIntervalp: DoubleType().fromJson(j['treeClockIntervalp']),
       treeSecondItemProb: DoubleType().fromJson(j['treeSecondItemProb']),
@@ -495,14 +497,28 @@ class ParametersType extends TypeHelp<Parameters> {
         DoubleType(),
       ).fromJson(j['traderCooldownRange']),
       muggerIncapTime: DoubleType().fromJson(j['muggerIncapTime']),
-      muggerKindWeights: weightsType(
-        _muggerKindType,
-      ).fromJson(j['muggerKindWeights']),
+      muggerKindWeights: weightsType(_muggerKindType)
+          .fromJson(j['muggerKindWeights']),
       storageCapacityRange: PairType(
         IntType(),
         IntType(),
       ).fromJson(j['storageCapacityRange']),
       storageSecurep: DoubleType().fromJson(j['storageSecurep']),
+      outboxCapacityRange: PairType(
+        IntType(),
+        IntType(),
+      ).fromJson(j['outboxCapacityRange']),
+      inboxActivationProb: DoubleType().fromJson(j['inboxActivationProb']),
+      inboxActivationConsumedProb: DoubleType().fromJson(
+        j['inboxActivationConsumedProb'],
+      ),
+      jumpFreeAimp: DoubleType().fromJson(j['jumpFreeAimp']),
+      jumpCostItemp: DoubleType().fromJson(j['jumpCostItemp']),
+      jumpCooldownp: DoubleType().fromJson(j['jumpCooldownp']),
+      jumpCooldownRange: PairType(
+        DoubleType(),
+        DoubleType(),
+      ).fromJson(j['jumpCooldownRange']),
       blightRadii: ListType(DoubleType()).fromJson(j['blightRadii']),
       blightMitigablep: DoubleType().fromJson(j['blightMitigablep']),
       blightHungryp: DoubleType().fromJson(j['blightHungryp']),
@@ -516,9 +532,8 @@ class ParametersType extends TypeHelp<Parameters> {
         _trainSpeedType,
         DoubleType(),
       ).fromJson(j['trainSpeedUnitsPerSec']),
-      trainSpeedWeights: weightsType(
-        _trainSpeedType,
-      ).fromJson(j['trainSpeedWeights']),
+      trainSpeedWeights: weightsType(_trainSpeedType)
+          .fromJson(j['trainSpeedWeights']),
       trainActivationProb: DoubleType().fromJson(j['trainActivationProb']),
       trainActivationConsumedProb: DoubleType().fromJson(
         j['trainActivationConsumedProb'],
@@ -526,16 +541,13 @@ class ParametersType extends TypeHelp<Parameters> {
       trainActivationTwoProb: DoubleType().fromJson(
         j['trainActivationTwoProb'],
       ),
-      scheduleDistribution: weightsType(
-        _trainScheduleKindType,
-      ).fromJson(j['scheduleDistribution']),
-      trainCycleDivisions: ListType(
-        IntType(),
-      ).fromJson(j['trainCycleDivisions']),
+      scheduleDistribution: weightsType(_trainScheduleKindType)
+          .fromJson(j['scheduleDistribution']),
+      trainCycleDivisions: ListType(IntType())
+          .fromJson(j['trainCycleDivisions']),
       movableFromInsideProb: DoubleType().fromJson(j['movableFromInsideProb']),
-      stationControlWeights: weightsType(
-        _stationControlType,
-      ).fromJson(j['stationControlWeights']),
+      stationControlWeights: weightsType(_stationControlType)
+          .fromJson(j['stationControlWeights']),
       trainTerminusDistance: DoubleType().fromJson(j['trainTerminusDistance']),
       oneWayReturnDelay: DoubleType().fromJson(j['oneWayReturnDelay']),
     );
@@ -546,9 +558,7 @@ class ParametersType extends TypeHelp<Parameters> {
     'seed': p.seed,
     'globalTime': p.globalTime,
     'eudaimoniaGoal': p.eudaimoniaGoal,
-    'dayLength': p.dayLength,
-    'facilityDayOnlyp': p.facilityDayOnlyp,
-    'muggerNightOnlyp': p.muggerNightOnlyp,
+    'dayRealSeconds': p.dayRealSeconds,
     'nPlayers': p.nPlayers,
     'inventoryCap': p.inventoryCap,
     'playerSpeed': p.playerSpeed,
@@ -589,41 +599,47 @@ class ParametersType extends TypeHelp<Parameters> {
       DoubleType(),
     ).toJson(p.traderCooldownRange),
     'muggerIncapTime': p.muggerIncapTime,
-    'muggerKindWeights': weightsType(
-      _muggerKindType,
-    ).toJson(p.muggerKindWeights),
+    'muggerKindWeights': weightsType(_muggerKindType)
+        .toJson(p.muggerKindWeights),
     'storageCapacityRange': PairType(
       IntType(),
       IntType(),
     ).toJson(p.storageCapacityRange),
     'storageSecurep': p.storageSecurep,
+    'outboxCapacityRange': PairType(
+      IntType(),
+      IntType(),
+    ).toJson(p.outboxCapacityRange),
+    'inboxActivationProb': p.inboxActivationProb,
+    'inboxActivationConsumedProb': p.inboxActivationConsumedProb,
+    'jumpFreeAimp': p.jumpFreeAimp,
+    'jumpCostItemp': p.jumpCostItemp,
+    'jumpCooldownp': p.jumpCooldownp,
+    'jumpCooldownRange': PairType(
+      DoubleType(),
+      DoubleType(),
+    ).toJson(p.jumpCooldownRange),
     'blightRadii': p.blightRadii,
     'blightMitigablep': p.blightMitigablep,
     'blightHungryp': p.blightHungryp,
-    'blightDaysRange': PairType(
-      IntType(),
-      IntType(),
-    ).toJson(p.blightDaysRange),
+    'blightDaysRange': PairType(IntType(), IntType()).toJson(p.blightDaysRange),
     'nTrains': p.nTrains,
     'stationsPerTrain': p.stationsPerTrain,
     'trainSpeedUnitsPerSec': MapType(
       _trainSpeedType,
       DoubleType(),
     ).toJson(p.trainSpeedUnitsPerSec),
-    'trainSpeedWeights': weightsType(
-      _trainSpeedType,
-    ).toJson(p.trainSpeedWeights),
+    'trainSpeedWeights': weightsType(_trainSpeedType)
+        .toJson(p.trainSpeedWeights),
     'trainActivationProb': p.trainActivationProb,
     'trainActivationConsumedProb': p.trainActivationConsumedProb,
     'trainActivationTwoProb': p.trainActivationTwoProb,
-    'scheduleDistribution': weightsType(
-      _trainScheduleKindType,
-    ).toJson(p.scheduleDistribution),
+    'scheduleDistribution': weightsType(_trainScheduleKindType)
+        .toJson(p.scheduleDistribution),
     'trainCycleDivisions': p.trainCycleDivisions,
     'movableFromInsideProb': p.movableFromInsideProb,
-    'stationControlWeights': weightsType(
-      _stationControlType,
-    ).toJson(p.stationControlWeights),
+    'stationControlWeights': weightsType(_stationControlType)
+        .toJson(p.stationControlWeights),
     'trainTerminusDistance': p.trainTerminusDistance,
     'oneWayReturnDelay': p.oneWayReturnDelay,
   };
@@ -680,6 +696,13 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
       ),
       FacilityKind.storage => _storage(j),
       FacilityKind.blight => _blight(j),
+      FacilityKind.outbox => _outbox(j),
+      FacilityKind.inbox => Inbox(
+        activation: Nullable(refs.quantity).fromJson(j['activation']),
+        activationConsumed: BoolType().fromJson(j['activationConsumed']),
+      ),
+      FacilityKind.jumpStation => _jumpStation(j),
+      FacilityKind.landingStation => LandingStation(),
     };
     f.activePhase = _activePhaseType.fromJson(j['activePhase']);
     return f;
@@ -707,16 +730,27 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
         ..duration = DoubleType().fromJson(j['duration'])
         ..cooldown = DoubleType().fromJson(j['cooldown'])
         ..workRemaining.value = DoubleType().fromJson(j['workRemaining'])
-        ..cooldownRemaining.value = DoubleType().fromJson(j['cooldownRemaining'])
-        ..pendingOutput.value = ListType(
-          refs.quantity,
-        ).fromJson(j['pendingOutput']);
+        ..cooldownRemaining.value = DoubleType().fromJson(
+          j['cooldownRemaining'],
+        )
+        ..pendingOutput.value = ListType(refs.quantity)
+            .fromJson(j['pendingOutput']);
 
-  Storage _storage(Map<String, dynamic> j) =>
-      Storage(
-        IntType().fromJson(j['capacity']),
-        secured: BoolType().fromJson(j['secured']),
-      )..contents.value = ListType(refs.item).fromJson(j['contents']);
+  Storage _storage(Map<String, dynamic> j) => Storage(
+    IntType().fromJson(j['capacity']),
+    secured: BoolType().fromJson(j['secured']),
+  )..contents.value = ListType(refs.item).fromJson(j['contents']);
+
+  Outbox _outbox(Map<String, dynamic> j) => Outbox(
+    IntType().fromJson(j['capacity']),
+    secured: BoolType().fromJson(j['secured']),
+  )..contents.value = ListType(refs.item).fromJson(j['contents']);
+
+  JumpStation _jumpStation(Map<String, dynamic> j) => JumpStation(
+    freeAim: BoolType().fromJson(j['freeAim']),
+    cost: Nullable(refs.quantity).fromJson(j['cost']),
+    cooldown: DoubleType().fromJson(j['cooldown']),
+  )..cooldownRemaining.value = DoubleType().fromJson(j['cooldownRemaining']);
 
   Blight _blight(Map<String, dynamic> j) =>
       Blight(
@@ -764,12 +798,34 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
       'item': refs.item.toJson(m.item),
       'muggerKind': _muggerKindType.toJson(m.kind),
     },
+    // before Storage: an outbox is one, as far as the type system and every
+    // storage flow in the game are concerned, and the first matching pattern
+    // is the one that writes it down
+    Outbox o => {
+      ..._head(f, FacilityKind.outbox),
+      'capacity': o.capacity,
+      'secured': o.secured,
+      'contents': ListType(refs.item).toJson(o.contents.peek()),
+    },
     Storage s => {
       ..._head(f, FacilityKind.storage),
       'capacity': s.capacity,
       'secured': s.secured,
       'contents': ListType(refs.item).toJson(s.contents.peek()),
     },
+    Inbox i => {
+      ..._head(f, FacilityKind.inbox),
+      'activation': Nullable(refs.quantity).toJson(i.activation),
+      'activationConsumed': i.activationConsumed,
+    },
+    JumpStation js => {
+      ..._head(f, FacilityKind.jumpStation),
+      'freeAim': js.freeAim,
+      'cost': Nullable(refs.quantity).toJson(js.cost),
+      'cooldown': js.cooldown,
+      'cooldownRemaining': js.cooldownRemaining.peek(),
+    },
+    LandingStation _ => _head(f, FacilityKind.landingStation),
     Blight b => {
       ..._head(f, FacilityKind.blight),
       'radius': b.radius,
@@ -886,9 +942,7 @@ class NodeType(final LevelRefs refs) extends TypeHelp<Node> {
     'tone': _nodeToneType.toJson(n.tone),
     'tint': ColorType().toJson(n.tint),
     'stackRank': n.stackRank,
-    'facilities': [
-      for (final f in n.facilities) FacilityType(refs).toJson(f),
-    ],
+    'facilities': [for (final f in n.facilities) FacilityType(refs).toJson(f)],
     if (n is TrainNode) 'train': _trainToJson(n),
   };
 
@@ -989,7 +1043,7 @@ class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
 /// read as though it were this one — a mismatch simply means no saved level,
 /// and a fresh one is generated. Bump it whenever the shape below changes.
 class LevelType extends TypeHelp<Game> {
-  LevelType() : super('trainscapeLevel/1');
+  LevelType() : super('trainscapeLevel/4');
 
   @override
   Game fromJsonValue(Object? json) {
@@ -1058,11 +1112,10 @@ class LevelType extends TypeHelp<Game> {
     game.eudaimonia.value = IntType().fromJson(j['eudaimonia']);
     game.paused.value = BoolType().fromJson(j['paused']);
     game.phase.value = _gamePhaseType.fromJson(j['phase']);
-    game.selectedPlayer.value = players[IntType().fromJson(j['selectedPlayer'])];
+    game.selectedPlayer.value =
+        players[IntType().fromJson(j['selectedPlayer'])];
     game._stackTop = IntType().fromJson(j['stackTop']);
-    // set rather than let the first update() notice the change, which would
-    // announce a nightfall that happened before the game was ever put down
-    game.isNight.value = game.timeOfDay >= params.dayLength / 2;
+    game.isNight.value = game.timeOfDay >= gameDay / 2;
     return game;
   }
 

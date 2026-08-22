@@ -16,9 +16,7 @@ Actions also include the functionality of the local graph node that they're curr
 
 day and night
 	The level runs on a day cycle of dayLength. The first half of each day is day, the second half is night — night turns to day halfway through the day.
-	Night mode affects all UIs: the whole game is drawn in a night colour scheme, written separately from the day one rather than derived from it by inverting lightness — the dark scheme wants its own contrast, its surfaces lifted clear of the ground instead of held at the day's distance from it, and its blight red washed out less far. Item colours are the exception and don't change: an item is known by its colour.
-	Briefly show NIGHT HAS FALLEN or DAY HAS RISEN when the night/day signal changes.
-	Facilities may only keep half the day. Day-only facilities (at facilityDayOnlyp) have a small day icon, top-aligned, before their main icon, kept visible even in the zoomed out mode. Night-only facilities (muggers, at muggerNightOnlyp) similarly have a small night icon, bottom-aligned. The marker sits inside the badge's own icon flow rather than hanging off the side of it, and it's never faded. The facility's tooltip says the same thing in words ("only active at night"), since the marker is a few pixels of silhouette and the tooltip is where a player goes to find out what it meant. Out of hours the facility's icons fade; the lozenge under them doesn't move, since it's the node's colour and a facility keeping different hours doesn't put it on a different node. The fade is mild enough to still read at a glance. A facility that's out of hours does nothing and offers no actions.
+	We mostly don't use this though. Having facilities only be active half of the time would mean that half of the player's knowledge wouldn't be actionable half of the time, which is bad for gameplay.
 
 time intervals
 	Intervals come in two types.
@@ -49,15 +47,12 @@ things in the world:
 				If they take the item, it should be a pretty basic item, unless it's a fast or very fast train, in which case it may be a medium icon
 				append the item's icon if it has a cost
 			trains can be slow (append s), regular (r), fast (f), or very fast (i)
-			trains may move automatically
-				render: if it's auto-reverse, append 'sc(o)', if it's cycle 'sc(<number of seconds>)'
-				cycle trains run on a division clock interval, and show a countdown pie to their next departure
 			otherwise, most can be moved from the inside, render: append Icons.swipe_right_alt
 	trees produce a first or second tier item or two. After harvesting, their item regenerates on an interval — some of them an arbitrary interval running from the moment they were picked, the rest a daily clock interval, so they come back at their own time of day however long ago they were picked. Once a day, not several: dividing the day up further was more schedule than the player could hold.
 		render: Icons.local_florist <items generated>
 	mugger/toll/threat nodes that require an item to enter or else they take everything the character is carrying
 		they may or may not take that item, or they may take a different, unrelated item if you have it
-		render: Icons.savings then explanation of the items it takes or requires, c<item> if it takes that item without requiring it (nonthreatening), r<item> (requiring without taking),  rc<item> (requiring and costing the same thing)
+		render: Icons.savings then explanation of the items it takes or requires, r<item> (requiring without taking),  rc<item> (requiring and costing the same thing)
 			it should pulse red when it strikes — including when it's only taking its toll off someone who was never at risk of the robbery, since an item leaving the inventory with no red anywhere is indistinguishable from a bug
 			say MUGGED
 	blights, a danger icon casting a wide dashed circle onto the map around it. The circle is thick and opaque, in the blight's red washed most of the way out to the world background color (blightWash), and the blight's own node gets a filled disc of radius 2 in the same color behind it, so the territory reads as ground rather than as another wire. Dormant and firing blights are that same color mixed further towards the background or back towards red — everything that recedes here recedes by mixing towards the background, never by going transparent, so nothing drawn over it is tinted. All of it paints under the graph, under the edges as well as the nodes. A blight's radius is drawn from a set of discrete sizes (blightRadii, [5, 7, 14]) rather than a range: the player has to judge a blight's reach by eye from across the map, and a few recognisable sizes can be learned where a continuum of them can only be guessed at. On a clock interval of one to three days, taking place during the night, the blight fires: it deletes any items within the radius carried by players or kept in unsecured storage, though not those on plants. If a player is caught in the wave, say BLIGHTSTRUCK.
@@ -73,6 +68,19 @@ things in the world:
 	storage
 		some storages (at storageSecurep) are secured, which puts their contents out of the blight's reach. Render with a lock after the storage icon.
 		can store 2 to 12 things, with a log distribution. Display the storage's control as its slots, similar to inventory. The storage is loaded by clicking items in inventory, which causes them to move in. If more than one storage is showing... i guess clicking them repeatedly just rotates them from one to the next. Eventually we'll support dragging. Loading and rotating both skip storages that are out of hours: an out-of-hours facility does nothing, and these are ways into a storage that don't go through its own controls, so they have to check for themselves.
+	outbox and inbox facilities
+		outboxes are more common than inboxes, and they're mostly like storage — same slots, same loading and rotating, and they roll for secured on the same storageSecurep, though they hold less (outboxCapacityRange). A lock is proof against the blight, not against the network. Inboxes allow pulling an item from any outbox (their UI is like a storage that you can't put things into, but can pull things out of that're in any outbox), grouped by item with a quantity. Inboxes may cost or require an item to operate. If they cost an item, prefer it to be a basic item; the cost is per item pulled, and it's charged on the pull, so an inbox nobody can pay at can still be looked inside.
+		render: Icons.outbox_rounded [lock if secured] <contents>, an inbox is Icons.inbox with a down arrow in a column above it (move_to_inbox's arrow sits inside the tray, which at badge size is the same few pixels as the outbox), then r<item>/c<item> as the muggers do
+	jump station
+		it may cost an item or have a cooldown of 1 to 40 game hours. The cooldown is the station's rather than the traveller's, and it's an arbitrary interval.
+		allows jumping, either
+			to a landing station ("click a landing station on the map")
+			or to any area on the map, in which case it most cost an item, or have a cooldown ("click which node on the map you want to jump to")
+		Taking the action puts the map into targeting mode: the legal targets keep their colour and the rest of the graph washes out towards the background. Nothing is charged until the jump happens, and the arrival is an ordinary arrival — a mugger on the far node robs whoever lands on it.
+		render: Icons.flight_rounded [Icons.public if it can jump anywhere] [the item it costs] — the plane stands up rather than taking off, since a takeoff and a landing are the same silhouette tilted
+	landing station
+		quite common, useless except with a jump station. No action of its own.
+		render: Icons.flight_land
 
 other things
 	players
@@ -99,6 +107,7 @@ level generation:
 	nTrainSchedules are generated randomly, which can be in the form of Never (which will only move when the player moves it), OneWay (which returns to its initial station two seconds after arrival), or Cycle(seconds) (which also can't be controlled) (seconds are always whole numbers, never fractional). Trains are assigned these on scheduleDistribution.
 	facilities then roll for their active phase: muggers are night-only at muggerNightOnlyp, blights are exempt (they're nocturnal by nature), everything else is day-only at facilityDayOnlyp.
 	as many buckets as there are nodes are generated, with size distribution closely equal to bucketSizeDistribution. Each bucket slot holds one facility. Traders are distributed first — exactly as many as trader generation produced, every one placed. The remaining slots are filled with the other facility types by nonTraderWeights. The buckets are then shuffled over the nodes and that's where each of their facilities go. Buckets aren't a concept in the code after generation has finished. Trains can contain facilities just like any other node!
+	a kind that's worthless without another kind is made good after the shuffle: an inbox with no outbox on the map turns the furthest storage into one, and a landing-only jump station with no landing station gets one at the furthest node. Furthest by graph distance, because a counterpart placed next door saves nobody a journey.
 
 rendering the level:
 	you'll want to use hsluv here.

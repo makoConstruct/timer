@@ -32,7 +32,6 @@ import 'package:makos_timer/type_help.dart';
 import 'package:provider/provider.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:universal_back_gesture/back_gesture_config.dart';
-import 'package:universal_back_gesture/back_gesture_page_transitions_builder.dart';
 import 'package:vibration/vibration.dart';
 import 'package:vibration/vibration_presets.dart';
 // import 'package:flutter_soloud/flutter_soloud.dart' as sl;
@@ -2667,18 +2666,249 @@ const BackGestureConfig _kBackGesture = BackGestureConfig(
   commitAnimationDuration: _kWipeReverseDuration,
 );
 
+/// Subtrees that handle their own drags — the trainscape map, the direction
+/// pads — wrap themselves in this, and the back swipe won't start on a pointer
+/// that goes down inside one.
+///
+/// It has to be settled that early, at the pointer down, because by the time a
+/// drag is recognisable the contest is already lost: a
+/// [HorizontalDragGestureRecognizer] declares victory the moment the finger
+/// passes [kTouchSlop], where a pan or a scale recognizer waits for
+/// [kPanSlop], twice as far. So any drag that leaves horizontally is taken off
+/// the widget it started on and handed to the page, which is the bug this
+/// exists for — the map lurching a few pixels and then sliding off screen.
+///
+/// It costs the swipe wherever it's used: over the map there's no swiping back,
+/// only the HUD's back arrow. That's the trade the drag widgets are worth.
+class const NoBackSwipe(final Widget child, {super.key})
+    extends StatefulWidget {
+  @override
+  State<NoBackSwipe> createState() => _NoBackSwipeState();
+}
+
+/// Every mounted [NoBackSwipe]. A handful at most, all of them consulted on
+/// each pointer down.
+final Set<_NoBackSwipeState> _noBackSwipeRegions = {};
+
+bool _inNoBackSwipeRegion(Offset globalPosition) =>
+    _noBackSwipeRegions.any((r) => r.contains(globalPosition));
+
+class _NoBackSwipeState extends State<NoBackSwipe> {
+  ModalRoute<dynamic>? _route;
+
+  @override
+  void initState() {
+    super.initState();
+    _noBackSwipeRegions.add(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
+
+  @override
+  void dispose() {
+    _noBackSwipeRegions.remove(this);
+    super.dispose();
+  }
+
+  /// Regions on a route that's been covered by another one are still mounted
+  /// and still where they were; they just aren't what the finger is on.
+  bool contains(Offset globalPosition) {
+    if (!(_route?.isCurrent ?? true)) return false;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached || !box.hasSize) return false;
+    return box.size.contains(box.globalToLocal(globalPosition));
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// Only takes the drag once it's heading the way a back swipe goes.
+///
+/// [HorizontalDragGestureRecognizer] wins the arena on horizontal movement in
+/// either direction, and the wrapper then finds the drag is leftward and sits
+/// out — but the arena is closed by then, so the drag is dead for everyone
+/// else too. Nothing happens, twice.
+class _RightwardDragGestureRecognizer({super.debugOwner})
+    extends HorizontalDragGestureRecognizer {
+  @override
+  bool hasSufficientGlobalDistanceToAccept(
+    PointerDeviceKind pointerDeviceKind,
+    double? deviceTouchSlop,
+  ) =>
+      // signed, unlike the base class's, which takes the absolute value
+      globalDistanceMoved > computeHitSlop(pointerDeviceKind, gestureSettings);
+}
+
+/// Forked from `universal_back_gesture` 2.1.0, whose page wrapper offers no way
+/// to keep a drag out of it. Ours skips [NoBackSwipe] regions and only accepts
+/// rightward drags; the rest — how the drag drives the route's controller, and
+/// what happens on release — is the package's, and [BackGestureConfig] still
+/// configures it.
+class const _BackSwipeTransitions({
+  required final PageTransitionsBuilder parentTransitionBuilder,
+  required final BackGestureConfig config,
+}) extends PageTransitionsBuilder {
+  @override
+  Duration get transitionDuration => parentTransitionBuilder.transitionDuration;
+
+  @override
+  Duration get reverseTransitionDuration =>
+      parentTransitionBuilder.reverseTransitionDuration;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => _BackSwipe(
+    route: route,
+    config: config,
+    child: parentTransitionBuilder.buildTransitions(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      child,
+    ),
+  );
+}
+
+class const _BackSwipe({
+  required final PageRoute<dynamic> route,
+  required final BackGestureConfig config,
+  required final Widget child,
+}) extends StatefulWidget {
+  @override
+  State<_BackSwipe> createState() => _BackSwipeState();
+}
+
+class _BackSwipeState extends State<_BackSwipe> {
+  late final HorizontalDragGestureRecognizer _recognizer =
+      _RightwardDragGestureRecognizer(debugOwner: this)
+        ..onStart = _handleDragStart
+        ..onUpdate = _handleDragUpdate
+        ..onEnd = _handleDragEnd
+        ..onCancel = _handleDragCancel;
+  bool _isGestureStarted = false;
+  double _gestureStartX = 0.0;
+
+  @override
+  void dispose() {
+    _recognizer.dispose();
+    super.dispose();
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (!widget.route.popGestureEnabled || _isGestureStarted) return;
+    if (_inNoBackSwipeRegion(event.position)) return;
+    // where on the page the swipe is allowed to start; the whole width, for us
+    if (event.localPosition.dx <=
+        widget.config.swipeDetectionArea.resolve(context)) {
+      _recognizer.addPointer(event);
+    }
+  }
+
+  void _handleDragStart(DragStartDetails details) {
+    _gestureStartX = details.localPosition.dx;
+  }
+
+  void _handleDragUpdate(DragUpdateDetails details) {
+    if (!_isGestureStarted) {
+      if ((details.primaryDelta ?? 0) <= 0) return;
+      _isGestureStarted = true;
+      widget.route.navigator!.didStartUserGesture();
+    }
+
+    final progress =
+        (details.localPosition.dx - _gestureStartX) /
+        widget.config.swipeTransitionRange.resolve(context);
+    // the route's controller is protected, and driving it from outside is the
+    // whole trick — Navigator has no other way to be a fraction of the way back
+    // ignore: invalid_use_of_protected_member
+    widget.route.controller!.value = 1.0 - progress.clamp(0.0, 1.0);
+  }
+
+  void _handleDragEnd(DragEndDetails details) {
+    _isGestureStarted = false;
+    _processDragEnd(details.velocity.pixelsPerSecond.dx);
+  }
+
+  void _handleDragCancel() {
+    _isGestureStarted = false;
+    _processDragEnd(0.0);
+  }
+
+  void _processDragEnd(double velocity) {
+    // ignore: invalid_use_of_protected_member
+    final AnimationController controller = widget.route.controller!;
+    final NavigatorState navigator = widget.route.navigator!;
+    final config = widget.config;
+
+    final bool commit = velocity.abs() >= config.swipeVelocityThreshold
+        // a fling decides it, whichever way it's going
+        ? velocity > 0
+        // otherwise, how far it got
+        : (1 - controller.value) >= config.animationProgressCompleteThreshold;
+
+    final Duration commitDuration =
+        config.commitAnimationDuration ??
+        widget.route.reverseTransitionDuration;
+
+    if (commit) {
+      // only pop if the route is still the current one
+      if (widget.route.isCurrent) navigator.pop();
+      controller.animateBack(
+        0.0,
+        duration: commitDuration,
+        curve: config.commitAnimationCurve,
+      );
+    } else {
+      controller.animateTo(
+        1.0,
+        duration: config.cancelAnimationDuration ?? commitDuration,
+        curve: config.cancelAnimationCurve,
+      );
+    }
+
+    if (controller.isAnimating) {
+      late AnimationStatusListener onSettled;
+      onSettled = (AnimationStatus status) {
+        navigator.didStopUserGesture();
+        controller.removeStatusListener(onSettled);
+      };
+      controller.addStatusListener(onSettled);
+    } else if (navigator.userGestureInProgress) {
+      navigator.didStopUserGesture();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    onPointerDown: _handlePointerDown,
+    behavior: HitTestBehavior.translucent,
+    child: widget.child,
+  );
+}
+
 /// Every screen is pushed on one of these: a [CupertinoPageRoute] whose back
-/// gesture is taken over by [BackGesturePageTransitionsBuilder] — so that it
-/// can be swiped from anywhere on the page rather than only from its edge, and
-/// so that the settle after release is ours to set — carrying
-/// [wipePageTransition] everywhere but Apple platforms, which keep the iOS one.
+/// gesture is taken over by [_BackSwipeTransitions] — so that it can be swiped
+/// from anywhere on the page rather than only from its edge, and so that the
+/// settle after release is ours to set — carrying [wipePageTransition]
+/// everywhere but Apple platforms, which keep the iOS one.
 class OurPageRoute<T>({required super.builder, super.settings, super.title})
     extends CupertinoPageRoute<T> {
-  static const _appleTransitions = BackGesturePageTransitionsBuilder(
+  static const _appleTransitions = _BackSwipeTransitions(
     parentTransitionBuilder: _CupertinoTransitions(),
     config: _kBackGesture,
   );
-  static const _wipeTransitions = BackGesturePageTransitionsBuilder(
+  static const _wipeTransitions = _BackSwipeTransitions(
     parentTransitionBuilder: _WipeTransitions(),
     config: _kBackGesture,
   );
@@ -2702,36 +2932,6 @@ class OurPageRoute<T>({required super.builder, super.settings, super.title})
   ) => (applePlatform() ? _appleTransitions : _wipeTransitions)
       .buildTransitions(this, context, animation, secondaryAnimation, child);
 }
-
-/// A [SelectionArea] that doesn't swallow the page's back swipe.
-///
-/// [SelectableRegion] gives touch devices a [TapAndHorizontalDragGestureRecognizer],
-/// and everywhere but iOS that recognizer takes eager victory in the gesture
-/// arena the instant a drag passes the touch slop. It sits deeper in the tree
-/// than [OurPageRoute]'s back-gesture recognizer, so it sees the move events
-/// first and wins outright — and then does nothing with what it won: selection
-/// dragging returns immediately for any non-precise pointer, so on a phone the
-/// drag half of that recognizer is inert. It's there to stop [SelectableRegion]
-/// from stealing scrolls in a horizontal list, and it steals the back gesture
-/// instead. Selection on touch runs on long press, which is timed and doesn't
-/// care.
-///
-/// Nothing turns the recognizer off, but its threshold comes from the ambient
-/// [MediaQueryData.gestureSettings], and it only ever *raises* one, so an
-/// unreachable touch slop over this subtree is enough to keep it out of the
-/// arena. Only [SelectableRegion]'s own three recognizers read it — link taps
-/// come from recognizers a [RenderParagraph] owns, which are given no gesture
-/// settings at all — and of those three, the two that can still fire are a tap
-/// (no threshold to cross) and a long press (which a real back swipe beats to
-/// the arena anyway).
-Widget dragThroughSelectionArea({required Widget child}) => Builder(
-  builder: (context) => MediaQuery(
-    data: MediaQuery.of(
-      context,
-    ).copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: 1e9)),
-    child: SelectionArea(child: child),
-  ),
-);
 
 /// The iOS transition, without the edge-only back gesture
 /// [CupertinoPageTransitionsBuilder] would install alongside it — the gesture

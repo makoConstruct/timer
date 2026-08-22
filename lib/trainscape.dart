@@ -47,17 +47,20 @@ const playerNames = ['Rudy', 'Noel', 'Geno', 'Lenny', 'Carter'];
 
 const edgeGrey = Color(0xFFebebeb);
 
-/// The scheme the whole UI draws itself in. Night was once the day scheme run
-/// through an inverting colour matrix — one filter over the whole tree, no
-/// per-colour decisions to make — but there was nowhere to put the tuning the
-/// two halves of the day each want. An inverted dark UI has its surfaces
-/// exactly as far from the ground as the light one did, when what a dark UI
-/// needs is surfaces lifted clear of the ground and contrast pulled *in*, not
-/// mirrored. So day and night are two independently written schemes, and
-/// [palette] says which is in force.
+/// The scheme the whole UI draws itself in. There are two, [lightPalette] and
+/// [darkPalette], and the system's brightness setting picks between them — see
+/// [paletteSignal]. The game used to flip between them itself, as its own day
+/// turned, which is a different and worse idea: the player never asked for it,
+/// and it arrived mid-glance.
+///
+/// The dark one is not the light one inverted. An inverting filter would have
+/// been one decision instead of twenty, but it leaves the surfaces exactly as
+/// far from the ground as they were, when what a dark UI wants is surfaces
+/// lifted clear of the ground and contrast pulled *in* rather than mirrored. So
+/// the two are written out independently.
 ///
 /// Item colours are deliberately not in here: an item is known by its colour,
-/// and a thing that changes colour at dusk isn't recognisable.
+/// and a thing that changes colour isn't recognisable.
 class const Palette({
   /// what the world is drawn on; everything that has to recede is mixed
   /// towards this rather than made transparent
@@ -118,8 +121,7 @@ class const Palette({
 
   /// How far a blight's red is washed out towards [ground]. Its territory is a
   /// region rather than a mark, so it sits barely off the ground and behind
-  /// everything. Night washes it less: the same fraction against a dark ground
-  /// takes the red past "faint" and into "gone".
+  /// everything.
   required final double blightWash,
 
   /// what the world is veiled with once the game is over
@@ -130,17 +132,24 @@ class const Palette({
   /// [lozengeSaturation], then the whole colour carried [lozengeTintp] of the
   /// way towards [lozengeTint].
   ///
-  /// A dark grey to aim at rather than a distance to travel from the ground:
-  /// one grey pulls both schemes off their own ground without either needing
-  /// to know which way that is. Against a white ground it darkens the lozenge,
-  /// against a near-black one it lifts it, and the two schemes stay tunable
-  /// apart. It desaturates a little on the way, which a lozenge wants anyway.
+  /// A colour to aim at rather than a distance to travel from the ground, so
+  /// the lozenge is stated outright instead of falling out of arithmetic on
+  /// the node's. It desaturates a little on the way, which a lozenge wants
+  /// anyway.
   required final Color lozengeTint,
   required final double lozengeTintp,
   required final double lozengeSaturation,
-});
+}) {
+  /// Which side this scheme is on. Almost nothing needs to ask — the point of
+  /// a palette is that its colours are already the right way round — but a mark
+  /// that means something in absolute terms does: a clock face is pale before
+  /// noon in both schemes, so it has to know which of [ground] and [inkStrong]
+  /// is the pale one. Derived rather than declared, so it can't disagree with
+  /// the colours it's about.
+  bool get isDark => HSLuvColor.fromColor(ground).lightness < 50;
+}
 
-const dayPalette = Palette(
+const lightPalette = Palette(
   ground: Colors.white,
   // off white, like the lozenges: a white item icon has to have something to
   // be seen against, and slots and chips are full of item icons
@@ -165,12 +174,12 @@ const dayPalette = Palette(
   lozengeSaturation: 0.8,
 );
 
-/// Night is not day inverted. The ground doesn't go all the way to black —
-/// pure black would make every surface on it glare — and the surfaces sit a
-/// clear step above it, since by day they're told apart from the ground by
-/// their outline alone and that trick doesn't survive the dark. Ink stops
-/// short of white for the same reason black87 stops short of black by day.
-const nightPalette = Palette(
+/// The ground doesn't go all the way to black — pure black would make every
+/// surface on it glare — and the surfaces sit a clear step above it, since in
+/// the light scheme they're told apart from the ground by their outline alone
+/// and that trick doesn't survive the dark. Ink stops short of white for the
+/// same reason black87 stops short of black over there.
+const darkPalette = Palette(
   ground: Color(0xFF15181B),
   surface: Color(0xFF262B30),
   panel: Color(0xFF1C2024),
@@ -193,10 +202,31 @@ const nightPalette = Palette(
   lozengeSaturation: 0.26,
 );
 
-/// The scheme in force. The screen sets it as the day turns and rebuilds
-/// everything beneath it, so read it during build — nothing should hold onto
-/// what it returned.
-Palette palette = dayPalette;
+/// The scheme in force, following the platform's brightness. Written by
+/// [TrainscapeScreen], which is the only thing that reads the platform.
+///
+/// Read it with `.value` and read it during build, so that whatever is building
+/// subscribes and redraws itself when the system flips — the reason the screen
+/// and the node widgets are a [SignalStatefulWidget] and a [SignalWidget]. A
+/// rebuild from the top can't be relied on to carry a change of scheme down:
+/// the map hands the same cached widget back for a node every frame, so a
+/// rebuild from above passes those by entirely.
+///
+/// A [CustomPainter] is the one place this doesn't hold — nothing subscribes
+/// during paint — so a painter takes the colours it uses as fields, and its
+/// `shouldRepaint` compares them.
+final Signal<Palette> paletteSignal = signal(platformPalette());
+
+/// what the platform's brightness setting says the scheme should be, asked
+/// right now. [TrainscapeScreen] pushes this into [paletteSignal] whenever it
+/// could have changed; the signal's own initial value comes from here too, so a
+/// screen that was already up when the code reloaded still starts from the
+/// truth rather than from whichever scheme was written down first.
+Palette platformPalette() =>
+    WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark
+    ? darkPalette
+    : lightPalette;
 
 /// the fixed logical-pixel basis for node-widget icons; nothing in the
 /// unscaled overlay zooms with the map.
@@ -240,24 +270,63 @@ const double defaultItemSpan = 16.0;
 const double minLeafItemScale = 0.26;
 const double maxIconGrowth = 1.6;
 
-/// how long an announcement (NIGHT HAS FALLEN, MUGGED, BLIGHTSTRUCK…) stays up
-const double announcementTime = 3;
+/// The game's unit of time is the in-game second, and a day is a day: 86400 of
+/// them, laid over the 24-hour clock face the level's schedules are read off.
+/// Everything with time in it is in these units — [Game.gameTime], every
+/// remaining-time signal the update loop counts down, every span and rate in
+/// [Parameters] — and so is the dt [Game.update] steps by.
+///
+/// Real time exists in exactly two places. One is the ticker, which converts
+/// the frame's wall-clock delta once, on the way in (see [Parameters.pace] and
+/// [Parameters.dayRealSeconds]); nothing downstream of it knows how fast the
+/// day is being played. The other is the two feedback spans below.
+const double gameSecond = 1;
+const double gameMinute = 60 * gameSecond;
+const double gameHour = 60 * gameMinute;
+const double gameDay = 24 * gameHour;
+
+/// These two are the only spans stated in real seconds. They aren't part of
+/// the level: they're how long a piece of feedback takes to read, which is a
+/// fact about the player's eyes and doesn't restretch when the day does. They
+/// still tick on the game clock, so pausing pauses them — [Parameters.pace] is
+/// what carries them across, via [Parameters.redFlashSpan] and
+/// [Parameters.announcementSpan]. Nothing should compare them to a game time
+/// directly.
+///
+/// how long an announcement (MUGGED, BLIGHTSTRUCK…) stays up
+const double announcementRealSeconds = 3;
 
 /// a red flash is three pulses over this many seconds
-const double redFlashTime = 1.2;
+const double redFlashRealSeconds = 1.2;
 const int redFlashPulses = 3;
 
-enum FacilityKind { trader, tree, mugger, storage, station, blight }
+enum FacilityKind {
+  trader,
+  tree,
+  mugger,
+  storage,
+  station,
+  blight,
+  outbox,
+  inbox,
+  jumpStation,
+  landingStation,
+}
 
-/// Some facilities only operate in one half of the day. Day-only ones carry a
+/// A facility can be restricted to one half of the day: day-only ones carry a
 /// small day icon before their badge (top-aligned) and fade at night;
 /// night-only ones carry a night icon (bottom-aligned) and fade in the day.
+///
+/// Nothing is generated restricted any more — half of what a player had learnt
+/// about the map being inactionable at any given moment cost more than the
+/// texture was worth — so every facility is [always] in practice. The display
+/// is kept: it's what a restriction would look like if one were ever handed
+/// out again, and a saved game can still carry one.
 enum ActivePhase { always, dayOnly, nightOnly }
 
-/// c: takes the item without requiring it (nonthreatening);
 /// r: requires the item to pass, without taking it;
 /// rc: requires and confiscates the same item.
-enum MuggerKind { c, r, rc }
+enum MuggerKind { r, rc }
 
 /// how a node widget displays, decided by the world view + player presence
 enum NodeZoomLevel {
@@ -303,18 +372,16 @@ class ArbitraryInterval(@override final double period) extends Interval {
 }
 
 class ClockInterval({
-  required final double dayLength,
-
   /// exactly one of these is > 1: the period is a whole multiple of the day,
   /// or a whole fraction of it
   final int multiple = 1,
   final int division = 1,
 
-  /// where in the period it fires, in seconds
+  /// where in the period it fires, in game seconds
   required final double offset,
 }) extends Interval {
   @override
-  double get period => dayLength * multiple / division;
+  double get period => gameDay * multiple / division;
 
   @override
   double remainingAt(double t) {
@@ -329,17 +396,15 @@ class ClockInterval({
   /// which is what makes a single time of day meaningful
   bool get isDaily => division == 1;
 
-  /// the time of day it fires at, in seconds into the day
-  double get timeOfDay => offset % dayLength;
+  /// the time of day it fires at, in game seconds into the day
+  double get timeOfDay => offset % gameDay;
 }
 
 /// picks a clock interval firing [division] times a day at a random phase
-ClockInterval _divisionInterval(GameRng rng, double dayLength, int division) =>
-    ClockInterval(
-      dayLength: dayLength,
-      division: division,
-      offset: rng.nextDouble() * dayLength / division,
-    );
+ClockInterval _divisionInterval(GameRng rng, int division) => ClockInterval(
+  division: division,
+  offset: rng.nextDouble() * gameDay / division,
+);
 
 /// A three-pulse red flash, driven off the game clock. It clears itself once
 /// spent so that nothing stays subscribed to the clock while idle.
@@ -348,16 +413,17 @@ class RedFlash {
   bool get active => startedAt.peek() > -1e8;
   void trigger(double t) => startedAt.value = t;
 
-  /// 0..1 redness at game time [t]; reading this subscribes to the clock, so
-  /// only call it when [active]
-  double rednessAt(double t) {
+  /// 0..1 redness at game time [t], over a flash lasting [span] game seconds
+  /// ([Parameters.redFlashSpan]); reading this subscribes to the clock, so only
+  /// call it when [active]
+  double rednessAt(double t, double span) {
     final e = t - startedAt.value;
-    if (e < 0 || e > redFlashTime) return 0;
-    return sin(e / redFlashTime * redFlashPulses * pi).abs();
+    if (e < 0 || e > span) return 0;
+    return sin(e / span * redFlashPulses * pi).abs();
   }
 
-  void expire(double t) {
-    if (active && t - startedAt.peek() > redFlashTime) {
+  void expire(double t, double span) {
+    if (active && t - startedAt.peek() > span) {
       startedAt.value = -1e9;
     }
   }
@@ -377,15 +443,17 @@ class Parameters({
   required final double globalTime,
   required final int eudaimoniaGoal,
 
-  // day/night: the first half of each day is day, the second half night
-  required final double dayLength,
-  required final double facilityDayOnlyp,
-  required final double muggerNightOnlyp,
+  /// How long a day takes to play, in real seconds — the level's pace, and the
+  /// one number here that isn't in game time. A day is always [gameDay] long
+  /// and the clock face always runs midnight to midnight; this is only how
+  /// fast the player watches that happen, and the only thing that reads it is
+  /// the ticker, through [pace].
+  required final double dayRealSeconds,
 
   // players
   required final int nPlayers,
   required final int inventoryCap,
-  required final double playerSpeed, // units/second
+  required final double playerSpeed, // world units per game second
   required final bool playersHaveMoveAction,
 
   // grid & graph (levelgen section of the doc)
@@ -403,7 +471,8 @@ class Parameters({
   required final List<Color> itemColors,
   required final List<int> tierCount, // length = number of item tiers
   required final List<TraderGeneratorsForTier> traderGeneratorsPerTier,
-  required final double iconNestingp, // chance a host icon absorbs each later part
+  required final double
+  iconNestingp, // chance a host icon absorbs each later part
   /// chance a nesting squircle is willing to take a 2x2 footprint, so that its
   /// inner grid gets full-size cells; it falls back to 1x1 where that won't fit
   required final double squircleTryEmbeddingLargep,
@@ -422,7 +491,8 @@ class Parameters({
   // Every parameter that divides something up is a set of weights with an
   // arbitrary total, never proportions that have to sum to one — weights are
   // what a human can actually sit down and tweak.
-  required final List<double> bucketSizeWeights, // index = bucket size, starting at 0
+  required final List<double>
+  bucketSizeWeights, // index = bucket size, starting at 0
   required final Map<FacilityKind, double> nonTraderWeights,
 
   /// how often each of the three node colourings comes up. See [NodeTone].
@@ -430,10 +500,10 @@ class Parameters({
 
   // trees
   required final double treeRegenTime, // arbitrary-interval trees
-  required final double treeClockIntervalp, // else the regen is a daily clock interval
+  required final double
+  treeClockIntervalp, // else the regen is a daily clock interval
   required final double treeSecondItemProb, // "an item or two"
   required final double treeTier1Prob, // else tier 0 ("first or second tier")
-
   // traders
   required final double traderInstantProb,
   required final (double, double) tradeDurationRange,
@@ -447,7 +517,20 @@ class Parameters({
   // storage
   required final (int, int) storageCapacityRange, // log-distributed
   required final double storageSecurep, // secured storages are safe from blight
-
+  // outboxes & inboxes
+  /// An outbox holds less than a storage does: its contents can be lifted off
+  /// the map from anywhere, and a warehouse that can be siphoned from across
+  /// the level is a level with fewer journeys in it. Log-distributed, and
+  /// secured on the same [storageSecurep] — the lock is proof against the
+  /// blight, not against the network.
+  required final (int, int) outboxCapacityRange,
+  required final double inboxActivationProb, // requires a held Quantity to pull
+  required final double inboxActivationConsumedProb, // of those: an actual cost
+  // jump stations
+  required final double jumpFreeAimp, // else it can only reach landing stations
+  required final double jumpCostItemp,
+  required final double jumpCooldownp,
+  required final (double, double) jumpCooldownRange,
   // blights
   /// The sizes a blight comes in, drawn from uniformly. Discrete rather than a
   /// range: a blight's radius is something the player has to judge by eye from
@@ -456,8 +539,8 @@ class Parameters({
   required final List<double> blightRadii,
   required final double blightMitigablep,
   required final double blightHungryp, // of the mitigable ones
-  required final (int, int) blightDaysRange, // its clock interval, in whole days
-
+  required final (int, int)
+  blightDaysRange, // its clock interval, in whole days
   // trains
   required final int nTrains,
   required final int stationsPerTrain,
@@ -468,12 +551,33 @@ class Parameters({
   required final double trainActivationConsumedProb, // of those: an actual cost
   required final double trainActivationTwoProb, // quantity 2 instead of 1
   required final List<(double, TrainScheduleKind)> scheduleDistribution,
-  required final List<int> trainCycleDivisions, // shuttles this many times a day
+  required final List<int>
+  trainCycleDivisions, // shuttles this many times a day
   required final double movableFromInsideProb, // of manually movable trains
   required final List<(double, StationControl)> stationControlWeights,
   required final double trainTerminusDistance,
   required final double oneWayReturnDelay,
 }) {
+  // ── pace ──
+  //
+  // Everything above with time in it is in game seconds (or units per game
+  // second), written with the [gameMinute]/[gameHour]/[gameDay] constants so
+  // that the figure and its unit sit together. It's what the update loop
+  // steps by, what the save file holds, and what the readouts are formatted
+  // from, so nothing below here converts a span — the only conversion in the
+  // game is this one, from the wall clock into game time, and it happens once
+  // a frame in the ticker.
+
+  /// game seconds per real second — how fast the day is being played
+  double get pace => gameDay / dayRealSeconds;
+
+  /// [s] real seconds as the game seconds they'll take to elapse
+  double realSeconds(double s) => s * pace;
+
+  /// [redFlashRealSeconds] and [announcementRealSeconds] on the game clock
+  double get redFlashSpan => realSeconds(redFlashRealSeconds);
+  double get announcementSpan => realSeconds(announcementRealSeconds);
+
   /// The level being played and tuned. Started as a straight copy of
   /// [urLevel] — which is the point of urLevel: this one is free to move.
   /// Unlike urLevel it's allowed to name live things ([defaultItemColors],
@@ -482,16 +586,14 @@ class Parameters({
     const tierCount = [13, 10, 4];
     return Parameters(
       seed: seed,
-      globalTime: 240 * 4,
+      globalTime: 4 * gameDay,
       eudaimoniaGoal: 4,
-      dayLength: 240,
-      facilityDayOnlyp: 0.34,
-      muggerNightOnlyp: 0.45,
+      dayRealSeconds: 240,
       nPlayers: 2,
       inventoryCap: 4,
-      playerSpeed: 1.75,
+      playerSpeed: 17.5 / gameHour,
       playersHaveMoveAction: true,
-      gridSizeN: 7,
+      gridSizeN: 8,
       gridSpacing: 3.5,
       gridSizeDistortionCountStartp: 0.3,
       gridSizeDistortionCountVariancep: 0.4,
@@ -511,30 +613,37 @@ class Parameters({
       nonTraderWeights: const {
         FacilityKind.tree: 10,
         FacilityKind.storage: 5,
-        FacilityKind.mugger: 3,
-        FacilityKind.blight: 0.12,
+        FacilityKind.mugger: 2,
+        FacilityKind.blight: 0.1,
+        FacilityKind.outbox: 4,
+        FacilityKind.inbox: 0.8,
+        FacilityKind.jumpStation: 1.5,
+        FacilityKind.landingStation: 5,
       },
       nodeToneWeights: const [
         (1, NodeTone.plain),
-        (0, NodeTone.deeper),
+        (0.1, NodeTone.deeper),
         (1, NodeTone.tinted),
       ],
-      treeRegenTime: 25,
+      treeRegenTime: 4 * gameHour,
       treeClockIntervalp: 0.6,
       treeSecondItemProb: 0.3,
       treeTier1Prob: 0.3,
       traderInstantProb: 0.5,
-      tradeDurationRange: (4, 15),
+      tradeDurationRange: (24 * gameMinute, 1.5 * gameHour),
       traderCooldownProb: 0.3,
-      traderCooldownRange: (5, 25),
-      muggerIncapTime: 20,
-      muggerKindWeights: const [
-        (3, MuggerKind.c),
-        (3, MuggerKind.r),
-        (2.3, MuggerKind.rc),
-      ],
+      traderCooldownRange: (1 * gameHour, 40 * gameHour),
+      muggerIncapTime: 2 * gameHour,
+      muggerKindWeights: const [(3, MuggerKind.r), (2.3, MuggerKind.rc)],
       storageCapacityRange: (2, 12),
       storageSecurep: 0.12,
+      outboxCapacityRange: (1, 6),
+      inboxActivationProb: 0.55,
+      inboxActivationConsumedProb: 0.7,
+      jumpFreeAimp: 0.3,
+      jumpCostItemp: 0.5,
+      jumpCooldownp: 0.6,
+      jumpCooldownRange: (1 * gameHour, 40 * gameHour),
       blightRadii: const [5, 7, 14],
       blightMitigablep: 0.8,
       blightHungryp: 0.15,
@@ -542,10 +651,10 @@ class Parameters({
       nTrains: 3,
       stationsPerTrain: 2,
       trainSpeedUnitsPerSec: const {
-        TrainSpeed.s: 1.6,
-        TrainSpeed.r: 3.4,
-        TrainSpeed.f: 6,
-        TrainSpeed.i: 16,
+        TrainSpeed.s: 16 / gameHour,
+        TrainSpeed.r: 34 / gameHour,
+        TrainSpeed.f: 60 / gameHour,
+        TrainSpeed.i: 160 / gameHour,
       },
       trainSpeedWeights: const [
         (1.3, TrainSpeed.s),
@@ -557,9 +666,9 @@ class Parameters({
       trainActivationConsumedProb: 0.25,
       trainActivationTwoProb: 0.25,
       scheduleDistribution: const [
-        (2, TrainScheduleKind.never),
-        (1, TrainScheduleKind.oneWay),
-        (1, TrainScheduleKind.cycle),
+        (1, TrainScheduleKind.never),
+        (0, TrainScheduleKind.oneWay),
+        (0, TrainScheduleKind.cycle),
       ],
       trainCycleDivisions: const [8, 10, 12, 15, 16, 20, 24, 30],
       movableFromInsideProb: 0.8,
@@ -569,7 +678,7 @@ class Parameters({
         (3, StationControl.localOnly),
       ],
       trainTerminusDistance: 1.5,
-      oneWayReturnDelay: 2.0,
+      oneWayReturnDelay: 12 * gameMinute,
     );
   }
 
@@ -587,14 +696,12 @@ class Parameters({
     const tierCount = [5, 16, 8, 6, 4];
     return Parameters(
       seed: seed,
-      globalTime: 240 * 10,
+      globalTime: 10 * gameDay,
       eudaimoniaGoal: 3,
-      dayLength: 240,
-      facilityDayOnlyp: 0.34,
-      muggerNightOnlyp: 0.45,
+      dayRealSeconds: 240,
       nPlayers: 2,
       inventoryCap: 5,
-      playerSpeed: 1.75,
+      playerSpeed: 17.5 / gameHour,
       playersHaveMoveAction: true,
       gridSizeN: 13,
       gridSpacing: 3.5,
@@ -619,33 +726,46 @@ class Parameters({
       iconGridPlacementBigp: 0.7,
       farZoomThreshold: 2.5,
       bucketSizeWeights: const [1, 8, 4, 2, 0.8],
+      // The kinds that didn't exist yet are weighted 0 rather than left out:
+      // the snapshot is of a level that had no outboxes or jump stations in
+      // it, and a zero-weighted kind takes no slots and draws no numbers, so
+      // the rng stream comes out exactly as it did.
       nonTraderWeights: const {
         FacilityKind.tree: 10,
-        FacilityKind.storage: 5,
+        FacilityKind.storage: 4,
         FacilityKind.mugger: 3,
         FacilityKind.blight: 0.12,
+        FacilityKind.outbox: 0,
+        FacilityKind.inbox: 0,
+        FacilityKind.jumpStation: 0,
+        FacilityKind.landingStation: 0,
       },
       nodeToneWeights: const [
         (1, NodeTone.plain),
         (1, NodeTone.deeper),
         (1, NodeTone.tinted),
       ],
-      treeRegenTime: 25,
+      treeRegenTime: 2.5 * gameHour,
       treeClockIntervalp: 0.6,
       treeSecondItemProb: 0.3,
-      treeTier1Prob: 0.3,
+      treeTier1Prob: 0.23,
       traderInstantProb: 0.5,
-      tradeDurationRange: (4, 15),
+      tradeDurationRange: (24 * gameMinute, 1.5 * gameHour),
       traderCooldownProb: 0.3,
-      traderCooldownRange: (5, 25),
-      muggerIncapTime: 20,
-      muggerKindWeights: const [
-        (3, MuggerKind.c),
-        (3, MuggerKind.r),
-        (4, MuggerKind.rc),
-      ],
+      traderCooldownRange: (30 * gameMinute, 2.5 * gameHour),
+      muggerIncapTime: 2 * gameHour,
+      muggerKindWeights: const [(3, MuggerKind.r), (4, MuggerKind.rc)],
       storageCapacityRange: (2, 12),
       storageSecurep: 0.12,
+      // nothing in the snapshot generates one of these; they're here because
+      // the constructor wants them
+      outboxCapacityRange: (1, 6),
+      inboxActivationProb: 0.55,
+      inboxActivationConsumedProb: 0.7,
+      jumpFreeAimp: 0.3,
+      jumpCostItemp: 0.5,
+      jumpCooldownp: 0.6,
+      jumpCooldownRange: (1 * gameHour, 40 * gameHour),
       blightRadii: const [5, 7, 14],
       blightMitigablep: 0.8,
       blightHungryp: 0.15,
@@ -653,10 +773,10 @@ class Parameters({
       nTrains: 3,
       stationsPerTrain: 2,
       trainSpeedUnitsPerSec: const {
-        TrainSpeed.s: 1.6,
-        TrainSpeed.r: 3.4,
-        TrainSpeed.f: 6,
-        TrainSpeed.i: 16,
+        TrainSpeed.s: 16 / gameHour,
+        TrainSpeed.r: 34 / gameHour,
+        TrainSpeed.f: 60 / gameHour,
+        TrainSpeed.i: 160 / gameHour,
       },
       trainSpeedWeights: const [
         (1.3, TrainSpeed.s),
@@ -680,7 +800,7 @@ class Parameters({
         (3, StationControl.localOnly),
       ],
       trainTerminusDistance: 1.5,
-      oneWayReturnDelay: 2.0,
+      oneWayReturnDelay: 12 * gameMinute,
     );
   }
 }
@@ -699,7 +819,8 @@ sealed class ItemIcon {
   const ItemIcon();
 }
 
-class const BasicIcon(final BasicShape shape, final Color color) extends ItemIcon {
+class const BasicIcon(final BasicShape shape, final Color color)
+    extends ItemIcon {
   @override
   bool operator ==(Object other) =>
       other is BasicIcon && other.shape == shape && other.color == color;
@@ -717,7 +838,6 @@ class HeartIcon extends ItemIcon {
 
 class const IconPlacement(
   final Coord pos, // top-left cell of the footprint in the containing grid
-
   /// how many cells it took, untilted. Size is settled per placement, not per
   /// icon: a rod is 1x2 or 1x1, a squircle 2x2 or 1x1, whichever fit.
   final Coord footprint,
@@ -1607,17 +1727,19 @@ class ItemIconPainter(final ItemIcon icon, [final bool outlineOn = false])
 
 // ────────────────────────────── trader generation ──────────────────────────────
 
-typedef RequiredTraderGen =
-    Trader? Function(
-      GameRng rng,
-      ItemCatalog cat,
-      int iItem,
-      List<Item> thisTierRequired,
-      int iTier,
-      List<Item>? nextTierRequired,
-    );
-typedef SupplementalTraderGen =
-    Trader? Function(GameRng rng, ItemCatalog cat, int iTier);
+typedef RequiredTraderGen = Trader? Function(
+  GameRng rng,
+  ItemCatalog cat,
+  int iItem,
+  List<Item> thisTierRequired,
+  int iTier,
+  List<Item>? nextTierRequired,
+);
+typedef SupplementalTraderGen = Trader? Function(
+  GameRng rng,
+  ItemCatalog cat,
+  int iTier,
+);
 
 class const TraderGeneratorsForTier({
   required final List<(double, RequiredTraderGen)> requiredGenerators,
@@ -2107,12 +2229,12 @@ List<Trader> generateTraders(GameRng rng, Parameters p, ItemCatalog cat) {
   for (final t in out) {
     if (t.gives.any((q) => q.item.isEudaimonia)) continue;
     if (!rng.chance(p.traderInstantProb)) {
-      t.duration = roundToSecond(
+      t.duration = roundToMinute(
         rangeIn(rng, p.tradeDurationRange.$1, p.tradeDurationRange.$2),
       );
     }
     if (rng.chance(p.traderCooldownProb)) {
-      t.cooldown = roundToSecond(
+      t.cooldown = roundToMinute(
         rangeIn(rng, p.traderCooldownRange.$1, p.traderCooldownRange.$2),
       );
     }
@@ -2186,17 +2308,23 @@ enum NodeTone {
 const double nodeTintAmount = 0.13;
 
 /// A node's own colour: its dot on the map, the wires running out of it, and
-/// the lozenges its facilities render into. Reads [palette], so it changes with
-/// the half of the day. A tinted node is the plain colour stained; the other
+/// the lozenges its facilities render into. Reads [paletteSignal], so calling
+/// it during build is what subscribes that build to the scheme — see there. A
+/// tinted node is the plain colour stained; the other
 /// two tones are colours in their own right, written out in the scheme. A node
 /// that bites is the hazard colour whatever it rolled.
 Color nodeColor(Node n) {
-  if (n.isHazard) return palette.hazardNode;
+  if (n.isHazard) return paletteSignal.value.hazardNode;
   final train = n is TrainNode;
-  final plain = train ? palette.trainNode : palette.node;
+  final plain = train
+      ? paletteSignal.value.trainNode
+      : paletteSignal.value.node;
   return switch (n.tone) {
     NodeTone.plain => plain,
-    NodeTone.deeper => train ? palette.trainNodeDarker : palette.nodeDarker,
+    NodeTone.deeper =>
+      train
+          ? paletteSignal.value.trainNodeDarker
+          : paletteSignal.value.nodeDarker,
     NodeTone.tinted => Color.lerp(plain, n.tint, nodeTintAmount)!,
   };
 }
@@ -2210,10 +2338,14 @@ Color lozengeFill(Color tone) {
   final c = HSLuvColor.fromColor(tone);
   final washed = HSLuvColor.fromHSL(
     c.hue,
-    c.saturation * palette.lozengeSaturation,
+    c.saturation * paletteSignal.value.lozengeSaturation,
     c.lightness,
   ).toColor();
-  return Color.lerp(washed, palette.lozengeTint, palette.lozengeTintp)!;
+  return Color.lerp(
+    washed,
+    paletteSignal.value.lozengeTint,
+    paletteSignal.value.lozengeTintp,
+  )!;
 }
 
 /// whether a colour has enough of a hue to stain anything with. The item
@@ -2274,7 +2406,7 @@ class Player(final String name, final Color color) extends Thing {
 
   @override
   void update(Game g, double dt) {
-    flash.expire(g.gameTime);
+    flash.expire(g.gameTime, g.params.redFlashSpan);
     if (incapacitatedFor.value > 0) {
       incapacitatedFor.value = max(0.0, incapacitatedFor.value - dt);
       return;
@@ -2344,8 +2476,7 @@ class OneWaySchedule extends TrainSchedule {
 
 /// shuttles on its own, on a division clock interval — so many departures a
 /// day, always at the same times ('sc(12.5)'); can't be controlled
-class const CycleSchedule(final ClockInterval interval)
-    extends TrainSchedule {
+class const CycleSchedule(final ClockInterval interval) extends TrainSchedule {
   double get seconds => interval.period;
 }
 
@@ -2465,7 +2596,8 @@ class TrainNode({
         if (next == null) {
           waitRemaining.value = -1;
         } else if (dockEdgeBusy(g)) {
-          waitRemaining.value = 0.1; // someone's boarding; try again shortly
+          // someone's boarding; try again shortly
+          waitRemaining.value = gameMinute;
         } else {
           departTo(g, next);
         }
@@ -2514,18 +2646,20 @@ abstract class Facility {
       return badgeRow(children, tone: tone);
     }
     final dayOnly = activePhase == ActivePhase.dayOnly;
-    return SignalBuilder(builder: (context) {
-      return badgeRow(
-        children,
-        tone: tone,
-        dim: !activeNow(g),
-        leading: Align(
-          alignment: dayOnly ? Alignment.topCenter : Alignment.bottomCenter,
-          // smaller than the material icons had to be: these shapes hold up
-          child: phaseIcon(!dayOnly, size: 7, color: palette.ink),
-        ),
-      );
-    });
+    return SignalBuilder(
+      builder: (context) {
+        return badgeRow(
+          children,
+          tone: tone,
+          dim: !activeNow(g),
+          leading: Align(
+            alignment: dayOnly ? Alignment.topCenter : Alignment.bottomCenter,
+            // smaller than the material icons had to be: these shapes hold up
+            child: phaseIcon(!dayOnly, size: 7, color: paletteSignal.value.ink),
+          ),
+        );
+      },
+    );
   }
 
   /// the tooltip shown when the badge is tapped: paraphrases the icon
@@ -2604,49 +2738,50 @@ class Station(final TrainNode train, final StationControl control)
   List<Widget> actionsFor(Game g, Player p) {
     if (control == StationControl.none) return const [];
     return [
-      SignalBuilder(builder: (context) {
-        final docked = train.dockedAt.value;
-        final target = train.stationNodes.firstWhereOrNull(
-          (s) => !identical(s, node),
-        );
-        final controlSatisfied =
-            docked != null &&
-            (control == StationControl.remote || identical(docked, node));
-        final enabled =
-            controlSatisfied &&
-            train.manualAllowed &&
-            !train.dockEdgeBusy(g) &&
-            (train.activation == null || g.playerHas(p, [train.activation!]));
-        final time = docked != null && target != null
-            ? train.travelTimeBetween(docked, target, g.params)
-            : null;
-        return DragDirectionPad(
-          dimension: 64,
-          enabled: enabled,
-          onAngle: (a) => g.manualTrainMove(train, p, a),
-          label: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  badgeIcon(Icons.train),
-                  badgeIcon(Icons.swipe_right_alt),
-                ],
-              ),
-              if (time != null) badgeText('${fmtSec(time)}s'),
-              if (train.activation != null) quantityWidget(train.activation!),
-            ],
-          ),
-        );
-      }),
+      SignalBuilder(
+        builder: (context) {
+          final docked = train.dockedAt.value;
+          final target = train.stationNodes.firstWhereOrNull(
+            (s) => !identical(s, node),
+          );
+          final controlSatisfied =
+              docked != null &&
+              (control == StationControl.remote || identical(docked, node));
+          final enabled =
+              controlSatisfied &&
+              train.manualAllowed &&
+              !train.dockEdgeBusy(g) &&
+              (train.activation == null || g.playerHas(p, [train.activation!]));
+          final time = docked != null && target != null
+              ? train.travelTimeBetween(docked, target, g.params)
+              : null;
+          return DragDirectionPad(
+            dimension: 64,
+            enabled: enabled,
+            onAngle: (a) => g.manualTrainMove(train, p, a),
+            label: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    badgeIcon(Icons.train),
+                    badgeIcon(Icons.swipe_right_alt),
+                  ],
+                ),
+                if (time != null) badgeText(fmtSpan(time)),
+                if (train.activation != null) quantityWidget(train.activation!),
+              ],
+            ),
+          );
+        },
+      ),
     ];
   }
 }
 
 class Tree(
   final List<Quantity> produces, // one or two tier-0/1 items
-
   /// Either kind of interval: an arbitrary one regrows that many seconds after
   /// it's picked, a clock one regrows at its times of day however long ago it
   /// was picked.
@@ -2705,54 +2840,60 @@ class Tree(
   // panel's job
   Widget badge(Game g, NodeZoomLevel level) => explainTap(
     g,
-    SignalBuilder(builder: (context) {
-      return withPie(
-        phaseBadgeRow(g, [
-          badgeIcon(Icons.local_florist),
-          if (level != NodeZoomLevel.small)
-            for (final q in produces)
-              quantityWidget(q, size: itemSizeFor(level)),
-        ]),
-        pie: CountdownPie(
-          remaining: regenRemaining,
-          total: regenTotal,
-          isCooldown: true,
-          clock: clockSchedule,
-        ),
-      );
-    }),
+    SignalBuilder(
+      builder: (context) {
+        return withPie(
+          phaseBadgeRow(g, [
+            badgeIcon(Icons.local_florist),
+            if (level != NodeZoomLevel.small)
+              for (final q in produces)
+                quantityWidget(q, size: itemSizeFor(level)),
+          ]),
+          pie: CountdownPie(
+            remaining: regenRemaining,
+            total: regenTotal,
+            isCooldown: true,
+            clock: clockSchedule,
+          ),
+        );
+      },
+    ),
   );
 
   @override
   List<InlineSpan> describe(Game g) => [
     tipText('a plant producing '),
     ...quantitiesSpans(produces),
-    tipText(switch (regen) {
-      ArbitraryInterval a => '; regrows ${fmtSec(a.period)}s after harvest',
-      ClockInterval c => '; regrows ${describeClock(c)}',
-    }),
+    ...switch (regen) {
+      ArbitraryInterval a => [
+        tipText('; regrows ${fmtSpan(a.period)} after harvest'),
+      ],
+      ClockInterval c => [tipText('; regrows '), ...describeClockSpans(c)],
+    },
   ];
 
   @override
   List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(builder: (context) {
-      final enabled = ready && g.roomFor(p, produces);
-      // subscribe to inventory so room updates re-enable the chip
-      p.inventory.value;
-      return actionChip(
-        enabled: enabled,
-        onTap: () => harvest(g, p),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          spacing: badgeGap,
-          children: [
-            badgeIcon(Icons.local_florist),
-            badgeText('take'),
-            for (final q in produces) quantityWidget(q),
-          ],
-        ),
-      );
-    }),
+    SignalBuilder(
+      builder: (context) {
+        final enabled = ready && g.roomFor(p, produces);
+        // subscribe to inventory so room updates re-enable the chip
+        p.inventory.value;
+        return actionChip(
+          enabled: enabled,
+          onTap: () => harvest(g, p),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: badgeGap,
+            children: [
+              badgeIcon(Icons.local_florist),
+              badgeText('take'),
+              for (final q in produces) quantityWidget(q),
+            ],
+          ),
+        );
+      },
+    ),
   ];
 }
 
@@ -2828,46 +2969,48 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
     }
   }
 
-  Widget _exchangeRow({double itemSize = 13}) => Row(
+  Widget _exchangeRow(Game g, {double itemSize = 13}) => Row(
     mainAxisSize: MainAxisSize.min,
     spacing: badgeGap,
     children: [
-      badgeIcon(Icons.swap_vert_circle, size: 12),
+      badgeText('T'),
       for (final q in takes) quantityWidget(q, size: itemSize),
       badgeIcon(Icons.navigate_next, size: 12),
       for (final q in gives) quantityWidget(q, size: itemSize),
-      if (duration > 0) badgeText('${fmtSec(duration)}s'),
+      if (duration > 0) badgeText(fmtSpan(duration)),
     ],
   );
 
   @override
-  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(builder: (context) {
-    final hasPending = pendingOutput.value.isNotEmpty;
-    final working = workRemaining.value > 0;
-    return explainTap(
-      g,
-      withPie(
-        phaseBadgeRow(g, [
-          if (level == NodeZoomLevel.small)
-            badgeIcon(Icons.swap_vert_circle, size: 12)
-          else
-            _exchangeRow(itemSize: itemSizeFor(level)),
-          if (hasPending) badgeIcon(Icons.outbox, size: 12),
-        ]),
-        pie: working
-            ? CountdownPie(
-                remaining: workRemaining,
-                total: duration,
-                isCooldown: false,
-              )
-            : CountdownPie(
-                remaining: cooldownRemaining,
-                total: cooldown,
-                isCooldown: true,
-              ),
-      ),
-    );
-  });
+  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
+    builder: (context) {
+      final hasPending = pendingOutput.value.isNotEmpty;
+      final working = workRemaining.value > 0;
+      return explainTap(
+        g,
+        withPie(
+          phaseBadgeRow(g, [
+            if (level == NodeZoomLevel.small)
+              badgeText('T')
+            else
+              _exchangeRow(g, itemSize: itemSizeFor(level)),
+            if (hasPending) badgeIcon(Icons.outbox, size: 12),
+          ]),
+          pie: working
+              ? CountdownPie(
+                  remaining: workRemaining,
+                  total: duration,
+                  isCooldown: false,
+                )
+              : CountdownPie(
+                  remaining: cooldownRemaining,
+                  total: cooldown,
+                  isCooldown: true,
+                ),
+        ),
+      );
+    },
+  );
 
   @override
   List<InlineSpan> describe(Game g) => [
@@ -2875,67 +3018,69 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
     ...quantitiesSpans(takes),
     tipText(' for '),
     ...quantitiesSpans(gives),
-    if (duration > 0) tipText('; takes ${fmtSec(duration)}s'),
-    if (cooldown > 0) tipText('; then rests ${fmtSec(cooldown)}s'),
+    if (duration > 0) tipText('; takes ${fmtSpan(duration)}'),
+    if (cooldown > 0) tipText('; then rests ${fmtSpan(cooldown)}'),
   ];
 
   @override
   List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(builder: (context) {
-      // subscriptions
-      p.inventory.value;
-      workRemaining.value;
-      cooldownRemaining.value;
-      final pending = pendingOutput.value;
-      if (pending.isNotEmpty) {
-        return actionChip(
-          enabled: true,
-          onTap: () => collect(g, p),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: badgeGap,
-            children: [
-              badgeIcon(Icons.outbox, size: 12),
-              badgeText('collect'),
-              for (final q in pending) quantityWidget(q),
-            ],
-          ),
+    SignalBuilder(
+      builder: (context) {
+        // subscriptions
+        p.inventory.value;
+        workRemaining.value;
+        cooldownRemaining.value;
+        final pending = pendingOutput.value;
+        if (pending.isNotEmpty) {
+          return actionChip(
+            enabled: true,
+            onTap: () => collect(g, p),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: badgeGap,
+              children: [
+                badgeIcon(Icons.outbox, size: 12),
+                badgeText('collect'),
+                for (final q in pending) quantityWidget(q),
+              ],
+            ),
+          );
+        }
+        final chip = actionChip(
+          enabled: canTrade(g, p),
+          onTap: () => startTrade(g, p),
+          child: _exchangeRow(g),
         );
-      }
-      final chip = actionChip(
-        enabled: canTrade(g, p),
-        onTap: () => startTrade(g, p),
-        child: _exchangeRow(),
-      );
-      // A chip that's gone dim doesn't say whether the trader is working, or
-      // resting, or waiting on something the player hasn't got — and the pies
-      // that do say it are out on the map badge, which isn't where a player
-      // who has just tapped this is looking. So the chip carries the same pie
-      // the badge does: sage while the trade runs, black and counting while
-      // the trader rests afterwards. It sits outside the chip's dimming, since
-      // its whole job is to be the part that's still alive.
-      if (busy) {
-        return withPie(
-          chip,
-          pie: CountdownPie(
-            remaining: workRemaining,
-            total: duration,
-            isCooldown: false,
-          ),
-        );
-      }
-      if (cooling) {
-        return withPie(
-          chip,
-          pie: CountdownPie(
-            remaining: cooldownRemaining,
-            total: cooldown,
-            isCooldown: true,
-          ),
-        );
-      }
-      return chip;
-    }),
+        // A chip that's gone dim doesn't say whether the trader is working, or
+        // resting, or waiting on something the player hasn't got — and the pies
+        // that do say it are out on the map badge, which isn't where a player
+        // who has just tapped this is looking. So the chip carries the same pie
+        // the badge does: sage while the trade runs, black and counting while
+        // the trader rests afterwards. It sits outside the chip's dimming, since
+        // its whole job is to be the part that's still alive.
+        if (busy) {
+          return withPie(
+            chip,
+            pie: CountdownPie(
+              remaining: workRemaining,
+              total: duration,
+              isCooldown: false,
+            ),
+          );
+        }
+        if (cooling) {
+          return withPie(
+            chip,
+            pie: CountdownPie(
+              remaining: cooldownRemaining,
+              total: cooldown,
+              isCooldown: true,
+            ),
+          );
+        }
+        return chip;
+      },
+    ),
   ];
 }
 
@@ -2944,20 +3089,20 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
   /// flashing keeps idle muggers from rebuilding every frame
   final RedFlash flash = RedFlash();
 
-  bool get _requires => kind != MuggerKind.c;
   bool get _takes => kind != MuggerKind.r;
 
   @override
   List<Item> get requiredItems => [item];
 
   @override
-  void update(Game g, double dt) => flash.expire(g.gameTime);
+  void update(Game g, double dt) =>
+      flash.expire(g.gameTime, g.params.redFlashSpan);
 
   @override
   void onPlayerEntered(Game g, Player p) {
     if (!activeNow(g)) return;
     // muggers no longer freeze anyone: they clean you out
-    if (_requires && !g.playerHas(p, [Quantity(item, 1)])) {
+    if (!g.playerHas(p, [Quantity(item, 1)])) {
       flash.trigger(g.gameTime);
       if (p.inventory.peek().isNotEmpty) {
         p.inventory.value = const [];
@@ -2979,34 +3124,31 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
   }
 
   @override
-  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(builder: (context) {
-    var color = palette.ink;
-    if (flash.active) {
-      color = Color.lerp(
-        palette.ink,
-        Colors.red,
-        flash.rednessAt(g.clock.value),
-      )!;
-    }
-    return explainTap(
-      g,
-      phaseBadgeRow(g, [
-        badgeIcon(Icons.savings, color: color),
-        if (level != NodeZoomLevel.small) ...[
-          badgeText(kind.name),
-          ItemWidget(item, size: itemSizeFor(level)),
-        ],
-      ]),
-    );
-  });
+  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
+    builder: (context) {
+      var color = paletteSignal.value.ink;
+      if (flash.active) {
+        color = Color.lerp(
+          paletteSignal.value.ink,
+          Colors.red,
+          flash.rednessAt(g.clock.value, g.params.redFlashSpan),
+        )!;
+      }
+      return explainTap(
+        g,
+        phaseBadgeRow(g, [
+          badgeIcon(Icons.savings, color: color),
+          if (level != NodeZoomLevel.small) ...[
+            badgeText(kind.name),
+            ItemWidget(item, size: itemSizeFor(level)),
+          ],
+        ]),
+      );
+    },
+  );
 
   @override
   List<InlineSpan> describe(Game g) => switch (kind) {
-    MuggerKind.c => [
-      tipText('takes a '),
-      itemSpan(item),
-      tipText(' from passers-by who have one (harmless)'),
-    ],
     MuggerKind.r => [
       tipText('demands to see a '),
       itemSpan(item),
@@ -3026,29 +3168,36 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
 }
 
 class Storage(
-  final int capacity, // 2..12, log-distributed
-  {
-    /// secured storages are out of the blight's reach
-    final bool secured = false,
-  }
-) extends Facility {
+  final int capacity, { // 2..12, log-distributed
+  /// secured storages are out of the blight's reach
+  final bool secured = false,
+}) extends Facility {
   final Signal<List<Item>> contents = signal(const []);
 
+  /// what this store leads with, in the badge and in its control. An [Outbox]
+  /// is a storage in every way that the storage flows care about — it's loaded
+  /// the same, it rotates with the rest, and the blight reaches into it on the
+  /// same terms — so what separates the two on screen is this icon and what
+  /// the tooltip says.
+  IconData get storeIcon => Icons.inventory_2;
+
   @override
-  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(builder: (context) {
-    final c = contents.value;
-    return explainTap(
-      g,
-      phaseBadgeRow(g, [
-        badgeIcon(Icons.inventory_2),
-        if (secured) badgeIcon(Icons.lock, size: 11),
-        if (level == NodeZoomLevel.small || c.length > 3)
-          badgeText('${c.length}/$capacity')
-        else
-          for (final it in c) ItemWidget(it, size: itemSizeFor(level)),
-      ]),
-    );
-  });
+  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
+    builder: (context) {
+      final c = contents.value;
+      return explainTap(
+        g,
+        phaseBadgeRow(g, [
+          badgeIcon(storeIcon),
+          if (secured) badgeIcon(Icons.lock, size: 11),
+          if (level == NodeZoomLevel.small || c.length > 3)
+            badgeText('${c.length}/$capacity')
+          else
+            for (final it in c) ItemWidget(it, size: itemSizeFor(level)),
+        ]),
+      );
+    },
+  );
 
   @override
   List<InlineSpan> describe(Game g) => [
@@ -3064,31 +3213,345 @@ class Storage(
   /// it on to the next storage here, or back to the inventory.
   @override
   List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(builder: (context) {
-      final stored = contents.value;
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          badgeIcon(Icons.inventory_2),
-          const SizedBox(width: 3),
-          Flexible(
-            child: Wrap(
-              spacing: 3,
-              runSpacing: 3,
-              children: [
-                for (var i = 0; i < capacity; i++)
-                  slotBox(
-                    item: i < stored.length ? stored[i] : null,
-                    onTap: i < stored.length
-                        ? () => g.rotateItemOnward(p, this, stored[i])
-                        : null,
-                  ),
-              ],
+    SignalBuilder(
+      builder: (context) {
+        final stored = contents.value;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            badgeIcon(storeIcon),
+            const SizedBox(width: 3),
+            Flexible(
+              child: Wrap(
+                spacing: 3,
+                runSpacing: 3,
+                children: [
+                  for (var i = 0; i < capacity; i++)
+                    slotBox(
+                      item: i < stored.length ? stored[i] : null,
+                      onTap: i < stored.length
+                          ? () => g.rotateItemOnward(p, this, stored[i])
+                          : null,
+                    ),
+                ],
+              ),
             ),
+          ],
+        );
+      },
+    ),
+  ];
+}
+
+/// A storage whose contents any [Inbox] on the map can reach into. Everything
+/// else about it is a storage: it's loaded from the inventory the same way,
+/// rotates with the other stores on its node, and an unsecured one loses its
+/// contents to a blight like any other — which stings more here, since what
+/// was taken belonged to the whole map rather than to this node.
+class Outbox(super.capacity, {super.secured}) extends Storage {
+  @override
+  IconData get storeIcon => Icons.outbox_rounded;
+
+  @override
+  List<InlineSpan> describe(Game g) => [
+    tipText(
+      secured
+          ? 'a secured outbox with $capacity slots — inboxes anywhere on the '
+                'map can take from it, and the blight cannot reach in'
+          : 'an outbox with $capacity slots — inboxes anywhere on the map can '
+                'take from it',
+    ),
+  ];
+}
+
+/// The other end of the outboxes: a place to pull an item out of any one of
+/// them, wherever it's standing. There's no network object anywhere — what an
+/// inbox offers is walked out of the outboxes each time it's asked, so nothing
+/// has to be kept in step and nothing extra goes to disk.
+class Inbox({
+  /// what a pull demands of the player, if anything. [activationConsumed]
+  /// separates the ones that only want to see it from the ones that take it,
+  /// as the trains and the muggers do.
+  final Quantity? activation,
+  final bool activationConsumed = false,
+}) extends Facility {
+  @override
+  List<Item> get requiredItems => [if (activation != null) activation!.item];
+
+  /// Every item the outboxes hold between them, in one list per distinct item
+  /// with the outbox each one would come out of. Node order, so the same tap
+  /// takes the same item from the same place every time it's replayed.
+  List<(Item, int)> available(Game g) {
+    final counts = <Item, int>{};
+    for (final o in _outboxes(g)) {
+      for (final it in o.contents.value) {
+        counts[it] = (counts[it] ?? 0) + 1;
+      }
+    }
+    return [for (final e in counts.entries) (e.key, e.value)];
+  }
+
+  Iterable<Outbox> _outboxes(Game g) sync* {
+    for (final n in g.nodes) {
+      for (final o in n.facilities.whereType<Outbox>()) {
+        // an outbox that's out of hours isn't in the network while it's shut,
+        // the same as it's skipped when a player loads one by hand
+        if (o.activeNow(g)) yield o;
+      }
+    }
+  }
+
+  bool _paid(Game g, Player p) =>
+      activation == null || g.playerHas(p, [activation!]);
+
+  bool canPull(Game g, Player p) =>
+      identical(p.at.value, node) &&
+      p.inventory.value.length < g.params.inventoryCap &&
+      _paid(g, p);
+
+  /// The price is per item pulled rather than per visit, and it's charged here
+  /// rather than when the panel opens — so an inbox nobody can pay at is still
+  /// one they can look inside, which is half of what an inbox is for.
+  void pull(Game g, Player p, Item it) {
+    if (!canPull(g, p)) return;
+    final from = _outboxes(g)
+        .firstWhereOrNull((o) => o.contents.value.contains(it));
+    if (from == null) return;
+    if (activation != null && activationConsumed) g.takeItems(p, [activation!]);
+    final c = [...from.contents.value];
+    c.remove(it);
+    from.contents.value = c;
+    p.inventory.value = [...p.inventory.value, it];
+  }
+
+  /// A tray with an arrow coming down into it. Material's own move_to_inbox is
+  /// a tray with an arrow inside it, which at the size a badge draws at is the
+  /// same handful of pixels as the outbox's tray — and the two of them are the
+  /// pair that most needs telling apart. Stacking the arrow above the tray
+  /// puts the difference in the silhouette instead of in the detail.
+  static Widget _mark({double size = 13}) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      badgeIcon(Icons.arrow_downward_rounded, size: size * 0.62),
+      badgeIcon(Icons.inbox, size: size),
+    ],
+  );
+
+  Widget _costRow({double itemSize = 13}) => Row(
+    mainAxisSize: MainAxisSize.min,
+    spacing: badgeGap,
+    children: [
+      _mark(),
+      if (activation != null) ...[
+        badgeText(activationConsumed ? 'c' : 'r'),
+        quantityWidget(activation!, size: itemSize),
+      ],
+    ],
+  );
+
+  @override
+  Widget badge(Game g, NodeZoomLevel level) => explainTap(
+    g,
+    phaseBadgeRow(g, [
+      if (level == NodeZoomLevel.small)
+        _mark()
+      else
+        _costRow(itemSize: itemSizeFor(level)),
+    ]),
+  );
+
+  @override
+  List<InlineSpan> describe(Game g) => [
+    tipText('an inbox — takes an item out of any outbox on the map'),
+    if (activation != null) ...[
+      tipText(activationConsumed ? '; each pull costs ' : '; demands to see '),
+      ...quantitiesSpans([activation!]),
+    ],
+  ];
+
+  /// Like a storage's control with the loading taken out: the slots are what
+  /// the outboxes are holding, and tapping one brings it here.
+  @override
+  List<Widget> actionsFor(Game g, Player p) => [
+    SignalBuilder(
+      builder: (context) {
+        p.inventory.value;
+        final offer = available(g);
+        final enabled = canPull(g, p);
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _costRow(),
+            const SizedBox(width: 3),
+            if (offer.isEmpty)
+              badgeText('every outbox is empty')
+            else
+              Flexible(
+                child: Opacity(
+                  opacity: enabled ? 1 : 0.35,
+                  child: Wrap(
+                    spacing: 3,
+                    runSpacing: 3,
+                    children: [
+                      for (final (it, n) in offer)
+                        slotBox(
+                          item: it,
+                          count: n,
+                          onTap: enabled ? () => pull(g, p, it) : null,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    ),
+  ];
+}
+
+/// Somewhere a [JumpStation] can send a player. Inert on its own: it has no
+/// action, and its whole function is being a place another node can reach.
+class LandingStation extends Facility {
+  @override
+  Widget badge(Game g, NodeZoomLevel level) =>
+      explainTap(g, phaseBadgeRow(g, [badgeIcon(Icons.flight_land)]));
+
+  @override
+  List<InlineSpan> describe(Game g) => [
+    tipText('a landing station — jump stations can send someone here'),
+  ];
+}
+
+/// Sends a player across the map in no time at all: to a [LandingStation], or
+/// anywhere at all if it's free-aim, which is dear enough that it always costs
+/// something. The cooldown is the station's rather than the traveller's — it
+/// recharges once for everybody — and it's an arbitrary interval, since it
+/// runs from whenever it was last used rather than from a time of day.
+class JumpStation({
+  final bool freeAim = false,
+  final Quantity? cost, // taken on the jump, not on aiming
+  final double cooldown = 0, // 0 = none
+}) extends Facility {
+  final Signal<double> cooldownRemaining = signal(0.0);
+
+  @override
+  List<Item> get requiredItems => [if (cost != null) cost!.item];
+
+  bool get cooling => cooldownRemaining.value > 0;
+
+  @override
+  void update(Game g, double dt) {
+    if (cooldownRemaining.value > 0) {
+      cooldownRemaining.value = max(0.0, cooldownRemaining.value - dt);
+    }
+  }
+
+  bool canJump(Game g, Player p) =>
+      identical(p.at.value, node) &&
+      !cooling &&
+      (cost == null || g.playerHas(p, [cost!]));
+
+  /// Where this station will send someone. Never the node they're already
+  /// standing on; a free-aim station will send them to any node at all, trains
+  /// and their stations included — a train is a node like any other, and
+  /// landing on one is the same as stepping aboard from its gangway.
+  bool isTarget(Node n, Player p) {
+    if (identical(n, node) || identical(n, p.at.value)) return false;
+    return freeAim || n.facilities.any((f) => f is LandingStation);
+  }
+
+  void jump(Game g, Player p, Node to) {
+    if (!canJump(g, p) || !isTarget(to, p)) return;
+    if (cost != null) g.takeItems(p, [cost!]);
+    if (cooldown > 0) cooldownRemaining.value = cooldown;
+    g.teleport(p, to);
+  }
+
+  Widget _row({double itemSize = 13}) => Row(
+    mainAxisSize: MainAxisSize.min,
+    spacing: badgeGap,
+    children: [
+      badgeIcon(Icons.flight_rounded),
+      if (freeAim) badgeIcon(Icons.public, size: 11),
+      if (cost != null) quantityWidget(cost!, size: itemSize),
+    ],
+  );
+
+  @override
+  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
+    builder: (context) => explainTap(
+      g,
+      withPie(
+        phaseBadgeRow(g, [
+          if (level == NodeZoomLevel.small)
+            badgeIcon(Icons.flight_rounded)
+          else
+            _row(itemSize: itemSizeFor(level)),
+        ]),
+        pie: CountdownPie(
+          remaining: cooldownRemaining,
+          total: cooldown,
+          isCooldown: true,
+        ),
+      ),
+    ),
+  );
+
+  @override
+  List<InlineSpan> describe(Game g) => [
+    tipText(
+      freeAim
+          ? 'a jump station — sends one person to any node on the map'
+          : 'a jump station — sends one person to any landing station',
+    ),
+    if (cost != null) ...[
+      tipText('; costs '),
+      ...quantitiesSpans([cost!]),
+    ],
+    if (cooldown > 0) tipText('; then rests ${fmtSpan(cooldown)}'),
+  ];
+
+  @override
+  List<Widget> actionsFor(Game g, Player p) => [
+    SignalBuilder(
+      builder: (context) {
+        p.inventory.value;
+        cooldownRemaining.value;
+        final aiming = identical(g.jumping.value?.$1, this);
+        final chip = actionChip(
+          enabled: aiming || canJump(g, p),
+          onTap: () => aiming ? g.cancelJump() : g.startJump(this, p),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: badgeGap,
+            children: [
+              _row(),
+              badgeText(
+                aiming
+                    ? (freeAim
+                          ? 'click which node on the map you want to jump to'
+                          : 'click a landing station on the map')
+                    : 'jump',
+              ),
+            ],
           ),
-        ],
-      );
-    }),
+        );
+        // the same pie the badge carries, for the same reason the trader's
+        // chip carries one: a chip that's gone dim doesn't say why
+        if (cooling) {
+          return withPie(
+            chip,
+            pie: CountdownPie(
+              remaining: cooldownRemaining,
+              total: cooldown,
+              isCooldown: true,
+            ),
+          );
+        }
+        return chip;
+      },
+    ),
   ];
 }
 
@@ -3123,7 +3586,7 @@ class Blight({
 
   @override
   void update(Game g, double dt) {
-    flash.expire(g.gameTime);
+    flash.expire(g.gameTime, g.params.redFlashSpan);
     final cycle = interval.cycleAt(g.gameTime);
     if (_lastCycle == -1 << 30) _lastCycle = cycle;
     if (cycle > _lastCycle) {
@@ -3169,49 +3632,52 @@ class Blight({
   }
 
   @override
-  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(builder: (context) {
-    var color = palette.ink;
-    if (flash.active) {
-      color = Color.lerp(
-        palette.ink,
-        Colors.red,
-        flash.rednessAt(g.clock.value),
-      )!;
-    }
-    final fed = satiated.value;
-    return explainTap(
-      g,
-      withPie(
-        phaseBadgeRow(g, [
-          badgeIcon(Icons.dangerous, color: color),
-          if (level != NodeZoomLevel.small) ...[
-            if (hungry) badgeText('R'),
-            if (mitigator != null)
-              Opacity(
-                opacity: fed ? 0.4 : 1,
-                child: ItemWidget(mitigator!, size: itemSizeFor(level)),
-              ),
-          ],
-        ]),
-        // a placated blight that wants nothing more stops counting down
-        pie: dormant
-            ? const SizedBox.shrink()
-            : CountdownPie(
-                remaining: remaining,
-                total: interval.period,
-                isCooldown: true,
-                clock: interval,
-              ),
-      ),
-    );
-  });
+  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
+    builder: (context) {
+      var color = paletteSignal.value.ink;
+      if (flash.active) {
+        color = Color.lerp(
+          paletteSignal.value.ink,
+          Colors.red,
+          flash.rednessAt(g.clock.value, g.params.redFlashSpan),
+        )!;
+      }
+      final fed = satiated.value;
+      return explainTap(
+        g,
+        withPie(
+          phaseBadgeRow(g, [
+            badgeIcon(Icons.dangerous, color: color),
+            if (level != NodeZoomLevel.small) ...[
+              if (hungry) badgeText('R'),
+              if (mitigator != null)
+                Opacity(
+                  opacity: fed ? 0.4 : 1,
+                  child: ItemWidget(mitigator!, size: itemSizeFor(level)),
+                ),
+            ],
+          ]),
+          // a placated blight that wants nothing more stops counting down
+          pie: dormant
+              ? const SizedBox.shrink()
+              : CountdownPie(
+                  remaining: remaining,
+                  total: interval.period,
+                  isCooldown: true,
+                  clock: interval,
+                ),
+        ),
+      );
+    },
+  );
 
   @override
   List<InlineSpan> describe(Game g) => [
+    tipText('a blight — '),
+    ...describeClockSpans(interval),
     tipText(
-      'a blight — ${describeClock(interval)} it strips every loose item '
-      'within ${fmt1(radius)} units, from players and unsecured storage '
-      'alike',
+      ' it strips every loose item within ${fmt1(radius)} units, from players '
+      'and unsecured storage alike',
     ),
     if (mitigator != null) ...[
       tipText('; give it '),
@@ -3224,23 +3690,25 @@ class Blight({
   List<Widget> actionsFor(Game g, Player p) {
     if (mitigator == null) return const [];
     return [
-      SignalBuilder(builder: (context) {
-        p.inventory.value;
-        final fed = satiated.value;
-        return actionChip(
-          enabled: !fed && canFeed(g, p),
-          onTap: () => feed(g, p),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: badgeGap,
-            children: [
-              badgeIcon(Icons.dangerous, size: 12),
-              badgeText(fed ? 'sated' : 'appease'),
-              ItemWidget(mitigator!, size: 13),
-            ],
-          ),
-        );
-      }),
+      SignalBuilder(
+        builder: (context) {
+          p.inventory.value;
+          final fed = satiated.value;
+          return actionChip(
+            enabled: !fed && canFeed(g, p),
+            onTap: () => feed(g, p),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: badgeGap,
+              children: [
+                badgeIcon(Icons.dangerous, size: 12),
+                badgeText(fed ? 'sated' : 'appease'),
+                ItemWidget(mitigator!, size: 13),
+              ],
+            ),
+          );
+        },
+      ),
     ];
   }
 }
@@ -3255,7 +3723,11 @@ class Game({
   required final List<Player> players,
   required final List<TrainNode> trains,
 }) {
-  double gameTime = 0; // the pausable clock; ALL timers tick on this
+  /// The pausable clock, in game seconds since the level began; ALL timers
+  /// tick on this. [update] steps it by a span of game time, never a span of
+  /// real time — the ticker converts before it gets here.
+  double gameTime = 0;
+
   /// gameTime mirrored as a signal, for the few things that animate off it
   /// reactively (the mugger pulse); most rendering rides the frame notifier
   final Signal<double> clock = signal(0.0);
@@ -3265,8 +3737,10 @@ class Game({
   late final Signal<Player> selectedPlayer;
   final Signal<GamePhase> phase = signal(GamePhase.playing);
 
-  /// Day occupies the first half of each day, night the second — night turns
-  /// to day halfway through. Everything that renders reads this.
+  /// Day occupies the first half of each day, night the second. It goes by
+  /// unremarked — nothing about the world changes as it turns — and is here
+  /// for the two things that still read the half of the day they're in: a
+  /// clock face's AM/PM colouring, and an [ActivePhase]-restricted facility.
   final Signal<bool> isNight = signal(false);
 
   /// How far the view is allowed to zoom, in logical pixels per world unit.
@@ -3276,14 +3750,14 @@ class Game({
   /// Placeholders until the first layout.
   double zoomMin = 1, zoomMax = 1;
 
-  /// the big transient caps message: NIGHT HAS FALLEN, MUGGED, BLIGHTSTRUCK…
+  /// the big transient caps message: MUGGED, BLIGHTSTRUCK…
   final Signal<(String text, double at)?> announcement = signal(null);
 
   /// every blight in the level, for painting their radii
   late final List<Blight> blights;
 
-  double get timeOfDay => gameTime % params.dayLength;
-  int get daysRemaining => (timeLeft.value / params.dayLength).floor();
+  double get timeOfDay => gameTime % gameDay;
+  int get daysRemaining => (timeLeft.value / gameDay).floor();
 
   void announce(String text) => announcement.value = (text, gameTime);
 
@@ -3292,12 +3766,50 @@ class Game({
   final Signal<(Object source, Node at, List<InlineSpan> spans)?> tooltip =
       signal(null);
 
-  /// tapping the facility whose tooltip is showing closes it again
+  /// The jump station currently aiming, and who it's aiming for. While this is
+  /// set the map is in targeting mode: the legal targets keep their colour and
+  /// the rest of the graph washes out, and the next tap on the world either
+  /// lands the jump or backs out of it.
+  final Signal<(JumpStation, Player)?> jumping = signal(null);
+
+  void startJump(JumpStation s, Player p) {
+    if (!s.canJump(this, p)) return;
+    tooltip.value = null;
+    jumping.value = (s, p);
+  }
+
+  void cancelJump() => jumping.value = null;
+
+  /// Bumped when the followed player has been put somewhere they didn't walk
+  /// to. The map view drops the user's pan and seeks them again; see
+  /// [teleport]. A counter rather than a flag, so two of them in a row are two
+  /// requests, and it's [peek]ed rather than watched — the view is looking at
+  /// it every frame anyway.
+  final Signal<int> recenterWanted = signal(0);
+
+  /// Takes the tap on [n] as the target, if it's a legal one. Returns whether
+  /// it was: an illegal target is a tap on the map like any other, and the
+  /// caller backs out of aiming.
+  bool tryJumpTo(Node n) {
+    final j = jumping.value;
+    if (j == null) return false;
+    final (station, p) = j;
+    if (!station.isTarget(n, p)) return false;
+    jumping.value = null;
+    station.jump(this, p, n);
+    return true;
+  }
+
+  /// tapping the facility whose tooltip is showing closes it again — unless a
+  /// jump is being aimed, in which case a tap on a facility is a tap on the
+  /// node it's standing on, and the badges are the easiest thing on the map to
+  /// hit
   void toggleTooltip(
     Object source,
     Node at,
     List<InlineSpan> Function() spans,
   ) {
+    if (tryJumpTo(at)) return;
     raiseNode(at);
     final cur = tooltip.value;
     tooltip.value = cur != null && identical(cur.$1, source)
@@ -3318,19 +3830,18 @@ class Game({
     blights = [for (final n in nodes) ...n.facilities.whereType<Blight>()];
   }
 
+  /// Steps the world on by [dt] game seconds. Everything it hands [dt] down to
+  /// counts in the same units, all the way to the last cooldown signal.
   void update(double dt) {
     if (paused.value || phase.value != GamePhase.playing) return;
     gameTime += dt;
     clock.value = gameTime;
     timeLeft.value = max(0.0, timeLeft.value - dt);
 
-    final night = timeOfDay >= params.dayLength / 2;
-    if (night != isNight.value) {
-      isNight.value = night;
-      announce(night ? 'NIGHT HAS FALLEN' : 'DAY HAS RISEN');
-    }
+    final night = timeOfDay >= gameDay / 2;
+    if (night != isNight.value) isNight.value = night;
     final ann = announcement.value;
-    if (ann != null && gameTime - ann.$2 > announcementTime) {
+    if (ann != null && gameTime - ann.$2 > params.announcementSpan) {
       announcement.value = null;
     }
 
@@ -3443,6 +3954,35 @@ class Game({
       if (!c.remove(it)) return;
       from.contents.value = c;
       p.inventory.value = [...p.inventory.value, it];
+    }
+  }
+
+  // ── moving ──
+
+  /// Puts [p] down on [to] without their crossing anything to get there. The
+  /// arrival is an ordinary arrival — the same [Facility.onPlayerEntered] runs,
+  /// so a mugger on the far node robs whoever lands on it exactly as it robs
+  /// whoever walks in. Any move they had planned is dropped: it was a plan for
+  /// a walk out of somewhere they're no longer standing.
+  void teleport(Player p, Node to) {
+    final from = p.at.value;
+    if (identical(from, to)) return;
+    p.plan.clear();
+    if (from != null) {
+      from.playersPresent.value = from.playersPresent.value
+          .where((x) => !identical(x, p))
+          .toList();
+    }
+    p.at.value = to;
+    to.playersPresent.value = [...to.playersPresent.value, p];
+    raiseNode(to);
+    // The camera has nothing to follow across — they crossed nothing — and
+    // whatever pan the player put in while they were aiming was a pan relative
+    // to where they used to be standing. Both are dropped and the view seeks
+    // them where they've landed.
+    if (identical(p, selectedPlayer.value)) recenterWanted.value++;
+    for (final f in List.of(to.facilities)) {
+      f.onPlayerEntered(this, p);
     }
   }
 
@@ -3681,7 +4221,6 @@ Game generateLevel(Parameters p) {
       TrainScheduleKind.cycle => CycleSchedule(
         _divisionInterval(
           rng,
-          p.dayLength,
           p.trainCycleDivisions[rng.nextInt(p.trainCycleDivisions.length)],
         ),
       ),
@@ -3741,6 +4280,10 @@ Game generateLevel(Parameters p) {
     FacilityKind.storage,
     FacilityKind.mugger,
     FacilityKind.blight,
+    FacilityKind.outbox,
+    FacilityKind.inbox,
+    FacilityKind.jumpStation,
+    FacilityKind.landingStation,
   ];
   final kindCounts = apportionCounts([
     for (final k in kinds) p.nonTraderWeights[k] ?? 0,
@@ -3759,25 +4302,26 @@ Game generateLevel(Parameters p) {
           secured: rng.chance(p.storageSecurep),
         ),
         FacilityKind.blight => _generateBlight(rng, p, catalog),
+        FacilityKind.outbox => Outbox(
+          logUniformInt(
+            rng,
+            p.outboxCapacityRange.$1,
+            p.outboxCapacityRange.$2,
+          ),
+          secured: rng.chance(p.storageSecurep),
+        ),
+        FacilityKind.inbox => _generateInbox(rng, p, catalog),
+        FacilityKind.jumpStation => _generateJumpStation(rng, p, catalog),
+        FacilityKind.landingStation => LandingStation(),
         _ => _generateMugger(rng, p, catalog),
       });
     }
   }
-  // day/night restriction: muggers work the night, everything else that keeps
-  // hours keeps day hours. Blights are nocturnal by nature, so they're exempt.
-  for (final f in pool) {
-    f.activePhase = switch (f) {
-      Mugger _ =>
-        rng.chance(p.muggerNightOnlyp)
-            ? ActivePhase.nightOnly
-            : ActivePhase.always,
-      Blight _ => ActivePhase.always,
-      _ =>
-        rng.chance(p.facilityDayOnlyp)
-            ? ActivePhase.dayOnly
-            : ActivePhase.always,
-    };
-  }
+  // Nothing is handed a day/night restriction: muggers used to work the night
+  // and a third of everything else kept day hours, which meant half of what a
+  // player had worked out about the map was inactionable at any given moment.
+  // Facilities keep their schedules; they no longer keep hours. See
+  // [ActivePhase].
   shuffleInPlace(rng, pool);
   var k = 0;
   for (var i = 0; i < nodes.length; i++) {
@@ -3787,6 +4331,8 @@ Game generateLevel(Parameters p) {
       nodes[i].facilities.add(f);
     }
   }
+
+  _makeGoodCounterparts(nodes);
 
   // 9b ── node tone: with the facilities in place, every node draws its
   // colouring. A tinted node stains itself with one of the colours its own
@@ -3881,10 +4427,7 @@ Tree _generateTree(GameRng rng, Parameters p, ItemCatalog cat) {
   // clock-regen trees come back once a day, at their own time of day —
   // several regrowths a day was more schedule than the player could hold
   final regen = rng.chance(p.treeClockIntervalp)
-      ? ClockInterval(
-          dayLength: p.dayLength,
-          offset: rng.nextDouble() * p.dayLength,
-        )
+      ? ClockInterval(offset: rng.nextDouble() * gameDay)
       : ArbitraryInterval(p.treeRegenTime);
   return Tree(produces, regen);
 }
@@ -3905,24 +4448,141 @@ Blight _generateBlight(GameRng rng, Parameters p, ItemCatalog cat) {
     radius: p.blightRadii[rng.nextInt(p.blightRadii.length)],
     // it always comes at night, so its offset lands in the day's second half
     interval: ClockInterval(
-      dayLength: p.dayLength,
       multiple: days,
-      offset: rangeIn(rng, p.dayLength / 2, p.dayLength),
+      offset: rangeIn(rng, gameDay / 2, gameDay),
     ),
     mitigator: mitigable ? all[rng.nextInt(all.length)] : null,
     hungry: mitigable && rng.chance(p.blightHungryp),
   );
 }
 
+Inbox _generateInbox(GameRng rng, Parameters p, ItemCatalog cat) {
+  if (!rng.chance(p.inboxActivationProb)) return Inbox();
+  return Inbox(
+    // a basic item by preference, as the trains take
+    activation: Quantity(
+      _pick(rng, cat.tiers[weightedPick(rng, [(0.7, 0), (0.3, 1)])]),
+      1,
+    ),
+    activationConsumed: rng.chance(p.inboxActivationConsumedProb),
+  );
+}
+
+JumpStation _generateJumpStation(GameRng rng, Parameters p, ItemCatalog cat) {
+  final freeAim = rng.chance(p.jumpFreeAimp);
+  var costs = rng.chance(p.jumpCostItemp);
+  var cools = rng.chance(p.jumpCooldownp);
+  // A jump to anywhere at no price is a second map with no distances in it, so
+  // a free-aim station that rolled neither is given the cooldown. A station
+  // that can only reach landing stations is allowed to be free: the landing
+  // stations are the price.
+  if (freeAim && !costs && !cools) cools = true;
+  Quantity? cost;
+  if (costs) {
+    // the trains' rule: a basic item, unless what it's buying is the expensive
+    // kind of jump, in which case it may be something out of the middle
+    final tier = weightedPick(rng, [
+      (0.6, 0),
+      (0.3, 1),
+      if (freeAim) (0.5, min(2, cat.tiers.length - 1)),
+    ]);
+    cost = Quantity(_pick(rng, cat.tiers[tier]), 1);
+  }
+  return JumpStation(
+    freeAim: freeAim,
+    cost: cost,
+    cooldown: cools
+        ? roundToMinute(
+            rangeIn(rng, p.jumpCooldownRange.$1, p.jumpCooldownRange.$2),
+          )
+        : 0,
+  );
+}
+
+/// Hops from [from] to every node it can reach over the permanent wires. Used
+/// to put a forced counterpart as far from the facility that needed it as the
+/// map allows — one placed next door saves nobody a journey.
+Map<Node, int> _hopsFrom(Node from) {
+  final dist = <Node, int>{from: 0};
+  final queue = <Node>[from];
+  for (var i = 0; i < queue.length; i++) {
+    final n = queue[i];
+    for (final e in n.edges) {
+      final other = e.other(n);
+      if (dist.containsKey(other)) continue;
+      dist[other] = dist[n]! + 1;
+      queue.add(other);
+    }
+  }
+  return dist;
+}
+
+/// the reachable node furthest from [from], or null if it stands alone
+Node? _furthestFrom(Node from, List<Node> nodes) {
+  final dist = _hopsFrom(from);
+  Node? best;
+  var bestD = -1;
+  for (final n in nodes) {
+    final d = dist[n];
+    if (d == null || d <= bestD) continue;
+    bestD = d;
+    best = n;
+  }
+  return best;
+}
+
+void _place(Node n, Facility f) {
+  f.node = n;
+  n.facilities.add(f);
+}
+
+/// Two of the kinds do nothing on their own, so once the shuffle has strewn
+/// everything the pairings are made good: an inbox with nothing to pull from,
+/// or a jump station with nowhere to land, is a facility the player can read,
+/// walk to, and get nothing out of.
+void _makeGoodCounterparts(List<Node> nodes) {
+  Iterable<T> allOf<T extends Facility>() sync* {
+    for (final n in nodes) {
+      yield* n.facilities.whereType<T>();
+    }
+  }
+
+  final inbox = allOf<Inbox>().firstOrNull;
+  if (inbox != null && allOf<Outbox>().isEmpty) {
+    final at = _furthestFrom(inbox.node, nodes);
+    if (at != null) {
+      // a storage is the nearest thing to an outbox there is, so one of those
+      // becomes the outbox where there's one to take; otherwise it's new
+      final storage = at.facilities.whereType<Storage>().firstOrNull;
+      if (storage != null) {
+        at.facilities.remove(storage);
+        _place(at, Outbox(storage.capacity, secured: storage.secured));
+      } else {
+        _place(at, Outbox(3));
+      }
+    }
+  }
+
+  final jump = allOf<JumpStation>().firstWhereOrNull((j) => !j.freeAim);
+  if (jump != null && allOf<LandingStation>().isEmpty) {
+    final at = _furthestFrom(jump.node, nodes);
+    if (at != null) _place(at, LandingStation());
+  }
+}
+
 // ────────────────────────────── shared render bits ──────────────────────────────
 
-String describeClock(ClockInterval c) => c.isDaily
-    ? (c.multiple == 1
-          ? 'daily at ${fmtTimeOfDay(c.timeOfDay, c.dayLength)}'
-          : 'every ${c.multiple} days at '
-                '${fmtTimeOfDay(c.timeOfDay, c.dayLength)}')
-    : '${c.division} times a day, from '
-          '${fmtTimeOfDay(c.timeOfDay, c.dayLength)}';
+/// A clock schedule in english, ending in the time of day it fires at — which,
+/// like every clock time the game prints, comes with its face. See
+/// [clockTimeSpans].
+List<InlineSpan> describeClockSpans(ClockInterval c) => [
+  tipText(
+    c.isDaily
+        ? (c.multiple == 1 ? 'daily at ' : 'every ${c.multiple} days at ')
+        : '${c.division} times a day, from ',
+  ),
+  ...clockTimeSpans(c),
+];
 
 /// The day/night markers. Material's light_mode/dark_mode carry too much
 /// interior detail to survive being drawn at eight logical pixels, so we draw
@@ -4028,17 +4688,167 @@ Widget phaseIcon(bool night, {required double size, required Color color}) =>
       painter: night ? _MoonPainter(color) : _SunPainter(color),
     );
 
+/// A clock face: a disc with an hour hand and a fainter, longer minute hand,
+/// standing at the time of day beside it.
+///
+/// It is emphatically not a pie, because it shares its corner with them. A pie
+/// is a countdown — a wedge that drains as something comes due — and a clock
+/// time is the other kind of fact, a fixed hour that comes round again, so the
+/// two have to be different objects at a glance and not two ways of filling the
+/// same disc. A dial with hands is about as far from a wedge as a disc gets.
+///
+/// The face is pale for an AM time and dark for a PM one, and stays that way
+/// round under a dark scheme — which half of the day it is doesn't depend on
+/// what the screen is doing. That does mean the face sometimes lands on a
+/// ground its own colour, which is what [rimmed] is for. The digits beside it
+/// are on a 24-hour clock and say the same thing; the point of the colouring is
+/// that it survives not being read.
+///
+/// The colours are passed in rather than read off [paletteSignal], because
+/// nothing subscribes during paint and [shouldRepaint] is where a change of
+/// scheme has to be noticed.
+class const _ClockFacePainter({
+  required final double minutesIntoDay,
+  required final Color face,
+  required final Color hand,
+
+  /// whether the face is the same colour as the ground it's drawn on, and so
+  /// needs an edge drawn round it to be a disc at all
+  required final bool rimmed,
+}) extends CustomPainter {
+  /// the rim, as a fraction of the radius
+  static const _rim = 0.13;
+
+  /// hand lengths and widths, as fractions of the radius inside the rim. The
+  /// minute hand reaches nearly to the edge and the hour hand stops around
+  /// halfway, which is the whole of what makes the two readable this small —
+  /// their positions can't be relied on to tell them apart.
+  static const _hourLength = 0.52;
+  static const _hourWidth = 0.3;
+  static const _minuteLength = 0.84;
+  static const _minuteWidth = 0.2;
+
+  /// how far the minute hand is let fade towards its face
+  static const _minuteFade = 0.55;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = min(size.width, size.height) / 2;
+    final c = Offset(size.width / 2, size.height / 2);
+
+    canvas.drawCircle(c, r, Paint()..color = face);
+    final rimWidth = rimmed ? max(0.6, r * _rim) : 0.0;
+    if (rimWidth > 0) {
+      canvas.drawCircle(
+        c,
+        r - rimWidth / 2,
+        Paint()
+          ..color = hand
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = rimWidth,
+      );
+    }
+
+    final dial = r - rimWidth;
+    void drawHand(double turns, double length, double width, Color color) {
+      final a = -pi / 2 + turns * 2 * pi;
+      canvas.drawLine(
+        c,
+        c + Offset(cos(a), sin(a)) * (dial * length),
+        Paint()
+          ..color = color
+          ..strokeWidth = max(0.7, dial * width)
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+
+    // the minute hand goes down first so the hour hand crosses over it
+    drawHand(
+      (minutesIntoDay % 60) / 60,
+      _minuteLength,
+      _minuteWidth,
+      hand.withValues(alpha: _minuteFade),
+    );
+    drawHand(
+      (minutesIntoDay % (12 * 60)) / (12 * 60),
+      _hourLength,
+      _hourWidth,
+      hand,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ClockFacePainter old) =>
+      old.minutesIntoDay != minutesIntoDay ||
+      old.face != face ||
+      old.hand != hand ||
+      old.rimmed != rimmed;
+}
+
+/// The face for a moment in the day, [size] across. The whole day maps onto the
+/// whole 24-hour clock, exactly as [fmtTimeOfDay] reads it.
+Widget clockFace(double t, {required double size}) {
+  final minutes = (t % gameDay) / gameMinute;
+  final pm = minutes >= 12 * 60;
+  // the scheme's palest and its deepest; which of the two is [Palette.ground]
+  // is exactly what changes between schemes, and exactly when the face needs
+  // its rim
+  final pale = paletteSignal.value.isDark
+      ? paletteSignal.value.inkStrong
+      : paletteSignal.value.ground;
+  final deep = paletteSignal.value.isDark
+      ? paletteSignal.value.ground
+      : paletteSignal.value.inkStrong;
+  final face = pm ? deep : pale;
+  return CustomPaint(
+    size: Size.square(size),
+    painter: _ClockFacePainter(
+      minutesIntoDay: minutes,
+      face: face,
+      hand: pm ? pale : deep,
+      rimmed: face == paletteSignal.value.ground,
+    ),
+  );
+}
+
+/// A clock time as it's always given: the face, then the digits.
+Widget clockTimeRow(
+  double t, {
+  required double faceSize,
+  required TextStyle style,
+}) => Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    clockFace(t, size: faceSize),
+    SizedBox(width: faceSize * 0.28),
+    Text(fmtTimeOfDay(t), style: style),
+  ],
+);
+
+/// the same pair inside tooltip prose, where the digits are ordinary text so
+/// they wrap and take the tooltip's style, and only the face is a widget
+List<InlineSpan> clockTimeSpans(ClockInterval c) => [
+  WidgetSpan(
+    alignment: PlaceholderAlignment.middle,
+    child: Padding(
+      padding: const EdgeInsets.only(left: 1, right: 3),
+      child: clockFace(c.timeOfDay, size: 11),
+    ),
+  ),
+  tipText(fmtTimeOfDay(c.timeOfDay)),
+];
+
 Widget badgeText(String s) => Text(
   s,
   style: TextStyle(
     fontSize: 10,
-    color: palette.ink,
+    color: paletteSignal.value.ink,
     fontWeight: FontWeight.w500,
   ),
 );
 
 Widget badgeIcon(IconData icon, {Color? color, double size = 13}) =>
-    Icon(icon, size: size, color: color ?? palette.ink);
+    Icon(icon, size: size, color: color ?? paletteSignal.value.ink);
 
 /// The gap between marks standing in a row — icons, item icons, text runs.
 /// Sequences of items are only legible if it's clear where one ends and the
@@ -4064,10 +4874,10 @@ Widget quantityWidget(Quantity q, {double size = 13}) {
           style: TextStyle(
             fontSize: 8.5,
             fontWeight: FontWeight.bold,
-            color: palette.inkStrong,
+            color: paletteSignal.value.inkStrong,
             shadows: [
-              Shadow(color: palette.ground, blurRadius: 2),
-              Shadow(color: palette.ground, blurRadius: 3),
+              Shadow(color: paletteSignal.value.ground, blurRadius: 2),
+              Shadow(color: paletteSignal.value.ground, blurRadius: 3),
             ],
           ),
         ),
@@ -4096,7 +4906,7 @@ Widget badgeRow(
   bool dim = false,
   Color? tone,
 }) {
-  final fill = lozengeFill(tone ?? palette.node);
+  final fill = lozengeFill(tone ?? paletteSignal.value.node);
   Widget dimmed(Widget w) => dim ? Opacity(opacity: dimFade, child: w) : w;
   final Widget row;
   if (leading == null) {
@@ -4162,9 +4972,11 @@ Widget withPie(Widget child, {required Widget pie}) => Stack(
 
 /// The ubiquitous countdown pie. Progress (work) pies are sage; cooldowns are
 /// black and labelled: with the clock time they're pinned to if they run on a
-/// clock interval, and with the seconds remaining otherwise — one or the
-/// other, never both. Both kinds shrink. Ticks on game time via its signal —
-/// never wall clock — so pausing pauses pies.
+/// clock interval — face and all, see [clockTimeRow] — and with the span still
+/// to run otherwise, one or the other, never both. Either way the pie is the
+/// same pie: how soon is the pie's business, and at what hour is the label's.
+/// Both kinds shrink. Ticks on game time via its signal — never wall clock —
+/// so pausing pauses pies.
 class const CountdownPie({
   super.key,
   required final Signal<double> remaining,
@@ -4172,44 +4984,50 @@ class const CountdownPie({
   required final bool isCooldown,
 
   /// set when the countdown runs on a clock interval: its time of day is the
-  /// more useful label, so it's shown in place of the seconds
+  /// more useful label, so it's shown in place of the span
   final ClockInterval? clock,
   final double size = 11,
 }) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return SignalBuilder(builder: (context) {
-      final r = remaining.value;
-      if (r <= 0 || total <= 0) return const SizedBox.shrink();
-      final pie = CustomPaint(
-        size: Size.square(size),
-        painter: _PiePainter(
-          fraction: clampUnit(r / total),
-          color: isCooldown ? palette.inkStrong : sage,
-        ),
-      );
-      if (!isCooldown) return pie;
-      final label = clock != null
-          ? fmtTimeOfDay(clock!.timeOfDay, clock!.dayLength)
-          : '${r.ceil()}';
-      // The label is positioned rather than laid out in a row: a Positioned
-      // given only a left offset is left unconstrained, so the text hangs off
-      // the pie's right without widening it, and the pie keeps the corner.
-      return Stack(
-        clipBehavior: Clip.none,
-        children: [
-          pie,
-          Positioned(
-            left: size + 1,
-            top: size / 2 - 5,
-            child: Text(
-              label,
-              style: TextStyle(fontSize: 8, color: palette.inkStrong),
-            ),
+    return SignalBuilder(
+      builder: (context) {
+        final r = remaining.value;
+        if (r <= 0 || total <= 0) return const SizedBox.shrink();
+        final pie = CustomPaint(
+          size: Size.square(size),
+          painter: _PiePainter(
+            fraction: clampUnit(r / total),
+            color: isCooldown ? paletteSignal.value.inkStrong : sage,
           ),
-        ],
-      );
-    });
+        );
+        if (!isCooldown) return pie;
+        final labelStyle = TextStyle(
+          fontSize: 8,
+          color: paletteSignal.value.inkStrong,
+        );
+        // The label is positioned rather than laid out in a row: a Positioned
+        // given only a left offset is left unconstrained, so it hangs off the
+        // pie's right without widening it, and the pie keeps the corner.
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            pie,
+            Positioned(
+              left: size + 1,
+              top: size / 2 - 5,
+              child: clock != null
+                  ? clockTimeRow(
+                      clock!.timeOfDay,
+                      faceSize: 9,
+                      style: labelStyle,
+                    )
+                  : Text(fmtSpan(r), style: labelStyle),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -4246,9 +5064,9 @@ Widget actionChip({
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
         decoration: BoxDecoration(
-          color: palette.surface,
+          color: paletteSignal.value.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: palette.outline),
+          border: Border.all(color: paletteSignal.value.outline),
         ),
         child: child,
       ),
@@ -4256,20 +5074,30 @@ Widget actionChip({
   );
 }
 
-/// an inventory-style item slot, used by the inventory row and storage controls
-Widget slotBox({Item? item, VoidCallback? onTap, double dim = 26}) {
+/// An inventory-style item slot, used by the inventory row and storage
+/// controls. [count] is for the one control that stands for more than what's
+/// in front of it — an inbox's slots are the whole map's outboxes gathered
+/// into one per item, so they carry the number the way an item icon does.
+Widget slotBox({
+  Item? item,
+  int count = 1,
+  VoidCallback? onTap,
+  double dim = 26,
+}) {
   return GestureDetector(
     onTap: onTap,
     child: Container(
       width: dim,
       height: dim,
       decoration: BoxDecoration(
-        color: palette.surface,
+        color: paletteSignal.value.surface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: palette.outline),
+        border: Border.all(color: paletteSignal.value.outline),
       ),
       child: item != null
-          ? Center(child: ItemWidget(item, size: dim * 0.7))
+          ? Center(
+              child: quantityWidget(Quantity(item, count), size: dim * 0.7),
+            )
           : null,
     ),
   );
@@ -4297,9 +5125,9 @@ class _DragDirectionPadState extends State<DragDirectionPad> {
     final threshold = Thumbspan.of(context) * 0.27;
     Widget pad = Container(
       decoration: BoxDecoration(
-        color: palette.pad,
+        color: paletteSignal.value.pad,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: palette.outline),
+        border: Border.all(color: paletteSignal.value.outline),
       ),
       child: Stack(
         children: [
@@ -4310,23 +5138,29 @@ class _DragDirectionPadState extends State<DragDirectionPad> {
               bottom: 3,
               child: Text(
                 widget.cornerText!,
-                style: TextStyle(fontSize: 11, color: palette.inkFaint),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: paletteSignal.value.inkFaint,
+                ),
               ),
             ),
         ],
       ),
     );
-    pad = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanUpdate: (details) {
-        _acc += details.delta;
-        if (_acc.distance > threshold) {
-          widget.onAngle(offsetAngle(_acc));
-          _acc = Offset.zero;
-        }
-      },
-      onPanEnd: (_) => _acc = Offset.zero,
-      child: pad,
+    // its whole job is dragging; the page's back swipe doesn't get to take one
+    pad = NoBackSwipe(
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanUpdate: (details) {
+          _acc += details.delta;
+          if (_acc.distance > threshold) {
+            widget.onAngle(offsetAngle(_acc));
+            _acc = Offset.zero;
+          }
+        },
+        onPanEnd: (_) => _acc = Offset.zero,
+        child: pad,
+      ),
     );
     if (!widget.enabled) {
       pad = Opacity(opacity: 0.35, child: IgnorePointer(child: pad));
@@ -4352,89 +5186,99 @@ class const PlayerOrb(
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: SignalBuilder(builder: (context) {
-        final selected = identical(game.selectedPlayer.value, player);
-        // the name sits centered *over* the orb, not above it
-        return Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            withPie(
-              Container(
-                width: orbSize,
-                height: orbSize,
-                decoration: BoxDecoration(
-                  color: player.color,
-                  shape: BoxShape.circle,
-                  border: selected
-                      ? Border.all(color: palette.ink, width: 2)
-                      : null,
-                ),
-              ),
-              pie: CountdownPie(
-                remaining: player.incapacitatedFor,
-                total: game.params.muggerIncapTime,
-                isCooldown: true,
-              ),
-            ),
-            if (showName)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                decoration: BoxDecoration(
-                  color: palette.surface,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
+      child: SignalBuilder(
+        builder: (context) {
+          final selected = identical(game.selectedPlayer.value, player);
+          // the name sits centered *over* the orb, not above it
+          return Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              withPie(
+                Container(
+                  width: orbSize,
+                  height: orbSize,
+                  decoration: BoxDecoration(
                     color: player.color,
-                    width: selected ? 1.6 : 0.8,
+                    shape: BoxShape.circle,
+                    border: selected
+                        ? Border.all(color: paletteSignal.value.ink, width: 2)
+                        : null,
                   ),
                 ),
-                child: Text(
-                  player.name,
-                  style: TextStyle(fontSize: 9, color: palette.ink),
+                pie: CountdownPie(
+                  remaining: player.incapacitatedFor,
+                  total: game.params.muggerIncapTime,
+                  isCooldown: true,
                 ),
               ),
-          ],
-        );
-      }),
+              if (showName)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: paletteSignal.value.surface,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: player.color,
+                      width: selected ? 1.6 : 0.8,
+                    ),
+                  ),
+                  child: Text(
+                    player.name,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: paletteSignal.value.ink,
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
 
 /// the train's own badge, shown in its node widget
 Widget trainBadge(Game g, TrainNode t, NodeZoomLevel level) {
-  return SignalBuilder(builder: (context) {
-    final inTransit = t.dockedAt.value == null;
-    Widget badge = badgeRow(tone: nodeColor(t), [
-      badgeIcon(Icons.train),
-      badgeText(t.speed.name),
-      if (level != NodeZoomLevel.small) ...[
-        if (t.activation != null)
-          quantityWidget(t.activation!, size: itemSizeFor(level)),
-        if (t.movableFromInside) badgeIcon(Icons.swipe_right_alt),
-        if (t.schedule is OneWaySchedule) badgeText('sc(o)'),
-        if (t.schedule case CycleSchedule c)
-          badgeText('sc(${fmtSec(c.seconds)})'),
-      ],
-      if (inTransit) badgeText('${t.transitRemaining.value.ceil()}s'),
-    ]);
-    // cycle trains show a countdown pie to their next departure, plus the
-    // clock time their interval is pinned to
-    if (t.schedule case CycleSchedule c) {
-      badge = withPie(
-        badge,
-        pie: CountdownPie(
-          remaining: t.waitRemaining,
-          total: c.interval.period,
-          isCooldown: true,
-          clock: c.interval,
-        ),
+  return SignalBuilder(
+    builder: (context) {
+      final inTransit = t.dockedAt.value == null;
+      Widget badge = badgeRow(tone: nodeColor(t), [
+        badgeIcon(Icons.train),
+        badgeText(t.speed.name),
+        if (level != NodeZoomLevel.small) ...[
+          if (t.activation != null)
+            quantityWidget(t.activation!, size: itemSizeFor(level)),
+          if (t.movableFromInside) badgeIcon(Icons.swipe_right_alt),
+          if (t.schedule is OneWaySchedule) badgeText('sc(o)'),
+          if (t.schedule case CycleSchedule c)
+            badgeText('sc(${fmtSpan(c.seconds)})'),
+        ],
+        if (inTransit) badgeText(fmtSpan(t.transitRemaining.value)),
+      ]);
+      // cycle trains show a countdown pie to their next departure, plus the
+      // clock time their interval is pinned to
+      if (t.schedule case CycleSchedule c) {
+        badge = withPie(
+          badge,
+          pie: CountdownPie(
+            remaining: t.waitRemaining,
+            total: c.interval.period,
+            isCooldown: true,
+            clock: c.interval,
+          ),
+        );
+      }
+      return GestureDetector(
+        onTap: () => g.toggleTooltip(t, t, () => describeTrain(t)),
+        child: badge,
       );
-    }
-    return GestureDetector(
-      onTap: () => g.toggleTooltip(t, t, () => describeTrain(t)),
-      child: badge,
-    );
-  });
+    },
+  );
 }
 
 List<InlineSpan> describeTrain(TrainNode t) {
@@ -4446,12 +5290,18 @@ List<InlineSpan> describeTrain(TrainNode t) {
   };
   // a Never train has nothing to say about its schedule — it just sits there
   final schedule = switch (t.schedule) {
-    NeverSchedule _ => null,
-    OneWaySchedule _ => 'returns home on its own shortly after arriving',
-    CycleSchedule c => 'shuttles on its own ${describeClock(c.interval)}',
+    NeverSchedule _ => const <InlineSpan>[],
+    OneWaySchedule _ => [
+      tipText('; returns home on its own shortly after arriving'),
+    ],
+    CycleSchedule c => [
+      tipText('; shuttles on its own '),
+      ...describeClockSpans(c.interval),
+    ],
   };
   return [
-    tipText('a $speedName train${schedule == null ? '' : '; $schedule'}'),
+    tipText('a $speedName train'),
+    ...schedule,
     if (t.activation != null) ...[
       tipText('; moving it requires holding '),
       ...quantitySpans(t.activation!),
@@ -4469,13 +5319,15 @@ class const TrainscapeScreen({
   /// generate this level rather than picking up the saved one. Passing a seed
   /// is asking for a particular map, which a save would only get in the way of
   final int? seed,
-}) extends StatefulWidget {
+  // signal-tracked: the screen is built against [paletteSignal] and has to
+  // follow it
+}) extends SignalStatefulWidget {
   @override
   State<TrainscapeScreen> createState() => _TrainscapeScreenState();
 }
 
 class _TrainscapeScreenState extends State<TrainscapeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   /// null until the saved level has been read back off disk, which is a
   /// database round trip. Everything below build's early return has a level
   Game? _game;
@@ -4499,8 +5351,28 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
       },
     );
     _ticker = createTicker(_tick);
+    WidgetsBinding.instance.addObserver(this);
+    _followPlatformBrightness();
     _open();
   }
+
+  @override
+  void didChangePlatformBrightness() => _followPlatformBrightness();
+
+  /// on hot reload too, so a scheme changed while the screen sat there open
+  /// doesn't wait for the screen to be reopened
+  @override
+  void reassemble() {
+    super.reassemble();
+    _followPlatformBrightness();
+  }
+
+  /// The scheme follows the system's light/dark setting. The platform is asked
+  /// directly rather than through a [MediaQuery] because every call site here
+  /// is deliberately outside build: writing [paletteSignal] during a build
+  /// would be dirtying the widgets subscribed to it in the middle of the frame
+  /// that's building them.
+  void _followPlatformBrightness() => paletteSignal.value = platformPalette();
 
   /// The level the game was left in comes back, unless a particular map was
   /// asked for by seed. Reading it is a database round trip, so the screen
@@ -4516,16 +5388,21 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
     _ticker.start();
   }
 
+  /// The one place real time enters the game. The frame's wall-clock delta is
+  /// clamped first — a long frame, or coming back from the background, must not
+  /// teleport the world — and then converted to game seconds, which is all
+  /// [Game.update] and everything under it deal in.
   void _tick(Duration elapsed) {
-    final dt = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 1 / 15);
+    final real = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 1 / 15);
     _last = elapsed;
-    game.update(dt);
+    game.update(game.params.realSeconds(real));
     _frame.value++;
   }
 
   @override
   void dispose() {
     if (_game != null) saveLevel(game);
+    WidgetsBinding.instance.removeObserver(this);
     _lifecycle.dispose();
     _ticker.dispose();
     _frame.dispose();
@@ -4540,235 +5417,254 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
     });
   }
 
+  /// Everything below is built against [paletteSignal], and this build is
+  /// signal-tracked — see [SignalStatefulWidget] — so reading the scheme for
+  /// the scaffold's own colour is what rebuilds the lot when the system flips.
+  /// It's a rebuild, not a restructure: the tree keeps its shape, so the world
+  /// view's state — the player's zoom and pan — rides through the change. The
+  /// node widgets the map caches are the exception, and subscribe for
+  /// themselves.
   @override
   Widget build(BuildContext context) {
-    if (_game == null) return ColoredBox(color: palette.ground);
+    if (_game == null) return ColoredBox(color: paletteSignal.value.ground);
     return EscapeToPop(
-      // Everything under here is built against [palette], so the flip has to
-      // happen above it and rebuild the lot. It's a rebuild, not a
-      // restructure: the tree keeps its shape, so the world view's state —
-      // the player's zoom and pan — rides through the turn of the day.
-      child: SignalBuilder(builder: (context) {
-        palette = game.isNight.value ? nightPalette : dayPalette;
-        return Scaffold(
-          backgroundColor: palette.ground,
-          body: SafeArea(
-            child: Stack(
-              children: [
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isWide =
-                        constraints.maxWidth > constraints.maxHeight;
-                    final world = Expanded(
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: WorldView(
-                              key: ObjectKey(game),
-                              game: game,
-                              frame: _frame,
-                              recenterNudge: _recenterNudge,
-                            ),
+      child: Scaffold(
+        backgroundColor: paletteSignal.value.ground,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth > constraints.maxHeight;
+                  final world = Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: WorldView(
+                            key: ObjectKey(game),
+                            game: game,
+                            frame: _frame,
+                            recenterNudge: _recenterNudge,
                           ),
-                          Positioned(
-                            left: 10,
-                            right: 10,
-                            top: 3,
-                            child: _hud(),
+                        ),
+                        Positioned(left: 10, right: 10, top: 3, child: _hud()),
+                        Positioned(
+                          right: 10,
+                          bottom: 10,
+                          child: _pauseButton(),
+                        ),
+                        Positioned.fill(child: _announcement()),
+                      ],
+                    ),
+                  );
+                  final controls = isWide
+                      ? SizedBox(
+                          width: 340,
+                          child: ControlsPanel(
+                            game: game,
+                            recenterNudge: _recenterNudge,
                           ),
-                          Positioned.fill(child: _announcement()),
-                        ],
-                      ),
-                    );
-                    final controls = isWide
-                        ? SizedBox(
-                            width: 340,
-                            child: ControlsPanel(
-                              game: game,
-                              recenterNudge: _recenterNudge,
-                            ),
-                          )
-                        : SizedBox(
-                            height: 210,
-                            child: ControlsPanel(
-                              game: game,
-                              recenterNudge: _recenterNudge,
-                            ),
-                          );
-                    return isWide
-                        ? Row(children: [world, controls])
-                        : Column(children: [world, controls]);
-                  },
-                ),
-                _phaseOverlay(),
-              ],
-            ),
-          ),
-        );
-      }),
-    );
-  }
-
-  /// the big transient caps message, centered over the world
-  Widget _announcement() => SignalBuilder(builder: (context) {
-    final a = game.announcement.value;
-    if (a == null) return const SizedBox.shrink();
-    return IgnorePointer(
-      child: Center(
-        child: Text(
-          a.$1,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 30,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 3,
-            color: palette.ink,
-            shadows: [
-              Shadow(color: palette.ground, blurRadius: 8),
-              Shadow(color: palette.ground, blurRadius: 14),
+                        )
+                      : SizedBox(
+                          height: 210,
+                          child: ControlsPanel(
+                            game: game,
+                            recenterNudge: _recenterNudge,
+                          ),
+                        );
+                  return isWide
+                      ? Row(children: [world, controls])
+                      : Column(children: [world, controls]);
+                },
+              ),
+              _phaseOverlay(),
             ],
           ),
         ),
       ),
     );
-  });
-
-  Widget _hud() {
-    return SignalBuilder(builder: (context) {
-      final paused = game.paused.value;
-      final night = game.isNight.value;
-      // the timer, the day clock and the standing orders all read as one line
-      // in the one voice; the wrap is screen-wide so they spill onto a second
-      // line rather than overflowing on a narrow phone
-      final hudStyle = TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: palette.ink,
-        fontFeatures: const [FontFeature.tabularFigures()],
-      );
-      // the requirement counts what's still owed, so it falls as they earn it
-      final owed = max(0, game.params.eudaimoniaGoal - game.eudaimonia.value);
-      return SizedBox(
-        width: double.infinity,
-        child: Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 10,
-          runSpacing: 2,
-          children: [
-            // bare tappable icons rather than IconButtons, whose own padding
-            // made the spacing along this line uneven
-            GestureDetector(
-              onTap: () => Navigator.of(context).maybePop(),
-              child: Icon(Icons.arrow_back, size: 20, color: palette.ink),
-            ),
-            GestureDetector(
-              onTap: () => game.paused.value = !paused,
-              child: Icon(
-                paused ? Icons.play_arrow : Icons.pause,
-                size: 20,
-                color: palette.ink,
-              ),
-            ),
-            Text(fmtClock(game.timeLeft.value), style: hudStyle),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                phaseIcon(night, size: 16, color: palette.ink),
-                const SizedBox(width: 3),
-                Text(
-                  fmtTimeOfDay(game.timeOfDay, game.params.dayLength),
-                  style: hudStyle,
-                ),
-              ],
-            ),
-            Text(
-              game.daysRemaining == 0
-                  ? "FINAL DAY"
-                  : game.daysRemaining == 1
-                  ? "1 DAY REMAINS"
-                  : "${game.daysRemaining} DAYS REMAIN",
-              style: hudStyle,
-            ),
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: '$owed '),
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: CustomPaint(
-                      size: const Size.square(16),
-                      painter: ItemIconPainter(const HeartIcon()),
-                    ),
-                  ),
-                  const TextSpan(text: ' REQUIRED'),
-                ],
-              ),
-              style: hudStyle,
-            ),
-          ],
-        ),
-      );
-    });
   }
 
-  Widget _phaseOverlay() {
-    return SignalBuilder(builder: (context) {
-      final phase = game.phase.value;
-      if (phase == GamePhase.playing) return const SizedBox.shrink();
-      final won = phase == GamePhase.won;
-      return Positioned.fill(
-        child: ColoredBox(
-          color: palette.scrim,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (won)
-                  CustomPaint(
-                    size: const Size.square(48),
-                    painter: ItemIconPainter(const HeartIcon()),
-                  ),
-                const SizedBox(height: 8),
-                Text(
-                  won ? 'Eudaimonia achieved' : 'Time has run out',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                    color: palette.ink,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                // these are the only Material-styled things on the screen, and
-                // the surrounding app's theme follows the device rather than
-                // the time of day in here, so they're told what ink to use
-                TextButtonTheme(
-                  data: TextButtonThemeData(
-                    style: TextButton.styleFrom(foregroundColor: palette.ink),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextButton(
-                        onPressed: () => _newGame(_seed),
-                        child: const Text('Restart'),
-                      ),
-                      TextButton(
-                        onPressed: () => _newGame(_seed + 1),
-                        child: const Text('New map'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        child: const Text('Exit'),
-                      ),
-                    ],
-                  ),
-                ),
+  /// the big transient caps message, centered over the world
+  Widget _announcement() => SignalBuilder(
+    builder: (context) {
+      final a = game.announcement.value;
+      if (a == null) return const SizedBox.shrink();
+      return IgnorePointer(
+        child: Center(
+          child: Text(
+            a.$1,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 3,
+              color: paletteSignal.value.ink,
+              shadows: [
+                Shadow(color: paletteSignal.value.ground, blurRadius: 8),
+                Shadow(color: paletteSignal.value.ground, blurRadius: 14),
               ],
             ),
           ),
         ),
       );
-    });
+    },
+  );
+
+  /// Sits in the world's bottom right corner, against the map rather than the
+  /// HUD line, so it wears the controls' panel colour to read as a control and
+  /// not as one more thing drawn on the ground.
+  Widget _pauseButton() => SignalBuilder(
+    builder: (context) {
+      final paused = game.paused.value;
+      return GestureDetector(
+        onTap: () => game.paused.value = !paused,
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: paletteSignal.value.panel,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            paused ? Icons.play_arrow : Icons.pause,
+            size: 22,
+            color: paletteSignal.value.ink,
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _hud() {
+    return SignalBuilder(
+      builder: (context) {
+        // the day clock and the standing orders read as one line in the one
+        // voice; the wrap is screen-wide so they spill onto a second line rather
+        // than overflowing on a narrow phone.
+        //
+        // The level's own countdown used to lead the line, in minutes and
+        // seconds of real time. The clock says the same thing in the units the
+        // game is actually played in — the hour, and the days left after it —
+        // and two clocks disagreeing about which one to read is worse than one.
+        final hudStyle = TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: paletteSignal.value.ink,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+        // the requirement counts what's still owed, so it falls as they earn it
+        final owed = max(0, game.params.eudaimoniaGoal - game.eudaimonia.value);
+        return SizedBox(
+          width: double.infinity,
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 10,
+            runSpacing: 2,
+            children: [
+              // bare tappable icons rather than IconButtons, whose own padding
+              // made the spacing along this line uneven
+              GestureDetector(
+                onTap: () => Navigator.of(context).maybePop(),
+                child: Icon(
+                  Icons.arrow_back,
+                  size: 20,
+                  color: paletteSignal.value.ink,
+                ),
+              ),
+              clockTimeRow(game.timeOfDay, faceSize: 16, style: hudStyle),
+              Text(
+                game.daysRemaining == 0
+                    ? "FINAL DAY"
+                    : game.daysRemaining == 1
+                    ? "1 DAY REMAINS"
+                    : "${game.daysRemaining} DAYS REMAIN",
+                style: hudStyle,
+              ),
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: '$owed '),
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: CustomPaint(
+                        size: const Size.square(16),
+                        painter: ItemIconPainter(const HeartIcon()),
+                      ),
+                    ),
+                    const TextSpan(text: ' REQUIRED'),
+                  ],
+                ),
+                style: hudStyle,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _phaseOverlay() {
+    return SignalBuilder(
+      builder: (context) {
+        final phase = game.phase.value;
+        if (phase == GamePhase.playing) return const SizedBox.shrink();
+        final won = phase == GamePhase.won;
+        return Positioned.fill(
+          child: ColoredBox(
+            color: paletteSignal.value.scrim,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (won)
+                    CustomPaint(
+                      size: const Size.square(48),
+                      painter: ItemIconPainter(const HeartIcon()),
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    won ? 'Eudaimonia achieved' : 'Time has run out',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      color: paletteSignal.value.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // these are the only Material-styled things on the screen, and
+                  // the surrounding app's theme follows the device rather than
+                  // the time of day in here, so they're told what ink to use
+                  TextButtonTheme(
+                    data: TextButtonThemeData(
+                      style: TextButton.styleFrom(
+                        foregroundColor: paletteSignal.value.ink,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextButton(
+                          onPressed: () => _newGame(_seed),
+                          child: const Text('Restart'),
+                        ),
+                        TextButton(
+                          onPressed: () => _newGame(_seed + 1),
+                          child: const Text('New map'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          child: const Text('Exit'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -4782,144 +5678,156 @@ class const ControlsPanel({
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: palette.panel,
+      color: paletteSignal.value.panel,
       padding: const EdgeInsets.all(6),
-      child: SignalBuilder(builder: (context) {
-        final sel = game.selectedPlayer.value;
-        final atNode = sel.at.value;
-        final actionWidgets = <Widget>[
-          if (atNode != null) ...[
-            // a facility that's out of hours offers nothing
-            for (final f in atNode.facilities)
-              if (f.activeNow(game)) ...f.actionsFor(game, sel),
-            if (atNode is TrainNode && atNode.movableFromInside)
-              _insideTrainPad(atNode, sel),
-          ],
-        ];
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _inventoryRow(sel),
-                  const SizedBox(height: 6),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Wrap(
-                        spacing: 4,
-                        runSpacing: 4,
-                        children: actionWidgets,
+      child: SignalBuilder(
+        builder: (context) {
+          final sel = game.selectedPlayer.value;
+          final atNode = sel.at.value;
+          final actionWidgets = <Widget>[
+            if (atNode != null) ...[
+              // a facility that's out of hours offers nothing
+              for (final f in atNode.facilities)
+                if (f.activeNow(game)) ...f.actionsFor(game, sel),
+              if (atNode is TrainNode && atNode.movableFromInside)
+                _insideTrainPad(atNode, sel),
+            ],
+          ];
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _inventoryRow(sel),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: actionWidgets,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 6),
-            if (game.params.playersHaveMoveAction)
-              SizedBox(
-                width: 110,
-                child: DragDirectionPad(
-                  enabled: sel.incapacitatedFor.value <= 0,
-                  onAngle: (a) => game.schedulePlayerMove(sel, a),
-                  // the instruction at the bottom right, the move icon in the
-                  // center
-                  label: Icon(
-                    Icons.swipe_right_alt,
-                    color: palette.inkFaint,
-                    size: 28,
-                  ),
-                  cornerText: 'drag to move',
+                  ],
                 ),
               ),
-            const SizedBox(width: 6),
-            SizedBox(width: 64, child: _roster()),
-          ],
-        );
-      }),
+              const SizedBox(width: 6),
+              if (game.params.playersHaveMoveAction)
+                SizedBox(
+                  width: 110,
+                  child: DragDirectionPad(
+                    enabled: sel.incapacitatedFor.value <= 0,
+                    onAngle: (a) => game.schedulePlayerMove(sel, a),
+                    // the instruction at the bottom right, the move icon in the
+                    // center
+                    label: Icon(
+                      Icons.swipe_right_alt,
+                      color: paletteSignal.value.inkFaint,
+                      size: 28,
+                    ),
+                    cornerText: 'drag to move',
+                  ),
+                ),
+              const SizedBox(width: 6),
+              SizedBox(width: 64, child: _roster()),
+            ],
+          );
+        },
+      ),
     );
   }
 
   Widget _insideTrainPad(TrainNode train, Player p) {
-    return SignalBuilder(builder: (context) {
-      final docked = train.dockedAt.value;
-      final enabled =
-          docked != null &&
-          train.manualAllowed &&
-          !train.dockEdgeBusy(game) &&
-          (train.activation == null || game.playerHas(p, [train.activation!]));
-      return DragDirectionPad(
-        dimension: 64,
-        enabled: enabled,
-        onAngle: (a) => game.manualTrainMove(train, p, a),
-        label: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [badgeIcon(Icons.train), badgeIcon(Icons.swipe_right_alt)],
-        ),
-      );
-    });
+    return SignalBuilder(
+      builder: (context) {
+        final docked = train.dockedAt.value;
+        final enabled =
+            docked != null &&
+            train.manualAllowed &&
+            !train.dockEdgeBusy(game) &&
+            (train.activation == null ||
+                game.playerHas(p, [train.activation!]));
+        return DragDirectionPad(
+          dimension: 64,
+          enabled: enabled,
+          onAngle: (a) => game.manualTrainMove(train, p, a),
+          label: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              badgeIcon(Icons.train),
+              badgeIcon(Icons.swipe_right_alt),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Widget _inventoryRow(Player p) {
-    return SignalBuilder(builder: (context) {
-      final inv = p.inventory.value;
-      final atNode = p.at.value;
-      // clicking an inventory item while a storage is open loads it in
-      final hasStorage =
-          atNode != null &&
-          atNode.facilities.any((f) => f is Storage && f.activeNow(game));
-      // muggings and blights flash the inventory red three times
-      final redness = p.flash.active
-          ? p.flash.rednessAt(game.clock.value)
-          : 0.0;
-      final row = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < game.params.inventoryCap; i++) ...[
-            if (i > 0) const SizedBox(width: 3),
-            slotBox(
-              item: i < inv.length ? inv[i] : null,
-              onTap: hasStorage && i < inv.length
-                  ? () => game.storeFromInventory(p, inv[i])
-                  : null,
-            ),
+    return SignalBuilder(
+      builder: (context) {
+        final inv = p.inventory.value;
+        final atNode = p.at.value;
+        // clicking an inventory item while a storage is open loads it in
+        final hasStorage =
+            atNode != null &&
+            atNode.facilities.any((f) => f is Storage && f.activeNow(game));
+        // muggings and blights flash the inventory red three times
+        final redness = p.flash.active
+            ? p.flash.rednessAt(game.clock.value, game.params.redFlashSpan)
+            : 0.0;
+        final row = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < game.params.inventoryCap; i++) ...[
+              if (i > 0) const SizedBox(width: 3),
+              slotBox(
+                item: i < inv.length ? inv[i] : null,
+                onTap: hasStorage && i < inv.length
+                    ? () => game.storeFromInventory(p, inv[i])
+                    : null,
+              ),
+            ],
           ],
-        ],
-      );
-      if (redness <= 0) return row;
-      return Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: Colors.red.withValues(alpha: 0.55 * redness),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: row,
-      );
-    });
+        );
+        if (redness <= 0) return row;
+        return Container(
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.55 * redness),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: row,
+        );
+      },
+    );
   }
 
   Widget _roster() {
-    return SignalBuilder(builder: (context) {
-      return ListView(
-        children: [
-          for (final p in game.players)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: PlayerOrb(
-                game,
-                p,
-                orbSize: 30,
-                onTap: () {
-                  game.selectedPlayer.value = p;
-                  recenterNudge.value++;
-                },
+    return SignalBuilder(
+      builder: (context) {
+        return ListView(
+          children: [
+            for (final p in game.players)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: PlayerOrb(
+                  game,
+                  p,
+                  orbSize: 30,
+                  onTap: () {
+                    game.selectedPlayer.value = p;
+                    recenterNudge.value++;
+                  },
+                ),
               ),
-            ),
-        ],
-      );
-    });
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -5013,6 +5921,9 @@ class _WorldViewState extends State<WorldView> {
     super.dispose();
   }
 
+  /// the last [Game.recenterWanted] this view has acted on
+  int _recenterSeen = 0;
+
   /// Drops the user's pan and seeks the followed point again. The follow point
   /// itself hasn't moved, so [_seekCam] wouldn't notice on its own — clearing
   /// it is what asks for the new segments.
@@ -5044,129 +5955,185 @@ class _WorldViewState extends State<WorldView> {
         game.zoomMin = viewShort / 40;
         game.zoomMax = viewShort / 5;
         _updateFarZoom();
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => game.tooltip.value = null,
-          onScaleStart: (d) => _zoomAtGestureStart = _zoom!,
-          onScaleUpdate: (d) {
-            // both gestures amplified 3x: pans move three times as far,
-            // pinches zoom as scale cubed (about the view center for now)
-            _panCam(-d.focalPointDelta * 3 / _zoom!);
-            if (d.scale != 1) {
-              _zoom = (_zoomAtGestureStart * pow(d.scale, 3))
-                  .clamp(game.zoomMin, game.zoomMax)
-                  .toDouble();
-              _updateFarZoom();
-            }
-          },
-          child: ClipRect(
-            child: ListenableBuilder(
-              listenable: widget.frame,
-              builder: (context, _) {
-                // the camera heads straight for the node the selected player is
-                // moving to, rather than tracking them along the wire
-                final sel = game.selectedPlayer.value;
-                final cam = _seekCam(
-                  sel.traversalTarget?.pos ?? sel.worldPos(),
-                );
-                final zoom = _zoom!;
-                final viewCenter = size.center(Offset.zero);
-                Offset project(Offset world) =>
-                    (world - cam) * zoom + viewCenter;
-                final cullRect = (Offset.zero & size).inflate(nodeIconSize * 5);
+        // the pan is the map's; there's the HUD's back arrow for leaving
+        return NoBackSwipe(
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (d) => _tapWorld(game, d.localPosition, size),
+            onScaleStart: (d) => _zoomAtGestureStart = _zoom!,
+            onScaleUpdate: (d) {
+              // both gestures amplified 3x: pans move three times as far,
+              // pinches zoom as scale cubed (about the view center for now)
+              _panCam(-d.focalPointDelta * 3 / _zoom!);
+              if (d.scale != 1) {
+                _zoom = (_zoomAtGestureStart * pow(d.scale, 3))
+                    .clamp(game.zoomMin, game.zoomMax)
+                    .toDouble();
+                _updateFarZoom();
+              }
+            },
+            child: ClipRect(
+              child: ListenableBuilder(
+                listenable: widget.frame,
+                builder: (context, _) {
+                  // the camera heads straight for the node the selected player is
+                  // moving to, rather than tracking them along the wire. While a
+                  // jump is being aimed it stops following altogether: the
+                  // player is deliberately looking somewhere else on the map,
+                  // and a camera that pulled them back to their own feet would
+                  // be arguing with them about it.
+                  final sel = game.selectedPlayer.value;
+                  final aiming = game.jumping.value != null;
+                  final wanted = game.recenterWanted.peek();
+                  if (_recenterSeen != wanted) {
+                    _recenterSeen = wanted;
+                    _recenter();
+                  }
+                  final cam = aiming
+                      ? Offset(_camX.endValue, _camY.endValue)
+                      : _seekCam(sel.traversalTarget?.pos ?? sel.worldPos());
+                  _lastCam = cam;
+                  final zoom = _zoom!;
+                  final viewCenter = size.center(Offset.zero);
+                  Offset project(Offset world) =>
+                      (world - cam) * zoom + viewCenter;
+                  final cullRect = (Offset.zero & size).inflate(
+                    nodeIconSize * 5,
+                  );
 
-                // nodes that have been raised — walked into, or tapped for a
-                // tooltip — are shunted to the end in the order it happened, so
-                // they render on top of the others; global keys keep their
-                // widget state stable across the reordering
-                final raised = game.nodes.where((x) => x.stackRank > 0).toList()
-                  ..sort((a, b) => a.stackRank - b.stackRank);
-                final orderedNodes = [
-                  ...game.nodes.where((x) => x.stackRank == 0),
-                  ...raised,
-                ];
-                final tip = game.tooltip.value;
-                // Once the map is small enough that the badges cover the graph
-                // they're standing on, a second copy of the graph fades in over
-                // the top of them. Only recorded when it's going to be used.
-                // Measured in log zoom, so the fade tracks how far out the
-                // pinch has taken you rather than the raw scale, which spends
-                // most of its range near the far end.
-                final overGraphp =
-                    overGraphMaxOpacity *
-                    unlerpUnit(log(_defaultZoom), log(game.zoomMin), log(zoom));
-                final recording = overGraphp > 0 ? _graphRecording : null;
-                // Everything anchored to a node goes inside one moving layer,
-                // laid out in world units scaled by the zoom and shifted whole
-                // by the camera. The nodes used to be positioned individually
-                // at wherever the camera projected them, which meant a pan
-                // moved every one of them relative to their parent, and the
-                // [Animove]s around the badges read that as the badges moving.
-                // Panning the container instead leaves them still inside it.
-                final layerOrigin = project(_worldRect.topLeft);
-                Offset inLayer(Offset world) =>
-                    (world - _worldRect.topLeft) * zoom;
+                  // nodes that have been raised — walked into, or tapped for a
+                  // tooltip — are shunted to the end in the order it happened, so
+                  // they render on top of the others; global keys keep their
+                  // widget state stable across the reordering
+                  final raised =
+                      game.nodes.where((x) => x.stackRank > 0).toList()
+                        ..sort((a, b) => a.stackRank - b.stackRank);
+                  final orderedNodes = [
+                    ...game.nodes.where((x) => x.stackRank == 0),
+                    ...raised,
+                  ];
+                  final tip = game.tooltip.value;
+                  // Once the map is small enough that the badges cover the graph
+                  // they're standing on, a second copy of the graph fades in over
+                  // the top of them. Only recorded when it's going to be used.
+                  // Measured in log zoom, so the fade tracks how far out the
+                  // pinch has taken you rather than the raw scale, which spends
+                  // most of its range near the far end.
+                  final overGraphp =
+                      overGraphMaxOpacity *
+                      unlerpUnit(
+                        log(_defaultZoom),
+                        log(game.zoomMin),
+                        log(zoom),
+                      );
+                  final recording = overGraphp > 0 ? _graphRecording : null;
+                  // Everything anchored to a node goes inside one moving layer,
+                  // laid out in world units scaled by the zoom and shifted whole
+                  // by the camera. The nodes used to be positioned individually
+                  // at wherever the camera projected them, which meant a pan
+                  // moved every one of them relative to their parent, and the
+                  // [Animove]s around the badges read that as the badges moving.
+                  // Panning the container instead leaves them still inside it.
+                  final layerOrigin = project(_worldRect.topLeft);
+                  Offset inLayer(Offset world) =>
+                      (world - _worldRect.topLeft) * zoom;
 
-                return Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    CustomPaint(
-                      size: size,
-                      painter: _WorldPainter(
-                        game: game,
-                        cam: cam,
-                        zoom: zoom,
-                        viewCenter: viewCenter,
-                        recording: recording,
-                      ),
-                    ),
-                    Positioned(
-                      left: layerOrigin.dx,
-                      top: layerOrigin.dy,
-                      width: _worldRect.width * zoom,
-                      height: _worldRect.height * zoom,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          // node widgets are still culled every frame, and
-                          // still don't scale with the zoom — only their places
-                          // in the layer do
-                          for (final node in orderedNodes)
-                            if (cullRect.contains(project(node.pos)))
-                              _positioned(
-                                inLayer(node.pos),
-                                _contentCache[node] ??= NodeContentWidget(
-                                  game: game,
-                                  node: node,
-                                  farZoom: farZoom,
-                                ),
-                                key: GlobalObjectKey(node),
-                              ),
-                        ],
-                      ),
-                    ),
-                    if (recording != null)
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
                       CustomPaint(
                         size: size,
-                        painter: _OverGraphPainter(recording, overGraphp),
+                        painter: _WorldPainter(
+                          game: game,
+                          cam: cam,
+                          zoom: zoom,
+                          viewCenter: viewCenter,
+                          recording: recording,
+                        ),
                       ),
-                    // players in transit stay above the overlay: they're what
-                    // the eye is following
-                    for (final p in game.players)
-                      if (p.traversing != null &&
-                          cullRect.contains(project(p.worldPos())))
-                        _positioned(project(p.worldPos()), PlayerOrb(game, p)),
-                    if (tip != null && cullRect.contains(project(tip.$2.pos)))
-                      _tooltipBubble(project(tip.$2.pos), tip.$3, tip.$2),
-                  ],
-                );
-              },
+                      Positioned(
+                        left: layerOrigin.dx,
+                        top: layerOrigin.dy,
+                        width: _worldRect.width * zoom,
+                        height: _worldRect.height * zoom,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            // node widgets are still culled every frame, and
+                            // still don't scale with the zoom — only their places
+                            // in the layer do
+                            for (final node in orderedNodes)
+                              if (cullRect.contains(project(node.pos)))
+                                _positioned(
+                                  inLayer(node.pos),
+                                  _contentCache[node] ??= NodeContentWidget(
+                                    game: game,
+                                    node: node,
+                                    farZoom: farZoom,
+                                  ),
+                                  key: GlobalObjectKey(node),
+                                ),
+                          ],
+                        ),
+                      ),
+                      if (recording != null)
+                        CustomPaint(
+                          size: size,
+                          painter: _OverGraphPainter(recording, overGraphp),
+                        ),
+                      // players in transit stay above the overlay: they're what
+                      // the eye is following
+                      for (final p in game.players)
+                        if (p.traversing != null &&
+                            cullRect.contains(project(p.worldPos())))
+                          _positioned(
+                            project(p.worldPos()),
+                            PlayerOrb(game, p),
+                          ),
+                      if (tip != null && cullRect.contains(project(tip.$2.pos)))
+                        _tooltipBubble(project(tip.$2.pos), tip.$3, tip.$2),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         );
       },
     );
   }
+
+  /// Where the camera was left the last time a frame was laid out, so that a
+  /// tap can be turned back into a place on the map. The projection lives
+  /// inside the frame builder, which a gesture callback isn't inside.
+  Offset _lastCam = Offset.zero;
+
+  /// A tap on the world. Ordinarily it just dismisses the tooltip; while a jump
+  /// is being aimed it's the aim itself — the nearest node under the finger, if
+  /// it's one this station can reach, and otherwise a tap that backs out. The
+  /// node's dot is what's being hit here; a tap that landed on a badge went
+  /// through [Game.toggleTooltip] instead and never reached this.
+  void _tapWorld(Game game, Offset local, Size size) {
+    if (game.jumping.peek() == null) {
+      game.tooltip.value = null;
+      return;
+    }
+    final zoom = _zoom!;
+    final world = (local - size.center(Offset.zero)) / zoom + _lastCam;
+    Node? nearest;
+    var bestPx = _jumpTapRadius;
+    for (final n in game.nodes) {
+      final px = (n.pos - world).distance * zoom;
+      if (px < bestPx) {
+        bestPx = px;
+        nearest = n;
+      }
+    }
+    if (nearest == null || !game.tryJumpTo(nearest)) game.cancelJump();
+  }
+
+  /// how close to a node's dot a tap has to land to count as aiming at it
+  static const double _jumpTapRadius = 28;
 
   Widget _positioned(Offset at, Widget child, {Key? key}) => Positioned(
     key: key,
@@ -5199,13 +6166,21 @@ class _WorldViewState extends State<WorldView> {
                 decoration: BoxDecoration(
                   color: lozengeFill(nodeColor(from)),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: palette.outlineStrong, width: 0.8),
-                  boxShadow: [BoxShadow(color: palette.shadow, blurRadius: 6)],
+                  border: Border.all(
+                    color: paletteSignal.value.outlineStrong,
+                    width: 0.8,
+                  ),
+                  boxShadow: [
+                    BoxShadow(color: paletteSignal.value.shadow, blurRadius: 6),
+                  ],
                 ),
                 child: Text.rich(
                   TextSpan(
                     children: spans,
-                    style: TextStyle(fontSize: 11, color: palette.ink),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: paletteSignal.value.ink,
+                    ),
                   ),
                 ),
               ),
@@ -5248,6 +6223,20 @@ class _WorldPainter({
     canvas.drawPicture(recording!.picture!);
   }
 
+  /// While a jump is being aimed, the nodes it can't reach wash most of the way
+  /// out to the background and the ones it can keep their colour, so the choice
+  /// reads off the map itself rather than out of something drawn over it. Like
+  /// the blight's dormant states, it recedes by mixing towards the ground: a
+  /// graph that went transparent instead would tint whatever it was over.
+  Color _nodeColor(Node n) {
+    final base = nodeColor(n);
+    final j = game.jumping.peek();
+    if (j == null || j.$1.isTarget(n, j.$2)) return base;
+    return Color.lerp(base, paletteSignal.value.ground, _aimWash)!;
+  }
+
+  static const double _aimWash = 0.72;
+
   void _paintGraph(Canvas canvas, Size size) {
     canvas.save();
     canvas.translate(viewCenter.dx, viewCenter.dy);
@@ -5269,14 +6258,14 @@ class _WorldPainter({
     // rather than by transparency, so nothing drawn over it is tinted.
     final blightBase = Color.lerp(
       Colors.red,
-      palette.ground,
-      palette.blightWash,
+      paletteSignal.value.ground,
+      paletteSignal.value.blightWash,
     )!;
     for (final b in game.blights) {
       final color = b.flash.active
           ? Color.lerp(blightBase, Colors.red, 0.5)!
           : b.dormant
-          ? Color.lerp(blightBase, palette.ground, 0.55)!
+          ? Color.lerp(blightBase, paletteSignal.value.ground, 0.55)!
           : blightBase;
       canvas.drawCircle(b.node.pos, 2, Paint()..color = color);
       _paintDashedCircle(
@@ -5293,7 +6282,7 @@ class _WorldPainter({
     // the trains' own shortcuts, which nothing else can travel along, each in
     // its train's livery
     for (final t in game.trains) {
-      trainEdgePaint.color = nodeColor(t);
+      trainEdgePaint.color = _nodeColor(t);
       final termini = t.stationNodes.map((s) => t.terminusFor[s]!).toList();
       for (var i = 0; i < termini.length; i++) {
         for (var j = i + 1; j < termini.length; j++) {
@@ -5335,7 +6324,7 @@ class _WorldPainter({
       edgePaint.shader = ui.Gradient.linear(
         e.a.pos + span * inset,
         e.b.pos - span * inset,
-        [nodeColor(e.a), nodeColor(e.b)],
+        [_nodeColor(e.a), _nodeColor(e.b)],
       );
       // the body: the wire as a quad, running centre to centre — the ends are
       // buried under the discs, which are drawn over it
@@ -5366,7 +6355,7 @@ class _WorldPainter({
     // colour where the node is a train
     final nodePaint = Paint();
     for (final n in game.nodes) {
-      nodePaint.color = nodeColor(n);
+      nodePaint.color = _nodeColor(n);
       canvas.drawCircle(n.pos, nodeRadius, nodePaint);
     }
     canvas.restore();
@@ -5505,125 +6494,122 @@ class const NodeContentWidget({
   required final Game game,
   required final Node node,
   required final Signal<bool> farZoom,
-}) extends StatelessWidget {
+
+  // Signal-tracked rather than plain, and not for the sake of tidiness: these
+  // widgets are cached by node and handed back to the stack as the same
+  // instance every frame, so a rebuild from above passes them by. Everything
+  // this build reads — who's standing here, the zoom level, and the scheme the
+  // badges under it are coloured from — it has to subscribe to itself.
+}) extends SignalWidget {
   @override
   Widget build(BuildContext context) {
-    return SignalBuilder(
-      builder: (context) {
-        // These widgets are cached by node and handed back to the stack as the
-        // same instance every frame, so a rebuild from above passes them by —
-        // subscribing to the phase here is what repaints the badges in the
-        // other half of the day's [palette].
-        game.isNight.value;
-        final players = node.playersPresent.value;
-        final level = players.isNotEmpty
-            ? NodeZoomLevel.selected
-            : farZoom.value
-            ? NodeZoomLevel.small
-            : NodeZoomLevel.normal;
-        // Every badge is wrapped in an [Animove] so that when the column
-        // rearranges under it — a player arriving and shoving the facilities
-        // off the dot, a badge changing width as the zoom level changes what
-        // it shows — the badges slide to their new places instead of jumping.
-        final facilityBadges = <Widget>[
-          if (node is TrainNode)
-            Animove(
-              key: badgeKey(node),
-              child: trainBadge(game, node as TrainNode, level),
-            ),
-          for (final f in node.facilities)
-            Animove(key: badgeKey(f), child: f.badge(game, level)),
-        ];
-        final facilityColumn = facilityBadges.isEmpty
-            ? null
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                // badges of unequal width line their right edges up on the dot
-                // while they're beside a player column, but stack centred on it
-                // once they have the node to themselves
-                crossAxisAlignment: players.isEmpty
-                    ? CrossAxisAlignment.center
-                    : CrossAxisAlignment.end,
-                children: [
-                  for (var i = 0; i < facilityBadges.length; i++) ...[
-                    if (i > 0) const SizedBox(height: 2),
-                    facilityBadges[i],
-                  ],
-                ],
-              );
-        final playerColumn = players.isEmpty
-            ? null
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final p in players)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: PlayerOrb(
-                        game,
-                        p,
-                        onTap: () => game.selectedPlayer.value = p,
-                      ),
-                    ),
-                ],
-              );
-        // With only one side of the split present there's nothing to make room
-        // for, so it sits on the dot rather than hanging off one side of it.
-        // Otherwise each half is wrapped in a box of twice its own width with
-        // the half pushed to one end, which puts the box's centre exactly on
-        // the half's inner edge. Stacking the two boxes centred then lands both
-        // inner edges on the node's dot without either side having to know how
-        // wide the other one came out — and unlike translating the halves out
-        // of place, everything stays inside the stack, where taps still reach
-        // it.
-        final content = facilityColumn == null || playerColumn == null
-            ? facilityColumn ?? playerColumn ?? const SizedBox.shrink()
-            : Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.center,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: _nodeSplitGap),
-                      child: facilityColumn,
-                    ),
+    final players = node.playersPresent.value;
+    final level = players.isNotEmpty
+        ? NodeZoomLevel.selected
+        : farZoom.value
+        ? NodeZoomLevel.small
+        : NodeZoomLevel.normal;
+    // Every badge is wrapped in an [Animove] so that when the column
+    // rearranges under it — a player arriving and shoving the facilities
+    // off the dot, a badge changing width as the zoom level changes what
+    // it shows — the badges slide to their new places instead of jumping.
+    final facilityBadges = <Widget>[
+      if (node is TrainNode)
+        Animove(
+          key: badgeKey(node),
+          child: trainBadge(game, node as TrainNode, level),
+        ),
+      for (final f in node.facilities)
+        Animove(key: badgeKey(f), child: f.badge(game, level)),
+    ];
+    final facilityColumn = facilityBadges.isEmpty
+        ? null
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            // badges of unequal width line their right edges up on the dot
+            // while they're beside a player column, but stack centred on it
+            // once they have the node to themselves
+            crossAxisAlignment: players.isEmpty
+                ? CrossAxisAlignment.center
+                : CrossAxisAlignment.end,
+            children: [
+              for (var i = 0; i < facilityBadges.length; i++) ...[
+                if (i > 0) const SizedBox(height: 2),
+                facilityBadges[i],
+              ],
+            ],
+          );
+    final playerColumn = players.isEmpty
+        ? null
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final p in players)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: PlayerOrb(
+                    game,
+                    p,
+                    onTap: () => game.selectedPlayer.value = p,
                   ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    widthFactor: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: _nodeSplitGap),
-                      child: playerColumn,
-                    ),
-                  ),
-                ],
-              );
-        // The cluster's own [AnimoveFrame], which is what keeps the badges out
-        // of the camera's business: their offsets are measured against this
-        // box, which travels with the node as one piece, so neither panning nor
-        // zooming is a move as far as they're concerned. Only rearranging
-        // inside the cluster is.
-        //
-        // The frame is a fixed box with the cluster centred in it rather than
-        // the cluster itself. Shrink-wrapped, the frame's own edges would move
-        // whenever the contents changed width — the box is centred on the dot,
-        // so widening it by anything shifts its left edge by half of that — and
-        // every badge in it would read that shift as having moved, and slide in
-        // from one side to land back where it already was. A box that doesn't
-        // move can't lie to them about it.
-        return AnimoveFrame(
-          child: SizedBox.fromSize(
-            size: clusterFrameSize,
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.center,
-              children: [content],
-            ),
-          ),
-        );
-      },
+                ),
+            ],
+          );
+    // With only one side of the split present there's nothing to make room
+    // for, so it sits on the dot rather than hanging off one side of it.
+    // Otherwise each half is wrapped in a box of twice its own width with
+    // the half pushed to one end, which puts the box's centre exactly on
+    // the half's inner edge. Stacking the two boxes centred then lands both
+    // inner edges on the node's dot without either side having to know how
+    // wide the other one came out — and unlike translating the halves out
+    // of place, everything stays inside the stack, where taps still reach
+    // it.
+    final content = facilityColumn == null || playerColumn == null
+        ? facilityColumn ?? playerColumn ?? const SizedBox.shrink()
+        : Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                widthFactor: 2,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: _nodeSplitGap),
+                  child: facilityColumn,
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                widthFactor: 2,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: _nodeSplitGap),
+                  child: playerColumn,
+                ),
+              ),
+            ],
+          );
+    // The cluster's own [AnimoveFrame], which is what keeps the badges out
+    // of the camera's business: their offsets are measured against this
+    // box, which travels with the node as one piece, so neither panning nor
+    // zooming is a move as far as they're concerned. Only rearranging
+    // inside the cluster is.
+    //
+    // The frame is a fixed box with the cluster centred in it rather than
+    // the cluster itself. Shrink-wrapped, the frame's own edges would move
+    // whenever the contents changed width — the box is centred on the dot,
+    // so widening it by anything shifts its left edge by half of that — and
+    // every badge in it would read that shift as having moved, and slide in
+    // from one side to land back where it already was. A box that doesn't
+    // move can't lie to them about it.
+    return AnimoveFrame(
+      child: SizedBox.fromSize(
+        size: clusterFrameSize,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [content],
+        ),
+      ),
     );
   }
 }

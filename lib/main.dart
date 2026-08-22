@@ -4483,9 +4483,10 @@ class DragActionRingState extends State<DragActionRing>
                 blendRadius: blendRadius,
                 blurRadius: mt.glassBlurRadius,
                 edgeTint: mt.edgeTint,
-                // icons and pill labels bend through the rims as the ring
-                // grows out, flat by the time it's out.
-                childRefractionIntensity: openingChildRefraction(baseGrow),
+                // refraction looks terrible on the blobmode rings
+                childRefractionIntensity: widget.arcModeNotBlobMode
+                    ? openingChildRefraction(baseGrow)
+                    : 0,
               ),
               glassiness,
             ),
@@ -7510,7 +7511,7 @@ Widget markdownPageSliver(
             duration: const Duration(milliseconds: 200),
             builder: (context, value, child) =>
                 Opacity(opacity: value, child: child),
-            child: dragThroughSelectionArea(
+            child: SelectionArea(
               child: markdownBody(theme, md, imageBuilder: imageBuilder),
             ),
           ),

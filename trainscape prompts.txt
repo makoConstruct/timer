@@ -142,10 +142,27 @@ I'm so sorry, it was because it was a non-instant trade.
 Perhaps there was no indicator of that. There is no indicator of recovery cooldown. In fact it seems that it
 never recovers.
 
+trainscape: remove day/night cycle theme change, and remove the change messages, and remove day/night constraint from facility generation, but keep the icon display logic (if you're wondering why I'm removing it/deemphasizing it, it's because it's visually more difficult than I imagined because flipping darkmode/lightmode is horrible, and it's also taxing on gameplay design, since it means half of what the user knows is inactionable half the time). Instead, keep clock time schedules. Make sure all clock times display next to clock faces, which aren't pies, they're discs with an hour hand and a fainter minute hand. AM times display with a light clockface, PM a dark one.
 
+uh make sure palette matches the system theme brightness
+
+remove real minutes/seconds countdown display from top, the new clock is sufficient
+
+trainscape: move pause/play control to bottom right of the view, give it a background of the same color as the controls. trader icon should just be T
+
+trainscape: sometimes the swipe gesture randomly steals drag and attempts to swipe and move the map cause the exit screen gesture to start. Make sure that can't happen on our drag widgets, such as the map screen, or move pads.
+
+make sure all cooldowns refer to in-game seconds (fractions of a day) rather than real world seconds.
+	yeah you're going to have to do playerSpeed and train speed. you can update trader cooldowns, the design doc is right.
+
+remove cost only muggers, they're too specific and don't do much
+Trains should not move automatically
+[reconsider design doc]
+replace the plane takeoff icon with flight_rounded, it currently looks too similar to the landing icon otherwise. Similarly, the inbox and outbox look almost identical at small sizes. For the inbox icon, make it Icons.inbox with an arrow above it, column above. For the outbox, outbox_rounded
+you can make trader stuff the original way
+when the player jumps, reset the camera to center on the new player position, otherwise their movement causes the camera to essentially fly off
 --
-Oh I was misunderstanding again. Show a "working..." indicator over traders when they're building the thing
-
+there's a lot of variation in facility representation sizes (or, specifically, widths), so we should use a more space-efficient layout. Use a pretty efficient packing algorithm, but keep it simple if possible.
 When something happens to a player who's off-screen, it needs to mention them in the popup message, like "<Rudy icon> MUGGED", or else it's sheer confusion.
 
 Add the ability to carry other players piggyback.
@@ -157,6 +174,14 @@ Big new feature. We need to do time shit. Controlling two characters simultaneou
 		Actions can become invalid against a state, which stops that player's action history from replaying any further.
 	needs to be easy to take periodic snapshots of state so that we can "rewind" to any state by playing action histories forward to it.
 
+time stuff
+	since the player is controlling two characters at once, and since there is such a long planning phase to get to know the facility and the goals, it can't really be realtime, it's really expected to be played as turn based at high sweat levels. So start the game paused (most players will never unpause).
+	And introduce a system for handling action histories and time travel.
+
+	- undo before time dial
+	- action histories that break when replayed show warning and stop advancing
+	- action history
+	- make sure actions within the same frame happen in order
 
 later
 	create an encoding for actions players can take. Allow scheduling arbitrary action
