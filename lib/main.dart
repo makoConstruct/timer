@@ -84,7 +84,7 @@ const databaseName = 'mako_timer_db';
 const double defaultTimerOutline = 7;
 const double timerGap = 11;
 // might make this user-configurable
-final Signal<double> timerWidgetRadius = Signal(25);
+final Signal<double> timerWidgetRadius = Signal(24);
 
 const double standardLineWidth = 6;
 
@@ -1966,7 +1966,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
 
     final p = Curves.easeOut.transform(progress * (1 - downwardProgress));
 
-    final deblubbingp = Curves.easeOut.transform(unlerpUnit(0.6, 1, p));
+    final deblubbingp = Curves.easeOut.transform(unlerpUnit(0.48, 1, p));
     final blendRadius = widget.arrowHeight * lerp(4, 1.15, deblubbingp);
     final bevelThickness = lerp(30, 19, deblubbingp);
 
@@ -4913,8 +4913,8 @@ class TimerScreenState extends State<TimerScreen>
               sides: 8,
               pointRounding: 0.3,
               rotation: 45 / 2,
+              // side: BorderSide(color: color, width: 5.75),
             ),
-            color: color,
           ),
         ),
       ),

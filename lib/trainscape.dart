@@ -277,6 +277,13 @@ const double mapButtonExtent = mapButtonIcon + mapButtonPad * 2;
 const double mapButtonInset = 10.0;
 const double mapButtonGap = 8.0;
 
+/// Clear space around each button that is still part of it as far as a thumb
+/// is concerned. Exactly half the gap, which is the most it can be without two
+/// buttons fighting over the same tap — their touch areas end up meeting
+/// precisely in the middle of the space between them, and nothing about where
+/// the buttons look like they are changes.
+const double mapButtonTouch = mapButtonGap / 2;
+
 /// How long the camera takes to settle on whatever it's seeking. It eases in
 /// and out over that whole span — the motion is what tells the player the view
 /// moved rather than cut, so it's leisurely.
@@ -293,18 +300,51 @@ const double maxIconGrowth = 1.6;
 
 /// The game's unit of time is the in-game second, and a day is a day: 86400 of
 /// them, laid over the 24-hour clock face the level's schedules are read off.
-/// Everything with time in it is in these units — [Game.gameTime], every
-/// remaining-time signal the update loop counts down, every span and rate in
-/// [Parameters] — and so is the dt [Game.update] steps by.
+/// Everything with time in it is in these units — [Game.now], every deadline
+/// the event loop waits on, every span and rate in [Parameters] — and so is
+/// the moment [Game.advanceTo] is asked for.
 ///
 /// Real time exists in exactly two places. One is the ticker, which converts
 /// the frame's wall-clock delta once, on the way in (see [Parameters.pace] and
 /// [Parameters.dayRealSeconds]); nothing downstream of it knows how fast the
 /// day is being played. The other is the two feedback spans below.
-const double gameSecond = 1;
-const double gameMinute = 60 * gameSecond;
-const double gameHour = 60 * gameMinute;
-const double gameDay = 24 * gameHour;
+/// Game time is an integer count of ticks, never a float. Two reasons, and the
+/// second is the one that matters. The small one: the clock is rewound as well
+/// as advanced, and float addition doesn't undo itself. The large one: the
+/// world is re-simulated from an earlier moment every time the clock moves
+/// back, and a re-simulation that lands a hair off the original is a
+/// re-simulation that produces a different game — a player who arrives 1e-15
+/// before a train leaves rather than 1e-15 after. Deadlines have to compare
+/// exactly, and integers are the only things that do.
+///
+/// [tickRate] per game second is far finer than anything the game measures —
+/// the shortest span in a level is a trade of twenty-odd game minutes — so the
+/// quantisation is invisible. It's this fine so that a rate expressed in the
+/// units below (`17.5 / gameHour`) has plenty of resolution left after being
+/// multiplied back up into a duration.
+///
+/// The ceiling is [dart:core int], which is 64-bit on every target but the web,
+/// where it's a double and stops being exact past 2^53 — the same constraint
+/// [GameRng] is written around. 2^53 ticks is seventeen thousand years of game
+/// time, so nothing here comes near it.
+typedef TTime = int;
+
+/// ticks per game second
+const TTime tickRate = 1 << 14;
+
+const TTime gameSecond = tickRate;
+const TTime gameMinute = 60 * gameSecond;
+const TTime gameHour = 60 * gameMinute;
+const TTime gameDay = 24 * gameHour;
+
+/// A span computed in floating point — a distance divided by a speed, a rolled
+/// duration — landing on the tick grid. Every span that enters the simulation
+/// goes through here, and it's the only door: a double that reaches a deadline
+/// unrounded is the bug this whole module exists to prevent.
+///
+/// Deterministic because it's a pure function of the double handed in, and the
+/// doubles handed in are computed the same way on every replay.
+TTime ticksOf(double t) => t.round();
 
 /// These two are the only spans stated in real seconds. They aren't part of
 /// the level: they're how long a piece of feedback takes to read, which is a
@@ -355,8 +395,6 @@ enum NodeZoomLevel {
   small, // badges collapse to their leading icon, item icons hidden
 }
 
-enum TrainSpeed { s, r, f, i }
-
 enum TrainScheduleKind { never, oneWay, cycle }
 
 enum StationControl {
@@ -367,6 +405,40 @@ enum StationControl {
 
 enum GamePhase { playing, won, lost }
 
+/// Why the clock is moving, which is the only thing that decides how eagerly
+/// it gets there.
+///
+/// One mover serves all of it, because there's only one clock and it can be
+/// pushed by several things at once — a walk playing out while a finger is on
+/// the dial. What changes is how hard.
+///
+/// [hourSeconds] is how long it takes to cross one game hour from a standstill
+/// and stop dead on the far side. Stated that way round because it's the thing
+/// anyone tuning this actually wants to say; the acceleration is worked out
+/// from it. Bigger distances take longer, but only as the square root — a
+/// day's worth is not twenty-four times the wait.
+enum ClockPush {
+  /// catching up to the end of something the player set going
+  ease(0.5),
+
+  /// following a finger on the dial. Quick, because a control that lags behind
+  /// the thumb doesn't read as a control at all — what smoothing there is here
+  /// is for taking the jitter out of a drag, not for feel.
+  dial(0.14),
+
+  /// plain unpaused play, where the destination keeps receding. Quick, so the
+  /// standing lag behind a moving target stays too small to see.
+  play(0.1);
+
+  const ClockPush(this.hourSeconds);
+  final double hourSeconds;
+
+  /// ticks per real second per real second. Constant acceleration, so the
+  /// distance covered goes as the square of the time — which is what makes
+  /// this a parabola rather than the exponential it replaced.
+  double get accel => 4 * gameHour / (hourSeconds * hourSeconds);
+}
+
 // ────────────────────────────── intervals ──────────────────────────────
 
 /// Repetition comes in two flavours. An [ArbitraryInterval] is just a span of
@@ -374,22 +446,16 @@ enum GamePhase { playing, won, lost }
 /// the day. A [ClockInterval] is locked to the day: its period is a whole
 /// multiple of the day or a whole fraction of it, so it always fires at the
 /// same time(s) of day, and it can be displayed as a clock time.
+/// Neither kind holds a moment of its own any more. An interval is a shape of
+/// repetition and nothing else; whatever is repeating writes down when it last
+/// went off (see [Tree.pickedAt]). That's what lets the clock be moved: there
+/// is no "time remaining" anywhere to be wound back, only moments and the
+/// arithmetic between them.
 sealed class Interval {
-  double get period;
-
-  /// seconds from game time [t] until the next firing
-  double remainingAt(double t);
+  TTime get period;
 }
 
-class ArbitraryInterval(@override final double period) extends Interval {
-  /// game time the current span began; whatever triggers it calls [start]
-  double startedAt = -1e9;
-
-  @override
-  double remainingAt(double t) => max(0.0, startedAt + period - t);
-  void start(double t) => startedAt = t;
-  bool elapsedAt(double t) => startedAt > -1e8 && t >= startedAt + period;
-}
+class ArbitraryInterval(@override final TTime period) extends Interval {}
 
 class ClockInterval({
   /// exactly one of these is > 1: the period is a whole multiple of the day,
@@ -397,55 +463,82 @@ class ClockInterval({
   final int multiple = 1,
   final int division = 1,
 
-  /// where in the period it fires, in game seconds
-  required final double offset,
+  /// where in the period it fires, in ticks
+  required final TTime offset,
 }) extends Interval {
+  /// Exact because [gameDay] carries a factor of 2^14 from [tickRate] and
+  /// another of 86400, so every division the game hands out divides it whole.
   @override
-  double get period => gameDay * multiple / division;
+  TTime get period => gameDay * multiple ~/ division;
 
-  @override
-  double remainingAt(double t) {
+  /// ticks from [t] until the next firing, counting a firing exactly at [t] as
+  /// having already gone: this is always the span to a moment strictly after
+  /// [t], which is what the event scheduler wants of it (see [Game.advanceTo])
+  /// and what a countdown wants of it too
+  TTime remainingAt(TTime t) {
     final r = (offset - t) % period;
     return r == 0 ? period : r;
   }
 
-  /// which repetition [t] falls in; a firing is a change in this number
-  int cycleAt(double t) => ((t - offset) / period).floor();
+  /// the next firing strictly after [t] — the scheduler's view of [remainingAt]
+  TTime nextAfter(TTime t) => t + remainingAt(t);
+
+  /// which repetition [t] falls in; a firing is a change in this number.
+  /// Floor division, not [num.~/], which truncates towards zero and so would
+  /// put the whole period before the offset in cycle 0 along with the one
+  /// after it.
+  int cycleAt(TTime t) {
+    final d = t - offset;
+    return d >= 0 ? d ~/ period : -((-d + period - 1) ~/ period);
+  }
 
   /// whether the period is a whole multiple of a day (rather than a fraction),
   /// which is what makes a single time of day meaningful
   bool get isDaily => division == 1;
 
-  /// the time of day it fires at, in game seconds into the day
-  double get timeOfDay => offset % gameDay;
+  /// the time of day it fires at, in ticks into the day
+  TTime get timeOfDay => offset % gameDay;
 }
 
 /// picks a clock interval firing [division] times a day at a random phase
 ClockInterval _divisionInterval(GameRng rng, int division) => ClockInterval(
   division: division,
-  offset: rng.nextDouble() * gameDay / division,
+  offset: ticksOf(rng.nextDouble() * gameDay / division),
 );
 
 /// A three-pulse red flash, driven off the game clock. It clears itself once
 /// spent so that nothing stays subscribed to the clock while idle.
+/// A three-pulse red flash, driven off the game clock.
+///
+/// Nothing clears it: it's the moment it was set off and it stays that, and
+/// whether it's showing is worked out from the clock. That's what makes it
+/// rewindable for free — a flash triggered by an event the player has since
+/// rewound past reads as not showing, because [Game.now] is back before it
+/// again, and no undo had to run.
+///
+/// It still costs an idle facility nothing per frame. [flashingAt] peeks at
+/// the clock rather than reading it, so a badge only subscribes to the clock —
+/// inside [rednessAt] — during the second or so it's actually pulsing. The
+/// last frame of a flash is subscribed, so it rebuilds once more and lets go.
 class RedFlash {
-  final Signal<double> startedAt = signal(-1e9);
-  bool get active => startedAt.peek() > -1e8;
-  void trigger(double t) => startedAt.value = t;
+  final Signal<TTime?> startedAt = signal(null);
+  void trigger(TTime t) => startedAt.value = t;
 
-  /// 0..1 redness at game time [t], over a flash lasting [span] game seconds
-  /// ([Parameters.redFlashSpan]); reading this subscribes to the clock, so only
-  /// call it when [active]
-  double rednessAt(double t, double span) {
-    final e = t - startedAt.value;
-    if (e < 0 || e > span) return 0;
-    return sin(e / span * redFlashPulses * pi).abs();
+  /// whether the flash is showing at [now], without subscribing to the clock
+  bool flashingAt(TTime now, TTime span) {
+    final s = startedAt.value;
+    return s != null && now >= s && now - s <= span;
   }
 
-  void expire(double t, double span) {
-    if (active && t - startedAt.peek() > span) {
-      startedAt.value = -1e9;
-    }
+  /// 0..1 redness at game time [t], over a flash lasting [span] ticks
+  /// ([Parameters.redFlashSpan]); reading this subscribes to the clock, so
+  /// only call it when [flashingAt]
+  double rednessAt(TTime t, TTime span) {
+    final s = startedAt.value;
+    if (s == null) return 0;
+    final e = t - s;
+    if (e < 0 || e > span) return 0;
+    return sin(e / span * redFlashPulses * pi).abs();
   }
 }
 
@@ -460,7 +553,7 @@ class Parameters({
   required final int seed,
 
   // goal
-  required final double globalTime,
+  required final TTime globalTime,
   required final int eudaimoniaGoal,
 
   /// How long a day takes to play, in real seconds — the level's pace, and the
@@ -473,7 +566,7 @@ class Parameters({
   // players
   required final int nPlayers,
   required final int inventoryCap,
-  required final double playerSpeed, // world units per game second
+  required final double playerSpeed, // world units per tick
   required final bool playersHaveMoveAction,
 
   // grid & graph (levelgen section of the doc)
@@ -519,19 +612,19 @@ class Parameters({
   required final List<(double, NodeTone)> nodeToneWeights,
 
   // trees
-  required final double treeRegenTime, // arbitrary-interval trees
+  required final TTime treeRegenTime, // arbitrary-interval trees
   required final double
   treeClockIntervalp, // else the regen is a daily clock interval
   required final double treeSecondItemProb, // "an item or two"
   required final double treeTier1Prob, // else tier 0 ("first or second tier")
   // traders
   required final double traderInstantProb,
-  required final (double, double) tradeDurationRange,
+  required final (TTime, TTime) tradeDurationRange,
   required final double traderCooldownProb,
-  required final (double, double) traderCooldownRange,
+  required final (TTime, TTime) traderCooldownRange,
 
   // muggers
-  required final double muggerIncapTime,
+  required final TTime muggerIncapTime,
   required final List<(double, MuggerKind)> muggerKindWeights,
 
   // storage
@@ -550,7 +643,7 @@ class Parameters({
   required final double jumpFreeAimp, // else it can only reach landing stations
   required final double jumpCostItemp,
   required final double jumpCooldownp,
-  required final (double, double) jumpCooldownRange,
+  required final (TTime, TTime) jumpCooldownRange,
   // blights
   /// The sizes a blight comes in, drawn from uniformly. Discrete rather than a
   /// range: a blight's radius is something the player has to judge by eye from
@@ -565,8 +658,7 @@ class Parameters({
   required final int nTrains,
   required final int stationsPerTrain,
 
-  required final Map<TrainSpeed, double> trainSpeedUnitsPerSec,
-  required final List<(double, TrainSpeed)> trainSpeedWeights,
+  required final double trainSpeed, // world units per tick, as [playerSpeed]
   required final double trainActivationProb, // requires a held Quantity to move
   required final double trainActivationConsumedProb, // of those: an actual cost
   required final double trainActivationTwoProb, // quantity 2 instead of 1
@@ -576,27 +668,31 @@ class Parameters({
   required final double movableFromInsideProb, // of manually movable trains
   required final List<(double, StationControl)> stationControlWeights,
   required final double trainTerminusDistance,
-  required final double oneWayReturnDelay,
+  required final TTime oneWayReturnDelay,
 }) {
   // ── pace ──
   //
-  // Everything above with time in it is in game seconds (or units per game
-  // second), written with the [gameMinute]/[gameHour]/[gameDay] constants so
-  // that the figure and its unit sit together. It's what the update loop
-  // steps by, what the save file holds, and what the readouts are formatted
-  // from, so nothing below here converts a span — the only conversion in the
-  // game is this one, from the wall clock into game time, and it happens once
-  // a frame in the ticker.
+  // Everything above with time in it is in ticks (or units per tick), written
+  // with the [gameMinute]/[gameHour]/[gameDay] constants so that the figure and
+  // its unit sit together. Ticks are what the update loop steps by, what the
+  // save file holds, and what the readouts are formatted from, so nothing below
+  // here converts a span — the only conversion in the game is this one, from
+  // the wall clock into game time, and it happens once a frame in the ticker.
+  //
+  // A rate written `17.5 / gameHour` needs no attention on the way across: it
+  // was units per game second when [gameHour] was 3600 and it's units per tick
+  // now that [gameHour] counts ticks, because the same constant is doing the
+  // dividing either way.
 
-  /// game seconds per real second — how fast the day is being played
+  /// ticks per real second — how fast the day is being played
   double get pace => gameDay / dayRealSeconds;
 
-  /// [s] real seconds as the game seconds they'll take to elapse
-  double realSeconds(double s) => s * pace;
+  /// [s] real seconds as the ticks they'll take to elapse
+  TTime realSeconds(double s) => ticksOf(s * pace);
 
   /// [redFlashRealSeconds] and [announcementRealSeconds] on the game clock
-  double get redFlashSpan => realSeconds(redFlashRealSeconds);
-  double get announcementSpan => realSeconds(announcementRealSeconds);
+  TTime get redFlashSpan => realSeconds(redFlashRealSeconds);
+  TTime get announcementSpan => realSeconds(announcementRealSeconds);
 
   /// The level being played and tuned. Started as a straight copy of
   /// [urLevel] — which is the point of urLevel: this one is free to move.
@@ -650,7 +746,7 @@ class Parameters({
       treeSecondItemProb: 0.3,
       treeTier1Prob: 0.3,
       traderInstantProb: 0.5,
-      tradeDurationRange: (24 * gameMinute, 1.5 * gameHour),
+      tradeDurationRange: (24 * gameMinute, 90 * gameMinute),
       traderCooldownProb: 0.3,
       traderCooldownRange: (1 * gameHour, 40 * gameHour),
       muggerIncapTime: 2 * gameHour,
@@ -670,18 +766,7 @@ class Parameters({
       blightDaysRange: (1, 3),
       nTrains: 3,
       stationsPerTrain: 2,
-      trainSpeedUnitsPerSec: const {
-        TrainSpeed.s: 16 / gameHour,
-        TrainSpeed.r: 34 / gameHour,
-        TrainSpeed.f: 60 / gameHour,
-        TrainSpeed.i: 160 / gameHour,
-      },
-      trainSpeedWeights: const [
-        (1.3, TrainSpeed.s),
-        (4, TrainSpeed.r),
-        (2, TrainSpeed.f),
-        (1, TrainSpeed.i),
-      ],
+      trainSpeed: 60 / gameHour,
       trainActivationProb: 0.35,
       trainActivationConsumedProb: 0.25,
       trainActivationTwoProb: 0.25,
@@ -765,14 +850,14 @@ class Parameters({
         (1, NodeTone.deeper),
         (1, NodeTone.tinted),
       ],
-      treeRegenTime: 2.5 * gameHour,
+      treeRegenTime: 150 * gameMinute,
       treeClockIntervalp: 0.6,
       treeSecondItemProb: 0.3,
       treeTier1Prob: 0.23,
       traderInstantProb: 0.5,
-      tradeDurationRange: (24 * gameMinute, 1.5 * gameHour),
+      tradeDurationRange: (24 * gameMinute, 90 * gameMinute),
       traderCooldownProb: 0.3,
-      traderCooldownRange: (30 * gameMinute, 2.5 * gameHour),
+      traderCooldownRange: (30 * gameMinute, 150 * gameMinute),
       muggerIncapTime: 2 * gameHour,
       muggerKindWeights: const [(3, MuggerKind.r), (4, MuggerKind.rc)],
       storageCapacityRange: (2, 12),
@@ -792,18 +877,7 @@ class Parameters({
       blightDaysRange: (1, 3),
       nTrains: 3,
       stationsPerTrain: 2,
-      trainSpeedUnitsPerSec: const {
-        TrainSpeed.s: 16 / gameHour,
-        TrainSpeed.r: 34 / gameHour,
-        TrainSpeed.f: 60 / gameHour,
-        TrainSpeed.i: 160 / gameHour,
-      },
-      trainSpeedWeights: const [
-        (1.3, TrainSpeed.s),
-        (4, TrainSpeed.r),
-        (2, TrainSpeed.f),
-        (1, TrainSpeed.i),
-      ],
+      trainSpeed: 60 / gameHour,
       trainActivationProb: 0.35,
       trainActivationConsumedProb: 0.25,
       trainActivationTwoProb: 0.25,
@@ -1272,6 +1346,25 @@ class Item(
   final bool isEudaimonia = false,
 }) {
   late final ItemIcon icon; // basics at construction, composites late-assigned
+  /// An item is a value, not a thing: two of the same item are the same item,
+  /// and where it sits in the catalogue is its whole name — which is exactly
+  /// how the save format writes it down, so this agrees with what's on disk.
+  ///
+  /// It matters more here than the [Identified] numbers do, because it's what
+  /// the implicit comparisons run on: an inventory is a `List<Item>` and the
+  /// game does `remove` and `contains` on it, and an inbox gathers the map's
+  /// outboxes into a `Map<Item, int>`. Those worked before only because the
+  /// catalogue hands out one object per item and everything shares it. Now
+  /// they work because they're the same item.
+  @override
+  bool operator ==(Object other) =>
+      other is Item &&
+      other.tier == tier &&
+      other.iInTier == iInTier &&
+      other.isEudaimonia == isEudaimonia;
+
+  @override
+  int get hashCode => Object.hash(tier, iInTier, isEudaimonia);
 }
 
 class const Quantity(final Item item, final int n);
@@ -1343,7 +1436,7 @@ void assignCompositeIcons(
       final producers = traders
           .where(
             (t) =>
-                t.gives.any((q) => identical(q.item, item)) &&
+                t.gives.any((q) => q.item == item) &&
                 t.takes.every((q) => q.item.tier < tier),
           )
           .toList();
@@ -1784,7 +1877,7 @@ Item _pick(GameRng rng, List<Item> tier) => tier[rng.nextInt(tier.length)];
 Item? _pickExcluding(GameRng rng, List<Item> tier, List<Quantity> takes) {
   final free = [
     for (final it in tier)
-      if (!takes.any((q) => identical(q.item, it))) it,
+      if (!takes.any((q) => q.item == it)) it,
   ];
   return free.isEmpty ? null : free[rng.nextInt(free.length)];
 }
@@ -1834,7 +1927,7 @@ List<TraderGeneratorsForTier> levelOneTraders(int nItemTiers) {
             Item give;
             do {
               give = _pick(rng, cur);
-            } while (identical(give, a) || identical(give, b));
+            } while (give == a || give == b);
             return Trader(mergeQuantities([Quantity(a, 1), Quantity(b, 1)]), [
               Quantity(give, 1),
             ]);
@@ -2041,7 +2134,7 @@ List<TraderGeneratorsForTier> urTraders(int nItemTiers) {
             Item give;
             do {
               give = _pick(rng, cur);
-            } while (identical(give, a) || identical(give, b));
+            } while (give == a || give == b);
             return Trader(mergeQuantities([Quantity(a, 1), Quantity(b, 1)]), [
               Quantity(give, 1),
             ]);
@@ -2236,9 +2329,7 @@ List<Trader> generateTraders(GameRng rng, Parameters p, ItemCatalog cat) {
     }
   }
   assert(
-    out.every(
-      (t) => !t.gives.any((g) => t.takes.any((k) => identical(k.item, g.item))),
-    ),
+    out.every((t) => !t.gives.any((g) => t.takes.any((k) => k.item == g.item))),
     'a trader gives an item it also takes',
   );
   // a eudaimonia trader for each final tier item
@@ -2250,12 +2341,12 @@ List<Trader> generateTraders(GameRng rng, Parameters p, ItemCatalog cat) {
     if (t.gives.any((q) => q.item.isEudaimonia)) continue;
     if (!rng.chance(p.traderInstantProb)) {
       t.duration = roundToMinute(
-        rangeIn(rng, p.tradeDurationRange.$1, p.tradeDurationRange.$2),
+        rangeInTicks(rng, p.tradeDurationRange.$1, p.tradeDurationRange.$2),
       );
     }
     if (rng.chance(p.traderCooldownProb)) {
       t.cooldown = roundToMinute(
-        rangeIn(rng, p.traderCooldownRange.$1, p.traderCooldownRange.$2),
+        rangeInTicks(rng, p.traderCooldownRange.$1, p.traderCooldownRange.$2),
       );
     }
   }
@@ -2264,7 +2355,49 @@ List<Trader> generateTraders(GameRng rng, Parameters p, ItemCatalog cat) {
 
 // ────────────────────────────── world graph ──────────────────────────────
 
-class Node {
+/// Everything in a level that is a particular *something* — a node, a player,
+/// a facility — as opposed to a value like an [Item] or a piece of topology
+/// like an [Edge]. Each carries a number that names it within its level.
+///
+/// The numbers are positions in the lists the level is written down as, and
+/// they're stamped by the [Game] constructor, which is what makes them the
+/// same numbers when a saved level is read back: the lists go to disk in order
+/// and come back in order. Two things follow. They're what the event ordering
+/// breaks ties on (see [Game.advanceTo]) — a replay has to resolve a collision
+/// the same way the first run did. And they're what [same] compares, so that
+/// asking whether two references are the same thing doesn't depend on their
+/// being the same object.
+///
+/// One number space across all three kinds, so that a node's number can never
+/// collide with a facility's and make [same] quietly agree about two unrelated
+/// things.
+mixin Identified {
+  /// -1 until the level is built; see [same]
+  int id = -1;
+}
+
+/// Whether two references are the same thing. Null is nobody, and nobody is
+/// only the same as nobody, so this reads on a null receiver.
+///
+/// The assert is the guard rail on the one place it can't be used: level
+/// generation, which makes and discards nodes long before any of them has been
+/// numbered. Down there everything is one graph being assembled and [identical]
+/// is both correct and the only thing that works — see [Edge.other], which is
+/// called from inside the generator.
+extension Sameness on Identified? {
+  bool isSameAs(Identified? other) {
+    final self = this;
+    if (self == null || other == null) return self == null && other == null;
+    assert(
+      self.id >= 0 && other.id >= 0,
+      'compared two things before the level numbered them — during generation, '
+      'use identical()',
+    );
+    return self.id == other.id;
+  }
+}
+
+class Node with Identified {
   Offset pos; // world units
   final List<Edge> edges = [];
   final List<Facility> facilities = [];
@@ -2382,85 +2515,332 @@ class Edge(
   final TrainNode? dockTrain,
 }) {
   double get length => (a.pos - b.pos).distance;
+
+  /// [identical] rather than [same] on purpose: this is called from inside
+  /// level generation, before anything has been numbered.
   Node other(Node n) => identical(n, a) ? b : a;
   double angleFromNode(Node n) => offsetAngle(other(n).pos - n.pos);
 }
 
 /// Base class for entities that have positions in the graph and can have move
 /// paths scheduled (for now only players move along move paths).
-abstract class Thing {
+abstract class Thing with Identified {
   final Signal<Node?> at = signal(null); // null while traversing an edge
-  void update(Game g, double dt);
 }
 
-class MovePath {
-  final List<Node> nodes = [];
-  final List<double> departureTimes = []; // game-time; "not before" semantics
-  void clear() {
-    nodes.clear();
-    departureTimes.clear();
+// ────────────────────────────── what a player did ──────────────────────────────
+
+/// What an action turned out to have done, kept so that a replay can notice it
+/// doing something else.
+///
+/// It's the player's whole hand afterwards, not just what the action itself
+/// moved. That's deliberately conservative: an action is part of a plan, and a
+/// plan made while holding one thing is not a plan worth carrying out while
+/// holding another. So a walk whose only difference is that the walker was
+/// robbed on the way here counts as a divergence, and the player is told
+/// rather than watched blundering on. Stopping too often is a nuisance;
+/// stopping too rarely is a level quietly playing out wrong.
+class ActionResult(final List<Item> holding, final Node? at) {
+  /// as a multiset, since two identical hands in a different order are the
+  /// same hand
+  bool matches(ActionResult o) {
+    if (!at.isSameAs(o.at) || holding.length != o.holding.length) return false;
+    for (final it in holding) {
+      if (holding.where((x) => x == it).length !=
+          o.holding.where((x) => x == it).length) {
+        return false;
+      }
+    }
+    return true;
   }
+
+  static ActionResult of(Player p) =>
+      ActionResult(p.inventory.peek(), p.at.peek());
+}
+
+/// One thing a player decided to do.
+///
+/// A level is a starting state plus a list of these per player, and where the
+/// world is at any moment is what you get by playing them out. That's the
+/// whole reason the clock can be wound back: going back doesn't undo anything,
+/// it puts an earlier state in place and runs the scripts forward again. Which
+/// in turn is why an action has to be a *decision* and not an effect — "take
+/// what this tree is holding", never "gain two of item 4" — so that running it
+/// again in a world someone else has meddled with does what the player would
+/// have done, or visibly fails to.
+sealed class PlayerAction {
+  /// The moment it was committed; it never runs before this. Not a promise
+  /// that it runs *at* this — a player halfway along a wire finishes walking
+  /// first, and one who's been mugged waits until they're back on their feet.
+  final TTime notBefore;
+  PlayerAction({required this.notBefore});
+
+  /// What it did the first time round. Null until it has run once; after that
+  /// it's what a replay is held against. Not part of a snapshot — see
+  /// [PlayerScript] — because it belongs to the history, not to the moment.
+  ActionResult? recorded;
+
+  /// Carry it out. Null means it couldn't be — the tree is bare, the train has
+  /// gone, the wire isn't there any more.
+  ActionResult? perform(Game g, Player p);
+
+  /// for the alert when a replay of this doesn't come out the same way
+  String get name;
+}
+
+/// Everything a player has done, and how much of it has happened yet.
+///
+/// [actions] is the history and is never rewound: it's the *input* to the
+/// simulation rather than one of its results, so a snapshot doesn't carry it.
+/// [done] is, because how far through the list the world has got is exactly
+/// what moving the clock changes.
+///
+/// Committing while [done] is short of the end throws the tail away. That's
+/// the ordinary meaning of doing something else instead: you went back, you
+/// made a different decision, and what you were going to do afterwards was a
+/// plan for a world that now isn't going to happen.
+class PlayerScript {
+  final List<PlayerAction> actions = [];
+  int done = 0;
+
+  PlayerAction? get next => done < actions.length ? actions[done] : null;
+
+  /// Everything from here on, gone. Used when a replay comes out differently:
+  /// the rest was a plan resting on something that didn't happen.
+  void truncate() => actions.removeRange(done, actions.length);
+
+  /// Drops only what has been played once already — the stretch a rewind left
+  /// sitting ahead of the cursor, waiting to happen again.
+  ///
+  /// The distinction matters because two things can be ahead of the cursor and
+  /// they mean opposite things. An action carrying a [PlayerAction.recorded]
+  /// has happened before and is queued to happen again, and deciding to do
+  /// something else instead is what replaces it. An action without one has
+  /// never happened at all — it's a step the player queued a moment ago while
+  /// walking, and they want both it and the one they're adding now.
+  void truncateReplayed() {
+    var k = done;
+    while (k < actions.length && actions[k].recorded != null) {
+      k++;
+    }
+    actions.removeRange(done, k);
+  }
+}
+
+/// Step onto the next node along. The only action that leaves the player busy
+/// afterwards; the rest are done the moment they're done.
+class MoveAction(final Node to, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'walk';
+
+  @override
+  ActionResult? perform(Game g, Player p) {
+    final from = p.at.peek();
+    if (from == null) return null;
+    final edge = from.edges.firstWhereOrNull((e) => e.other(from).isSameAs(to));
+    if (edge == null) return null; // the wire's gone: its train left
+    p.departOn(g, edge, to);
+    return ActionResult.of(p);
+  }
+}
+
+class HarvestAction(final Tree tree, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'harvest';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      tree.harvest(g, p) ? ActionResult.of(p) : null;
+}
+
+class TradeAction(final Trader trader, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'trade';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      trader.startTrade(g, p) ? ActionResult.of(p) : null;
+}
+
+class CollectAction(final Trader trader, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'collect';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      trader.collect(g, p) ? ActionResult.of(p) : null;
+}
+
+class FeedAction(final Blight blight, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'appease';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      blight.feed(g, p) ? ActionResult.of(p) : null;
+}
+
+/// Naming the item is the point: an inbox reaches into every outbox on the
+/// map, and what's in them is exactly what another player can have changed
+/// while this one was walking. Asking for the item rather than for "the first
+/// slot" is what lets a replay tell "I got what I came for" from "I got
+/// whatever happened to be there".
+class PullAction(final Inbox inbox, final Item item, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'take from the inbox';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      inbox.pull(g, p, item) ? ActionResult.of(p) : null;
+}
+
+class JumpAction(
+  final JumpStation station,
+  final Node to, {
+  required super.notBefore,
+}) extends PlayerAction {
+  @override
+  String get name => 'jump';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      station.jump(g, p, to) ? ActionResult.of(p) : null;
+}
+
+class StoreAction(final Item item, {required super.notBefore})
+    extends PlayerAction {
+  @override
+  String get name => 'put away';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      g.storeFromInventory(p, item) ? ActionResult.of(p) : null;
+}
+
+class RotateAction(
+  final Storage from,
+  final Item item, {
+  required super.notBefore,
+}) extends PlayerAction {
+  @override
+  String get name => 'move an item on';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      g.rotateItemOnward(p, from, item) ? ActionResult.of(p) : null;
+}
+
+/// Sending a train isn't something the player does to themselves, so what it
+/// leaves behind in [ActionResult] is only whatever the fare cost them. The
+/// train's own journey is the train's, and is replayed by the train.
+class TrainMoveAction(
+  final TrainNode train,
+  final Node to, {
+  required super.notBefore,
+}) extends PlayerAction {
+  @override
+  String get name => 'send the train';
+
+  @override
+  ActionResult? perform(Game g, Player p) =>
+      g.manualTrainMove(train, p, to) ? ActionResult.of(p) : null;
 }
 
 class Player(final String name, final Color color) extends Thing {
   final Signal<List<Item>> inventory = signal(const []);
-  final Signal<double> incapacitatedFor = signal(0.0); // > 0 blocks everything
+
+  /// while [Game.now] is under this, everything the player could do is blocked;
+  /// null when they're free
+  final Signal<TTime?> incapacitatedUntil = signal(null);
+
   /// flashes their inventory red — muggings and blights
   final RedFlash flash = RedFlash();
-  final MovePath plan = MovePath();
+
+  /// everything this player has decided to do, and how far through it the
+  /// world has got
+  final PlayerScript script = PlayerScript();
+
+  /// The walk in progress: which wire, which end of it they're heading for,
+  /// and the two moments that bracket the crossing.
+  ///
+  /// Both ends are recorded rather than a progress fraction being carried
+  /// along. A fraction has to be advanced by the size of whatever step the
+  /// simulation happens to take, which makes where the player is a function of
+  /// how the clock was cut up on the way here — the same journey run in one
+  /// step and in a thousand ends in different places, because the step that
+  /// crosses the far end overshoots it and the overshoot is thrown away. Two
+  /// absolute moments and a lerp between them give the same answer at a given
+  /// [Game.now] however the clock got there, which is the whole requirement
+  /// for the world being re-simulable. (Everything else in the file that used
+  /// to count down does the same thing now, for the same reason.)
   Edge? traversing;
   Node? traversalTarget;
-  double traversalProgress = 0;
+  TTime departedAt = 0, arrivesAt = 0;
 
-  Offset worldPos() {
-    if (traversing != null) {
-      final from = traversing!.other(traversalTarget!);
+  Offset worldPos(TTime now) {
+    final edge = traversing;
+    if (edge != null) {
+      final from = edge.other(traversalTarget!);
+      final span = arrivesAt - departedAt;
       return Offset.lerp(
         from.pos,
         traversalTarget!.pos,
-        clampUnit(traversalProgress),
+        span <= 0 ? 1 : clampUnit((now - departedAt) / span),
       )!;
     }
     return at.value?.pos ?? Offset.zero;
   }
 
-  @override
-  void update(Game g, double dt) {
-    flash.expire(g.gameTime, g.params.redFlashSpan);
-    if (incapacitatedFor.value > 0) {
-      incapacitatedFor.value = max(0.0, incapacitatedFor.value - dt);
-      return;
-    }
+  bool incapacitatedAt(TTime now) {
+    final u = incapacitatedUntil.value;
+    return u != null && now < u;
+  }
+
+  /// The next moment this player does something: land at the far end of a
+  /// walk, or carry out the next thing on their list. Neither can happen while
+  /// they're flat on their back, so the block is folded into the time rather
+  /// than being an event of its own — coming round from a mugging isn't
+  /// something that happens, it's something that stops being true.
+  TTime? nextEventAt(Game g) {
+    if (traversing != null) return arrivesAt;
+    final a = script.next;
+    if (a == null || at.peek() == null) return null;
+    final u = incapacitatedUntil.peek();
+    return u == null ? a.notBefore : max(a.notBefore, u);
+  }
+
+  /// whether the pending event is an arrival, which sorts ahead of departures;
+  /// see [Game.advanceTo]
+  bool get nextIsArrival => traversing != null;
+
+  void fire(Game g) {
     if (traversing != null) {
-      final len = max(traversing!.length, 0.001);
-      traversalProgress += dt * g.params.playerSpeed / len;
-      if (traversalProgress >= 1) _arrive(g);
-    } else if (plan.nodes.isNotEmpty &&
-        g.gameTime >= plan.departureTimes.first) {
-      _depart(g);
+      _arrive(g);
+    } else {
+      g.runNextAction(this);
     }
   }
 
-  void _depart(Game g) {
-    final from = at.value;
-    if (from == null) return;
-    final target = plan.nodes.first;
-    final edge = from.edges.firstWhereOrNull(
-      (e) => identical(e.other(from), target),
-    );
-    if (edge == null) {
-      // the wire no longer exists (its train left) — abandon the plan
-      plan.clear();
-      return;
-    }
-    plan.nodes.removeAt(0);
-    plan.departureTimes.removeAt(0);
+  /// Sets off along [edge] towards [to]. Called by [MoveAction], which is the
+  /// only thing that ever decides to walk; the arrival at the far end is a
+  /// consequence rather than a decision, and gets an event of its own.
+  void departOn(Game g, Edge edge, Node to) {
+    final from = at.peek()!;
     traversing = edge;
-    traversalTarget = target;
-    traversalProgress = 0;
+    traversalTarget = to;
+    departedAt = g.now;
+    // never zero, or a wire with no length would be an event that fires at the
+    // moment it was scheduled and the event loop would never get past it
+    arrivesAt = g.now + max(1, ticksOf(edge.length / g.params.playerSpeed));
     at.value = null;
     from.playersPresent.value = from.playersPresent.value
-        .where((p) => !identical(p, this))
+        .where((p) => !p.isSameAs(this))
         .toList();
   }
 
@@ -2468,7 +2848,6 @@ class Player(final String name, final Color color) extends Thing {
     final node = traversalTarget!;
     traversing = null;
     traversalTarget = null;
-    traversalProgress = 0;
     at.value = node;
     node.playersPresent.value = [...node.playersPresent.value, this];
     g.raiseNode(node);
@@ -2497,7 +2876,7 @@ class OneWaySchedule extends TrainSchedule {
 /// shuttles on its own, on a division clock interval — so many departures a
 /// day, always at the same times ('sc(12.5)'); can't be controlled
 class const CycleSchedule(final ClockInterval interval) extends TrainSchedule {
-  double get seconds => interval.period;
+  TTime get period => interval.period;
 }
 
 /// Trains ARE nodes: they hold facilities and players like any other node.
@@ -2508,7 +2887,6 @@ class const CycleSchedule(final ClockInterval interval) extends TrainSchedule {
 /// it from the train.
 class TrainNode({
   required Offset pos,
-  required final TrainSpeed speed,
   required final Quantity? activation, // must be held by the mover
   required final bool activationConsumed, // true (an actual cost) less often
   required final bool movableFromInside,
@@ -2517,14 +2895,18 @@ class TrainNode({
   required final Map<Node, Offset> terminusFor,
 }) extends Node {
   final Signal<Node?> dockedAt = signal(null);
-  final Signal<double> transitRemaining = signal(0.0);
-  double _transitTotal = 0;
+
+  /// when the train now in transit reaches its far terminus; null when it's
+  /// docked. With [departedAt] it brackets the crossing, and [pos] is read off
+  /// the pair — see [Player.traversing] for why nothing counts down.
+  final Signal<TTime?> arrivesAt = signal(null);
+  TTime departedAt = 0;
   Offset _fromPos = Offset.zero, _toPos = Offset.zero;
   Node? _toStation;
   Edge? _dockEdge;
 
-  /// countdown to an automatic departure while docked; -1 = none
-  final Signal<double> waitRemaining = signal(-1.0);
+  /// when this train leaves on its own while docked; null = it doesn't
+  final Signal<TTime?> departsAt = signal(null);
 
   this : super(pos);
 
@@ -2538,97 +2920,132 @@ class TrainNode({
     if (activation != null) activation!.item,
   ];
 
-  double unitsPerSec(Parameters p) => p.trainSpeedUnitsPerSec[speed]!;
+  double unitsPerTick(Parameters p) => p.trainSpeed;
 
-  double travelTimeBetween(Node s1, Node s2, Parameters p) =>
-      (terminusFor[s1]! - terminusFor[s2]!).distance / unitsPerSec(p);
+  TTime travelTimeBetween(Node s1, Node s2, Parameters p) => max(
+    1,
+    ticksOf((terminusFor[s1]! - terminusFor[s2]!).distance / unitsPerTick(p)),
+  );
 
   bool get manualAllowed => switch (schedule) {
     NeverSchedule _ => true,
-    OneWaySchedule _ => identical(dockedAt.value, homeStation),
+    OneWaySchedule _ => dockedAt.value.isSameAs(homeStation),
     CycleSchedule _ => false,
   };
 
+  /// [identical] and not [same], because an [Edge] is the one part of a level
+  /// with no name of its own — it isn't [Identified], and a gangway in
+  /// particular is made and unmade as the train docks and leaves. Anything
+  /// that has to survive being rebuilt names an edge by its two ends instead;
+  /// see [restoreState].
   bool dockEdgeBusy(Game g) =>
       _dockEdge != null &&
       g.players.any((p) => identical(p.traversing, _dockEdge));
 
-  void dock(Game g, Node station) {
-    pos = terminusFor[station]!;
-    dockedAt.value = station;
+  /// Puts the gangway in, or takes it out again. The boarding wire is the one
+  /// piece of the graph that comes and goes, which makes it the one piece a
+  /// snapshot has to rebuild rather than assign — hence the pair, used by
+  /// docking and departing and by [restoreState] alike.
+  void attachDock(Game g, Node station) {
+    if (_dockEdge != null) detachDock(g);
     _dockEdge = Edge(station, this, dockTrain: this);
     station.edges.add(_dockEdge!);
     edges.add(_dockEdge!);
     g.edges.add(_dockEdge!);
-    waitRemaining.value = switch (schedule) {
-      OneWaySchedule _ when !identical(station, homeStation) =>
-        g.params.oneWayReturnDelay,
+  }
+
+  void detachDock(Game g) {
+    final e = _dockEdge;
+    if (e == null) return;
+    e.a.edges.remove(e);
+    edges.remove(e);
+    g.edges.remove(e);
+    _dockEdge = null;
+  }
+
+  void dock(Game g, Node station) {
+    pos = terminusFor[station]!;
+    dockedAt.value = station;
+    arrivesAt.value = null;
+    _toStation = null;
+    attachDock(g, station);
+    departsAt.value = switch (schedule) {
+      OneWaySchedule _ when !station.isSameAs(homeStation) =>
+        g.now + g.params.oneWayReturnDelay,
       // cycle trains leave at their clock times, not a fixed wait after docking
-      CycleSchedule c => c.interval.remainingAt(g.gameTime),
-      _ => -1,
+      CycleSchedule c => c.interval.nextAfter(g.now),
+      _ => null,
     };
   }
 
   void departTo(Game g, Node station) {
     final from = dockedAt.value;
-    if (from == null || identical(from, station)) return;
-    if (_dockEdge != null) {
-      from.edges.remove(_dockEdge);
-      edges.remove(_dockEdge);
-      g.edges.remove(_dockEdge);
-      _dockEdge = null;
-    }
+    if (from == null || from.isSameAs(station)) return;
+    detachDock(g);
     dockedAt.value = null;
     _fromPos = pos;
     _toPos = terminusFor[station]!;
     _toStation = station;
-    _transitTotal = max(0.001, travelTimeBetween(from, station, g.params));
-    transitRemaining.value = _transitTotal;
-    waitRemaining.value = -1;
+    departedAt = g.now;
+    arrivesAt.value = g.now + travelTimeBetween(from, station, g.params);
+    departsAt.value = null;
+  }
+
+  /// Where the train is at [now], written back onto [pos] because everything
+  /// that paints a node reads that field. Called once per advance rather than
+  /// per event: between two events a train in transit is still moving, and its
+  /// position is the one piece of state here that's continuous.
+  void syncPos(TTime now) {
+    final a = arrivesAt.peek();
+    if (a == null) return;
+    final span = a - departedAt;
+    pos = Offset.lerp(
+      _fromPos,
+      _toPos,
+      span <= 0 ? 1 : clampUnit((now - departedAt) / span),
+    )!;
   }
 
   Node? _nextAutoStation() {
     final here = dockedAt.value;
     if (here == null) return null;
     return switch (schedule) {
-      OneWaySchedule _ => identical(here, homeStation) ? null : homeStation,
+      OneWaySchedule _ => here.isSameAs(homeStation) ? null : homeStation,
       CycleSchedule _ => stationNodes.firstWhereOrNull(
-        (s) => !identical(s, here),
+        (s) => !s.isSameAs(here),
       ),
       NeverSchedule _ => null,
     };
   }
 
-  void updateTrain(Game g, double dt) {
-    if (dockedAt.value == null && _toStation != null) {
-      transitRemaining.value = max(0.0, transitRemaining.value - dt);
-      final t = 1 - transitRemaining.value / _transitTotal;
-      pos = Offset.lerp(_fromPos, _toPos, clampUnit(t))!;
-      if (transitRemaining.value <= 0) {
-        final st = _toStation!;
-        _toStation = null;
-        dock(g, st);
-      }
-    } else if (waitRemaining.value >= 0) {
-      waitRemaining.value -= dt;
-      if (waitRemaining.value <= 0) {
-        final next = _nextAutoStation();
-        if (next == null) {
-          waitRemaining.value = -1;
-        } else if (dockEdgeBusy(g)) {
-          // someone's boarding; try again shortly
-          waitRemaining.value = gameMinute;
-        } else {
-          departTo(g, next);
-        }
-      }
+  /// docking at the end of a crossing, or the scheduled departure — the two
+  /// things a train does by itself
+  TTime? nextEventAt(Game g) =>
+      _toStation != null ? arrivesAt.peek() : departsAt.peek();
+
+  /// whether the pending event is an arrival; see [Game.advanceTo]
+  bool get nextIsArrival => _toStation != null;
+
+  void fire(Game g) {
+    if (_toStation != null) {
+      dock(g, _toStation!);
+      return;
+    }
+    final next = _nextAutoStation();
+    if (next == null) {
+      departsAt.value = null;
+    } else if (dockEdgeBusy(g)) {
+      // someone's boarding; try again shortly
+      departsAt.value = g.now + gameMinute;
+    } else {
+      departTo(g, next);
     }
   }
 }
 
 // ────────────────────────────── facilities ──────────────────────────────
 
-abstract class Facility {
+abstract class Facility with Identified {
   late Node node; // assigned at placement
 
   /// which half of the day this facility operates in; set at generation
@@ -2691,7 +3108,28 @@ abstract class Facility {
   /// they're at this facility's node
   List<Widget> actionsFor(Game g, Player p) => const [];
 
-  void update(Game g, double dt) {}
+  /// The next moment this facility acts of its own accord, or null if it's not
+  /// waiting on anything.
+  ///
+  /// A countdown is not automatically an event. A cooldown running out changes
+  /// nothing in the world — it stops being true, and everything that cared was
+  /// asking a predicate anyway — so the only reason the ones below are still
+  /// scheduled is that the controls that go dim during a cooldown are driven
+  /// by signals, and a signal that nothing ever writes is a chip that never
+  /// comes back. They're a handful of events per level either way.
+  TTime? nextEventAt(Game g) => null;
+
+  /// Whether this facility ever has anything for [nextEventAt] to report —
+  /// asked once, when the level is built, so that the event loop can skip the
+  /// two thirds of a map that only ever react to being walked into. Override
+  /// it to true alongside [nextEventAt]; the pair go together, and a facility
+  /// that schedules without saying so simply never gets its turn.
+  bool get everSchedules => false;
+
+  /// Runs at exactly the [nextEventAt] that was last reported. Whatever it
+  /// changes has to be state the level writes down, because a rewind past this
+  /// moment puts the world back by re-running it, not by undoing it.
+  void fire(Game g) {}
 
   void onPlayerEntered(Game g, Player p) {}
 
@@ -2736,62 +3174,52 @@ class Station(final TrainNode train, final StationControl control)
 
   @override
   List<InlineSpan> describe(Game g) {
-    final speedName = switch (train.speed) {
-      TrainSpeed.s => 'slow',
-      TrainSpeed.r => 'regular',
-      TrainSpeed.f => 'fast',
-      TrainSpeed.i => 'very fast',
-    };
     final controlDesc = switch (control) {
       StationControl.none => "this station can't move the train",
       StationControl.remote => 'this station can control the train',
       StationControl.localOnly =>
         'this station can move the train only while it waits here',
     };
-    return [tipText('a station of a $speedName train; $controlDesc')];
+    return [tipText('a station of a train; $controlDesc')];
   }
 
   @override
   List<Widget> actionsFor(Game g, Player p) {
     if (control == StationControl.none) return const [];
+    final docked = train.dockedAt.peek();
+    final target = train.stationNodes.firstWhereOrNull(
+      (s) => !s.isSameAs(node),
+    );
+    final controlSatisfied =
+        docked != null &&
+        (control == StationControl.remote || docked.isSameAs(node));
+    final enabled =
+        controlSatisfied &&
+        train.manualAllowed &&
+        !train.dockEdgeBusy(g) &&
+        (train.activation == null || g.playerHas(p, [train.activation!]));
+    final time = docked != null && target != null
+        ? train.travelTimeBetween(docked, target, g.params)
+        : null;
     return [
-      SignalBuilder(
-        builder: (context) {
-          final docked = train.dockedAt.value;
-          final target = train.stationNodes.firstWhereOrNull(
-            (s) => !identical(s, node),
-          );
-          final controlSatisfied =
-              docked != null &&
-              (control == StationControl.remote || identical(docked, node));
-          final enabled =
-              controlSatisfied &&
-              train.manualAllowed &&
-              !train.dockEdgeBusy(g) &&
-              (train.activation == null || g.playerHas(p, [train.activation!]));
-          final time = docked != null && target != null
-              ? train.travelTimeBetween(docked, target, g.params)
-              : null;
-          return DragDirectionPad(
-            dimension: 64,
-            enabled: enabled,
-            onAngle: (a) => g.manualTrainMove(train, p, a),
-            label: Column(
+      DragDirectionPad(
+        dimension: 64,
+        enabled: enabled,
+        onAngle: (a) => g.dragTrainMove(train, p, a),
+        label: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    badgeIcon(Icons.train),
-                    badgeIcon(Icons.swipe_right_alt),
-                  ],
-                ),
-                if (time != null) badgeText(fmtSpan(time)),
-                if (train.activation != null) quantityWidget(train.activation!),
+                badgeIcon(Icons.train),
+                badgeIcon(Icons.swipe_right_alt),
               ],
             ),
-          );
-        },
+            if (time != null) badgeText(fmtSpan(time)),
+            if (train.activation != null) quantityWidget(train.activation!),
+          ],
+        ),
       ),
     ];
   }
@@ -2804,52 +3232,49 @@ class Tree(
   /// was picked.
   final Interval regen,
 ) extends Facility {
-  final Signal<bool> picked = signal(false);
+  /// when it was last stripped, or null if it's standing in fruit. The moment
+  /// rather than a flag plus a countdown: the regrowth is [regrowsAt] away
+  /// from it, and both survive the clock being moved.
+  final Signal<TTime?> pickedAt = signal(null);
 
-  /// for clock regen: which repetition it was picked in — it's back once the
-  /// interval has come round again
-  int _pickedInCycle = 0;
+  bool get ready => pickedAt.value == null;
 
-  bool get ready => !picked.value;
+  /// when the fruit is back, or null if it's already there
+  TTime? get regrowsAt {
+    final t = pickedAt.value;
+    if (t == null) return null;
+    return switch (regen) {
+      ArbitraryInterval _ => t + regen.period,
+      // a clock tree comes back at its own time of day however long ago it was
+      // stripped, so the wait is measured from the picking to the next firing
+      ClockInterval c => c.nextAfter(t),
+    };
+  }
 
   @override
   ClockInterval? get clockSchedule =>
       regen is ClockInterval ? regen as ClockInterval : null;
 
-  /// what the pie counts down: seconds until the fruit is back
-  final Signal<double> regenRemaining = signal(0.0);
-  double get regenTotal => regen.period;
+  TTime get regenTotal => regen.period;
 
   @override
-  void update(Game g, double dt) {
-    if (!picked.value) return;
-    switch (regen) {
-      case ArbitraryInterval a:
-        regenRemaining.value = a.remainingAt(g.gameTime);
-        if (a.elapsedAt(g.gameTime)) picked.value = false;
-      case ClockInterval c:
-        if (c.cycleAt(g.gameTime) > _pickedInCycle) {
-          picked.value = false;
-        } else {
-          regenRemaining.value = c.remainingAt(g.gameTime);
-        }
-    }
-    if (!picked.value) regenRemaining.value = 0;
-  }
+  bool get everSchedules => true;
 
-  void harvest(Game g, Player p) {
-    if (!ready || !identical(p.at.value, node)) return;
-    if (!g.roomFor(p, produces)) return;
+  @override
+  TTime? nextEventAt(Game g) => regrowsAt;
+
+  @override
+  void fire(Game g) => pickedAt.value = null;
+
+  /// true if it happened. Everything a player does reports that, because
+  /// [PlayerAction.perform] is the only caller and a replay has to be able to
+  /// tell "done" from "couldn't".
+  bool harvest(Game g, Player p) {
+    if (!ready || !p.at.value.isSameAs(node)) return false;
+    if (!g.roomFor(p, produces)) return false;
     g.giveItems(p, produces);
-    picked.value = true;
-    switch (regen) {
-      case ArbitraryInterval a:
-        a.start(g.gameTime);
-        regenRemaining.value = a.period;
-      case ClockInterval c:
-        _pickedInCycle = c.cycleAt(g.gameTime);
-        regenRemaining.value = c.remainingAt(g.gameTime);
-    }
+    pickedAt.value = g.now;
+    return true;
   }
 
   @override
@@ -2867,7 +3292,8 @@ class Tree(
                 quantityWidget(q, size: _facilityItemSize),
           ]),
           pie: CountdownPie(
-            remaining: regenRemaining,
+            game: g,
+            endsAt: () => regrowsAt,
             total: regenTotal,
             isCooldown: true,
             clock: clockSchedule,
@@ -2891,25 +3317,19 @@ class Tree(
 
   @override
   List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(
-      builder: (context) {
-        final enabled = ready && g.roomFor(p, produces);
-        // subscribe to inventory so room updates re-enable the chip
-        p.inventory.value;
-        return actionChip(
-          enabled: enabled,
-          onTap: () => harvest(g, p),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: badgeGap,
-            children: [
-              badgeIcon(Icons.local_florist),
-              badgeText('take'),
-              for (final q in produces) quantityWidget(q),
-            ],
-          ),
-        );
-      },
+    actionChip(
+      enabled: ready && g.roomFor(p, produces),
+      onTap: () => g.commit(p, HarvestAction(this, notBefore: g.actionMoment)),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: badgeGap,
+        runSpacing: 2,
+        children: [
+          badgeIcon(Icons.local_florist),
+          badgeText('take'),
+          for (final q in produces) quantityWidget(q),
+        ],
+      ),
     ),
   ];
 }
@@ -2919,21 +3339,24 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
   @override
   List<Item> get requiredItems => [for (final q in takes) q.item];
 
-  double duration = 0; // 0 = instant
-  double cooldown = 0; // 0 = none
-  final Signal<double> workRemaining = signal(0.0);
-  final Signal<double> cooldownRemaining = signal(0.0);
+  TTime duration = 0; // 0 = instant
+  TTime cooldown = 0; // 0 = none
+  /// when the trade under way completes, and when the rest after one ends;
+  /// null for neither. The two never overlap — the rest is set as the work
+  /// finishes — so which one the scheduler is waiting on is never in doubt.
+  final Signal<TTime?> workEndsAt = signal(null);
+  final Signal<TTime?> cooldownEndsAt = signal(null);
   final Signal<List<Quantity>> pendingOutput = signal(const []);
   Player? _worker;
 
-  bool get busy => workRemaining.value > 0;
-  bool get cooling => cooldownRemaining.value > 0;
+  bool get busy => workEndsAt.value != null;
+  bool get cooling => cooldownEndsAt.value != null;
 
   bool canTrade(Game g, Player p) =>
       !busy &&
       !cooling &&
       pendingOutput.value.isEmpty &&
-      identical(p.at.value, node) &&
+      p.at.value.isSameAs(node) &&
       g.playerHas(p, takes) &&
       (duration > 0 || _roomForInstant(g, p));
 
@@ -2945,50 +3368,62 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
     return p.inventory.value.length - takesN + givesN <= g.params.inventoryCap;
   }
 
-  void startTrade(Game g, Player p) {
-    if (!canTrade(g, p)) return;
+  bool startTrade(Game g, Player p) {
+    if (!canTrade(g, p)) return false;
     g.takeItems(p, takes);
     if (duration <= 0) {
       _deliver(g, p);
     } else {
-      workRemaining.value = duration;
+      workEndsAt.value = g.now + duration;
       _worker = p;
     }
+    return true;
   }
 
   void _deliver(Game g, Player? p) {
     var leftovers = gives;
-    if (p != null && identical(p.at.value, node)) {
+    if (p != null && p.at.value.isSameAs(node)) {
       leftovers = g.giveItems(p, gives);
     }
     if (leftovers.isNotEmpty) {
       pendingOutput.value = [...pendingOutput.value, ...leftovers];
     }
-    if (cooldown > 0) cooldownRemaining.value = cooldown;
+    if (cooldown > 0) cooldownEndsAt.value = g.now + cooldown;
   }
 
-  void collect(Game g, Player p) {
-    if (!identical(p.at.value, node)) return;
+  bool collect(Game g, Player p) {
+    if (!p.at.value.isSameAs(node) || pendingOutput.value.isEmpty) return false;
     pendingOutput.value = g.giveItems(p, pendingOutput.value);
+    return true;
   }
 
   @override
-  void update(Game g, double dt) {
-    if (workRemaining.value > 0) {
-      workRemaining.value = max(0.0, workRemaining.value - dt);
-      if (workRemaining.value <= 0) {
-        final w = _worker;
-        _worker = null;
-        _deliver(g, w);
-      }
-    } else if (cooldownRemaining.value > 0) {
-      cooldownRemaining.value = max(0.0, cooldownRemaining.value - dt);
+  bool get everSchedules => true;
+
+  @override
+  TTime? nextEventAt(Game g) => workEndsAt.value ?? cooldownEndsAt.value;
+
+  @override
+  void fire(Game g) {
+    if (workEndsAt.peek() != null) {
+      final w = _worker;
+      _worker = null;
+      workEndsAt.value = null;
+      _deliver(g, w);
+    } else {
+      cooldownEndsAt.value = null;
     }
   }
 
-  Widget _exchangeRow(Game g, {double itemSize = 13}) => Row(
-    mainAxisSize: MainAxisSize.min,
+  /// A [Wrap] rather than a [Row], because this is the widest thing the
+  /// control panel ever has to fit and the panel is a strip along the bottom
+  /// of a phone. Two items in, two out, a duration and an arrow comes to more
+  /// than the width on offer, and a row that can't fit just clips — the player
+  /// loses the right-hand half of what the trade actually is.
+  Widget _exchangeRow(Game g, {double itemSize = 13}) => Wrap(
+    crossAxisAlignment: WrapCrossAlignment.center,
     spacing: badgeGap,
+    runSpacing: 2,
     children: [
       badgeText('T'),
       for (final q in takes) quantityWidget(q, size: itemSize),
@@ -3002,7 +3437,7 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
   Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
     builder: (context) {
       final hasPending = pendingOutput.value.isNotEmpty;
-      final working = workRemaining.value > 0;
+      final working = busy;
       return explainTap(
         g,
         withPie(
@@ -3015,12 +3450,14 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
           ]),
           pie: working
               ? CountdownPie(
-                  remaining: workRemaining,
+                  game: g,
+                  endsAt: () => workEndsAt.value,
                   total: duration,
                   isCooldown: false,
                 )
               : CountdownPie(
-                  remaining: cooldownRemaining,
+                  game: g,
+                  endsAt: () => cooldownEndsAt.value,
                   total: cooldown,
                   isCooldown: true,
                 ),
@@ -3040,65 +3477,67 @@ class Trader(final List<Quantity> takes, final List<Quantity> gives)
   ];
 
   @override
-  List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(
-      builder: (context) {
-        // subscriptions
-        p.inventory.value;
-        workRemaining.value;
-        cooldownRemaining.value;
-        final pending = pendingOutput.value;
-        if (pending.isNotEmpty) {
-          return actionChip(
-            enabled: true,
-            onTap: () => collect(g, p),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              spacing: badgeGap,
-              children: [
-                badgeIcon(Icons.outbox, size: 12),
-                badgeText('collect'),
-                for (final q in pending) quantityWidget(q),
-              ],
-            ),
-          );
-        }
-        final chip = actionChip(
-          enabled: canTrade(g, p),
-          onTap: () => startTrade(g, p),
-          child: _exchangeRow(g),
-        );
-        // A chip that's gone dim doesn't say whether the trader is working, or
-        // resting, or waiting on something the player hasn't got — and the pies
-        // that do say it are out on the map badge, which isn't where a player
-        // who has just tapped this is looking. So the chip carries the same pie
-        // the badge does: sage while the trade runs, black and counting while
-        // the trader rests afterwards. It sits outside the chip's dimming, since
-        // its whole job is to be the part that's still alive.
-        if (busy) {
-          return withPie(
-            chip,
-            pie: CountdownPie(
-              remaining: workRemaining,
-              total: duration,
-              isCooldown: false,
-            ),
-          );
-        }
-        if (cooling) {
-          return withPie(
-            chip,
-            pie: CountdownPie(
-              remaining: cooldownRemaining,
-              total: cooldown,
-              isCooldown: true,
-            ),
-          );
-        }
-        return chip;
-      },
-    ),
-  ];
+  List<Widget> actionsFor(Game g, Player p) {
+    final pending = pendingOutput.peek();
+    if (pending.isNotEmpty) {
+      return [
+        actionChip(
+          enabled: true,
+          onTap: () =>
+              g.commit(p, CollectAction(this, notBefore: g.actionMoment)),
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: badgeGap,
+            runSpacing: 2,
+            children: [
+              badgeIcon(Icons.outbox, size: 12),
+              badgeText('collect'),
+              for (final q in pending) quantityWidget(q),
+            ],
+          ),
+        ),
+      ];
+    }
+    final chip = actionChip(
+      enabled: canTrade(g, p),
+      onTap: () => g.commit(p, TradeAction(this, notBefore: g.actionMoment)),
+      child: _exchangeRow(g),
+    );
+    // A chip that's gone dim doesn't say whether the trader is working, or
+    // resting, or waiting on something the player hasn't got — and the pies
+    // that do say it are out on the map badge, which isn't where a player who
+    // has just tapped this is looking. So the chip carries the same pie the
+    // badge does: sage while the trade runs, black and counting while the
+    // trader rests afterwards. It sits outside the chip's dimming, since its
+    // whole job is to be the part that's still alive.
+    if (busy) {
+      return [
+        withPie(
+          chip,
+          pie: CountdownPie(
+            game: g,
+            endsAt: () => workEndsAt.value,
+            total: duration,
+            isCooldown: false,
+          ),
+        ),
+      ];
+    }
+    if (cooling) {
+      return [
+        withPie(
+          chip,
+          pie: CountdownPie(
+            game: g,
+            endsAt: () => cooldownEndsAt.value,
+            total: cooldown,
+            isCooldown: true,
+          ),
+        ),
+      ];
+    }
+    return [chip];
+  }
 }
 
 class Mugger(final Item item, final MuggerKind kind) extends Facility {
@@ -3112,20 +3551,15 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
   List<Item> get requiredItems => [item];
 
   @override
-  void update(Game g, double dt) =>
-      flash.expire(g.gameTime, g.params.redFlashSpan);
-
-  @override
   void onPlayerEntered(Game g, Player p) {
     if (!activeNow(g)) return;
     // muggers no longer freeze anyone: they clean you out
     if (!g.playerHas(p, [Quantity(item, 1)])) {
-      flash.trigger(g.gameTime);
+      flash.trigger(g.now);
       if (p.inventory.peek().isNotEmpty) {
         p.inventory.value = const [];
-        p.flash.trigger(g.gameTime);
+        p.flash.trigger(g.now);
       }
-      g.announce('MUGGED', who: [p]);
       return;
     }
     // The toll: taken from anyone who has it, including the ones who were
@@ -3135,8 +3569,8 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
     // told about it.
     if (_takes && g.playerHas(p, [Quantity(item, 1)])) {
       g.takeItems(p, [Quantity(item, 1)]);
-      flash.trigger(g.gameTime);
-      p.flash.trigger(g.gameTime);
+      flash.trigger(g.now);
+      p.flash.trigger(g.now);
     }
   }
 
@@ -3144,7 +3578,7 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
   Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
     builder: (context) {
       var color = paletteSignal.value.ink;
-      if (flash.active) {
+      if (flash.flashingAt(g.now, g.params.redFlashSpan)) {
         color = Color.lerp(
           paletteSignal.value.ink,
           Colors.red,
@@ -3229,35 +3663,40 @@ class Storage(
   /// loaded by clicking items in the inventory; clicking a stored item moves
   /// it on to the next storage here, or back to the inventory.
   @override
-  List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(
-      builder: (context) {
-        final stored = contents.value;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            badgeIcon(storeIcon),
-            const SizedBox(width: 3),
-            Flexible(
-              child: Wrap(
-                spacing: 3,
-                runSpacing: 3,
-                children: [
-                  for (var i = 0; i < capacity; i++)
-                    slotBox(
-                      item: i < stored.length ? stored[i] : null,
-                      onTap: i < stored.length
-                          ? () => g.rotateItemOnward(p, this, stored[i])
-                          : null,
-                    ),
-                ],
-              ),
+  List<Widget> actionsFor(Game g, Player p) {
+    final stored = contents.peek();
+    return [
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          badgeIcon(storeIcon),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Wrap(
+              spacing: 3,
+              runSpacing: 3,
+              children: [
+                for (var i = 0; i < capacity; i++)
+                  slotBox(
+                    item: i < stored.length ? stored[i] : null,
+                    onTap: i < stored.length
+                        ? () => g.commit(
+                            p,
+                            RotateAction(
+                              this,
+                              stored[i],
+                              notBefore: g.actionMoment,
+                            ),
+                          )
+                        : null,
+                  ),
+              ],
             ),
-          ],
-        );
-      },
-    ),
-  ];
+          ),
+        ],
+      ),
+    ];
+  }
 }
 
 /// A storage whose contents any [Inbox] on the map can reach into. Everything
@@ -3322,23 +3761,24 @@ class Inbox({
       activation == null || g.playerHas(p, [activation!]);
 
   bool canPull(Game g, Player p) =>
-      identical(p.at.value, node) &&
+      p.at.value.isSameAs(node) &&
       p.inventory.value.length < g.params.inventoryCap &&
       _paid(g, p);
 
   /// The price is per item pulled rather than per visit, and it's charged here
   /// rather than when the panel opens — so an inbox nobody can pay at is still
   /// one they can look inside, which is half of what an inbox is for.
-  void pull(Game g, Player p, Item it) {
-    if (!canPull(g, p)) return;
+  bool pull(Game g, Player p, Item it) {
+    if (!canPull(g, p)) return false;
     final from = _outboxes(g)
         .firstWhereOrNull((o) => o.contents.value.contains(it));
-    if (from == null) return;
+    if (from == null) return false;
     if (activation != null && activationConsumed) g.takeItems(p, [activation!]);
     final c = [...from.contents.value];
     c.remove(it);
     from.contents.value = c;
     p.inventory.value = [...p.inventory.value, it];
+    return true;
   }
 
   /// A tray with an arrow coming down into it. Material's own move_to_inbox is
@@ -3389,42 +3829,44 @@ class Inbox({
   /// Like a storage's control with the loading taken out: the slots are what
   /// the outboxes are holding, and tapping one brings it here.
   @override
-  List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(
-      builder: (context) {
-        p.inventory.value;
-        final offer = available(g);
-        final enabled = canPull(g, p);
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _costRow(),
-            const SizedBox(width: 3),
-            if (offer.isEmpty)
-              badgeText('every outbox is empty')
-            else
-              Flexible(
-                child: Opacity(
-                  opacity: enabled ? 1 : 0.35,
-                  child: Wrap(
-                    spacing: 3,
-                    runSpacing: 3,
-                    children: [
-                      for (final (it, n) in offer)
-                        slotBox(
-                          item: it,
-                          count: n,
-                          onTap: enabled ? () => pull(g, p, it) : null,
-                        ),
-                    ],
-                  ),
+  List<Widget> actionsFor(Game g, Player p) {
+    final offer = available(g);
+    final enabled = canPull(g, p);
+    return [
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _costRow(),
+          const SizedBox(width: 3),
+          if (offer.isEmpty)
+            badgeText('every outbox is empty')
+          else
+            Flexible(
+              child: Opacity(
+                opacity: enabled ? 1 : 0.35,
+                child: Wrap(
+                  spacing: 3,
+                  runSpacing: 3,
+                  children: [
+                    for (final (it, n) in offer)
+                      slotBox(
+                        item: it,
+                        count: n,
+                        onTap: enabled
+                            ? () => g.commit(
+                                p,
+                                PullAction(this, it, notBefore: g.actionMoment),
+                              )
+                            : null,
+                      ),
+                  ],
                 ),
               ),
-          ],
-        );
-      },
-    ),
-  ];
+            ),
+        ],
+      ),
+    ];
+  }
 }
 
 /// Somewhere a [JumpStation] can send a player. Inert on its own: it has no
@@ -3448,24 +3890,26 @@ class LandingStation extends Facility {
 class JumpStation({
   final bool freeAim = false,
   final Quantity? cost, // taken on the jump, not on aiming
-  final double cooldown = 0, // 0 = none
+  final TTime cooldown = 0, // 0 = none
 }) extends Facility {
-  final Signal<double> cooldownRemaining = signal(0.0);
+  final Signal<TTime?> cooldownEndsAt = signal(null);
 
   @override
   List<Item> get requiredItems => [if (cost != null) cost!.item];
 
-  bool get cooling => cooldownRemaining.value > 0;
+  bool get cooling => cooldownEndsAt.value != null;
 
   @override
-  void update(Game g, double dt) {
-    if (cooldownRemaining.value > 0) {
-      cooldownRemaining.value = max(0.0, cooldownRemaining.value - dt);
-    }
-  }
+  bool get everSchedules => true;
+
+  @override
+  TTime? nextEventAt(Game g) => cooldownEndsAt.value;
+
+  @override
+  void fire(Game g) => cooldownEndsAt.value = null;
 
   bool canJump(Game g, Player p) =>
-      identical(p.at.value, node) &&
+      p.at.value.isSameAs(node) &&
       !cooling &&
       (cost == null || g.playerHas(p, [cost!]));
 
@@ -3474,15 +3918,16 @@ class JumpStation({
   /// and their stations included — a train is a node like any other, and
   /// landing on one is the same as stepping aboard from its gangway.
   bool isTarget(Node n, Player p) {
-    if (identical(n, node) || identical(n, p.at.value)) return false;
+    if (n.isSameAs(node) || n.isSameAs(p.at.value)) return false;
     return freeAim || n.facilities.any((f) => f is LandingStation);
   }
 
-  void jump(Game g, Player p, Node to) {
-    if (!canJump(g, p) || !isTarget(to, p)) return;
+  bool jump(Game g, Player p, Node to) {
+    if (!canJump(g, p) || !isTarget(to, p)) return false;
     if (cost != null) g.takeItems(p, [cost!]);
-    if (cooldown > 0) cooldownRemaining.value = cooldown;
+    if (cooldown > 0) cooldownEndsAt.value = g.now + cooldown;
     g.teleport(p, to);
+    return true;
   }
 
   Widget _row({double itemSize = 13}) => Row(
@@ -3507,7 +3952,8 @@ class JumpStation({
             _row(itemSize: _facilityItemSize),
         ]),
         pie: CountdownPie(
-          remaining: cooldownRemaining,
+          game: g,
+          endsAt: () => cooldownEndsAt.value,
           total: cooldown,
           isCooldown: true,
         ),
@@ -3530,46 +3976,42 @@ class JumpStation({
   ];
 
   @override
-  List<Widget> actionsFor(Game g, Player p) => [
-    SignalBuilder(
-      builder: (context) {
-        p.inventory.value;
-        cooldownRemaining.value;
-        final aiming = identical(g.jumping.value?.$1, this);
-        final chip = actionChip(
-          enabled: aiming || canJump(g, p),
-          onTap: () => aiming ? g.cancelJump() : g.startJump(this, p),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: badgeGap,
-            children: [
-              _row(),
-              badgeText(
-                aiming
-                    ? (freeAim
-                          ? 'click which node on the map you want to jump to'
-                          : 'click a landing station on the map')
-                    : 'jump',
-              ),
-            ],
+  List<Widget> actionsFor(Game g, Player p) {
+    final aiming = g.jumping.peek()?.$1.isSameAs(this) ?? false;
+    final chip = actionChip(
+      enabled: aiming || canJump(g, p),
+      onTap: () => aiming ? g.cancelJump() : g.startJump(this, p),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: badgeGap,
+        runSpacing: 2,
+        children: [
+          _row(),
+          badgeText(
+            aiming
+                ? (freeAim
+                      ? 'click which node on the map you want to jump to'
+                      : 'click a landing station on the map')
+                : 'jump',
           ),
-        );
-        // the same pie the badge carries, for the same reason the trader's
-        // chip carries one: a chip that's gone dim doesn't say why
-        if (cooling) {
-          return withPie(
-            chip,
-            pie: CountdownPie(
-              remaining: cooldownRemaining,
-              total: cooldown,
-              isCooldown: true,
-            ),
-          );
-        }
-        return chip;
-      },
-    ),
-  ];
+        ],
+      ),
+    );
+    // the same pie the badge carries, for the same reason the trader's chip
+    // carries one: a chip that's gone dim doesn't say why
+    if (!cooling) return [chip];
+    return [
+      withPie(
+        chip,
+        pie: CountdownPie(
+          game: g,
+          endsAt: () => cooldownEndsAt.value,
+          total: cooldown,
+          isCooldown: true,
+        ),
+      ),
+    ];
+  }
 }
 
 /// A wide nocturnal wave that strips everything loose inside its radius —
@@ -3591,7 +4033,6 @@ class Blight({
   bool get isHazard => true;
 
   final RedFlash flash = RedFlash();
-  int _lastCycle = -1 << 30;
 
   @override
   ClockInterval? get clockSchedule => interval;
@@ -3599,33 +4040,35 @@ class Blight({
   /// once a non-hungry blight has been fed it's done, so it stops counting
   bool get dormant => satiated.value && !hungry;
 
-  final Signal<double> remaining = signal(0.0);
+  /// when the next wave lands, or null if it's been put down for good.
+  ///
+  /// Worked out from the clock rather than counted towards, and no record is
+  /// kept of which cycle last went off — which is what makes the wave survive
+  /// the clock being moved. Winding back past a wave doesn't have to un-fire
+  /// it; the question "when does this next fire after now" simply answers
+  /// differently, and the wave happens again on the way forward.
+  TTime? nextWaveAt(Game g) => dormant ? null : interval.nextAfter(g.now);
 
   @override
-  void update(Game g, double dt) {
-    flash.expire(g.gameTime, g.params.redFlashSpan);
-    final cycle = interval.cycleAt(g.gameTime);
-    if (_lastCycle == -1 << 30) _lastCycle = cycle;
-    if (cycle > _lastCycle) {
-      _lastCycle = cycle;
-      _fire(g);
-    }
-    remaining.value = dormant ? 0 : interval.remainingAt(g.gameTime);
-  }
+  bool get everSchedules => true;
 
-  void _fire(Game g) {
+  @override
+  TTime? nextEventAt(Game g) => nextWaveAt(g);
+
+  @override
+  void fire(Game g) {
     if (satiated.value) {
       // a hungry blight is only bought off for the one cycle
       if (hungry) satiated.value = false;
       return;
     }
-    flash.trigger(g.gameTime);
+    flash.trigger(g.now);
     bool within(Offset o) => (o - node.pos).distance <= radius;
     final struck = <Player>[];
     for (final p in g.players) {
-      if (!within(p.worldPos())) continue;
+      if (!within(p.worldPos(g.now))) continue;
       p.inventory.value = const [];
-      p.flash.trigger(g.gameTime);
+      p.flash.trigger(g.now);
       struck.add(p);
     }
     for (final n in g.nodes) {
@@ -3634,7 +4077,13 @@ class Blight({
         if (!s.secured) s.contents.value = const [];
       }
     }
-    if (struck.isNotEmpty) g.announce('BLIGHTSTRUCK', who: struck);
+    // MUGGED and BLIGHTSTRUCK used to be announced here. Taken out rather
+    // than fixed: the announcement was written for a world where time only
+    // went forwards, and it has no answer for being replayed, wound past, or
+    // raised for something that hasn't happened yet. The red flashes still
+    // say it happened, and they're worked out from the clock so they say it
+    // at the right moments. See [RedFlash] and [Game.announce], which the
+    // divergence alert still uses.
   }
 
   bool canFeed(Game g, Player p) =>
@@ -3642,17 +4091,18 @@ class Blight({
       !satiated.value &&
       g.playerHas(p, [Quantity(mitigator!, 1)]);
 
-  void feed(Game g, Player p) {
-    if (!canFeed(g, p)) return;
+  bool feed(Game g, Player p) {
+    if (!canFeed(g, p)) return false;
     g.takeItems(p, [Quantity(mitigator!, 1)]);
     satiated.value = true;
+    return true;
   }
 
   @override
   Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
     builder: (context) {
       var color = paletteSignal.value.ink;
-      if (flash.active) {
+      if (flash.flashingAt(g.now, g.params.redFlashSpan)) {
         color = Color.lerp(
           paletteSignal.value.ink,
           Colors.red,
@@ -3678,7 +4128,8 @@ class Blight({
           pie: dormant
               ? const SizedBox.shrink()
               : CountdownPie(
-                  remaining: remaining,
+                  game: g,
+                  endsAt: () => nextWaveAt(g),
                   total: interval.period,
                   isCooldown: true,
                   clock: interval,
@@ -3706,25 +4157,21 @@ class Blight({
   @override
   List<Widget> actionsFor(Game g, Player p) {
     if (mitigator == null) return const [];
+    final fed = satiated.peek();
     return [
-      SignalBuilder(
-        builder: (context) {
-          p.inventory.value;
-          final fed = satiated.value;
-          return actionChip(
-            enabled: !fed && canFeed(g, p),
-            onTap: () => feed(g, p),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              spacing: badgeGap,
-              children: [
-                badgeIcon(Icons.dangerous, size: 12),
-                badgeText(fed ? 'sated' : 'appease'),
-                ItemWidget(mitigator!, size: 13),
-              ],
-            ),
-          );
-        },
+      actionChip(
+        enabled: !fed && canFeed(g, p),
+        onTap: () => g.commit(p, FeedAction(this, notBefore: g.actionMoment)),
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: badgeGap,
+          runSpacing: 2,
+          children: [
+            badgeIcon(Icons.dangerous, size: 12),
+            badgeText(fed ? 'sated' : 'appease'),
+            ItemWidget(mitigator!, size: 13),
+          ],
+        ),
       ),
     ];
   }
@@ -3740,17 +4187,22 @@ class Game({
   required final List<Player> players,
   required final List<TrainNode> trains,
 }) {
-  /// The pausable clock, in game seconds since the level began; ALL timers
-  /// tick on this. [update] steps it by a span of game time, never a span of
-  /// real time — the ticker converts before it gets here.
-  double gameTime = 0;
+  /// The clock, in ticks since the level began; ALL deadlines are moments on
+  /// it. [advanceTo] moves it, and it moves in game time, never real time —
+  /// the ticker converts before it gets here.
+  TTime now = 0;
 
-  /// gameTime mirrored as a signal, for the few things that animate off it
-  /// reactively (the mugger pulse); most rendering rides the frame notifier
-  final Signal<double> clock = signal(0.0);
-  final Signal<double> timeLeft;
+  /// [now] mirrored as a signal, for the things that animate off it reactively
+  /// (countdown pies, the red pulses); most rendering rides the frame notifier
+  final Signal<TTime> clock = signal(0);
   final Signal<int> eudaimonia = signal(0);
-  final Signal<bool> paused = signal(false);
+
+  /// Whether the clock only moves when the player moves it — by doing
+  /// something, or by turning the dial. A level starts this way now: with two
+  /// characters to run and a clock that can be wound, time running on its own
+  /// while you think is the thing the whole feature exists to stop. The play
+  /// button is still there for watching a stretch go by.
+  final Signal<bool> paused = signal(true);
   late final Signal<Player> selectedPlayer;
   final Signal<GamePhase> phase = signal(GamePhase.playing);
 
@@ -3769,14 +4221,18 @@ class Game({
 
   /// the big transient caps message: MUGGED, BLIGHTSTRUCK… along with whoever
   /// it happened to, who is shown beside it
-  final Signal<(String text, List<Player> who, double at)?> announcement =
+  final Signal<(String text, List<Player> who, TTime at)?> announcement =
       signal(null);
 
   /// every blight in the level, for painting their radii
   late final List<Blight> blights;
 
-  double get timeOfDay => gameTime % gameDay;
-  int get daysRemaining => (timeLeft.value / gameDay).floor();
+  TTime get timeOfDay => now % gameDay;
+
+  /// Derived, not counted down: the level's whole span less how much of it has
+  /// gone. One less thing to put back when the clock moves.
+  TTime get timeLeft => max(0, params.globalTime - now);
+  int get daysRemaining => timeLeft ~/ gameDay;
 
   /// [who] it happened to is part of the message, not decoration: the camera is
   /// rarely on every player at once, and a bare MUGGED with the victim off
@@ -3788,18 +4244,18 @@ class Game({
     final all =
         (prev != null &&
             prev.$1 == text &&
-            gameTime - prev.$3 <= params.announcementSpan)
-        ? [
-            ...prev.$2,
-            ...who.where((p) => !prev.$2.any((q) => identical(p, q))),
-          ]
+            now - prev.$3 <= params.announcementSpan)
+        ? [...prev.$2, ...who.where((p) => !prev.$2.any((q) => p.isSameAs(q)))]
         : who;
-    announcement.value = (text, all, gameTime);
+    announcement.value = (text, all, now);
   }
 
   /// the current explanation tooltip: the facility (or train) that was tapped,
   /// which node it's anchored to, and its spans
-  final Signal<(Object source, Node at, List<InlineSpan> spans)?> tooltip =
+  /// [Identified] rather than Object: what gets tapped is always a facility or
+  /// a train, and typing it that way is what lets [same] decide whether the
+  /// tooltip already open is this one's
+  final Signal<(Identified source, Node at, List<InlineSpan> spans)?> tooltip =
       signal(null);
 
   /// The jump station currently aiming, and who it's aiming for. While this is
@@ -3832,7 +4288,7 @@ class Game({
     final (station, p) = j;
     if (!station.isTarget(n, p)) return false;
     jumping.value = null;
-    station.jump(this, p, n);
+    commit(p, JumpAction(station, n, notBefore: actionMoment));
     return true;
   }
 
@@ -3841,14 +4297,14 @@ class Game({
   /// node it's standing on, and the badges are the easiest thing on the map to
   /// hit
   void toggleTooltip(
-    Object source,
+    Identified source,
     Node at,
     List<InlineSpan> Function() spans,
   ) {
     if (tryJumpTo(at)) return;
     raiseNode(at);
     final cur = tooltip.value;
-    tooltip.value = cur != null && identical(cur.$1, source)
+    tooltip.value = cur != null && cur.$1.isSameAs(source)
         ? null
         : (source, at, spans());
   }
@@ -3859,44 +4315,622 @@ class Game({
   /// node the player has just touched or walked into is a node whose badges
   /// they want to keep reading, and dropping it back under its neighbours the
   /// moment the tooltip closes or the player leaves would undo that mid-glance.
-  void raiseNode(Node n) => n.stackRank = ++_stackTop;
-
-  this : timeLeft = signal(params.globalTime) {
-    selectedPlayer = signal(players.first);
-    blights = [for (final n in nodes) ...n.facilities.whereType<Blight>()];
+  void raiseNode(Node n) {
+    if (probing) return; // the pile order is not the probe's business
+    n.stackRank = ++_stackTop;
   }
 
-  /// Steps the world on by [dt] game seconds. Everything it hands [dt] down to
-  /// counts in the same units, all the way to the last cooldown signal.
-  void update(double dt) {
-    if (paused.value || phase.value != GamePhase.playing) return;
-    gameTime += dt;
-    clock.value = gameTime;
-    timeLeft.value = max(0.0, timeLeft.value - dt);
-
-    final night = timeOfDay >= gameDay / 2;
-    if (night != isNight.value) isNight.value = night;
-    final ann = announcement.value;
-    if (ann != null && gameTime - ann.$3 > params.announcementSpan) {
-      announcement.value = null;
-    }
-
+  this {
+    selectedPlayer = signal(players.first);
+    blights = [for (final n in nodes) ...n.facilities.whereType<Blight>()];
+    // Numbering everything in a level, in one sequence. One sequence and not
+    // three so that a node's number can't collide with a facility's — see
+    // [Identified] — and in this order because it's the order the level is
+    // written down in, which is what makes the numbers come back the same when
+    // a save is read.
+    var next = 0;
     for (final p in players) {
-      p.update(this, dt);
-    }
-    for (final t in trains) {
-      t.updateTrain(this, dt);
+      p.id = next++;
     }
     for (final n in nodes) {
+      n.id = next++;
       for (final f in n.facilities) {
-        f.update(this, dt);
+        f.id = next++;
       }
     }
-    if (eudaimonia.value >= params.eudaimoniaGoal) {
-      phase.value = GamePhase.won;
-    } else if (timeLeft.value <= 0) {
-      phase.value = GamePhase.lost;
+    _scheduled = [
+      for (final n in nodes)
+        for (final f in n.facilities)
+          if (f.everSchedules) f,
+    ];
+    markOrigin();
+  }
+
+  /// Takes the world as it stands to be as far back as the clock goes.
+  ///
+  /// Whoever finishes building a level calls this, and it has to be the last
+  /// thing they do: a [Game] is constructed before its world is finished —
+  /// [generateLevel] docks the trains afterwards, and [LevelType] fills in
+  /// almost everything afterwards — so an origin taken any earlier is a clock
+  /// reading of zero attached to a world that was never in that state. The
+  /// constructor takes one anyway, so that the field is never unset, but it
+  /// expects to be overruled.
+  void markOrigin() {
+    _snapshots.clear();
+    _origin = captureState(this);
+  }
+
+  /// The facilities the event loop has to ask, flattened once: two thirds of a
+  /// level is storage, muggers and stations, which never act on their own (see
+  /// [Facility.everSchedules]), and walking the node graph to ask each of them
+  /// a question whose answer is always null is work for nothing.
+  ///
+  /// Worth measuring before believing, and it was: skipping them takes about a
+  /// tenth off a replay. The scan was never where the time went — a replay
+  /// spends essentially all of it inside the handlers, in the signal writes
+  /// and list churn of players arriving and leaving — so this is a tidy-up,
+  /// not the thing that makes replaying affordable. What makes it affordable
+  /// is not replaying much: the cost tracks the number of player moves being
+  /// played back, which is what a snapshot is there to bound.
+  late final List<Facility> _scheduled;
+
+  /// Guards the one thing that could go quietly wrong about the list above: a
+  /// facility that reports an event but forgot to say it ever would, which
+  /// would be an event that never fires and a level that stops halfway. In
+  /// debug only — it's the whole sweep that the list exists to avoid.
+  bool _noneSkippedAreWaiting() {
+    for (final n in nodes) {
+      for (final f in n.facilities) {
+        if (!f.everSchedules && f.nextEventAt(this) != null) return false;
+      }
     }
+    return true;
+  }
+
+  /// Where the ordering of two events landing on the same tick is decided.
+  ///
+  /// Kind comes first, and it's the same rule read twice: a player is
+  /// *somewhere* from the tick they land on it up to and including the tick
+  /// they leave it. So arrivals go first, then everything that acts on who's
+  /// standing where, then departures. Two consequences worth knowing, both
+  /// deliberate: someone who walks into a node at the exact tick a blight
+  /// fires is caught by it, and someone who steps onto a train's gangway at
+  /// the exact tick it was going to leave gets aboard and holds it up.
+  ///
+  /// [Thing.id] and [Facility.id] settle what's left. They're positions in
+  /// lists that go to disk in order, so the same two events break the same way
+  /// every time this stretch of the level is played out — which they have to,
+  /// because it gets played out again every time the clock is moved back.
+  static const int _rankArrive = 0;
+  static const int _rankAct = 1;
+  static const int _rankDepart = 2;
+
+  /// Runs the world forward to [t], stopping at each thing that happens on the
+  /// way so that it happens at its own moment rather than at the end of a step.
+  ///
+  /// This is the whole reason the simulation can be re-run. Nothing here is a
+  /// function of how the clock was cut up: [t] is arrived at through exactly
+  /// the events that lie between here and there, in exactly one order, whether
+  /// it's one frame away or two days. `advanceTo(x)` then `advanceTo(y)` leaves
+  /// the world where `advanceTo(y)` alone would have.
+  ///
+  /// It only ever goes forward. Going back is re-running from an earlier state,
+  /// which is a different operation and doesn't live here.
+  void advanceTo(TTime t) {
+    assert(t >= now, 'advanceTo only goes forward; rewinding re-simulates');
+    assert(_noneSkippedAreWaiting(), 'a facility schedules without saying so');
+    while (true) {
+      // the earliest pending event no later than t, and who owns it
+      TTime? bestAt;
+      var bestRank = 0, bestId = 0;
+      Object? best;
+      void consider(Object owner, TTime? at, int rank, int id) {
+        if (at == null || at > t) return;
+        if (bestAt == null ||
+            at < bestAt! ||
+            (at == bestAt! &&
+                (rank < bestRank || (rank == bestRank && id < bestId)))) {
+          bestAt = at;
+          bestRank = rank;
+          bestId = id;
+          best = owner;
+        }
+      }
+
+      for (final p in players) {
+        consider(
+          p,
+          p.nextEventAt(this),
+          p.nextIsArrival ? _rankArrive : _rankDepart,
+          p.id,
+        );
+      }
+      for (final tr in trains) {
+        consider(
+          tr,
+          tr.nextEventAt(this),
+          tr.nextIsArrival ? _rankArrive : _rankDepart,
+          // trains and players only ever share a rank, never an id space that
+          // means anything across kinds; a train's node index is as stable as
+          // a player's list index, which is all the tie-break needs
+          tr.id,
+        );
+      }
+      for (final f in _scheduled) {
+        consider(f, f.nextEventAt(this), _rankAct, f.id);
+      }
+
+      if (best == null) break;
+      now = bestAt!;
+      clock.value = now;
+      switch (best!) {
+        case Player p:
+          p.fire(this);
+        case TrainNode tr:
+          tr.fire(this);
+        case Facility f:
+          f.fire(this);
+      }
+      // a replay that came out differently stops the world where it noticed,
+      // rather than at the moment it was asked for — see [runNextAction]
+      if (_halted) {
+        _halted = false;
+        headingFor = null;
+        _settle();
+        return;
+      }
+    }
+    now = t;
+    clock.value = now;
+    _settle();
+  }
+
+  /// Puts the world back to [t] and plays it forward again from there.
+  ///
+  /// The only way back. There is no undo anywhere in this game: going back is
+  /// finding a state from before [t], putting it in place, and re-running the
+  /// scripts over it. Which is why nothing in [advanceTo] has to know how to
+  /// reverse itself, and why a facility can be written without a thought for
+  /// the clock — see [Facility.fire].
+  ///
+  /// The scripts themselves are untouched. Winding back doesn't unmake
+  /// anyone's decisions; it only unmakes their having happened yet.
+  void rewindTo(TTime t) {
+    final to = max(t, earliestMoment);
+    if (to >= now) {
+      advanceTo(to);
+      return;
+    }
+    final from = _snapshots.lastWhereOrNull((s) => s.at <= to) ?? _origin;
+    restoreState(this, from);
+    advanceTo(to);
+  }
+
+  /// How far back the clock can go. Zero for a level being played from the
+  /// start, and where it was put down for one picked up off disk: a save
+  /// carries the world as it stood and everyone's history, but not the ladder
+  /// of moments in between, so there's nothing to wind back *through*.
+  TTime get earliestMoment => _origin.at;
+
+  /// The state the level began in, and a ladder of moments since, so that
+  /// going back is a short replay rather than the whole level again. Kept at
+  /// [_snapshotEvery]; a couple of hundred fields each, so a level's worth of
+  /// them is a rounding error — see [GameSnapshot].
+  late GameSnapshot _origin;
+  final List<GameSnapshot> _snapshots = [];
+  static const TTime _snapshotEvery = 30 * gameMinute;
+
+  /// Takes one down if the clock has moved far enough since the last, and
+  /// drops any that the clock has since gone back past — those describe a
+  /// future that has been replaced.
+  void _keepSnapshots() {
+    while (_snapshots.isNotEmpty && _snapshots.last.at > now) {
+      _snapshots.removeLast();
+    }
+    final lastAt = _snapshots.isEmpty ? 0 : _snapshots.last.at;
+    if (now - lastAt >= _snapshotEvery) _snapshots.add(captureState(this));
+  }
+
+  // ── doing things ──
+
+  /// Writes [a] down as something [p] has decided to do, and starts the clock
+  /// running until it's been done.
+  ///
+  /// Anything that player was going to do after this moment is dropped: the
+  /// clock has been wound back and a different decision made, and what came
+  /// after was a plan for a world that isn't going to happen now. Only *that*
+  /// player's tail goes — everyone else's stands, which is the point of the
+  /// whole arrangement. You wind back to before your second character moved so
+  /// that you can move them, and your first character walks their walk again
+  /// around you.
+  void commit(Player p, PlayerAction a) {
+    p.script.truncateReplayed();
+    p.script.actions.add(a);
+    playUntilIdle(p);
+  }
+
+  /// The moment an action decided on now belongs to: the next tick, not this
+  /// one.
+  ///
+  /// A tick is 1/16384 of a game second and nobody will ever see the
+  /// difference, but it buys a property worth having — **for every action
+  /// there is a moment at which it hasn't happened yet**. Give it this instant
+  /// instead and it's welded to it: [advanceTo] runs everything due at or
+  /// before the moment it's asked for, so winding back to the instant of an
+  /// action replays it, and there's nowhere to stand and watch the world as it
+  /// was just before. For the first action of a level that's fatal, because
+  /// there is no earlier moment to wind back to at all.
+  ///
+  /// It also makes an instant action move the clock, which is what carries it
+  /// out. Picking a tree takes no time, so a plan to be done by now is a plan
+  /// the ticker has no journey to make for, and it would sit there until
+  /// something else happened to move time.
+  TTime get actionMoment => now + 1;
+
+  /// Carries out whatever [p] is up to next, and decides whether it came out
+  /// the way it did the first time.
+  ///
+  /// The first run is the record. Every run after that is measured against it,
+  /// and a run that doesn't match — because the container was emptied, or the
+  /// train had gone, or someone took the thing they were coming for — stops
+  /// that player where they stand and says so. It stops the clock too: the
+  /// entire premise of replaying somebody is that nobody is watching them, so
+  /// a quiet note in the corner would be found three game-hours later.
+  void runNextAction(Player p) {
+    final a = p.script.next;
+    if (a == null) return;
+    final got = a.perform(this, p);
+    // A probe is a question, not a turn. It runs the world forward to see what
+    // things will look like and is thrown away immediately afterwards — so it
+    // must not write anything a snapshot won't put back. Recording an outcome,
+    // dropping an action, raising an alert and stopping the clock are all
+    // exactly that: they change the history rather than the world, and the
+    // history is what the replay is made of. See [probing].
+    if (probing) {
+      p.script.done++;
+      return;
+    }
+    final was = a.recorded;
+    if (was == null) {
+      if (got == null) {
+        // it couldn't be done even the first time; it never happened, so it
+        // doesn't go in the history
+        p.script.actions.removeAt(p.script.done);
+        return;
+      }
+      a.recorded = got;
+    } else if (got == null || !got.matches(was)) {
+      p.script.truncate();
+      _halted = true;
+      announce("${a.name.toUpperCase()} DIDN'T WORK", who: [p]);
+      // whoever it happened to is almost certainly off screen, since not
+      // watching them is why they were being replayed
+      selectedPlayer.value = p;
+      recenterWanted.value++;
+      return;
+    }
+    p.script.done++;
+  }
+
+  /// Set when a replay came out differently; [advanceTo] notices and stops
+  /// there rather than carrying on to the moment it was asked for.
+  bool _halted = false;
+
+  /// Whether the world is being run forward to be *looked at* rather than
+  /// played. Everything that would outlive a [restoreState] checks this and
+  /// holds off: see [runNextAction], [raiseNode], [teleport], [_settle].
+  bool probing = false;
+
+  /// When [p] runs out of things to do — the end of their history, and where
+  /// tapping the clock takes them. [now] if there's nothing left.
+  ///
+  /// Walked out rather than guessed at. Walking is the only thing on a script
+  /// that takes any time, wires don't change length, and where each step
+  /// leaves them is what says which wire the next step is along — so following
+  /// the chain gives the real answer rather than an estimate. It can still be
+  /// wrong, but only by being optimistic in the one way the whole feature is
+  /// about: if a wire isn't there when they get to it, they'll stop early and
+  /// be told.
+  TTime frontierOf(Player p) => frontier(p).$1;
+
+  /// Where [p] will be standing once their list runs out — which is the node
+  /// the next thing they're told to do has to make sense from. A drag on the
+  /// move pad while they're already walking means "and then from there", so
+  /// this is what the drag is resolved against.
+  Node? frontierNodeOf(Player p) => frontier(p).$2;
+
+  /// When and where the next thing [p] is told to do would actually take
+  /// effect — which is the moment the controls should be describing, because
+  /// showing someone a world they'll have walked away from by the time their
+  /// tap lands is showing them the wrong world.
+  ///
+  /// Not the same as [frontierOf], and the difference is the point. Anything
+  /// on the list that has already been played once is replay material, and
+  /// deciding to do something else is what replaces it — see
+  /// [PlayerScript.truncateReplayed] — so it isn't in the way. What *is* in
+  /// the way is the walk already under way, which can't be called back, and
+  /// anything queued behind it that hasn't happened yet.
+  (TTime, Node?) actionTimeFor(Player p) => frontier(p, onlyUnplayed: true);
+
+  /// When the one thing [p] is in the middle of, or about to start, is done.
+  ///
+  /// A walk already under way is the thing in hand and nothing on the list is,
+  /// so that's the answer; otherwise it's the next item and only the next
+  /// item. This is what tapping the clock runs to — one thing at a time, tap
+  /// again for the one after — where [frontierOf] is the whole list and is
+  /// what the dial's bands are drawn from.
+  TTime nextActionEndsAt(Player p) =>
+      p.traversing != null ? max(now, p.arrivesAt) : frontier(p, take: 1).$1;
+
+  (TTime, Node?) frontier(Player p, {bool onlyUnplayed = false, int? take}) {
+    var t = now;
+    var here = p.at.peek();
+    if (p.traversing != null) {
+      t = max(t, p.arrivesAt);
+      here = p.traversalTarget;
+    }
+    for (var i = p.script.done; i < p.script.actions.length; i++) {
+      if (take != null && i - p.script.done >= take) break;
+      final a = p.script.actions[i];
+      if (onlyUnplayed && a.recorded != null) break;
+      t = max(t, a.notBefore);
+      switch (a) {
+        case MoveAction m:
+          final from = here;
+          if (from != null) {
+            final e = from.edges.firstWhereOrNull(
+              (x) => x.other(from).isSameAs(m.to),
+            );
+            if (e != null) {
+              t += max(1, ticksOf(e.length / params.playerSpeed));
+            }
+          }
+          here = m.to;
+        case JumpAction j:
+          here = j.to;
+        default:
+          break; // everything else is done the moment it's begun
+      }
+    }
+    return (t, here);
+  }
+
+  /// What the controls should be showing.
+  ///
+  /// Not the world as it is — the world as it will be when the next thing the
+  /// player taps would actually happen. Someone halfway along a wire is about
+  /// to be somewhere else, and offering them the tree they're walking away
+  /// from is offering them a tap that will miss.
+  ///
+  /// Read by running the world forward to that moment, taking down what the
+  /// controls need, and putting it straight back. Which is why it's here and
+  /// not in a widget: restoring writes a couple of hundred signals, and doing
+  /// that from inside a build is dirtying widgets in the middle of building
+  /// them. The ticker is where writing to the world already belongs.
+  ///
+  /// The widgets it comes back with are ordinary ones, built and frozen at the
+  /// moment they were read. That's why nothing under [Facility.actionsFor]
+  /// subscribes to a signal any more — a control that re-read the world for
+  /// itself would quietly go back to describing now.
+  PanelView readControls() {
+    final p = selectedPlayer.peek();
+    final (at, _) = actionTimeFor(p);
+    if (at <= now) return _controlsHere(p);
+    final held = captureState(this);
+    final was = _outsideTheSnapshot();
+    probing = true;
+    advanceTo(at);
+    final v = _controlsHere(p);
+    probing = false;
+    restoreState(this, held);
+    assert(
+      _outsideTheSnapshot() == was,
+      'a probe changed something a snapshot does not put back — see [probing]',
+    );
+    return v;
+  }
+
+  /// A fingerprint of the state that [restoreState] would *not* undo: the
+  /// histories, and the odds and ends that belong to the person playing rather
+  /// than to the world.
+  ///
+  /// This is what keeps [probing] honest. Guarding each of those writes by
+  /// hand is a standing obligation on everyone who adds one, and an obligation
+  /// nobody is reminded of is one that gets forgotten — the symptom being a
+  /// plan quietly truncated, or an alert for something that hasn't happened,
+  /// by the mere act of looking at the future. Debug only; it's a few thousand
+  /// integers at the end of a long level.
+  int _outsideTheSnapshot() {
+    var h = _stackTop * 31 + recenterWanted.peek();
+    for (final p in players) {
+      h = h * 31 + p.script.actions.length;
+      for (final a in p.script.actions) {
+        h = h * 31 + (a.recorded == null ? 0 : 1);
+      }
+    }
+    return h;
+  }
+
+  PanelView _controlsHere(Player p) {
+    final node = p.at.peek();
+    return PanelView(
+      at: now,
+      node: node,
+      inventory: p.inventory.peek(),
+      canMove: !p.incapacitatedAt(now),
+      hasStorage:
+          node != null &&
+          node.facilities.any((f) => f is Storage && f.activeNow(this)),
+      actions: [
+        if (node != null) ...[
+          // a facility that's out of hours offers nothing
+          for (final f in node.facilities)
+            if (f.activeNow(this)) ...f.actionsFor(this, p),
+          if (node is TrainNode && node.movableFromInside)
+            DragDirectionPad(
+              dimension: 64,
+              enabled:
+                  node.dockedAt.peek() != null &&
+                  node.manualAllowed &&
+                  !node.dockEdgeBusy(this) &&
+                  (node.activation == null || playerHas(p, [node.activation!])),
+              onAngle: (a) => dragTrainMove(node, p, a),
+              label: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  badgeIcon(Icons.train),
+                  badgeIcon(Icons.swipe_right_alt),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  // ── playback ──
+  //
+  // The clock never jumps to where it's been asked for; it travels there, on a
+  // spring, so that a walk is watched rather than reported. Every way of
+  // moving time — an action playing out, the dial being turned, plain unpaused
+  // play — is the same one mechanism: name a moment and say why, and the
+  // ticker carries the world to it.
+
+  /// whether a finger is on the dial, which stops free-running play from
+  /// arguing with it — see [TimeDial]
+  bool dialHeld = false;
+
+  /// where the clock is headed, or null when it's arrived and stopped
+  TTime? headingFor;
+  ClockPush _push = ClockPush.ease;
+
+  /// The clock as it's being shown, which is not [now]: a real number of
+  /// ticks, carrying a velocity, so that it can be sprung towards a
+  /// destination instead of cutting to it. Each frame it's rounded and the
+  /// world is taken to that moment. See [ClockPush].
+  double _shown = 0, _shownVelocity = 0;
+
+  /// where the clock has sprung to, and how fast it's going — in ticks and in
+  /// ticks per real second
+  double get shownClock => _shown;
+  double get clockVelocity => _shownVelocity;
+
+  /// Sets the clock travelling to [t], with [why] deciding how eagerly.
+  ///
+  /// Deliberately touches nothing but the destination. A clock already on its
+  /// way somewhere and told to go somewhere else carries on from where it is
+  /// at the speed it was going — the spring re-solves from the position and
+  /// velocity it already has, so redirecting mid-flight bends the movement
+  /// instead of restarting it. Changing [why] at the same time changes how
+  /// hard it's pulled, which is a change of acceleration; the hand itself
+  /// neither jumps nor stops.
+  void headFor(TTime t, ClockPush why) {
+    headingFor = max(t, earliestMoment);
+    _push = why;
+  }
+
+  /// runs the clock until [p] has nothing left on their list. [frontierOf] is
+  /// exact — walking is the only thing that takes any time and wires don't
+  /// change length — so this is a moment, not a condition to keep testing.
+  void playUntilIdle(Player p) => headFor(frontierOf(p), ClockPush.ease);
+
+  /// The one call the ticker makes, and the only place real time touches the
+  /// game. Nothing below here knows that frames exist.
+  void tickRealTime(double realSeconds) {
+    if (phase.peek() != GamePhase.playing) return;
+    // Free-running play is a rate, not a journey, so it doesn't go through the
+    // mover at all — the mover's job is arriving somewhere and stopping, and
+    // this never arrives. Running it through anyway would have it overshooting
+    // a destination one frame away every single frame and being rescued by the
+    // snap, which happens to come out right and is no way to write it down.
+    //
+    // Not while the dial is held: a finger on the clock outranks the clock
+    // running on.
+    if (!paused.peek() && !dialHeld) {
+      _shown += params.realSeconds(realSeconds).toDouble();
+      _shownVelocity = 0;
+      headingFor = null;
+      _land();
+      return;
+    }
+    final to = headingFor;
+    if (to == null) return;
+
+    // Braking to a stop, rather than a spring relaxing towards one.
+    //
+    // A spring never actually arrives: it closes the remaining distance by a
+    // fraction each frame, so the last little bit of a big move takes as long
+    // as the first big bit, and the clock spends a second crawling the final
+    // few minutes. This gets there — under constant acceleration, at a moment
+    // that can be named — and stops.
+    //
+    // The whole of it is one line of physics. `v² = 2ad` is the fastest you
+    // can be going at distance d and still stop exactly on the mark, so that's
+    // the speed to aim for, and the acceleration is the limit on how fast the
+    // aim can change. Steering towards it rather than jumping to it is what
+    // makes the motion continuous when the destination changes mid-flight;
+    // never exceeding it is what stops it overshooting, which for a clock
+    // would mean sailing past the moment and re-simulating the world to come
+    // back to it.
+    final target = to.toDouble();
+    final gap = target - _shown;
+    final a = _push.accel;
+    final canStopFrom = sqrt(2 * a * gap.abs()) * (gap.isNegative ? -1 : 1);
+    final step = a * realSeconds;
+    _shownVelocity += (canStopFrom - _shownVelocity).clamp(-step, step);
+    _shown += _shownVelocity * realSeconds;
+
+    // Arrived: either near enough that another frame would be a frame of
+    // nothing, or a whole frame was long enough to carry it over the mark. The
+    // second is the one a long frame produces, and is why the crossing is
+    // checked rather than assumed away.
+    if (gap * (target - _shown) <= 0 || (target - _shown).abs() < tickRate) {
+      _shown = target;
+      _shownVelocity = 0;
+      headingFor = null;
+    }
+
+    _land();
+  }
+
+  /// Takes the world to wherever the clock has got to, and gives up on the
+  /// journey if it wouldn't go.
+  void _land() {
+    final want = _shown.round();
+    if (want != now) rewindTo(want);
+    if (now != want) {
+      // the world refused: a replay came out differently and stopped the
+      // clock, or that's as far back as this level knows. Either way the
+      // motion is now describing a journey that isn't happening.
+      _shown = now.toDouble();
+      _shownVelocity = 0;
+      headingFor = null;
+    }
+  }
+
+  /// The parts of the world that aren't events: things that are continuous
+  /// (where a train has got to), and things that are read off the clock rather
+  /// than triggered by it (the phase, the half of the day). Run once at the
+  /// end of an advance, because running them per event would be running them
+  /// for no reason.
+  void _settle() {
+    for (final tr in trains) {
+      tr.syncPos(now);
+    }
+    if (!probing) _keepSnapshots();
+    final night = timeOfDay >= gameDay ~/ 2;
+    if (night != isNight.peek()) isNight.value = night;
+    final ann = announcement.peek();
+    if (ann != null &&
+        (now < ann.$3 || now - ann.$3 > params.announcementSpan)) {
+      announcement.value = null;
+    }
+    final want = eudaimonia.peek() >= params.eudaimoniaGoal
+        ? GamePhase.won
+        : timeLeft <= 0
+        ? GamePhase.lost
+        : GamePhase.playing;
+    if (want != phase.peek()) phase.value = want;
   }
 
   // ── inventory helpers (eudaimonia never occupies inventory: it converts
@@ -3904,7 +4938,7 @@ class Game({
 
   bool playerHas(Player p, List<Quantity> qs) {
     for (final q in mergeQuantities(qs)) {
-      if (p.inventory.value.where((it) => identical(it, q.item)).length < q.n) {
+      if (p.inventory.value.where((it) => it == q.item).length < q.n) {
         return false;
       }
     }
@@ -3953,24 +4987,25 @@ class Game({
   /// first storage with space. A storage that's out of hours isn't one of
   /// them: an out-of-hours facility does nothing at all, and this is a way
   /// into a storage that doesn't go through its own controls.
-  void storeFromInventory(Player p, Item it) {
+  bool storeFromInventory(Player p, Item it) {
     final node = p.at.value;
-    if (node == null) return;
+    if (node == null) return false;
     for (final s in node.facilities.whereType<Storage>()) {
       if (!s.activeNow(this)) continue;
       if (s.contents.value.length < s.capacity) {
         final inv = [...p.inventory.value];
-        if (!inv.remove(it)) return;
+        if (!inv.remove(it)) return false;
         p.inventory.value = inv;
         s.contents.value = [...s.contents.value, it];
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   /// clicking a stored item rotates it on: to the next storage at the node
   /// with space, wrapping around to the player's inventory
-  void rotateItemOnward(Player p, Storage from, Item it) {
+  bool rotateItemOnward(Player p, Storage from, Item it) {
     final node = from.node;
     final storages = node.facilities.whereType<Storage>().toList();
     final start = storages.indexOf(from);
@@ -3978,19 +5013,21 @@ class Game({
       if (!storages[k].activeNow(this)) continue;
       if (storages[k].contents.value.length < storages[k].capacity) {
         final c = [...from.contents.value];
-        if (!c.remove(it)) return;
+        if (!c.remove(it)) return false;
         from.contents.value = c;
         storages[k].contents.value = [...storages[k].contents.value, it];
-        return;
+        return true;
       }
     }
-    if (identical(p.at.value, node) &&
+    if (p.at.value.isSameAs(node) &&
         p.inventory.value.length < params.inventoryCap) {
       final c = [...from.contents.value];
-      if (!c.remove(it)) return;
+      if (!c.remove(it)) return false;
       from.contents.value = c;
       p.inventory.value = [...p.inventory.value, it];
+      return true;
     }
+    return false;
   }
 
   // ── moving ──
@@ -4002,11 +5039,10 @@ class Game({
   /// a walk out of somewhere they're no longer standing.
   void teleport(Player p, Node to) {
     final from = p.at.value;
-    if (identical(from, to)) return;
-    p.plan.clear();
+    if (from.isSameAs(to)) return;
     if (from != null) {
       from.playersPresent.value = from.playersPresent.value
-          .where((x) => !identical(x, p))
+          .where((x) => !x.isSameAs(p))
           .toList();
     }
     p.at.value = to;
@@ -4016,7 +5052,7 @@ class Game({
     // whatever pan the player put in while they were aiming was a pan relative
     // to where they used to be standing. Both are dropped and the view seeks
     // them where they've landed.
-    if (identical(p, selectedPlayer.value)) recenterWanted.value++;
+    if (!probing && p.isSameAs(selectedPlayer.value)) recenterWanted.value++;
     for (final f in List.of(to.facilities)) {
       f.onPlayerEntered(this, p);
     }
@@ -4024,15 +5060,20 @@ class Game({
 
   // ── move scheduling ──
 
-  /// Resolve a move-pad drag for [p]: pick the edge minimizing angle distance
-  /// to the drag; if the minimum exceeds pi/2, don't move. Scheduling ahead is
-  /// disabled for now — one move ongoing at a time, and none while the
-  /// character is disabled.
-  void schedulePlayerMove(Player p, double dragAngle) {
+  /// Resolve a move-pad drag for [p] into the wire they meant — the one whose
+  /// angle is closest, and nothing at all past a right angle — and write it
+  /// down as something they've decided to do.
+  ///
+  /// Where the drag points is resolved here, at the moment of the drag, rather
+  /// than being kept as an angle: an angle is a fact about the map as it looks
+  /// now, and a replay wants the decision, which is the node. Scheduling ahead
+  /// is allowed now — a player mid-walk who is told to walk again queues it,
+  /// and it goes when they land.
+  void dragPlayerMove(Player p, double dragAngle) {
     if (!params.playersHaveMoveAction) return;
-    if (p.incapacitatedFor.value > 0) return;
-    if (p.traversing != null || p.plan.nodes.isNotEmpty) return;
-    final source = p.at.value;
+    // from where they'll be when they get round to it, not from where they
+    // are: a drag while they're mid-walk means "and then from there"
+    final source = frontierNodeOf(p);
     if (source == null) return;
     Edge? best;
     var bestDist = double.infinity;
@@ -4044,20 +5085,17 @@ class Game({
       }
     }
     if (best == null || bestDist > pi / 2) return;
-    p.plan.nodes.add(best.other(source));
-    p.plan.departureTimes.add(gameTime); // depart as soon as free
+    commit(p, MoveAction(best.other(source), notBefore: actionMoment));
   }
 
-  /// Same drag mechanic for a train, targeting its shortcut wires.
-  void manualTrainMove(TrainNode train, Player by, double dragAngle) {
+  /// Same drag mechanic for a train, resolved to the station it meant.
+  void dragTrainMove(TrainNode train, Player by, double dragAngle) {
     final from = train.dockedAt.value;
-    if (from == null || !train.manualAllowed || train.dockEdgeBusy(this)) {
-      return;
-    }
+    if (from == null) return;
     Node? best;
     var bestDist = double.infinity;
     for (final s in train.stationNodes) {
-      if (identical(s, from)) continue;
+      if (s.isSameAs(from)) continue;
       final ang = offsetAngle(train.terminusFor[s]! - train.terminusFor[from]!);
       final d = shortestAngleDistance(dragAngle, ang).abs();
       if (d < bestDist) {
@@ -4066,12 +5104,25 @@ class Game({
       }
     }
     if (best == null || bestDist > pi / 2) return;
+    commit(by, TrainMoveAction(train, best, notBefore: actionMoment));
+  }
+
+  /// Sends [train] to [to] on [by]'s say-so, paying whatever it asks. The
+  /// checks are all here rather than at the drag, because by the time a replay
+  /// gets round to running this the train may have gone somewhere else, be
+  /// mid-journey, or have someone standing on its gangway.
+  bool manualTrainMove(TrainNode train, Player by, Node to) {
+    final from = train.dockedAt.value;
+    if (from == null || from.isSameAs(to)) return false;
+    if (!train.manualAllowed || train.dockEdgeBusy(this)) return false;
+    if (!train.stationNodes.any((s) => s.isSameAs(to))) return false;
     final act = train.activation;
     if (act != null) {
-      if (!playerHas(by, [act])) return;
+      if (!playerHas(by, [act])) return false;
       if (train.activationConsumed) takeItems(by, [act]);
     }
-    train.departTo(this, best);
+    train.departTo(this, to);
+    return true;
   }
 }
 
@@ -4247,7 +5298,6 @@ Game generateLevel(Parameters p) {
             s.pos +
             angleToOffset(_openestAngle(rng, s)) * p.trainTerminusDistance,
     };
-    final speed = weightedPick(rng, p.trainSpeedWeights);
     final scheduleKind = weightedPick(rng, p.scheduleDistribution);
     final schedule = switch (scheduleKind) {
       TrainScheduleKind.never => const NeverSchedule(),
@@ -4265,10 +5315,8 @@ Game generateLevel(Parameters p) {
     var activationConsumed = false;
     if (rng.chance(p.trainActivationProb)) {
       activationConsumed = rng.chance(p.trainActivationConsumedProb);
-      // a pretty basic item, unless it's a fast or very fast train, in which
-      // case it may be a medium one
-      final fast = speed == TrainSpeed.f || speed == TrainSpeed.i;
-      final tier = weightedPick(rng, [(0.6, 0), (0.3, 1), if (fast) (0.5, 2)]);
+      // a pretty basic item, though it may be a medium one
+      final tier = weightedPick(rng, [(0.6, 0), (0.3, 1), (0.5, 2)]);
       activation = Quantity(
         _pick(rng, catalog.tiers[tier]),
         rng.chance(p.trainActivationTwoProb) ? 2 : 1,
@@ -4277,7 +5325,6 @@ Game generateLevel(Parameters p) {
     final manual = schedule is NeverSchedule || schedule is OneWaySchedule;
     final train = TrainNode(
       pos: terminusFor[stationNodes.first]!,
-      speed: speed,
       activation: activation,
       activationConsumed: activationConsumed,
       movableFromInside: manual && rng.chance(p.movableFromInsideProb),
@@ -4421,6 +5468,9 @@ Game generateLevel(Parameters p) {
   for (final t in trains) {
     t.dock(game, t.homeStation);
   }
+  // the level is finished now, and this is what winding all the way back
+  // gets you — see [Game.markOrigin]
+  game.markOrigin();
   return game;
 }
 
@@ -4463,7 +5513,7 @@ Tree _generateTree(GameRng rng, Parameters p, ItemCatalog cat) {
   // clock-regen trees come back once a day, at their own time of day —
   // several regrowths a day was more schedule than the player could hold
   final regen = rng.chance(p.treeClockIntervalp)
-      ? ClockInterval(offset: rng.nextDouble() * gameDay)
+      ? ClockInterval(offset: ticksOf(rng.nextDouble() * gameDay))
       : ArbitraryInterval(p.treeRegenTime);
   return Tree(produces, regen);
 }
@@ -4485,7 +5535,7 @@ Blight _generateBlight(GameRng rng, Parameters p, ItemCatalog cat) {
     // it always comes at night, so its offset lands in the day's second half
     interval: ClockInterval(
       multiple: days,
-      offset: rangeIn(rng, gameDay / 2, gameDay),
+      offset: rangeInTicks(rng, gameDay ~/ 2, gameDay),
     ),
     mitigator: mitigable ? all[rng.nextInt(all.length)] : null,
     hungry: mitigable && rng.chance(p.blightHungryp),
@@ -4529,7 +5579,7 @@ JumpStation _generateJumpStation(GameRng rng, Parameters p, ItemCatalog cat) {
     cost: cost,
     cooldown: cools
         ? roundToMinute(
-            rangeIn(rng, p.jumpCooldownRange.$1, p.jumpCooldownRange.$2),
+            rangeInTicks(rng, p.jumpCooldownRange.$1, p.jumpCooldownRange.$2),
           )
         : 0,
   );
@@ -4736,25 +5786,29 @@ Widget phaseIcon(bool night, {required double size, required Color color}) =>
 /// The face is pale for an AM time and dark for a PM one, and stays that way
 /// round under a dark scheme — which half of the day it is doesn't depend on
 /// what the screen is doing. That does mean the face sometimes lands on a
-/// ground its own colour, which is what [rimmed] is for. The digits beside it
-/// are on a 24-hour clock and say the same thing; the point of the colouring is
-/// that it survives not being read.
+/// ground its own colour, which is what the rim is for: see [_rim]. The digits
+/// across it are on a 24-hour clock and say the same thing the colouring does;
+/// the point of the colouring is that it survives not being read.
 ///
 /// The colours are passed in rather than read off [paletteSignal], because
 /// nothing subscribes during paint and [shouldRepaint] is where a change of
 /// scheme has to be noticed.
 class const _ClockFacePainter({
   required final double minutesIntoDay,
+
+  /// the hour written out across the lower half of the face, or null on the
+  /// small faces where four digits would be a smudge
+  final String? digits,
+
+  /// where the minute hand was a frame ago, if it's worth showing the ground
+  /// it covered — see [_minuteSweepFade]
+  final double? sweptFromMinutes,
   required final Color face,
   required final Color hand,
 
   /// whether the face is the same colour as the ground it's drawn on, and so
   /// needs an edge drawn round it to be a disc at all
-  required final bool rimmed,
 }) extends CustomPainter {
-  /// the rim, as a fraction of the radius
-  static const _rim = 0.13;
-
   /// hand lengths and widths, as fractions of the radius inside the rim. The
   /// minute hand reaches nearly to the edge and the hour hand stops around
   /// halfway, which is the whole of what makes the two readable this small —
@@ -4767,43 +5821,121 @@ class const _ClockFacePainter({
   /// how far the minute hand is let fade towards its face
   static const _minuteFade = 0.55;
 
+  /// The edge drawn round the face, as a fraction of the radius, and how far
+  /// its colour is carried towards the face's own.
+  ///
+  /// It's here for the half of the day whose face is the colour of the ground
+  /// it sits on, where without it there's no disc at all. But it only has to
+  /// close the shape, not describe it — the hands are the clock — so it's a
+  /// line rather than a band, and nearly the colour of what it encloses.
+  static const _rim = 0.052;
+  static const _rimTowardsFace = 0.8;
+
+  /// How much of its colour the minute hand keeps once it has smeared right
+  /// round the dial. Not zero: a hand that vanishes is a hand you have to
+  /// hunt for when it settles again.
+  static const _minuteSweepFloor = 0.45;
+
+  /// The written hour, as a fraction of the radius, and how much of the hands'
+  /// colour it keeps. Fainter than they are on purpose: the hands are the
+  /// clock and this is a second opinion, there for when the exact minute
+  /// matters — a reading you go looking for rather than one that competes for
+  /// the glance the hands are supposed to answer.
+  static const _digitsSize = 0.23;
+  static const _digitsFade = 0.42;
+
+  /// where it sits: the middle of the lower half of the face
+  static const _digitsDrop = 0.5;
+
   @override
   void paint(Canvas canvas, Size size) {
     final r = min(size.width, size.height) / 2;
     final c = Offset(size.width / 2, size.height / 2);
 
     canvas.drawCircle(c, r, Paint()..color = face);
-    final rimWidth = rimmed ? max(0.6, r * _rim) : 0.0;
-    if (rimWidth > 0) {
-      canvas.drawCircle(
-        c,
-        r - rimWidth / 2,
-        Paint()
-          ..color = hand
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = rimWidth,
-      );
-    }
+    final rimWidth = max(0.6, r * _rim);
+    canvas.drawCircle(
+      c,
+      r - rimWidth / 2,
+      Paint()
+        ..color = Color.lerp(hand, face, _rimTowardsFace)!
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = rimWidth,
+    );
 
     final dial = r - rimWidth;
-    void drawHand(double turns, double length, double width, Color color) {
+
+    /// A hand, and the ground it covered getting here.
+    ///
+    /// One shape, not a hand with something drawn behind it. The swept region
+    /// is the hand's own outline dragged round the dial, so it's built as a
+    /// path — out along the hand where it started, round at the tip, back to
+    /// the middle — and then both filled *and* stroked with the hand's own
+    /// width and round ends, in one colour. Which is what makes it read as the
+    /// hand having been there rather than as a wedge sitting under it: at
+    /// [sweptTurns] of nothing the path collapses to the line itself and the
+    /// stroke alone draws the hand, so the two cases are the same drawing.
+    void drawHand(
+      double turns,
+      double length,
+      double width,
+      Color color, {
+      double sweptTurns = 0,
+    }) {
       final a = -pi / 2 + turns * 2 * pi;
-      canvas.drawLine(
-        c,
-        c + Offset(cos(a), sin(a)) * (dial * length),
-        Paint()
-          ..color = color
-          ..strokeWidth = max(0.7, dial * width)
-          ..strokeCap = StrokeCap.round,
-      );
+      final reach = dial * length;
+      final paint = Paint()
+        ..color = color
+        ..strokeWidth = max(0.7, dial * width)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+      if (sweptTurns.abs() < 0.0005) {
+        canvas.drawLine(
+          c,
+          c + Offset(cos(a), sin(a)) * reach,
+          paint..style = PaintingStyle.stroke,
+        );
+        return;
+      }
+      // the arc runs from where the hand was to where it is; going backwards
+      // is the same ground covered the other way round
+      final from = sweptTurns >= 0 ? a - sweptTurns * 2 * pi : a;
+      final path = Path()
+        ..moveTo(c.dx, c.dy)
+        ..lineTo(c.dx + cos(from) * reach, c.dy + sin(from) * reach)
+        ..arcTo(
+          Rect.fromCircle(center: c, radius: reach),
+          from,
+          sweptTurns.abs() * 2 * pi,
+          false,
+        )
+        ..close();
+      canvas.drawPath(path, Paint()..color = color);
+      canvas.drawPath(path, paint..style = PaintingStyle.stroke);
     }
+
+    // How far round the minute hand went since the last frame, capped at the
+    // whole turn past which it has covered everything anyway. It thins out as
+    // it smears, but only down to [_minuteSweepFloor] — a spinning hand should
+    // read as a faint disc, not as an absence.
+    //
+    // Kept as a signed count of turns rather than two times of day, so a sweep
+    // across the hour is one sweep and not fifty-nine minutes the other way.
+    final was = sweptFromMinutes;
+    final turns = was == null ? 0.0 : (minutesIntoDay - was) / 60;
+    final swept = turns.sign * min(turns.abs(), 1.0);
+    final solidity = 1 - swept.abs() * (1 - _minuteSweepFloor);
+
+    // under the hands, so a hand crossing it reads as being in front
+    _paintDigits(canvas, c, dial);
 
     // the minute hand goes down first so the hour hand crosses over it
     drawHand(
       (minutesIntoDay % 60) / 60,
       _minuteLength,
       _minuteWidth,
-      hand.withValues(alpha: _minuteFade),
+      lerpColor(face, hand, _minuteFade * solidity),
+      sweptTurns: swept,
     );
     drawHand(
       (minutesIntoDay % (12 * 60)) / (12 * 60),
@@ -4813,22 +5945,49 @@ class const _ClockFacePainter({
     );
   }
 
+  void _paintDigits(Canvas canvas, Offset c, double dial) {
+    final text = digits;
+    if (text == null) return;
+    final t = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: dial * _digitsSize,
+          fontWeight: FontWeight.w600,
+          height: 1,
+          color: hand.withValues(alpha: _digitsFade),
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    t.paint(
+      canvas,
+      c + Offset(-t.width / 2, dial * _digitsDrop - t.height / 2),
+    );
+  }
+
   @override
   bool shouldRepaint(_ClockFacePainter old) =>
+      old.digits != digits ||
       old.minutesIntoDay != minutesIntoDay ||
+      old.sweptFromMinutes != sweptFromMinutes ||
       old.face != face ||
-      old.hand != hand ||
-      old.rimmed != rimmed;
+      old.hand != hand;
 }
 
 /// The face for a moment in the day, [size] across. The whole day maps onto the
 /// whole 24-hour clock, exactly as [fmtTimeOfDay] reads it.
-Widget clockFace(double t, {required double size}) {
+Widget clockFace(
+  TTime t, {
+  required double size,
+  TTime? sweptFrom,
+  bool digits = false,
+}) {
   final minutes = (t % gameDay) / gameMinute;
   final pm = minutes >= 12 * 60;
   // the scheme's palest and its deepest; which of the two is [Palette.ground]
-  // is exactly what changes between schemes, and exactly when the face needs
-  // its rim
+  // is exactly what changes between schemes
   final pale = paletteSignal.value.isDark
       ? paletteSignal.value.inkStrong
       : paletteSignal.value.ground;
@@ -4840,16 +5999,21 @@ Widget clockFace(double t, {required double size}) {
     size: Size.square(size),
     painter: _ClockFacePainter(
       minutesIntoDay: minutes,
+      digits: digits ? fmtTimeOfDayPadded(t) : null,
+      // measured off the raw clock, not off the time of day, so a sweep that
+      // crosses midnight is one sweep rather than a whole dial's worth
+      sweptFromMinutes: sweptFrom == null
+          ? null
+          : minutes - (t - sweptFrom) / gameMinute,
       face: face,
       hand: pm ? pale : deep,
-      rimmed: face == paletteSignal.value.ground,
     ),
   );
 }
 
 /// A clock time as it's always given: the face, then the digits.
 Widget clockTimeRow(
-  double t, {
+  TTime t, {
   required double faceSize,
   required TextStyle style,
 }) => Row(
@@ -5013,10 +6177,22 @@ Widget withPie(Widget child, {required Widget pie}) => Stack(
 /// same pie: how soon is the pie's business, and at what hour is the label's.
 /// Both kinds shrink. Ticks on game time via its signal — never wall clock —
 /// so pausing pauses pies.
+/// A wedge that empties as something finishes.
+///
+/// [endsAt] is a closure rather than a signal because what it wants is a
+/// deadline, and a deadline is rarely a field — a tree's is its picking plus
+/// its regrowth, a train's is worked out from its schedule. Called inside the
+/// builder, so whatever signals it reads on the way are the ones this pie
+/// rebuilds for.
+///
+/// It subscribes to the clock only while it's counting: a pie with nothing to
+/// count returns before it looks at [Game.clock], so the badges of the idle
+/// majority of the map cost nothing per frame.
 class const CountdownPie({
   super.key,
-  required final Signal<double> remaining,
-  required final double total,
+  required final Game game,
+  required final TTime? Function() endsAt,
+  required final TTime total,
   required final bool isCooldown,
 
   /// set when the countdown runs on a clock interval: its time of day is the
@@ -5028,8 +6204,10 @@ class const CountdownPie({
   Widget build(BuildContext context) {
     return SignalBuilder(
       builder: (context) {
-        final r = remaining.value;
-        if (r <= 0 || total <= 0) return const SizedBox.shrink();
+        final end = endsAt();
+        if (end == null || total <= 0) return const SizedBox.shrink();
+        final r = end - game.clock.value;
+        if (r <= 0) return const SizedBox.shrink();
         final pie = CustomPaint(
           size: Size.square(size),
           painter: _PiePainter(
@@ -5086,6 +6264,355 @@ class _PiePainter({required final double fraction, required final Color color})
   @override
   bool shouldRepaint(_PiePainter old) =>
       old.fraction != fraction || old.color != color;
+}
+
+// ────────────────────────────── the dial ──────────────────────────────
+
+/// how much game time one full turn of the grabbed wheel is worth. The hour
+/// hand goes round twice a day, and the dial turns the hour hand, so a whole
+/// turn of the inner wheel is half a day.
+const TTime _dialTurn = 12 * gameHour;
+
+/// what the rim divides that by. A drag of thirty degrees out there is six
+/// game minutes — half a walk between two nodes — where the same drag on the
+/// clock face is an hour. Fine control is a ring you can hook a thumb round
+/// rather than a mode you have to switch into.
+const double _outerWheelGearing = 1 / 10;
+
+/// Where the action-history bands begin, and which way they run: down and to
+/// the right of the clock, sweeping anticlockwise up over it. Which is the
+/// part of the rim that's over the map rather than off the bottom or the side.
+const double _dialStartAngle = pi / 2 * 0.3;
+const double _dialSweepSign = -1;
+
+/// The wheel's radius and thickness, as multiples of the clock face's
+/// *diameter*, so the whole dial keeps its proportions when the face is sized
+/// to the map. Note the diameter: at 0.5 the rim would sit exactly on the edge
+/// of the face, and anything under that would be inside it.
+///
+/// How far out the rim stands is being tuned by eye. Nothing else depends on
+/// it — where the wheels meet comes off the face (see [dialIsFineWheel]) and
+/// what can be grabbed comes off what's drawn (see [dialTakesTouch]) — so it
+/// can be moved without anything else having to be told.
+const double _wheelRadiusFactor = 0.8;
+const double _wheelWidthFactor = 0.23;
+
+/// The least the rim will accept a thumb across, whatever it's drawn at. A
+/// wheel is only a wheel if you can take hold of the rim, and the rim is a
+/// line — the width that matters to a finger has nothing to do with the width
+/// that matters to an eye.
+const double _wheelTouchWidth = 52;
+
+/// How near the middle a finger has to get before the dial stops taking it
+/// literally, as a fraction of the face's radius.
+///
+/// An angle is a poor thing to measure a drag by when the finger is near the
+/// middle: a few pixels there sweep half the dial, and a wheel that spins
+/// faster the closer you get to the axle is a wheel nobody can hold still. So
+/// inside this the turn is worked out as though the finger were out here —
+/// same movement, less turn, which is what having leverage means.
+const double _dialMinLeverage = 0.4;
+
+/// How near the middle the dial stops taking the angle literally. Read rather
+/// than written out wherever it's needed, so the tuning lives in one place.
+double dialLeverageLimit(double faceSize) => faceSize / 2 * _dialMinLeverage;
+
+/// how far the wheel reaches from the middle of the clock
+double dialWheelRadius(double faceSize) => faceSize * _wheelRadiusFactor;
+
+/// where the rim is drawn: the centre of the band, not its outside
+double dialRimRadius(double faceSize) =>
+    dialWheelRadius(faceSize) - faceSize * _wheelWidthFactor / 2;
+
+/// How far the dial turns for a drag from [from] to [to], both measured from
+/// the middle of the clock. Positive winds time forward, which is clockwise,
+/// which is the way the hour hand goes.
+///
+/// It's the angle swept, which is the whole of it anywhere a hand would
+/// normally be. The angle is the right measure and it's exact however far the
+/// finger travelled in the frame — where working the turn out from the
+/// movement would be reading the chord for the arc, and would lose a fast drag
+/// most of its turn.
+///
+/// Inside [_dialMinLeverage] the angle stops being a sensible thing to steer
+/// by: a few pixels across the middle of the clock is half the dial, and the
+/// closer to the axle the worse it gets, up to a discontinuity right on it. So
+/// in there — and only in there — the turn is taken from how far the finger
+/// went *around*, as though it had been out at the limit the whole time. Same
+/// movement, less turn, no singularity.
+double dialTurnFor(double faceSize, Offset from, Offset to) {
+  final reach = from.distance;
+  if (reach < 0.01) return 0;
+  final limit = dialLeverageLimit(faceSize);
+  if (reach >= limit && to.distance >= limit) {
+    return shortestAngleDistance(offsetAngle(from), offsetAngle(to));
+  }
+  final delta = to - from;
+  // the part of the movement that went around rather than in or out. Never
+  // more than the movement itself, so this can't run away as the middle is
+  // approached the way an angle does.
+  final around = (from.dx * delta.dy - from.dy * delta.dx) / reach;
+  return around / limit;
+}
+
+/// Whether the dial takes a touch this far out from the middle of the clock:
+/// on the face, or across the rim.
+///
+/// Everything the dial draws, it will take a drag on — that's the rule, and
+/// it's the whole shape. The gap in between belongs to the map: the dial's
+/// widget is a square as wide as the whole wheel, and a control that swallowed
+/// everything inside it would be a control covering most of the level, so what
+/// isn't drawn falls through to what is.
+///
+/// Both the painting and the hit test are worked out from here, which is the
+/// point of it being a function rather than two sets of arithmetic: a rim you
+/// can see and can't grab is exactly the bug this is guarding.
+bool dialTakesTouch(double faceSize, double fromMiddle) =>
+    fromMiddle <= faceSize / 2 ||
+    (fromMiddle - dialRimRadius(faceSize)).abs() <= dialRimTouchBand(faceSize);
+
+/// half the width of the rim as a thumb sees it
+double dialRimTouchBand(double faceSize) =>
+    max(faceSize * _wheelWidthFactor, _wheelTouchWidth) / 2;
+
+/// Which of the two wheels a touch this far out is on.
+///
+/// The clock face decides it, because the clock face *is* the fast wheel —
+/// there are two things drawn here and they are the two wheels, so there is
+/// nothing to choose and no fraction to pick. Anywhere on the clock turns time
+/// quickly; the rim, being a rim, turns it finely.
+bool dialIsFineWheel(double faceSize, double fromMiddle) =>
+    fromMiddle > faceSize / 2;
+
+/// how much of the map's narrower side the clock face takes up
+const double dialFaceSpan = 0.24;
+
+/// how far the clock face is held off the corner
+const double dialPadding = 10;
+
+/// The clock, turned rather than watched.
+///
+/// Dragging it winds the world: the hour hand follows the finger, and the
+/// world is re-simulated to wherever the hand ends up. Two wheels, because one
+/// dial can't be both a way to skip a day and a way to land on a particular
+/// ten minutes — the clock face is quick, the rim around it is geared right
+/// down. The two things it draws are the two wheels; there's no third region
+/// and no fraction to pick.
+///
+/// Tapping it goes to the end of the selected player's list, which is the
+/// moment you almost always want: everything they've been told to do, done.
+///
+/// It sits in the very corner, and the wheel is drawn as a circle round it
+/// wider than the widget holding them both — so it hangs off the bottom and
+/// the left, and what's in view is the arc over the map. Which is the honest
+/// shape of the thing: a wheel you turn a few degrees of, where a few degrees
+/// of a wide wheel is a long, shallow, precise arc and the same gesture on a
+/// small one is a jerk of the wrist.
+class const TimeDial({
+  super.key,
+  required final Game game,
+  required final ValueNotifier<int> frame,
+
+  /// the clock itself — the part that is actually a clock. Everything else
+  /// about the dial is a multiple of it.
+  required final double faceSize,
+}) extends StatefulWidget {
+  @override
+  State<TimeDial> createState() => _TimeDialState();
+}
+
+class _TimeDialState extends State<TimeDial> {
+  /// which wheel the finger came down on, decided once when it lands: a drag
+  /// that started on the fine wheel stays on it even as it wanders inward,
+  /// because changing gear halfway through a turn is not something a hand
+  /// asked for
+  bool _onOuterWheel = false;
+  Offset _lastTouch = Offset.zero;
+
+  /// where the drag has wound to, kept as a real number so that a slow turn
+  /// isn't lost to rounding a tick at a time
+  double _wound = 0;
+
+  /// what the clock read on the last frame, so the minute hand can be drawn as
+  /// the ground it covered rather than as a line that jumped
+  TTime? _lastShown;
+
+  /// The widget is the whole wheel, so the middle of it is the middle of the
+  /// clock — and the clock is held [TimeDial.padding] off the corner by
+  /// hanging the rest of the wheel off the screen. See [_cornerOffset].
+  double get _wheelRadius => widget.faceSize * _wheelRadiusFactor;
+  double get _box => _wheelRadius * 2;
+  Offset get _middle => Offset(_wheelRadius, _wheelRadius);
+
+  void _down(Offset local) {
+    _onOuterWheel = dialIsFineWheel(
+      widget.faceSize,
+      (local - _middle).distance,
+    );
+    _lastTouch = local;
+    _wound = widget.game.now.toDouble();
+    widget.game.dialHeld = true;
+  }
+
+  void _drag(Offset local) {
+    final turned = dialTurnFor(
+      widget.faceSize,
+      _lastTouch - _middle,
+      local - _middle,
+    );
+    _lastTouch = local;
+    final gearing = _onOuterWheel ? _outerWheelGearing : 1.0;
+    _wound += turned / (2 * pi) * _dialTurn * gearing;
+    // the clock has a floor and no ceiling: you can always wait, and you can
+    // never go back before the level knows about
+    _wound = max(_wound, widget.game.earliestMoment.toDouble());
+    widget.game.headFor(_wound.round(), ClockPush.dial);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final game = widget.game;
+    // NoBackSwipe for the same reason the move pad has it: a drag that starts
+    // near the left edge is a drag, not a page back
+    return NoBackSwipe(
+      GestureDetector(
+        // deferToChild, not opaque: the widget is a five-hundred-pixel square
+        // and almost all of it is map. What counts as the dial is decided by
+        // [_DialWheelPainter.hitTest], which is the face and the rim and
+        // nothing in between.
+        behavior: HitTestBehavior.deferToChild,
+        // the one thing they're in the middle of, or about to start — not
+        // the whole list. Tapping again takes the next one.
+        onTapUp: (_) => game.headFor(
+          game.nextActionEndsAt(game.selectedPlayer.peek()),
+          ClockPush.ease,
+        ),
+        onPanDown: (d) => _down(d.localPosition),
+        onPanUpdate: (d) => _drag(d.localPosition),
+        onPanEnd: (_) => game.dialHeld = false,
+        onPanCancel: () => game.dialHeld = false,
+        child: ValueListenableBuilder(
+          valueListenable: widget.frame,
+          builder: (context, _, _) => CustomPaint(
+            size: Size.square(_box),
+            painter: _DialWheelPainter(
+              // How much each player has still to do, drawn as an arc apiece:
+              // the only sign on screen that there's a future to wind forward
+              // into, and with everyone on the wheel it also says at a glance
+              // which of them you've left behind.
+              ahead: [
+                for (final p in game.players)
+                  (
+                    (game.frontierOf(p) - game.now) / _dialTurn.toDouble(),
+                    p.color,
+                  ),
+              ],
+              wheel: paletteSignal.value.pad,
+              width: widget.faceSize * _wheelWidthFactor,
+              faceRadius: widget.faceSize / 2,
+            ),
+            child: SizedBox.square(
+              dimension: _box,
+              child: Center(
+                child: Builder(
+                  builder: (context) {
+                    final was = _lastShown;
+                    _lastShown = game.now;
+                    return clockFace(
+                      game.now,
+                      size: widget.faceSize,
+                      sweptFrom: was,
+                      digits: true,
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class const _DialWheelPainter({
+  /// one per player, innermost first: how far ahead of the clock their list
+  /// still stretches, in turns of the hour hand, and what colour they are
+  required final List<(double, Color)> ahead,
+  required final Color wheel,
+  required final double width,
+  required final double faceRadius,
+}) extends CustomPainter {
+  /// What the dial will take a finger on: the clock face, and a band across
+  /// the rim wide enough to grab.
+  ///
+  /// This is the whole of what makes the wheel a control. The widget is a
+  /// square as wide as the wheel, and if it swallowed everything inside it the
+  /// dial would eat most of the map — so the gap between the face and the rim
+  /// is left alone, and taps there go to the map that is drawn there. The band
+  /// is [_wheelTouchWidth] whatever the rim is drawn at, because the width a
+  /// thumb needs is not the width that looks right.
+  @override
+  bool hitTest(Offset position) {
+    final reach = dialWheelRadius(faceRadius * 2);
+    return dialTakesTouch(
+      faceRadius * 2,
+      (position - Offset(reach, reach)).distance,
+    );
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    // the same rim the hit test uses, so what's drawn is what's grabbable
+    final outer = dialRimRadius(faceRadius * 2);
+    canvas.drawCircle(
+      c,
+      outer,
+      Paint()
+        ..color = wheel
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width,
+    );
+
+    // The bands share the wheel's width between them. Thin, because a hair of
+    // colour along the rim is enough to say "this one still has somewhere to
+    // be", which is all they're for. No end caps: a cap on a band this thin
+    // is a blob, and a blob at the start of every arc reads as a mark on the
+    // dial rather than as the end of something.
+    final each = width / ahead.length;
+    for (var i = 0; i < ahead.length; i++) {
+      final (turns, color) = ahead[i];
+      if (turns <= 0) continue;
+      final r = outer - width / 2 + each * (i + 0.5);
+      // a list stretching more than one turn of the hand fills its band rather
+      // than wrapping round it; past that the arc has stopped meaning anything
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: r),
+        _dialStartAngle,
+        _dialSweepSign * min(turns, 1) * 2 * pi,
+        false,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = each * 0.4,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DialWheelPainter old) {
+    if (old.wheel != wheel ||
+        old.width != width ||
+        old.faceRadius != faceRadius ||
+        old.ahead.length != ahead.length) {
+      return true;
+    }
+    for (var i = 0; i < ahead.length; i++) {
+      if (old.ahead[i] != ahead[i]) return true;
+    }
+    return false;
+  }
 }
 
 Widget actionChip({
@@ -5151,8 +6678,66 @@ class const DragDirectionPad({
   State<DragDirectionPad> createState() => _DragDirectionPadState();
 }
 
+/// How far the thumb has to fall below its own top speed before the pad will
+/// take another step. Relative rather than an absolute speed, so it works the
+/// same for someone flicking and someone dragging slowly — what it's looking
+/// for is a lull, and a lull is a fraction of whatever pace they were setting.
+const double _padRearmFraction = 0.4;
+
+/// how quickly the measured speed follows the thumb: one frame of a drag is a
+/// noisy thing to divide by a frame time
+const double _padSpeedBlend = 0.45;
+
 class _DragDirectionPadState extends State<DragDirectionPad> {
   Offset _acc = Offset.zero;
+
+  /// A drag that keeps going is one gesture, not a stream of them. Sliding a
+  /// thumb across the pad used to fire a step every time the accumulated
+  /// distance crossed the threshold, which meant one long swipe sent a player
+  /// three nodes away. So after a step the pad shuts, and only opens again
+  /// once the thumb has slowed right down — one deliberate push per step.
+  bool _armed = true;
+  double _speed = 0, _peakSpeed = 0;
+  Duration? _lastStamp;
+
+  void _reset() {
+    _acc = Offset.zero;
+    _armed = true;
+    _speed = 0;
+    _peakSpeed = 0;
+    _lastStamp = null;
+  }
+
+  void _update(DragUpdateDetails d, double threshold) {
+    final stamp = d.sourceTimeStamp;
+    final dt = (stamp != null && _lastStamp != null)
+        ? (stamp - _lastStamp!).inMicroseconds / 1e6
+        : 1 / 60;
+    _lastStamp = stamp;
+    _speed =
+        _speed * (1 - _padSpeedBlend) +
+        (dt > 0 ? d.delta.distance / dt : 0.0) * _padSpeedBlend;
+    _acc += d.delta;
+
+    if (!_armed) {
+      _peakSpeed = max(_peakSpeed, _speed);
+      // the lull. Whatever they were doing, they've stopped doing it
+      if (_speed < _peakSpeed * _padRearmFraction) {
+        _armed = true;
+        _peakSpeed = 0;
+        _acc = Offset.zero;
+      }
+      return;
+    }
+    if (_acc.distance <= threshold) return;
+    // the first step of a gesture goes on distance alone — a slow, deliberate
+    // drag from a standstill is exactly what it looks like. Every step after
+    // it has a lull behind it by construction.
+    widget.onAngle(offsetAngle(_acc));
+    _acc = Offset.zero;
+    _armed = false;
+    _peakSpeed = _speed;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -5184,14 +6769,9 @@ class _DragDirectionPadState extends State<DragDirectionPad> {
     pad = NoBackSwipe(
       GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onPanUpdate: (details) {
-          _acc += details.delta;
-          if (_acc.distance > threshold) {
-            widget.onAngle(offsetAngle(_acc));
-            _acc = Offset.zero;
-          }
-        },
-        onPanEnd: (_) => _acc = Offset.zero,
+        onPanUpdate: (details) => _update(details, threshold),
+        onPanEnd: (_) => _reset(),
+        onPanCancel: _reset,
         child: pad,
       ),
     );
@@ -5221,7 +6801,7 @@ class const PlayerOrb(
       onTap: onTap,
       child: SignalBuilder(
         builder: (context) {
-          final selected = identical(game.selectedPlayer.value, player);
+          final selected = game.selectedPlayer.value.isSameAs(player);
           // the name sits centered *over* the orb, not above it
           return Stack(
             clipBehavior: Clip.none,
@@ -5240,7 +6820,8 @@ class const PlayerOrb(
                   ),
                 ),
                 pie: CountdownPie(
-                  remaining: player.incapacitatedFor,
+                  game: game,
+                  endsAt: () => player.incapacitatedUntil.value,
                   total: game.params.muggerIncapTime,
                   isCooldown: true,
                 ),
@@ -5282,16 +6863,16 @@ Widget trainBadge(Game g, TrainNode t, NodeZoomLevel level) {
       final inTransit = t.dockedAt.value == null;
       Widget badge = badgeRow(tone: nodeColor(t), [
         badgeIcon(Icons.train),
-        badgeText(t.speed.name),
         if (level != NodeZoomLevel.small) ...[
           if (t.activation != null)
             quantityWidget(t.activation!, size: _facilityItemSize),
           if (t.movableFromInside) badgeIcon(Icons.swipe_right_alt),
           if (t.schedule is OneWaySchedule) badgeText('sc(o)'),
           if (t.schedule case CycleSchedule c)
-            badgeText('sc(${fmtSpan(c.seconds)})'),
+            badgeText('sc(${fmtSpan(c.period)})'),
         ],
-        if (inTransit) badgeText(fmtSpan(t.transitRemaining.value)),
+        if (inTransit)
+          badgeText(fmtSpan(max(0, (t.arrivesAt.value ?? 0) - g.clock.value))),
       ]);
       // cycle trains show a countdown pie to their next departure, plus the
       // clock time their interval is pinned to
@@ -5299,7 +6880,8 @@ Widget trainBadge(Game g, TrainNode t, NodeZoomLevel level) {
         badge = withPie(
           badge,
           pie: CountdownPie(
-            remaining: t.waitRemaining,
+            game: g,
+            endsAt: () => t.departsAt.value,
             total: c.interval.period,
             isCooldown: true,
             clock: c.interval,
@@ -5315,12 +6897,6 @@ Widget trainBadge(Game g, TrainNode t, NodeZoomLevel level) {
 }
 
 List<InlineSpan> describeTrain(TrainNode t) {
-  final speedName = switch (t.speed) {
-    TrainSpeed.s => 'slow',
-    TrainSpeed.r => 'regular',
-    TrainSpeed.f => 'fast',
-    TrainSpeed.i => 'very fast',
-  };
   // a Never train has nothing to say about its schedule — it just sits there
   final schedule = switch (t.schedule) {
     NeverSchedule _ => const <InlineSpan>[],
@@ -5333,7 +6909,7 @@ List<InlineSpan> describeTrain(TrainNode t) {
     ],
   };
   return [
-    tipText('a $speedName train'),
+    tipText('a train'),
     ...schedule,
     if (t.activation != null) ...[
       tipText('; moving it requires holding '),
@@ -5370,6 +6946,10 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   late final AppLifecycleListener _lifecycle;
   Duration _last = Duration.zero;
   final ValueNotifier<int> _frame = ValueNotifier(0);
+
+  /// what the controls are describing, read once a frame in the ticker —
+  /// see [Game.readControls]
+  final ValueNotifier<PanelView?> _panel = ValueNotifier(null);
   final ValueNotifier<int> _recenterNudge = ValueNotifier(0);
 
   @override
@@ -5422,13 +7002,14 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   }
 
   /// The one place real time enters the game. The frame's wall-clock delta is
-  /// clamped first — a long frame, or coming back from the background, must not
-  /// teleport the world — and then converted to game seconds, which is all
-  /// [Game.update] and everything under it deal in.
+  /// clamped first — a long frame, or coming back from the background, must
+  /// not teleport the world — and handed to [Game.tickRealTime], which is the
+  /// last thing in the game that knows what a real second is.
   void _tick(Duration elapsed) {
     final real = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 1 / 15);
     _last = elapsed;
-    game.update(game.params.realSeconds(real));
+    game.tickRealTime(real);
+    _panel.value = game.readControls();
     _frame.value++;
   }
 
@@ -5439,6 +7020,7 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
     _lifecycle.dispose();
     _ticker.dispose();
     _frame.dispose();
+    _panel.dispose();
     _recenterNudge.dispose();
     super.dispose();
   }
@@ -5469,25 +7051,67 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
               LayoutBuilder(
                 builder: (context, constraints) {
                   final isWide = constraints.maxWidth > constraints.maxHeight;
+                  // The dial is sized off the map, and the map's size is known
+                  // here and nowhere further in: a [Positioned] that names only
+                  // two edges hands its child unbounded constraints, so asking
+                  // from down inside the stack gets infinity back.
                   final world = Expanded(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: WorldView(
-                            key: ObjectKey(game),
-                            game: game,
-                            frame: _frame,
-                            recenterNudge: _recenterNudge,
-                          ),
-                        ),
-                        Positioned(left: 10, right: 10, top: 3, child: _hud()),
-                        Positioned(
-                          right: mapButtonInset,
-                          bottom: mapButtonInset,
-                          child: _pauseButton(),
-                        ),
-                        Positioned.fill(child: _announcement()),
-                      ],
+                    child: LayoutBuilder(
+                      builder: (context, mapBox) {
+                        // off the narrower side, so it's the same clock held
+                        // the same way round in either orientation
+                        final dialFace =
+                            min(mapBox.maxWidth, mapBox.maxHeight) *
+                            dialFaceSpan;
+                        return Stack(
+                          children: [
+                            Positioned.fill(
+                              child: WorldView(
+                                key: ObjectKey(game),
+                                game: game,
+                                frame: _frame,
+                                recenterNudge: _recenterNudge,
+                              ),
+                            ),
+                            Positioned(
+                              left: 10,
+                              right: 10,
+                              top: 3,
+                              child: _hud(),
+                            ),
+                            Positioned(
+                              // less the touch area [mapButton] carries, so the
+                              // button looks where it always did
+                              right: mapButtonInset - mapButtonTouch,
+                              bottom: mapButtonInset - mapButtonTouch,
+                              child: _pauseButton(),
+                            ),
+                            // hard into the corner: the wheel drawn round it
+                            // runs off the bottom and both sides, which is the
+                            // point of it — see [TimeDial]
+                            Positioned(
+                              // The dial widget is the whole wheel, so it
+                              // hangs off the corner by everything that isn't
+                              // the clock — the face ends up sitting where it
+                              // looks like it is, a little in from both edges.
+                              left:
+                                  dialFace / 2 +
+                                  dialPadding -
+                                  dialFace * _wheelRadiusFactor,
+                              bottom:
+                                  dialFace / 2 +
+                                  dialPadding -
+                                  dialFace * _wheelRadiusFactor,
+                              child: TimeDial(
+                                game: game,
+                                frame: _frame,
+                                faceSize: dialFace,
+                              ),
+                            ),
+                            Positioned.fill(child: _announcement()),
+                          ],
+                        );
+                      },
                     ),
                   );
                   final controls = isWide
@@ -5495,6 +7119,7 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                           width: 340,
                           child: ControlsPanel(
                             game: game,
+                            view: _panel,
                             recenterNudge: _recenterNudge,
                           ),
                         )
@@ -5502,6 +7127,7 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                           height: 210,
                           child: ControlsPanel(
                             game: game,
+                            view: _panel,
                             recenterNudge: _recenterNudge,
                           ),
                         );
@@ -5572,14 +7198,17 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   Widget _hud() {
     return SignalBuilder(
       builder: (context) {
-        // the day clock and the standing orders read as one line in the one
-        // voice; the wrap is screen-wide so they spill onto a second line rather
-        // than overflowing on a narrow phone.
+        // The standing orders, and nothing else. The hour used to lead this
+        // line as well, back when the dial was a sixteen-pixel token up here
+        // — but the clock is a great dial in the corner now with the time
+        // written across its own face, and a second reading of it in the
+        // opposite corner is one more thing to check against.
         //
-        // The level's own countdown used to lead the line, in minutes and
-        // seconds of real time. The clock says the same thing in the units the
-        // game is actually played in — the hour, and the days left after it —
-        // and two clocks disagreeing about which one to read is worse than one.
+        // The days left are still read off [Game.now], which is a plain field,
+        // so this is what subscribes the line to it — it used to come for free
+        // from a timeLeft signal, back when the level counted its remaining
+        // time down instead of working it out; see [Game.timeLeft].
+        game.clock.value;
         final hudStyle = TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w600,
@@ -5605,7 +7234,6 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                   color: paletteSignal.value.ink,
                 ),
               ),
-              clockTimeRow(game.timeOfDay, faceSize: 16, style: hudStyle),
               Text(
                 game.daysRemaining == 0
                     ? "FINAL DAY"
@@ -5704,9 +7332,27 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
 
 // ────────────────────────────── controls panel ──────────────────────────────
 
+/// The world as the controls are describing it — a moment that is usually now
+/// and sometimes a little way off; see [Game.readControls].
+///
+/// Plain values and already-built widgets, read once in the ticker. It exists
+/// because the panel can't ask the world questions itself: the answers it
+/// wants are from a moment the world isn't at, and getting there and back
+/// means writing to every signal in the level, which is not something to do
+/// halfway through a build.
+class const PanelView({
+  required final TTime at,
+  required final Node? node,
+  required final List<Item> inventory,
+  required final bool canMove,
+  required final bool hasStorage,
+  required final List<Widget> actions,
+});
+
 class const ControlsPanel({
   super.key,
   required final Game game,
+  required final ValueNotifier<PanelView?> view,
   required final ValueNotifier<int> recenterNudge,
 }) extends StatelessWidget {
   @override
@@ -5714,19 +7360,11 @@ class const ControlsPanel({
     return Container(
       color: paletteSignal.value.panel,
       padding: const EdgeInsets.all(6),
-      child: SignalBuilder(
-        builder: (context) {
-          final sel = game.selectedPlayer.value;
-          final atNode = sel.at.value;
-          final actionWidgets = <Widget>[
-            if (atNode != null) ...[
-              // a facility that's out of hours offers nothing
-              for (final f in atNode.facilities)
-                if (f.activeNow(game)) ...f.actionsFor(game, sel),
-              if (atNode is TrainNode && atNode.movableFromInside)
-                _insideTrainPad(atNode, sel),
-            ],
-          ];
+      child: ValueListenableBuilder(
+        valueListenable: view,
+        builder: (context, v, _) {
+          if (v == null) return const SizedBox.shrink();
+          final sel = game.selectedPlayer.peek();
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -5734,14 +7372,14 @@ class const ControlsPanel({
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _inventoryRow(sel),
+                    _inventoryRow(sel, v),
                     const SizedBox(height: 6),
                     Expanded(
                       child: SingleChildScrollView(
                         child: Wrap(
                           spacing: 4,
                           runSpacing: 4,
-                          children: actionWidgets,
+                          children: v.actions,
                         ),
                       ),
                     ),
@@ -5753,8 +7391,8 @@ class const ControlsPanel({
                 SizedBox(
                   width: 110,
                   child: DragDirectionPad(
-                    enabled: sel.incapacitatedFor.value <= 0,
-                    onAngle: (a) => game.schedulePlayerMove(sel, a),
+                    enabled: v.canMove,
+                    onAngle: (a) => game.dragPlayerMove(sel, a),
                     // the instruction at the bottom right, the move icon in the
                     // center
                     label: Icon(
@@ -5774,59 +7412,33 @@ class const ControlsPanel({
     );
   }
 
-  Widget _insideTrainPad(TrainNode train, Player p) {
-    return SignalBuilder(
-      builder: (context) {
-        final docked = train.dockedAt.value;
-        final enabled =
-            docked != null &&
-            train.manualAllowed &&
-            !train.dockEdgeBusy(game) &&
-            (train.activation == null ||
-                game.playerHas(p, [train.activation!]));
-        return DragDirectionPad(
-          dimension: 64,
-          enabled: enabled,
-          onAngle: (a) => game.manualTrainMove(train, p, a),
-          label: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              badgeIcon(Icons.train),
-              badgeIcon(Icons.swipe_right_alt),
-            ],
+  /// The hand as it will be when the player can next act on it, out of
+  /// [PanelView] — but the red flash of being robbed comes off the live clock,
+  /// because that's a thing that just happened rather than a thing about to.
+  Widget _inventoryRow(Player p, PanelView v) {
+    final inv = v.inventory;
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < game.params.inventoryCap; i++) ...[
+          if (i > 0) const SizedBox(width: 3),
+          slotBox(
+            item: i < inv.length ? inv[i] : null,
+            onTap: v.hasStorage && i < inv.length
+                ? () => game.commit(
+                    p,
+                    StoreAction(inv[i], notBefore: game.actionMoment),
+                  )
+                : null,
           ),
-        );
-      },
+        ],
+      ],
     );
-  }
-
-  Widget _inventoryRow(Player p) {
     return SignalBuilder(
       builder: (context) {
-        final inv = p.inventory.value;
-        final atNode = p.at.value;
-        // clicking an inventory item while a storage is open loads it in
-        final hasStorage =
-            atNode != null &&
-            atNode.facilities.any((f) => f is Storage && f.activeNow(game));
-        // muggings and blights flash the inventory red three times
-        final redness = p.flash.active
+        final redness = p.flash.flashingAt(game.now, game.params.redFlashSpan)
             ? p.flash.rednessAt(game.clock.value, game.params.redFlashSpan)
             : 0.0;
-        final row = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < game.params.inventoryCap; i++) ...[
-              if (i > 0) const SizedBox(width: 3),
-              slotBox(
-                item: i < inv.length ? inv[i] : null,
-                onTap: hasStorage && i < inv.length
-                    ? () => game.storeFromInventory(p, inv[i])
-                    : null,
-              ),
-            ],
-          ],
-        );
         if (redness <= 0) return row;
         return Container(
           padding: const EdgeInsets.all(2),
@@ -5871,13 +7483,20 @@ class const ControlsPanel({
 /// against the map rather than the HUD line: it wears the controls' panel
 /// colour so it reads as a control and not as one more thing drawn on the
 /// ground. The caller supplies the gesture handling.
-Widget mapButton(IconData icon) => Container(
-  padding: const EdgeInsets.all(mapButtonPad),
-  decoration: BoxDecoration(
-    color: paletteSignal.value.panel,
-    borderRadius: BorderRadius.circular(8),
+/// The padding outside the decoration is not spacing — the caller's positions
+/// are pulled in by the same amount to cancel it — it's touch area. A button
+/// this size is a small thing to hit with a thumb, and the space around it was
+/// doing nothing.
+Widget mapButton(IconData icon) => Padding(
+  padding: const EdgeInsets.all(mapButtonTouch),
+  child: Container(
+    padding: const EdgeInsets.all(mapButtonPad),
+    decoration: BoxDecoration(
+      color: paletteSignal.value.panel,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Icon(icon, size: mapButtonIcon, color: paletteSignal.value.ink),
   ),
-  child: Icon(icon, size: mapButtonIcon, color: paletteSignal.value.ink),
 );
 
 class const WorldView({
@@ -5906,17 +7525,23 @@ class _WorldViewState extends State<WorldView> {
   /// Seeks the point the selected player is at (or heading for). Only a change
   /// in that point starts new segments; the user's pan doesn't go through here
   /// — see [_panCam].
+  double get _camElapsed => _camClock.elapsedMicroseconds / 1e6 - _camSegStart;
+
+  /// where the camera has got to, without asking it to go anywhere new
+  Offset get _camNow {
+    final t = _camElapsed;
+    return Offset(_camX.x(t), _camY.x(t));
+  }
+
   Offset _seekCam(Offset follow) {
-    final now = _camClock.elapsedMicroseconds / 1e6;
     if (_camFollow != follow) {
-      final t = now - _camSegStart;
+      final t = _camElapsed;
       _camX.target(follow.dx + _userPan.dx, time: t);
       _camY.target(follow.dy + _userPan.dy, time: t);
-      _camSegStart = now;
+      _camSegStart = _camClock.elapsedMicroseconds / 1e6;
       _camFollow = follow;
     }
-    final t = now - _camSegStart;
-    return Offset(_camX.x(t), _camY.x(t));
+    return _camNow;
   }
 
   /// A drag is the player's own hand on the camera, so it moves the
@@ -6094,8 +7719,12 @@ class _WorldViewState extends State<WorldView> {
               // one gap above the pause button, which the screen puts at the
               // same inset in the corner this view fills
               Positioned(
-                right: mapButtonInset,
-                bottom: mapButtonInset + mapButtonExtent + mapButtonGap,
+                right: mapButtonInset - mapButtonTouch,
+                bottom:
+                    mapButtonInset +
+                    mapButtonExtent +
+                    mapButtonGap -
+                    mapButtonTouch,
                 child: _zoomButton(game, size),
               ),
             ],
@@ -6141,15 +7770,28 @@ class _WorldViewState extends State<WorldView> {
               _recenterSeen = wanted;
               _recenter();
             }
+            // The camera only chases someone it can already see. Once the
+            // clock can be wound, the selected player is often somewhere the
+            // user isn't looking — replaying a walk from ten minutes ago
+            // across the far side of the map — and a view that leapt after
+            // every step of theirs would be dragging the user away from
+            // whatever they were reading. Being asked outright to recentre
+            // (a jump, the whole-map view) still counts; that isn't a step.
+            final zoom = _zoom!;
+            final where = sel.worldPos(game.now) - _camNow;
+            final watching =
+                _camFollow == null ||
+                max((where.dx * zoom).abs(), (where.dy * zoom).abs()) <
+                    size.shortestSide / 2;
+            final follow =
+                _forcedCamTarget ??
+                (watching
+                    ? (sel.traversalTarget?.pos ?? sel.worldPos(game.now))
+                    : _camFollow!);
             final cam = aiming
                 ? Offset(_camX.endValue, _camY.endValue)
-                : _seekCam(
-                    _forcedCamTarget ??
-                        sel.traversalTarget?.pos ??
-                        sel.worldPos(),
-                  );
+                : _seekCam(follow);
             _lastCam = cam;
-            final zoom = _zoom!;
             final viewCenter = size.center(Offset.zero);
             Offset project(Offset world) => (world - cam) * zoom + viewCenter;
             final cullRect = (Offset.zero & size).inflate(nodeIconSize * 5);
@@ -6232,8 +7874,11 @@ class _WorldViewState extends State<WorldView> {
                 // the eye is following
                 for (final p in game.players)
                   if (p.traversing != null &&
-                      cullRect.contains(project(p.worldPos())))
-                    _positioned(project(p.worldPos()), PlayerOrb(game, p)),
+                      cullRect.contains(project(p.worldPos(game.now))))
+                    _positioned(
+                      project(p.worldPos(game.now)),
+                      PlayerOrb(game, p),
+                    ),
                 if (tip != null && cullRect.contains(project(tip.$2.pos)))
                   _tooltipBubble(project(tip.$2.pos), tip.$3, tip.$2),
               ],
@@ -6403,7 +8048,7 @@ class _WorldPainter({
       paletteSignal.value.blightWash,
     )!;
     for (final b in game.blights) {
-      final color = b.flash.active
+      final color = b.flash.flashingAt(game.now, game.params.redFlashSpan)
           ? Color.lerp(blightBase, Colors.red, 0.5)!
           : b.dormant
           ? Color.lerp(blightBase, paletteSignal.value.ground, 0.55)!

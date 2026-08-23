@@ -47,17 +47,22 @@ class GameRng {
 double rangeIn(GameRng rng, double low, double high) =>
     low + rng.nextDouble() * (high - low);
 
+/// [rangeIn] onto the tick grid. One rng draw, same as the double version, so
+/// swapping one for the other doesn't shift the generation stream.
+TTime rangeInTicks(GameRng rng, TTime low, TTime high) =>
+    low + ticksOf(rng.nextDouble() * (high - low));
+
 /// log-distributed int in [low, high]
 int logUniformInt(GameRng rng, int low, int high) =>
     exp(rangeIn(rng, log(low.toDouble()), log(high.toDouble())))
         .round()
         .clamp(low, high);
 
-/// Rolled durations land on a whole game minute. A game second is far finer
-/// than anything the player can perceive or that a readout shows, so leaving
-/// them unquantised would only mean two nominally identical traders resting
-/// for imperceptibly different spans.
-double roundToMinute(double v) => (v / gameMinute).roundToDouble() * gameMinute;
+/// Rolled durations land on a whole game minute. A tick is far finer than
+/// anything the player can perceive or that a readout shows, so leaving them
+/// unquantised would only mean two nominally identical traders resting for
+/// imperceptibly different spans.
+TTime roundToMinute(TTime v) => (v / gameMinute).round() * gameMinute;
 
 T weightedPick<T>(GameRng rng, List<(double, T)> options) {
   final total = options.fold(0.0, (a, o) => a + o.$1);
@@ -127,7 +132,7 @@ String fmt1(double v) =>
 /// under an hour, hours under a day, days above that. Never rounds down to
 /// nothing — a real span that reads as zero is indistinguishable from no span
 /// at all.
-String fmtSpan(double t) {
+String fmtSpan(TTime t) {
   final mins = max(1, (t / gameMinute).ceil());
   if (mins < 60) return '${mins}m';
   String rounded(double v) => fmt1((v * 10).roundToDouble() / 10);
@@ -135,9 +140,203 @@ String fmtSpan(double t) {
 }
 
 /// a moment in the day as a 24-hour clock time
-String fmtTimeOfDay(double t) {
+String fmtTimeOfDay(TTime t) {
   final mins = ((t % gameDay) / gameMinute).floor();
   return '${mins ~/ 60}:${(mins % 60).toString().padLeft(2, '0')}';
+}
+
+/// The same, with the hour padded out — `07:05`, never `7:05`.
+///
+/// For the one place the time is read off a face rather than out of a
+/// sentence: it's a fixed four digits that don't shuffle sideways as the hour
+/// rolls over from nine to ten, which matters when it's sitting still under a
+/// pair of moving hands.
+String fmtTimeOfDayPadded(TTime t) {
+  final mins = ((t % gameDay) / gameMinute).floor();
+  return '${(mins ~/ 60).toString().padLeft(2, '0')}:'
+      '${(mins % 60).toString().padLeft(2, '0')}';
+}
+
+// ────────────────────────────── snapshots ──────────────────────────────
+
+/// The mutable half of a level, lifted out so the clock can be put back.
+///
+/// Not the save format. A save is a whole world written down as text, most of
+/// it the parts that never change — the graph, the item catalogue, every icon
+/// it composed — and it costs about 100KB and a parse. This is only what a
+/// moment of play can alter: a few thousand fields, held as themselves rather
+/// than as JSON, and restored into the very objects they came out of. Which is
+/// what makes it cheap enough to keep a ring of them and what keeps
+/// [identical] meaning something afterwards — no object in the level is
+/// replaced by a snapshot, only refilled.
+///
+/// What's deliberately not in here is anything that belongs to the person
+/// playing rather than to the world: which player is selected, what the camera
+/// is doing, which node was last raised to the top of the pile. Winding the
+/// clock back is meant to undo what happened, not to undo where they were
+/// looking.
+class GameSnapshot {
+  final List<Object?> _cells;
+  const GameSnapshot._(this._cells);
+
+  /// how far in this was taken, for choosing which one to wind back to
+  TTime get at => _cells[0] as TTime;
+
+  /// how many fields it holds — for the test that keeps an eye on the size
+  int get cellCountForTest => _cells.length;
+}
+
+/// Reads or writes one field, depending on which way round it was made.
+///
+/// One cursor for both directions on purpose: capture and restore are the same
+/// list of fields in the same order, and the only way to be sure they stay
+/// that way is for there to be one list. Two functions that had to be kept in
+/// step would drift the first time a field was added to one of them, and the
+/// symptom would be a rewind that silently puts one number into another
+/// number's slot.
+class _Cursor {
+  final List<Object?> cells;
+  final bool writing;
+  int _i = 0;
+
+  _Cursor.capturing() : cells = [], writing = true;
+  _Cursor.restoring(this.cells) : writing = false;
+
+  /// hands back [v] while capturing, or what was captured while restoring —
+  /// so `x = c.io(x)` is a write on the way out and a read on the way in
+  T io<T>(T v) {
+    if (writing) {
+      cells.add(v);
+      return v;
+    }
+    return cells[_i++] as T;
+  }
+
+  /// the same for a signal. While capturing this assigns the value it just
+  /// read, which signals treats as no change and doesn't announce.
+  void sig<T>(Signal<T> s) => s.value = io(s.peek());
+}
+
+/// Takes down everything a moment of play can have changed.
+GameSnapshot captureState(Game g) {
+  final c = _Cursor.capturing();
+  _syncState(c, g);
+  return GameSnapshot._(c.cells);
+}
+
+/// Puts [s] back into [g]. Afterwards the level is the level it was when the
+/// snapshot was taken, down to which wires exist, and [Game.advanceTo] can be
+/// asked to play the same stretch again.
+void restoreState(Game g, GameSnapshot s) =>
+    _syncState(_Cursor.restoring(s._cells), g);
+
+/// The field list, walked in one direction or the other. Order is the whole
+/// contract; anything added has to be added in one place, which is the point.
+void _syncState(_Cursor c, Game g) {
+  g.now = c.io(g.now);
+  g.clock.value = g.now;
+  c.sig(g.eudaimonia);
+  c.sig(g.phase);
+  c.sig(g.isNight);
+  c.sig(g.announcement);
+
+  // Trains before players: a player halfway onto a train is halfway along a
+  // wire that only exists while that train is docked, so the gangway has to be
+  // back before anyone can be put on it.
+  for (final t in g.trains) {
+    t.pos = c.io(t.pos);
+    t.departedAt = c.io(t.departedAt);
+    t._fromPos = c.io(t._fromPos);
+    t._toPos = c.io(t._toPos);
+    t._toStation = c.io(t._toStation);
+    c.sig(t.arrivesAt);
+    c.sig(t.departsAt);
+    final docked = c.io(t.dockedAt.peek());
+    if (!c.writing) {
+      // the gangway is rebuilt rather than assigned — it's an object that
+      // exists or doesn't, and the level's edge list has to agree
+      if (!docked.isSameAs(t.dockedAt.peek()) || docked == null) {
+        t.detachDock(g);
+        if (docked != null) t.attachDock(g, docked);
+      }
+      t.dockedAt.value = docked;
+    }
+  }
+
+  for (final p in g.players) {
+    c.sig(p.inventory);
+    c.sig(p.incapacitatedUntil);
+    c.sig(p.flash.startedAt);
+    c.sig(p.at);
+    p.traversalTarget = c.io(p.traversalTarget);
+    p.departedAt = c.io(p.departedAt);
+    p.arrivesAt = c.io(p.arrivesAt);
+    // the wire itself isn't kept: a dock edge is a different object after the
+    // trains above have been rebuilt, so which one they're on is worked out
+    // again from the two ends
+    final from = c.io(
+      p.traversing?.other(p.traversalTarget ?? p.traversing!.a),
+    );
+    if (!c.writing) {
+      final target = p.traversalTarget;
+      p.traversing = (from == null || target == null)
+          ? null
+          : from.edges.firstWhereOrNull((e) => e.other(from).isSameAs(target));
+      // a wire that isn't there any more can't be walked; put them at the end
+      // they were making for, which is what loading a save does too
+      if (p.traversing == null && target != null) {
+        p.traversalTarget = null;
+        p.at.value = target;
+      }
+    }
+    // How far through their list they've got, and not the list itself. What a
+    // player has decided to do is the input to the simulation rather than one
+    // of its results — moving the clock changes how much of it has happened,
+    // never what it says. See [PlayerScript].
+    p.script.done = c.io(p.script.done);
+  }
+
+  // who is standing where, rebuilt from the players rather than carried, so
+  // the two can't disagree. Only written when it's actually changed: these
+  // lists are what the node widgets watch.
+  if (!c.writing) {
+    for (final n in g.nodes) {
+      final here = [
+        for (final p in g.players)
+          if (p.at.peek().isSameAs(n)) p,
+      ];
+      final was = n.playersPresent.peek();
+      if (here.length != was.length ||
+          !here.every((p) => was.any((q) => p.isSameAs(q)))) {
+        n.playersPresent.value = here;
+      }
+    }
+  }
+
+  for (final n in g.nodes) {
+    for (final f in n.facilities) {
+      switch (f) {
+        case Tree t:
+          c.sig(t.pickedAt);
+        case Trader t:
+          c.sig(t.workEndsAt);
+          c.sig(t.cooldownEndsAt);
+          c.sig(t.pendingOutput);
+          t._worker = c.io(t._worker);
+        case Storage s: // an Outbox is one of these too
+          c.sig(s.contents);
+        case JumpStation j:
+          c.sig(j.cooldownEndsAt);
+        case Blight b:
+          c.sig(b.satiated);
+          c.sig(b.flash.startedAt);
+        case Mugger m:
+          c.sig(m.flash.startedAt);
+        default:
+          break; // stations, inboxes and landing pads hold nothing that moves
+      }
+    }
+  }
 }
 
 // ────────────────────────────── saving & loading ──────────────────────────────
@@ -244,13 +443,11 @@ ListType<(double, T)> weightsType<T>(TypeHelp<T> of) =>
 final _facilityKindType = EnumType('FacilityKind', FacilityKind.values);
 final _activePhaseType = EnumType('ActivePhase', ActivePhase.values);
 final _muggerKindType = EnumType('MuggerKind', MuggerKind.values);
-final _trainSpeedType = EnumType('TrainSpeed', TrainSpeed.values);
 final _trainScheduleKindType = EnumType(
   'TrainScheduleKind',
   TrainScheduleKind.values,
 );
 final _stationControlType = EnumType('StationControl', StationControl.values);
-final _gamePhaseType = EnumType('GamePhase', GamePhase.values);
 final _nodeToneType = EnumType('NodeTone', NodeTone.values);
 final _basicShapeType = EnumType('BasicShape', BasicShape.values);
 
@@ -408,11 +605,10 @@ class IntervalType extends TypeHelp<Interval> {
       return ClockInterval(
         multiple: IntType().fromJson(j['multiple']),
         division: IntType().fromJson(j['division']),
-        offset: DoubleType().fromJson(j['offset']),
+        offset: IntType().fromJson(j['offset']),
       );
     }
-    return ArbitraryInterval(DoubleType().fromJson(j['period']))
-      ..startedAt = DoubleType().fromJson(j['startedAt']);
+    return ArbitraryInterval(IntType().fromJson(j['period']));
   }
 
   @override
@@ -423,11 +619,7 @@ class IntervalType extends TypeHelp<Interval> {
       'division': c.division,
       'offset': c.offset,
     },
-    ArbitraryInterval a => {
-      'kind': 'arbitrary',
-      'period': a.period,
-      'startedAt': a.startedAt,
-    },
+    ArbitraryInterval a => {'kind': 'arbitrary', 'period': a.period},
   };
 }
 
@@ -447,7 +639,7 @@ class ParametersType extends TypeHelp<Parameters> {
       traderGeneratorsPerTier: levelOneTraders(tierCount.length),
       tierCount: tierCount,
       seed: IntType().fromJson(j['seed']),
-      globalTime: DoubleType().fromJson(j['globalTime']),
+      globalTime: IntType().fromJson(j['globalTime']),
       eudaimoniaGoal: IntType().fromJson(j['eudaimoniaGoal']),
       dayRealSeconds: DoubleType().fromJson(j['dayRealSeconds']),
       nPlayers: IntType().fromJson(j['nPlayers']),
@@ -482,21 +674,21 @@ class ParametersType extends TypeHelp<Parameters> {
       ).fromJson(j['nonTraderWeights']),
       nodeToneWeights: weightsType(_nodeToneType)
           .fromJson(j['nodeToneWeights']),
-      treeRegenTime: DoubleType().fromJson(j['treeRegenTime']),
+      treeRegenTime: IntType().fromJson(j['treeRegenTime']),
       treeClockIntervalp: DoubleType().fromJson(j['treeClockIntervalp']),
       treeSecondItemProb: DoubleType().fromJson(j['treeSecondItemProb']),
       treeTier1Prob: DoubleType().fromJson(j['treeTier1Prob']),
       traderInstantProb: DoubleType().fromJson(j['traderInstantProb']),
       tradeDurationRange: PairType(
-        DoubleType(),
-        DoubleType(),
+        IntType(),
+        IntType(),
       ).fromJson(j['tradeDurationRange']),
       traderCooldownProb: DoubleType().fromJson(j['traderCooldownProb']),
       traderCooldownRange: PairType(
-        DoubleType(),
-        DoubleType(),
+        IntType(),
+        IntType(),
       ).fromJson(j['traderCooldownRange']),
-      muggerIncapTime: DoubleType().fromJson(j['muggerIncapTime']),
+      muggerIncapTime: IntType().fromJson(j['muggerIncapTime']),
       muggerKindWeights: weightsType(_muggerKindType)
           .fromJson(j['muggerKindWeights']),
       storageCapacityRange: PairType(
@@ -516,8 +708,8 @@ class ParametersType extends TypeHelp<Parameters> {
       jumpCostItemp: DoubleType().fromJson(j['jumpCostItemp']),
       jumpCooldownp: DoubleType().fromJson(j['jumpCooldownp']),
       jumpCooldownRange: PairType(
-        DoubleType(),
-        DoubleType(),
+        IntType(),
+        IntType(),
       ).fromJson(j['jumpCooldownRange']),
       blightRadii: ListType(DoubleType()).fromJson(j['blightRadii']),
       blightMitigablep: DoubleType().fromJson(j['blightMitigablep']),
@@ -528,12 +720,7 @@ class ParametersType extends TypeHelp<Parameters> {
       ).fromJson(j['blightDaysRange']),
       nTrains: IntType().fromJson(j['nTrains']),
       stationsPerTrain: IntType().fromJson(j['stationsPerTrain']),
-      trainSpeedUnitsPerSec: MapType(
-        _trainSpeedType,
-        DoubleType(),
-      ).fromJson(j['trainSpeedUnitsPerSec']),
-      trainSpeedWeights: weightsType(_trainSpeedType)
-          .fromJson(j['trainSpeedWeights']),
+      trainSpeed: DoubleType().fromJson(j['trainSpeed']),
       trainActivationProb: DoubleType().fromJson(j['trainActivationProb']),
       trainActivationConsumedProb: DoubleType().fromJson(
         j['trainActivationConsumedProb'],
@@ -549,7 +736,7 @@ class ParametersType extends TypeHelp<Parameters> {
       stationControlWeights: weightsType(_stationControlType)
           .fromJson(j['stationControlWeights']),
       trainTerminusDistance: DoubleType().fromJson(j['trainTerminusDistance']),
-      oneWayReturnDelay: DoubleType().fromJson(j['oneWayReturnDelay']),
+      oneWayReturnDelay: IntType().fromJson(j['oneWayReturnDelay']),
     );
   }
 
@@ -590,13 +777,13 @@ class ParametersType extends TypeHelp<Parameters> {
     'treeTier1Prob': p.treeTier1Prob,
     'traderInstantProb': p.traderInstantProb,
     'tradeDurationRange': PairType(
-      DoubleType(),
-      DoubleType(),
+      IntType(),
+      IntType(),
     ).toJson(p.tradeDurationRange),
     'traderCooldownProb': p.traderCooldownProb,
     'traderCooldownRange': PairType(
-      DoubleType(),
-      DoubleType(),
+      IntType(),
+      IntType(),
     ).toJson(p.traderCooldownRange),
     'muggerIncapTime': p.muggerIncapTime,
     'muggerKindWeights': weightsType(_muggerKindType)
@@ -616,8 +803,8 @@ class ParametersType extends TypeHelp<Parameters> {
     'jumpCostItemp': p.jumpCostItemp,
     'jumpCooldownp': p.jumpCooldownp,
     'jumpCooldownRange': PairType(
-      DoubleType(),
-      DoubleType(),
+      IntType(),
+      IntType(),
     ).toJson(p.jumpCooldownRange),
     'blightRadii': p.blightRadii,
     'blightMitigablep': p.blightMitigablep,
@@ -625,12 +812,7 @@ class ParametersType extends TypeHelp<Parameters> {
     'blightDaysRange': PairType(IntType(), IntType()).toJson(p.blightDaysRange),
     'nTrains': p.nTrains,
     'stationsPerTrain': p.stationsPerTrain,
-    'trainSpeedUnitsPerSec': MapType(
-      _trainSpeedType,
-      DoubleType(),
-    ).toJson(p.trainSpeedUnitsPerSec),
-    'trainSpeedWeights': weightsType(_trainSpeedType)
-        .toJson(p.trainSpeedWeights),
+    'trainSpeed': p.trainSpeed,
     'trainActivationProb': p.trainActivationProb,
     'trainActivationConsumedProb': p.trainActivationConsumedProb,
     'trainActivationTwoProb': p.trainActivationTwoProb,
@@ -675,6 +857,21 @@ class LevelRefs(
 
   int indexOf(Node n) => _index[n]!;
   Node node(Object? json) => nodes[IntType().fromJson(json)];
+
+  /// A facility named the way everything else here is named: by where it sits.
+  /// Its node, then its place among that node's own. [Facility.id] would be
+  /// shorter, but a level is read back in passes and the ids aren't handed out
+  /// until the [Game] is standing, which is after the facilities need to be
+  /// findable.
+  List<int> facilityRef(Facility f) => [
+    indexOf(f.node),
+    f.node.facilities.indexOf(f),
+  ];
+
+  Facility facility(Object? json) {
+    final r = _jsonList(json, 'facility');
+    return nodes[IntType().fromJson(r[0])].facilities[IntType().fromJson(r[1])];
+  }
 }
 
 class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
@@ -708,14 +905,10 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
     return f;
   }
 
-  Tree _tree(Map<String, dynamic> j) =>
-      Tree(
-          ListType(refs.quantity).fromJson(j['produces']),
-          IntervalType().fromJson(j['regen']),
-        )
-        ..picked.value = BoolType().fromJson(j['picked'])
-        .._pickedInCycle = IntType().fromJson(j['pickedInCycle'])
-        ..regenRemaining.value = DoubleType().fromJson(j['regenRemaining']);
+  Tree _tree(Map<String, dynamic> j) => Tree(
+    ListType(refs.quantity).fromJson(j['produces']),
+    IntervalType().fromJson(j['regen']),
+  )..pickedAt.value = Nullable(IntType()).fromJson(j['pickedAt']);
 
   /// Who a trade in progress belongs to isn't written down. [Trader._worker]
   /// only exists so the goods can be put straight into the hands of whoever
@@ -727,12 +920,11 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
           ListType(refs.quantity).fromJson(j['takes']),
           ListType(refs.quantity).fromJson(j['gives']),
         )
-        ..duration = DoubleType().fromJson(j['duration'])
-        ..cooldown = DoubleType().fromJson(j['cooldown'])
-        ..workRemaining.value = DoubleType().fromJson(j['workRemaining'])
-        ..cooldownRemaining.value = DoubleType().fromJson(
-          j['cooldownRemaining'],
-        )
+        ..duration = IntType().fromJson(j['duration'])
+        ..cooldown = IntType().fromJson(j['cooldown'])
+        ..workEndsAt.value = Nullable(IntType()).fromJson(j['workEndsAt'])
+        ..cooldownEndsAt.value = Nullable(IntType())
+            .fromJson(j['cooldownEndsAt'])
         ..pendingOutput.value = ListType(refs.quantity)
             .fromJson(j['pendingOutput']);
 
@@ -749,19 +941,15 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
   JumpStation _jumpStation(Map<String, dynamic> j) => JumpStation(
     freeAim: BoolType().fromJson(j['freeAim']),
     cost: Nullable(refs.quantity).fromJson(j['cost']),
-    cooldown: DoubleType().fromJson(j['cooldown']),
-  )..cooldownRemaining.value = DoubleType().fromJson(j['cooldownRemaining']);
+    cooldown: IntType().fromJson(j['cooldown']),
+  )..cooldownEndsAt.value = Nullable(IntType()).fromJson(j['cooldownEndsAt']);
 
-  Blight _blight(Map<String, dynamic> j) =>
-      Blight(
-          radius: DoubleType().fromJson(j['radius']),
-          interval: IntervalType().fromJson(j['interval']) as ClockInterval,
-          mitigator: Nullable(refs.item).fromJson(j['mitigator']),
-          hungry: BoolType().fromJson(j['hungry']),
-        )
-        ..satiated.value = BoolType().fromJson(j['satiated'])
-        .._lastCycle = IntType().fromJson(j['lastCycle'])
-        ..remaining.value = DoubleType().fromJson(j['remaining']);
+  Blight _blight(Map<String, dynamic> j) => Blight(
+    radius: DoubleType().fromJson(j['radius']),
+    interval: IntervalType().fromJson(j['interval']) as ClockInterval,
+    mitigator: Nullable(refs.item).fromJson(j['mitigator']),
+    hungry: BoolType().fromJson(j['hungry']),
+  )..satiated.value = BoolType().fromJson(j['satiated']);
 
   Map<String, Object?> _head(Facility f, FacilityKind kind) => {
     'kind': _facilityKindType.toJson(kind),
@@ -779,9 +967,7 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
       ..._head(f, FacilityKind.tree),
       'produces': ListType(refs.quantity).toJson(t.produces),
       'regen': IntervalType().toJson(t.regen),
-      'picked': t.picked.peek(),
-      'pickedInCycle': t._pickedInCycle,
-      'regenRemaining': t.regenRemaining.peek(),
+      'pickedAt': Nullable(IntType()).toJson(t.pickedAt.peek()),
     },
     Trader t => {
       ..._head(f, FacilityKind.trader),
@@ -789,8 +975,8 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
       'gives': ListType(refs.quantity).toJson(t.gives),
       'duration': t.duration,
       'cooldown': t.cooldown,
-      'workRemaining': t.workRemaining.peek(),
-      'cooldownRemaining': t.cooldownRemaining.peek(),
+      'workEndsAt': Nullable(IntType()).toJson(t.workEndsAt.peek()),
+      'cooldownEndsAt': Nullable(IntType()).toJson(t.cooldownEndsAt.peek()),
       'pendingOutput': ListType(refs.quantity).toJson(t.pendingOutput.peek()),
     },
     Mugger m => {
@@ -823,7 +1009,7 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
       'freeAim': js.freeAim,
       'cost': Nullable(refs.quantity).toJson(js.cost),
       'cooldown': js.cooldown,
-      'cooldownRemaining': js.cooldownRemaining.peek(),
+      'cooldownEndsAt': Nullable(IntType()).toJson(js.cooldownEndsAt.peek()),
     },
     LandingStation _ => _head(f, FacilityKind.landingStation),
     Blight b => {
@@ -833,8 +1019,6 @@ class FacilityType(final LevelRefs refs) extends TypeHelp<Facility> {
       'mitigator': Nullable(refs.item).toJson(b.mitigator),
       'hungry': b.hungry,
       'satiated': b.satiated.peek(),
-      'lastCycle': b._lastCycle,
-      'remaining': b.remaining.peek(),
     },
     _ => throw ArgumentError('no way to write down a ${f.runtimeType}'),
   };
@@ -886,7 +1070,6 @@ class NodeType(final LevelRefs refs) extends TypeHelp<Node> {
 
   TrainNode _trainShell(Offset pos, Map<String, dynamic> j) => TrainNode(
     pos: pos,
-    speed: _trainSpeedType.fromJson(j['speed']),
     activation: Nullable(refs.quantity).fromJson(j['activation']),
     activationConsumed: BoolType().fromJson(j['activationConsumed']),
     movableFromInside: BoolType().fromJson(j['movableFromInside']),
@@ -927,13 +1110,17 @@ class NodeType(final LevelRefs refs) extends TypeHelp<Node> {
     t._fromPos = OffsetType().fromJson(j['fromPos']);
     t._toPos = OffsetType().fromJson(j['toPos']);
     t._toStation = j['toStation'] == null ? null : refs.node(j['toStation']);
-    t._transitTotal = DoubleType().fromJson(j['transitTotal']);
-    t.transitRemaining.value = DoubleType().fromJson(j['transitRemaining']);
+    t.departedAt = IntType().fromJson(j['departedAt']);
+    t.arrivesAt.value = Nullable(IntType()).fromJson(j['arrivesAt']);
     final docked = j['dockedAt'];
     if (docked != null) t.dock(g, refs.node(docked));
-    // dock() starts a fresh countdown off the schedule; the saved one is the
-    // countdown that was really running
-    t.waitRemaining.value = DoubleType().fromJson(j['waitRemaining']);
+    // dock() works out a fresh departure off the schedule, and clears the
+    // transit bracket; both of the saved ones are what was really running
+    t.departsAt.value = Nullable(IntType()).fromJson(j['departsAt']);
+    if (docked == null) {
+      t._toStation = j['toStation'] == null ? null : refs.node(j['toStation']);
+      t.arrivesAt.value = Nullable(IntType()).fromJson(j['arrivesAt']);
+    }
   }
 
   @override
@@ -949,7 +1136,6 @@ class NodeType(final LevelRefs refs) extends TypeHelp<Node> {
   Object? _trainToJson(TrainNode t) {
     final docked = t.dockedAt.peek();
     return {
-      'speed': _trainSpeedType.toJson(t.speed),
       'activation': Nullable(refs.quantity).toJson(t.activation),
       'activationConsumed': t.activationConsumed,
       'movableFromInside': t.movableFromInside,
@@ -962,11 +1148,115 @@ class NodeType(final LevelRefs refs) extends TypeHelp<Node> {
       'toStation': t._toStation == null ? null : refs.indexOf(t._toStation!),
       'fromPos': OffsetType().toJson(t._fromPos),
       'toPos': OffsetType().toJson(t._toPos),
-      'transitTotal': t._transitTotal,
-      'transitRemaining': t.transitRemaining.peek(),
-      'waitRemaining': t.waitRemaining.peek(),
+      'departedAt': t.departedAt,
+      'arrivesAt': Nullable(IntType()).toJson(t.arrivesAt.peek()),
+      'departsAt': Nullable(IntType()).toJson(t.departsAt.peek()),
     };
   }
+}
+
+/// A player's history, which goes to disk along with everything else: the
+/// clock can be wound back into a session played yesterday, and it can only do
+/// that if what everyone decided to do is still written down.
+///
+/// [PlayerAction.recorded] rides along too. Without it a reloaded level would
+/// treat every replayed action as though it were happening for the first time,
+/// quietly re-recording whatever came out instead of noticing it had come out
+/// differently — the divergence alert would work until you quit the app and
+/// then never again.
+class ActionType(final LevelRefs refs) extends TypeHelp<PlayerAction> {
+  this : super('trainscapeAction');
+
+  ActionResult? _result(Object? json) {
+    if (json == null) return null;
+    final j = _jsonMap(json, 'result');
+    final at = j['at'];
+    return ActionResult(
+      ListType(refs.item).fromJson(j['holding']),
+      at == null ? null : refs.node(at),
+    );
+  }
+
+  Object? _resultJson(ActionResult? r) => r == null
+      ? null
+      : {
+          'holding': ListType(refs.item).toJson(r.holding),
+          'at': r.at == null ? null : refs.indexOf(r.at!),
+        };
+
+  @override
+  PlayerAction fromJsonValue(Object? json) {
+    final j = _jsonMap(json, 'PlayerAction');
+    final at = IntType().fromJson(j['notBefore']);
+    final a = switch (StringType().fromJson(j['kind'])) {
+      'move' => MoveAction(refs.node(j['to']), notBefore: at),
+      'harvest' => HarvestAction(refs.facility(j['at']) as Tree, notBefore: at),
+      'trade' => TradeAction(refs.facility(j['at']) as Trader, notBefore: at),
+      'collect' => CollectAction(
+        refs.facility(j['at']) as Trader,
+        notBefore: at,
+      ),
+      'feed' => FeedAction(refs.facility(j['at']) as Blight, notBefore: at),
+      'pull' => PullAction(
+        refs.facility(j['at']) as Inbox,
+        refs.item.fromJson(j['item']),
+        notBefore: at,
+      ),
+      'jump' => JumpAction(
+        refs.facility(j['at']) as JumpStation,
+        refs.node(j['to']),
+        notBefore: at,
+      ),
+      'store' => StoreAction(refs.item.fromJson(j['item']), notBefore: at),
+      'rotate' => RotateAction(
+        refs.facility(j['at']) as Storage,
+        refs.item.fromJson(j['item']),
+        notBefore: at,
+      ),
+      'train' => TrainMoveAction(
+        refs.node(j['train']) as TrainNode,
+        refs.node(j['to']),
+        notBefore: at,
+      ),
+      final k => throw ArgumentError('no action called $k'),
+    };
+    a.recorded = _result(j['recorded']);
+    return a;
+  }
+
+  @override
+  Object? toJsonValue(PlayerAction a) => {
+    'notBefore': a.notBefore,
+    'recorded': _resultJson(a.recorded),
+    ...switch (a) {
+      MoveAction m => {'kind': 'move', 'to': refs.indexOf(m.to)},
+      HarvestAction h => {'kind': 'harvest', 'at': refs.facilityRef(h.tree)},
+      TradeAction t => {'kind': 'trade', 'at': refs.facilityRef(t.trader)},
+      CollectAction t => {'kind': 'collect', 'at': refs.facilityRef(t.trader)},
+      FeedAction f => {'kind': 'feed', 'at': refs.facilityRef(f.blight)},
+      PullAction p => {
+        'kind': 'pull',
+        'at': refs.facilityRef(p.inbox),
+        'item': refs.item.toJson(p.item),
+      },
+      JumpAction j => {
+        'kind': 'jump',
+        'at': refs.facilityRef(j.station),
+        'to': refs.indexOf(j.to),
+      },
+      StoreAction s => {'kind': 'store', 'item': refs.item.toJson(s.item)},
+      RotateAction r => {
+        'kind': 'rotate',
+        'at': refs.facilityRef(r.from),
+        'item': refs.item.toJson(r.item),
+      },
+      TrainMoveAction t => {
+        'kind': 'train',
+        'train': refs.indexOf(t.train),
+        'to': refs.indexOf(t.to),
+      },
+    },
+  };
 }
 
 class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
@@ -980,16 +1270,20 @@ class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
       ColorType().fromJson(j['color']),
     );
     p.inventory.value = ListType(refs.item).fromJson(j['inventory']);
-    p.incapacitatedFor.value = DoubleType().fromJson(j['incapacitatedFor']);
+    p.incapacitatedUntil.value = Nullable(IntType())
+        .fromJson(j['incapacitatedUntil']);
     final at = j['at'];
     if (at != null) p.at.value = refs.node(at);
-    for (final n in _jsonList(j['planNodes'], 'plan')) {
-      p.plan.nodes.add(refs.node(n));
-    }
-    p.plan.departureTimes.addAll(
-      ListType(DoubleType()).fromJson(j['planDepartures']),
-    );
     return p;
+  }
+
+  /// The script names facilities, and facilities are hung on their nodes in a
+  /// later pass than the one that makes the nodes — so like the wire a walker
+  /// is halfway along, it waits until the level is standing.
+  void restoreScript(Player p, Object? json) {
+    final j = _jsonMap(json, 'Player');
+    p.script.actions.addAll(ListType(ActionType(refs)).fromJson(j['script']));
+    p.script.done = IntType().fromJson(j['scriptDone']);
   }
 
   /// The wire a player is halfway along can only be found once the trains have
@@ -1001,9 +1295,7 @@ class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
     final j = _jsonMap(t, 'traversal');
     final from = refs.node(j['from']);
     final to = refs.node(j['to']);
-    final edge = from.edges.firstWhereOrNull(
-      (e) => identical(e.other(from), to),
-    );
+    final edge = from.edges.firstWhereOrNull((e) => e.other(from).isSameAs(to));
     if (edge == null) {
       // the wire is gone — a train they were boarding left without them. Put
       // them down at the end they were walking towards rather than nowhere
@@ -1012,7 +1304,8 @@ class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
     }
     p.traversing = edge;
     p.traversalTarget = to;
-    p.traversalProgress = DoubleType().fromJson(j['progress']);
+    p.departedAt = IntType().fromJson(j['departedAt']);
+    p.arrivesAt = IntType().fromJson(j['arrivesAt']);
   }
 
   @override
@@ -1023,16 +1316,18 @@ class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
       'name': p.name,
       'color': ColorType().toJson(p.color),
       'inventory': ListType(refs.item).toJson(p.inventory.peek()),
-      'incapacitatedFor': p.incapacitatedFor.peek(),
+      'incapacitatedUntil': Nullable(IntType())
+          .toJson(p.incapacitatedUntil.peek()),
       'at': at == null ? null : refs.indexOf(at),
-      'planNodes': [for (final n in p.plan.nodes) refs.indexOf(n)],
-      'planDepartures': p.plan.departureTimes,
+      'script': ListType(ActionType(refs)).toJson(p.script.actions),
+      'scriptDone': p.script.done,
       'traversing': traversing == null
           ? null
           : {
               'from': refs.indexOf(traversing.other(p.traversalTarget!)),
               'to': refs.indexOf(p.traversalTarget!),
-              'progress': p.traversalProgress,
+              'departedAt': p.departedAt,
+              'arrivesAt': p.arrivesAt,
             },
     };
   }
@@ -1043,7 +1338,7 @@ class PlayerType(final LevelRefs refs) extends TypeHelp<Player> {
 /// read as though it were this one — a mismatch simply means no saved level,
 /// and a fresh one is generated. Bump it whenever the shape below changes.
 class LevelType extends TypeHelp<Game> {
-  LevelType() : super('trainscapeLevel/4');
+  LevelType() : super('trainscapeLevel/7');
 
   @override
   Game fromJsonValue(Object? json) {
@@ -1097,6 +1392,7 @@ class LevelType extends TypeHelp<Game> {
     }
     for (var i = 0; i < playersJson.length; i++) {
       playerType.restoreTraversal(players[i], playersJson[i]);
+      playerType.restoreScript(players[i], playersJson[i]);
     }
     for (final p in players) {
       final at = p.at.peek();
@@ -1105,26 +1401,62 @@ class LevelType extends TypeHelp<Game> {
       }
     }
 
-    // 5 ── the clock and the score
-    game.gameTime = DoubleType().fromJson(j['gameTime']);
-    game.clock.value = game.gameTime;
-    game.timeLeft.value = DoubleType().fromJson(j['timeLeft']);
+    // 5 ── the score and the settings, then the clock
     game.eudaimonia.value = IntType().fromJson(j['eudaimonia']);
     game.paused.value = BoolType().fromJson(j['paused']);
-    game.phase.value = _gamePhaseType.fromJson(j['phase']);
     game.selectedPlayer.value =
         players[IntType().fromJson(j['selectedPlayer'])];
     game._stackTop = IntType().fromJson(j['stackTop']);
-    game.isNight.value = game.timeOfDay >= gameDay / 2;
+
+    // Everything above is the level as it *began*, so this is the beginning,
+    // and it's as far back as winding can go — which is all the way.
+    game.now = IntType().fromJson(j['originAt']);
+    game.clock.value = game.now;
+    game.isNight.value = game.timeOfDay >= gameDay ~/ 2;
+    game.markOrigin();
+
+    // and then it's played, which is what puts it back where it was left. The
+    // histories are loaded, so this is the same replay the clock does when
+    // it's wound forwards, and it lands in the same place for the same reason.
+    game.advanceTo(IntType().fromJson(j['now']));
     return game;
   }
 
   @override
+  /// Written from the level's beginning rather than from where it has got to.
+  ///
+  /// A middle can't be wound back through — that's what a saved game used to
+  /// be, and it's why picking one up left the clock nailed to the floor. A
+  /// beginning plus everyone's history can be wound back through completely,
+  /// because it's the same pair the running game replays from every time the
+  /// dial moves. The clock reading is written alongside and played back to on
+  /// the way in, so nothing about being reloaded is a special case.
+  ///
+  /// It's a smaller file, too: one world instead of one world and a ladder of
+  /// moments. The price is that a save is now reproduced rather than recorded
+  /// — change what the simulation *does* and an old save replays into a
+  /// different world — so the version above has to move whenever behaviour
+  /// does, not only when this format does.
+  @override
   Object? toJsonValue(Game g) {
+    // Wound back to the beginning to be written down, and put back
+    // afterwards. The histories aren't part of a snapshot, so they're the same
+    // either way, and the score is (it's re-earned by the replay on the way
+    // in, so what goes to disk is the nothing it started with).
+    //
+    // This does write to every signal in the level, twice, netting out at no
+    // change. It's the one place outside the ticker that does, and it's safe
+    // in both places a save happens: leaving the screen unmounts the widgets
+    // below before this runs, and backgrounding costs one wasted rebuild of a
+    // screen nobody is looking at.
+    final here = captureState(g);
+    final at = g.now;
+    restoreState(g, g._origin);
+
     final refs = LevelRefs(g.catalog, g.nodes);
     final nodeType = NodeType(refs);
     final playerType = PlayerType(refs);
-    return {
+    final out = {
       'params': ParametersType().toJson(g.params),
       'catalog': ItemCatalogType().toJson(g.catalog),
       'nodes': [for (final n in g.nodes) nodeType.toJson(n)],
@@ -1133,14 +1465,16 @@ class LevelType extends TypeHelp<Game> {
           if (e.dockTrain == null) [refs.indexOf(e.a), refs.indexOf(e.b)],
       ],
       'players': [for (final p in g.players) playerType.toJson(p)],
-      'gameTime': g.gameTime,
-      'timeLeft': g.timeLeft.peek(),
+      'originAt': g.now,
+      'now': at,
       'eudaimonia': g.eudaimonia.peek(),
       'paused': g.paused.peek(),
-      'phase': _gamePhaseType.toJson(g.phase.peek()),
       'selectedPlayer': g.players.indexOf(g.selectedPlayer.peek()),
       'stackTop': g._stackTop,
     };
+
+    restoreState(g, here);
+    return out;
   }
 }
 

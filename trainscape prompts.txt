@@ -167,24 +167,80 @@ add a control above the pause icon, a zoom icon. If tapped, it cycles between th
 get rid of the size change to facilities when player enters a node (it's tricky for us to make the size change animate)
 When something happens to a player who's off-screen, it needs to mention them in the popup message, like "<Rudy icon> MUGGED", or else it's sheer confusion.
 center camera when it's in full map view. when cycling zoom mode, cycle one up from the zoom level that's closest to the current zoom level.
---
+Remove train speed. All trains should be fast.
 Big new feature. We need to do time shit. Controlling two characters simultaneously while dealing with time limits doesn't really work well gameplaywise unless it's turn based, believe it or not. Moving characters in alternation sucks, so you want to be able to move one independently for a while then only move the second to follow once they need to cross paths/interact. So we're going to do that by, when you wanna move the second player, rewind to the last time they moved, which will rewind the first player's actions, then as the second player moves, the first one's actions replay in parallel. This means the actions later moving characters take can interfere with the actions of the first character, in some cases invalidating them, but we can detect that. So:
-	there has to be a time dial that can turn time forwards and backwards. Move the clock to the lower left side of the map, and make it bigger. When the player turns it, it turns time back and forth.
-	time needs to advance only when the player does things (or if playing, during ticks), such as walking, or riding a train, or turning the time dial forward
+	there has to be a time dial that can turn time forwards and backwards. Move the clock to the lower left side of the map, and make it bigger. When the player turns it, it turns the hour hand by the angle they moved.
+	in pause mode, time only advances when the player does things (or if playing, during ticks), such as walking, or launching the train, or turning the time dial forward. I guess.. when the selected player has an action scheduled, time plays until all of those actions complete.
 	we need to be able to record action histories so that we can replay them after rewinding
 		scheduled actions can become invalid, for instance if a player is about to take an item from a container that doesn't have anything in it, or move on to a train that's not at this station, which stops that player's action history from replaying any further, and shows a minor alert message.
-	make sure that nothing is framerate dependent, so, there's a strict ordering of events to come that's knowable in advance. If a player is moving towards a node, their arrival time and trajectory is known, anything that acts on space knows whether they will be within range at the time it will fire.
-	actions/events must be reversible, which is to say, if they destroy state, the action must keep the state it destroyed, so that it can restore it if reversed.
+	make sure that nothing is framerate dependent, eg, you'd be able to run update(delta: 2 hours) and still get the same results as update(delta:16 ms) running however many times, so, there's a strict ordering of events to come, that's knowable in advance. If a player is moving towards a node, their arrival time and trajectory is known, anything that acts on space knows whether they will be within range at the time it will fire.
+		part of this ordering means I guess every entity needs to have an id so that can be used to break ties. For instance if two players tried to take the same item on the same frame. Though in most cases, you should use type to break ties.
+	actions/events must be reversible, which is to say, if they destroy state, the action must keep the state it destroyed, so that it can restore it instantly when reversed.
+	we maybe switch everything represent time with an integer since float addition and subtraction isn't reversible :(
+		I guess u64s, 16384 (2^14) per in-game second
+does that all sound feasible? Does any of it sound like a bad idea?
 
-time stuff
-	since the player is controlling two characters at once, and since there is such a long planning phase to get to know the facility and the goals, it can't really be realtime, it's really expected to be played as turn based at high sweat levels. So start the game paused (most players will never unpause).
-	And introduce a system for handling action histories and time travel.
+Okay :( I guess if we take periodic snapshots it'll be cheap enough to run a resimulation every frame. But you better be ready to say sorry if we try it and find out it causes framerate to decrease cause I don't think it introduces more complexity than you'd be able to handle. You can try it without more than one snapshot for now.
+Aren't signals responses lazy?
+sketchy, let's replace identical with ids then/provide an equality implementation.
+Yeah okay, major alert. but isn't that a suggestion that the take action should mention the id of what it's taking.
+the rewind clock can't go below 0 but has no upper bound (to allow using it to wait fast). I don't really want it to snap to events. It can show players partway through their action animations. When a player is selected, it should go to the time of the completion of their most recent action. Yeah okay let's just gear down the clock, or amplify distance, 30deg becomes 3 when the clock's outer wheel (add that) is dragged, only turns very fast when the inner wheel is dragged.
+yes the game will be more like a puzzle, it needs to be.
+- regarding Now... and animations. I guess you have a "TTime? playingTo;" which, when set, the game updates each frame to inch towards it until it's at now and then it pauses again? (where TTime = int, per your decision)
+- yes
+- okay
+- uh yeah. And I guess muggers wont like, in any important sense own the action, it happens as part of the entry action? idk
+Sounds like we're ready to start?
 
-	- undo before time dial
-	- action histories that break when replayed show warning and stop advancing
-	- action history
-	- make sure actions within the same frame happen in order
+I said we're replacing identical with id comparisons. Is something wrong with that?
+"captured panel model"? Oh yeah, does the control panel show as if it's already in the future game state? Is that what you mean? It probably should.
 
-later
-	create an encoding for actions players can take. Allow scheduling arbitrary action
+proceed
+
+I wouldn't really want to playtest until those are in. Proceed. The easing-to-present should... probably actually follow a spring. Because we'll want to smooth clock drag actions slightly as well. Probably that would want a stiffer spring, so change stiffness depending on what the cause of the movement was.
+
+an issue with closed form is that we may need (for visual smoothness) to be able to interrupt it with an initial velocity of current velocity if another action is taken while the current one is animating. Do you do that? (do you have closed form compute of the velocity, and initial as parameter)
+I'm a bit confused by one paragraph, (Wouldn't the rebuild only fire when flutter's ready to render another frame?) what're probes that throw the world away exactly?
+yeah i'd already asked to start paused in a previous round..
+sounds okay, after talking about the above, i'll playtest
+
+Is there a reason we're moving Game forward and back in that sort of situation instead of just maintaining a GameSnapshot and operating on that, like a model, disconnected from a view.
+
+disable mugged/blighted messages, they're a bit broken
+the clock drag turns it the wrong way
+make the clock and outer ring twice as large, but recess it so that only like 12% of the outer ring is showing at the left and right, the user can start a drag anywhere so the whole thing doesn't have to be showing. Make the outer ring a bit thicker. Make action future indicator rings thinner and remove the caps. the start angle should be -pi*0.12.
+Show all action history indicator rings on the outer ring, now that they're thin.
+bug: take actions don't seem to work while paused, until play starts.
+The spring takes too long to settle, use parabolic easer, I may already be providing one, but it's capable of overshooting and bugging out, so you might want to write a better one.
+
+the movement pad controls often send multiple moves in quick succession. They should only accept a new event after player thumb movement slows and then speeds up again substantially enough.
+
+also make zoom and play buttons clickable anywhere in their padding instead of just within the visible container area.
+
+make clockface be 0.24 * the span of the minimum map view widget
+
+okay there was a misunderstanding on the clock thing. I want it like Positioned(bottom:0, left:0, child: Stack(padding(clockface), Positioned.centered(outerRing))). The outer ring will overflow and go offscreen at the left and right
+
+[pasted a crash] 'package:flutter/src/rendering/object.dart': Failed assertion: line 6018 pos 14: '!childSemantics.renderObject._needsLayout': is not true. / BoxConstraints forces an infinite width and infinite height.
+
+:S the outer ring is rendering way wider than it actually is/isn't interactive at that distance
+
+the inner limit of the outer wheel is further in on the clockface, it still doesn't line up with the outer wheel visually on the inside. You probably should have the draggable be over all of the graphical parts, but calculate it correclty. The inner wheel extent isn't a constant, it's determined from clock face.
+
+I gave the wrong start position for outer wheel action history lines, it should be -PI/2*1.23
+
+I don't think action history is saved to disk? When I restart there's none, can't travel back.
+
+everything we did during this session that's not in the trainscape prompts.txt, copy my prompts in there. Then do the next block (excepting the piggyback thing which I guess we don't need so much right now)
+Treat clockface drags that're too close to the center (say, closer than 0.5r) as if they were out at that min distance, ie make them lower gear
+Only update the camera in response to a move if the selected player is currently on screen, or, narrower than that, if (selectedPlayer.position - camera).maxDim < mapScreen.dimensions.minDim/2
+clock, when tapped, should complete the next/current action.
+the minute hand sometimes moves really really fast, so show it as an arc segment from the previous frame. The wider it is, the fainter.
+have the future action history ring indicators run the other way, starting at PI/2*0.3
+it doesn't seem to be able to rewind to before the first action
+I'm not seeing the minute hand arcing, I'm still seeing a lot of full cylinders flashing.
+aaa ffs i see what you're doing, you're just adding fill. That isn't it. The arc needs to have the same outline as the hand, and the outline and fill need to be the same, the outline will fade with the rest. And don't make it go so faint. There should be a limit on how faint it goes.
+There's always been a strange issue where, when the camera is at a certain vertical y (I can't see a pattern that would predict why this particular y does it), the map goes blank. Move above or below this level by very much, the map is visible again. It's a bit sporadic. Investigate.
+--
+
 Add the ability to carry other players piggyback.
