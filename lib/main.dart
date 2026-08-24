@@ -4915,6 +4915,7 @@ class TimerScreenState extends State<TimerScreen>
               rotation: 45 / 2,
               // side: BorderSide(color: color, width: 5.75),
             ),
+            color: color,
           ),
         ),
       ),
