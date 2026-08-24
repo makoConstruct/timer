@@ -1221,6 +1221,21 @@ class ActionType(final LevelRefs refs) extends TypeHelp<PlayerAction> {
       final k => throw ArgumentError('no action called $k'),
     };
     a.recorded = _result(j['recorded']);
+    // When it went — see [SyntheticClock]. Written as two small offsets rather
+    // than absolute moments, and left out entirely when they're nothing, which
+    // is the usual case: an action mostly goes at the moment it was down for
+    // and mostly takes no time. A tick is 1/16384 of a second and a level runs
+    // for days, so an absolute one of these is eight digits.
+    //
+    // Having run is [PlayerAction.recorded] being there, not [ran] being
+    // there: the two are written at the same moment — see
+    // [Game.runNextAction].
+    if (a.recorded != null) {
+      final at =
+          a.notBefore + (j['ran'] == null ? 0 : IntType().fromJson(j['ran']));
+      a.ranAt = at;
+      a.ranUntil = at + (j['over'] == null ? 0 : IntType().fromJson(j['over']));
+    }
     return a;
   }
 
@@ -1228,6 +1243,10 @@ class ActionType(final LevelRefs refs) extends TypeHelp<PlayerAction> {
   Object? toJsonValue(PlayerAction a) => {
     'notBefore': a.notBefore,
     'recorded': _resultJson(a.recorded),
+    if (a.ranAt != null && a.ranAt != a.notBefore)
+      'ran': a.ranAt! - a.notBefore,
+    if (a.ranAt != null && a.ranUntil != null && a.ranUntil != a.ranAt)
+      'over': a.ranUntil! - a.ranAt!,
     ...switch (a) {
       MoveAction m => {'kind': 'move', 'to': refs.indexOf(m.to)},
       HarvestAction h => {'kind': 'harvest', 'at': refs.facilityRef(h.tree)},

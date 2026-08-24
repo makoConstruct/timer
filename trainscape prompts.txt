@@ -241,6 +241,47 @@ it doesn't seem to be able to rewind to before the first action
 I'm not seeing the minute hand arcing, I'm still seeing a lot of full cylinders flashing.
 aaa ffs i see what you're doing, you're just adding fill. That isn't it. The arc needs to have the same outline as the hand, and the outline and fill need to be the same, the outline will fade with the rest. And don't make it go so faint. There should be a limit on how faint it goes.
 There's always been a strange issue where, when the camera is at a certain vertical y (I can't see a pattern that would predict why this particular y does it), the map goes blank. Move above or below this level by very much, the map is visible again. It's a bit sporadic. Investigate.
+The outer wheel's representation of time should be somewhat synthetic, it should allocate max(duration, minSyntheticActionDuration = 10minutes) to each action, and it should show actions as discrete segments, ie, have a gap at the end so that the separation is clear. When players are alternatingly taking instant actions at the same time (rare), it will produce an interleaving pattern. So it wont always turn time forward by a certain amount of minutes when turned, it might not turn time forward at all.
+when the wheel starts to move, the direction is noted, and time snaps to before or after the current wheel action depending on the direction. If the wheel is being moved back in time, then it immediately rolls back to before the most recent action, if it's being moved forward in time, then it immediately snaps to the end of the next action
+The snap should animate. So I guess if the action has a duration, use the spring target, otherwise.. do whatever it is you do to advance over instant actions.
+When a player is selected, time needs to go back to the end of their last action.
 --
+allow turning the outer wheel beyond the action history, it should proceed at the usual rate (it currently wont go past the final action)
+events currently run far too fast. when the player schedules an action, it should animate linearly at normal speed. It should only rush to complete that if they schedule another action, but the way the catchup works should also be changed, it should be an elastic snap to the present, it should move faster when it's further behind, and it should land in the present smoothly, with no discontinuity in velocity most of the time. This shouldn't interfere with the spring snapping behavior of the outer clock event wheel, though that also needs to be a little bit more relaxed.
+If a player moves into the smaller camera sensitivity box, center on them.
+Make player inventory vertical, next to the move pad.
+we need to start the player with tutorial levels, so there's a mobj that stores their progress, and there's a level screen
+the game initially boots into level 1 though
+Level 1: "open the lock". 1 heart required. three days. players: 1
+	the player starts in a route that leads to a thing that trades a1 and a2 for heart
+	but a1 is behind an a3 r mugger.
+	likewise, a2 is behind an a1 r mugger, and a3 is behind an a2 r mugger.
+	but there is an a3 plant down a long route to the south.
+Level X1: "The known way"
+	easy parameters, randomly generated. An endless hallway of levels, each time the player wins, the hallway is extended one out, the new level is at the beginning of the list.
+	10 levels and a random generator which the player can seed
+Level X2: "Many ways"
+	basic parameters
+	5 levels, seedable generator
+Level X3: "The true way"
+	hard parameters
+	3 levels, seedable generator
+if the player beats all 3 X3 levels, it unlocks a diatribe from me
+	the diatribe
+		"Habitat"
+		We wouldn't recognize our home. Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in the The rest of us dwindle as some fresh plague bubbles over our feet.
+		We see someone walking upright, armed, a child upon their back. They notice us and approach and, alas, those big black eyes, emotions we do not recognize, inscrutable mutterings, a reaching device whose function we do not understand, and we left behind another cautionary tale.
+		Our vision will need to improve.
 
+		Humanity's home shore is shattering and sinking.
+		There are many habitable places, all varying degrees of abyssal. There's nowhere left on the shore, but there are places closer to it, but the closer you wish to be, the harder it is to survive at all. It stands to reason that there is one place of minimal compromise where the most humanlike remaining things still defiantly flourish, reachable only by those with absolute courage that is tempered with inerrent wisdom. You might not be among those people, in which case your place will be further down.
+		As you descend, as you're' embedded in your abyssal cell, you will hear the screams of the humans who couldn't or wouldn't sink as deep as you did as they're dashed and swallowed by monsters older than you. You will feel guilty when you are spared. They will spare you because you no longer taste good.
+		One day, long after your descent, you will learn of a place of lesser compromise, further up. You will learn how you could have kept your hair or your smooth scaleless skin, but you were too fearful, or too stupid, to find that place, you casted it all away. You might shudder in grief. Or, now an abyssal thing, you may not grieve at all, you may chuckle ruefully, for that thing you grew from, who cared, is dead, their memories are just another thing you took from the world, to dissolve in your maw.
+		Look the other way, downwards, you will only see greater older monsters, chuckling ruefully about how you kept your brown eyes, or your flat face, and how pathetic you are for doing that.
+
+		None of this has happened yet.
+		The sooner you accept that your shore is soon to shatter and sink, the lesser the compromise you will need to enact.
+		Your vision is going to need to improve. We know that it is inhuman to see like us, but we don't believe there is any place of lesser compromise than ours. You don't believe us, yet? You don't have much time.
+		
+		
 Add the ability to carry other players piggyback.

@@ -1,5 +1,5 @@
 // Trainscape: Thrival — a game about time. See trainscape_thrival.txt for the
-// design doc; this file is its implementation and stays in sync with it. The
+// original design doc, and trainscape prompts.txt for later on when we stopped maintaining the design doc. The
 // boilerplate half of the implementation is in trainscape_boring.dart, which
 // is a part of this library.
 
@@ -2572,8 +2572,21 @@ sealed class PlayerAction {
   /// The moment it was committed; it never runs before this. Not a promise
   /// that it runs *at* this — a player halfway along a wire finishes walking
   /// first, and one who's been mugged waits until they're back on their feet.
-  final TTime notBefore;
+  ///
+  /// Nudged forward by [Game.commit] when the player already has something
+  /// down for that tick, so that one player's decisions are never two things
+  /// happening at the same instant. See there for why.
+  TTime notBefore;
   PlayerAction({required this.notBefore});
+
+  /// When it actually happened, and when what it started was over — the same
+  /// moment for everything but a walk. Null until it has run once.
+  ///
+  /// Recorded for the same reason [recorded] is: it's history, and history
+  /// outlives a rewind. It can't be worked out afterwards — an action waits on
+  /// the walk in front of it and on being on your feet — and it's what the
+  /// dial's wheel is drawn from. See [SyntheticClock].
+  TTime? ranAt, ranUntil;
 
   /// What it did the first time round. Null until it has run once; after that
   /// it's what a replay is held against. Not part of a snapshot — see
@@ -4543,8 +4556,20 @@ class Game({
   /// whole arrangement. You wind back to before your second character moved so
   /// that you can move them, and your first character walks their walk again
   /// around you.
+  ///
+  /// One further thing happens here: an action lands on a tick of its own.
+  /// [actionMoment] is the next tick and the clock doesn't move while a tap is
+  /// being read, so three taps in a row would otherwise all be down for the
+  /// same instant, and the event loop would run all three of one player's
+  /// before it looked at anyone else — two players queueing at the same
+  /// standstill would come out grouped rather than taking turns. A tick each
+  /// is what makes the order they were decided the order they happen in.
   void commit(Player p, PlayerAction a) {
     p.script.truncateReplayed();
+    final last = p.script.actions.lastOrNull;
+    if (last != null && a.notBefore <= last.notBefore) {
+      a.notBefore = last.notBefore + 1;
+    }
     p.script.actions.add(a);
     playUntilIdle(p);
   }
@@ -4609,6 +4634,8 @@ class Game({
       recenterWanted.value++;
       return;
     }
+    a.ranAt = now;
+    a.ranUntil = p.traversing != null ? p.arrivesAt : now;
     p.script.done++;
   }
 
@@ -4662,24 +4689,72 @@ class Game({
   TTime nextActionEndsAt(Player p) =>
       p.traversing != null ? max(now, p.arrivesAt) : frontier(p, take: 1).$1;
 
-  (TTime, Node?) frontier(Player p, {bool onlyUnplayed = false, int? take}) {
+  /// The far end of the last thing [p] has been told to do, whichever side of
+  /// the clock it falls on. [earliestMoment] for somebody who has never done
+  /// anything: they have been standing about since the level opened, so the
+  /// moment their story runs out is the moment it started.
+  ///
+  /// [frontierOf] only ever looks forward, so a player who ran out of things
+  /// to do an hour ago comes back as [now] — true, and useless for finding
+  /// them. This one goes back for them, off the record of when their last
+  /// action went; see [PlayerAction.ranAt].
+  TTime storyEndOf(Player p) {
+    if (p.script.done < p.script.actions.length) return frontierOf(p);
+    for (var i = p.script.done - 1; i >= 0; i--) {
+      final a = p.script.actions[i];
+      final ran = a.ranUntil ?? a.ranAt;
+      // an action off a save carries no record of when it went, and there's
+      // no winding back past the save anyway — which is where this lands
+      if (ran != null) return ran;
+    }
+    return earliestMoment;
+  }
+
+  (TTime, Node?) frontier(Player p, {bool onlyUnplayed = false, int? take}) =>
+      walkPlan(p, onlyUnplayed: onlyUnplayed, take: take);
+
+  /// Plays [p]'s list out on paper: every action still ahead of the cursor,
+  /// handed to [each] with the stretch of clock it would take up and where it
+  /// leaves them. Returns where the whole list runs out, which is [frontier].
+  ///
+  /// The one place the shape of a plan is worked out, because the frontier and
+  /// [SyntheticClock] have to agree: one is where tapping the clock lands, the
+  /// other is the picture of it you tapped.
+  ///
+  /// Optimistic in the way the whole feature is: it assumes every wire is
+  /// where it was and nobody gets mugged on the way. If that turns out to be
+  /// wrong the player stops early and is told — see [runNextAction].
+  (TTime, Node?) walkPlan(
+    Player p, {
+    bool onlyUnplayed = false,
+    int? take,
+    void Function(PlayerAction a, TTime from, TTime to, Node? at)? each,
+  }) {
     var t = now;
     var here = p.at.peek();
     if (p.traversing != null) {
       t = max(t, p.arrivesAt);
       here = p.traversalTarget;
     }
+    // Nothing happens while they're flat on their back, which the event loop
+    // folds into the time rather than treating as an event — see
+    // [Player.nextEventAt] — so the plan has to fold it in the same way, or it
+    // says "now" for something that can't be done until they come round, and
+    // says it again next frame.
+    final coming = p.incapacitatedUntil.peek();
+    if (coming != null) t = max(t, coming);
     for (var i = p.script.done; i < p.script.actions.length; i++) {
       if (take != null && i - p.script.done >= take) break;
       final a = p.script.actions[i];
       if (onlyUnplayed && a.recorded != null) break;
-      t = max(t, a.notBefore);
+      final from = max(t, a.notBefore);
+      t = from;
       switch (a) {
         case MoveAction m:
-          final from = here;
-          if (from != null) {
-            final e = from.edges.firstWhereOrNull(
-              (x) => x.other(from).isSameAs(m.to),
+          final was = here;
+          if (was != null) {
+            final e = was.edges.firstWhereOrNull(
+              (x) => x.other(was).isSameAs(m.to),
             );
             if (e != null) {
               t += max(1, ticksOf(e.length / params.playerSpeed));
@@ -4691,6 +4766,7 @@ class Game({
         default:
           break; // everything else is done the moment it's begun
       }
+      each?.call(a, from, t, here);
     }
     return (t, here);
   }
@@ -4746,6 +4822,7 @@ class Game({
       h = h * 31 + p.script.actions.length;
       for (final a in p.script.actions) {
         h = h * 31 + (a.recorded == null ? 0 : 1);
+        h = h * 31 + a.notBefore + (a.ranAt ?? 0);
       }
     }
     return h;
@@ -4833,6 +4910,26 @@ class Game({
   /// exact — walking is the only thing that takes any time and wires don't
   /// change length — so this is a moment, not a condition to keep testing.
   void playUntilIdle(Player p) => headFor(frontierOf(p), ClockPush.ease);
+
+  /// Turns to [p] — and takes the clock with them, to the end of *their* last
+  /// action rather than leaving it at the end of everyone's.
+  ///
+  /// Picking somebody up is saying you want to decide what they do next, and
+  /// the moment to decide that in is the one where the last thing they were
+  /// told to do is done. That moment is usually behind the clock: the reason
+  /// you stopped playing this one is that you went off to play someone else.
+  /// Leaving the clock there would show you this player's controls for a world
+  /// they're an hour late for, and every tap would be a decision made after the
+  /// fact.
+  ///
+  /// Only on an actual change of hands. Tapping the one who's already
+  /// selected is a tap for the camera, and taking a wound-back clock away
+  /// from someone who deliberately wound it is not what they asked for.
+  void select(Player p) {
+    if (p.isSameAs(selectedPlayer.peek())) return;
+    selectedPlayer.value = p;
+    headFor(storyEndOf(p), ClockPush.ease);
+  }
 
   /// The one call the ticker makes, and the only place real time touches the
   /// game. Nothing below here knows that frames exist.
@@ -5124,6 +5221,206 @@ class Game({
     train.departTo(this, to);
     return true;
   }
+
+  /// The dial's clock: [SyntheticClock], rebuilt whenever anything it's made
+  /// of has moved.
+  ///
+  /// Kept here rather than in the widget because the dial reads it twice for
+  /// different purposes — once to draw the segments, once to turn a finger
+  /// into a moment — and those two had better be looking at the same clock.
+  /// The stamp is everything it's built from: where the world is, how long
+  /// each list is, and how far through it we are.
+  SyntheticClock get synthetic {
+    var stamp = now;
+    for (final p in players) {
+      stamp = stamp * 31 + p.script.actions.length;
+      stamp = stamp * 31 + p.script.done;
+    }
+    if (_synthetic == null || stamp != _syntheticStamp) {
+      _syntheticStamp = stamp;
+      _synthetic = SyntheticClock.of(this);
+    }
+    return _synthetic!;
+  }
+
+  SyntheticClock? _synthetic;
+  int _syntheticStamp = 0;
+}
+
+// ────────────────────────────── the dial's clock ──────────────────────────────
+
+/// The least room an action takes up on the wheel, however long it took.
+///
+/// A wheel that showed time as time would show a level's worth of harvesting
+/// and trading as nothing at all: those take no time, and most of what a
+/// player *does* takes no time. So the wheel is a clock with the small things
+/// made big enough to see and to catch with a thumb.
+const TTime minSyntheticActionDuration = 2 * gameMinute;
+
+/// One action's place on the wheel: when it happened, and where it sits once
+/// the clock has been stretched to make room for it.
+class const SyntheticSpan({
+  /// index into [Game.players], which is the band it's drawn on and the tie
+  /// break when two actions land on the same tick — see [Game.advanceTo]
+  required final int who,
+
+  /// the real stretch of clock it takes up; the two are equal for everything
+  /// but a walk
+  required final TTime from,
+  required final TTime to,
+
+  /// where it lies on the wheel. Never shorter than
+  /// [minSyntheticActionDuration], and longer than [from]..[to] whenever
+  /// something short happened while it was going on.
+  required final double start,
+  required final double end,
+}) {
+  double get length => end - start;
+}
+
+/// One place where the wheel's clock stands still: a real moment, and how much
+/// wheel is let into it.
+class const _Pad({
+  required final TTime at,
+  required final double width,
+
+  /// which action's padding this is, as a position in the run order — what
+  /// decides whose 10 minutes comes first when two of them are at the same
+  /// moment
+  required final int rank,
+}) {
+  bool isBefore(TTime t, int r) => at < t || (at == t && rank < r);
+}
+
+/// Time as the outer wheel tells it: real time with a stretch let into it
+/// wherever an action would otherwise be too small to see.
+///
+/// The rule is one line — every action gets at least
+/// [minSyntheticActionDuration] of wheel — and everything else here is the
+/// consequences of it holding for several players at once. The stretches are
+/// let in *at the moment the action ends*, so:
+///
+///  * two players walking the same half hour side by side share the same
+///    stretch of wheel, because neither of them needed padding;
+///  * something instant that happens during someone else's walk is a segment
+///    sitting inside that walk's arc, and the walk's arc grows by exactly the
+///    room the instant thing was given;
+///  * a run of instant actions comes out as a row of equal segments in the
+///    order the world ran them, which is what makes two players taking turns
+///    at a standstill read as taking turns.
+///
+/// The map is monotonic and never goes backwards, but it is emphatically not
+/// proportional. That's the point of it: what it measures out is how much
+/// wheel each action is worth, both to look at and to turn past, and a turn of
+/// the wheel is a number of *things*, not a number of minutes. The world
+/// itself only ever stands at the ends of those things — see [dialStopAt].
+class SyntheticClock {
+  SyntheticClock._(this.spans, this._pads, this._cum);
+
+  /// every action anyone has run or is going to, in the order the world runs
+  /// them
+  final List<SyntheticSpan> spans;
+
+  /// where the wheel stands still, ordered the same way, with a running total
+  /// alongside: `_cum[i]` is all the padding let in before `_pads[i]`
+  final List<_Pad> _pads;
+  final List<double> _cum;
+
+  /// bigger than any action's place in the run order: "after everything that
+  /// happens at this moment"
+  static const int _afterAll = 1 << 40;
+
+  static SyntheticClock of(Game g) {
+    // What's behind us comes off the record — see [PlayerAction.ranAt] — and
+    // what's ahead comes off the plan. Both are needed: the wheel winds
+    // backwards as much as forwards, and a stretch let in for something that
+    // has already happened has to still be there when you wind back to it, or
+    // the wheel would change shape under the thumb.
+    final raw = <({int who, TTime from, TTime to, int seq})>[];
+    for (var w = 0; w < g.players.length; w++) {
+      final p = g.players[w];
+      for (var i = 0; i < p.script.done && i < p.script.actions.length; i++) {
+        final a = p.script.actions[i];
+        final ran = a.ranAt;
+        // an action off a save: nobody wrote down when it went, and there's no
+        // winding back past where the save was put down anyway
+        if (ran == null) continue;
+        raw.add((who: w, from: ran, to: a.ranUntil ?? ran, seq: raw.length));
+      }
+      g.walkPlan(
+        p,
+        each: (a, from, to, _) =>
+            raw.add((who: w, from: from, to: to, seq: raw.length)),
+      );
+    }
+    // the order the world runs them in, read off [Game.advanceTo]: the moment,
+    // then whose turn it is, and a player's own list is already in order
+    raw.sort((a, b) {
+      if (a.from != b.from) return a.from - b.from;
+      if (a.who != b.who) return a.who - b.who;
+      return a.seq - b.seq;
+    });
+
+    final pads = <_Pad>[];
+    for (var k = 0; k < raw.length; k++) {
+      final short = minSyntheticActionDuration - (raw[k].to - raw[k].from);
+      if (short > 0) {
+        pads.add(_Pad(at: raw[k].to, width: short.toDouble(), rank: k));
+      }
+    }
+    // A stretch is let in where its action *ends*, not where it started, so
+    // these don't come out in order and have to be put in one. Rank settles
+    // the ties: the pads at one instant are the several actions that happened
+    // at it, in the order they ran.
+    pads.sort((a, b) => a.at != b.at ? a.at - b.at : a.rank - b.rank);
+    final cum = <double>[0];
+    for (final pad in pads) {
+      cum.add(cum.last + pad.width);
+    }
+
+    final clock = SyntheticClock._([], pads, cum);
+    for (var k = 0; k < raw.length; k++) {
+      final r = raw[k];
+      clock.spans.add(
+        SyntheticSpan(
+          who: r.who,
+          from: r.from,
+          to: r.to,
+          // its own padding is at its end and belongs to it, so it counts
+          // towards where it finishes and not towards where it starts
+          start: r.from + clock._before(r.from, k),
+          end: r.to + clock._before(r.to, k + 1),
+        ),
+      );
+    }
+    return clock;
+  }
+
+  /// all the padding let in before the moment [t], counting only what belongs
+  /// to actions that ran before [rank] among those at that very moment
+  double _before(TTime t, int rank) {
+    var lo = 0, hi = _pads.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_pads[mid].isBefore(t, rank)) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return _cum[lo];
+  }
+
+  /// Where the wheel stands when the clock reads [t]: past everything that has
+  /// already happened at that instant, since it has already happened.
+  double at(TTime t) => t + _before(t, _afterAll);
+
+  /// one player's actions, in order — the band drawn for them, and the
+  /// detents the wheel clicks through when they're the one selected
+  List<SyntheticSpan> bandOf(int who) => [
+    for (final s in spans)
+      if (s.who == who) s,
+  ];
 }
 
 // ────────────────────────────── level generation ──────────────────────────────
@@ -6276,8 +6573,36 @@ const TTime _dialTurn = 12 * gameHour;
 /// what the rim divides that by. A drag of thirty degrees out there is six
 /// game minutes — half a walk between two nodes — where the same drag on the
 /// clock face is an hour. Fine control is a ring you can hook a thumb round
-/// rather than a mode you have to switch into.
-const double _outerWheelGearing = 1 / 10;
+/// rather than a mode you have to switch into. Like dragging the minute hand,
+/// except where the wheel has padded an instant action out.
+const double _outerWheelGearing = 1 / 12;
+
+/// How much of the wheel's clock one full band's worth of arc stands for.
+///
+/// Not a number of its own: it's what a whole turn of a thumb on the rim winds
+/// the wheel by, written as that product so it can't quietly stop being. The
+/// band is a ruler the thumb pushes along and the two have to agree — the arc
+/// a segment is drawn at is the arc it costs to turn past. Drawing the band at
+/// the whole twelve hours meant a segment five degrees wide that took fifty
+/// degrees of thumb.
+///
+/// So [_outerWheelGearing] is the one knob. Gear it down to see further ahead
+/// at the cost of a coarser thumb.
+const double _wheelSpan = _dialTurn * _outerWheelGearing;
+
+/// How far the wheel has to turn before it's turning rather than being taken
+/// hold of. A thumb landing on the rim moves a pixel or two of its own accord,
+/// and the first thing a turn does is jump — see [dialStopAt] — so which way
+/// it went had better not be decided by a wobble.
+const double _dialSnapDeadzone = 0.014;
+
+/// The bite taken out of the end of every segment so that two of them in a row
+/// read as two things and not one long one, and the most of a segment it's
+/// allowed to eat. Fixed angle rather than a fraction: the gap is doing the
+/// same job whatever it separates, and a proportional gap is invisible on the
+/// short segments, which are most of them.
+const double _segmentGap = 0.055;
+const double _segmentGapMax = 0.4;
 
 /// Where the action-history bands begin, and which way they run: down and to
 /// the right of the clock, sweeping anticlockwise up over it. Which is the
@@ -6384,6 +6709,70 @@ double dialRimTouchBand(double faceSize) =>
 bool dialIsFineWheel(double faceSize, double fromMiddle) =>
     fromMiddle > faceSize / 2;
 
+/// What the rim has to click through: the selected player's actions, in order,
+/// each one as wide as [SyntheticClock] says it is.
+List<SyntheticSpan> dialBand(Game game) =>
+    game.synthetic.bandOf(game.players.indexOf(game.selectedPlayer.peek()));
+
+/// Where the wheel stands when the world stands at [Game.now]: on the clock,
+/// but never off the ends of the list.
+///
+/// The wheel past the last action is time nobody decided anything in, and
+/// having to crank back through an hour of it to reach the thing you actually
+/// wanted to unmake is not a control. So the rim's ends are the list's ends, a
+/// tick either side — that tick being the room to stand before the first
+/// action or after the last — and idling on past the end of a list leaves the
+/// wheel sitting where a turn still means something.
+double dialWoundFor(Game game) {
+  final band = dialBand(game);
+  final at = game.synthetic.at(game.now);
+  if (band.isEmpty) return at;
+  return at.clamp(band.first.start - 1, band.last.end + 1);
+}
+
+/// Where the world stands when the rim has been turned to [wound]: the far
+/// side of the action the wheel is on, on the side it's being turned towards.
+///
+/// The whole rule is *which action the wheel is over*. Turning forward, being
+/// anywhere on an action means that action has happened; turning back, being
+/// anywhere on it means it hasn't. So the world clicks over the moment the
+/// wheel comes onto a segment and doesn't move again until it comes onto the
+/// next — one action per segment of turning, evenly, however long the actions
+/// took, and nothing in between. There is no gesture here that means "half way
+/// through a walk"; that's what the clock face is for.
+///
+/// A turn that went one too far is taken back by turning back, because [wound]
+/// is the whole of the state — the wheel remembers where it is, not how it got
+/// there.
+///
+/// Which way it's going has to be given, because it's the one thing the wheel
+/// position can't say: the same place on the wheel means "that's done" to a
+/// thumb pushing forward and "that hasn't happened" to one pulling back. It's
+/// settled once, when the turn starts, and holds for the whole of it.
+///
+/// The selected player's list, not everyone's, for the same reason tapping the
+/// clock uses theirs. Null when they have no list to turn through at all.
+TTime? dialStopAt(Game game, double wound, bool forward) {
+  final band = dialBand(game);
+  if (band.isEmpty) return null;
+  if (forward) {
+    // before the first of them is the world with none of it done
+    var best = band.first.from - 1;
+    for (final s in band) {
+      if (s.start > wound) break;
+      best = s.to;
+    }
+    return best;
+  }
+  // and past the last, the world with all of it
+  var best = band.last.to;
+  for (final s in band.reversed) {
+    if (s.end < wound) break;
+    best = s.from - 1;
+  }
+  return best;
+}
+
 /// how much of the map's narrower side the clock face takes up
 const double dialFaceSpan = 0.24;
 
@@ -6401,6 +6790,11 @@ const double dialPadding = 10;
 ///
 /// Tapping it goes to the end of the selected player's list, which is the
 /// moment you almost always want: everything they've been told to do, done.
+///
+/// The two move in quite different ways. The face winds time: it goes where
+/// the thumb goes and the world goes with it. The rim turns just as smoothly,
+/// but the world clicks, an action at a time, as the wheel comes onto each of
+/// them. See [dialStopAt].
 ///
 /// It sits in the very corner, and the wheel is drawn as a circle round it
 /// wider than the widget holding them both — so it hangs off the bottom and
@@ -6429,9 +6823,55 @@ class _TimeDialState extends State<TimeDial> {
   bool _onOuterWheel = false;
   Offset _lastTouch = Offset.zero;
 
-  /// where the drag has wound to, kept as a real number so that a slow turn
-  /// isn't lost to rounding a tick at a time
+  /// Where the drag has wound to, kept as a real number so that a slow turn
+  /// isn't lost to rounding a tick at a time.
+  ///
+  /// Which clock it's on depends on which wheel was grabbed: the face winds
+  /// the world's own time, the rim winds [SyntheticClock]'s. Set once when the
+  /// finger lands and read back through the same clock, so the two never meet.
   double _wound = 0;
+
+  /// Which way this turn is going; null until the thumb has moved enough to
+  /// say. See [dialStopAt]. Settled once and held, because a hand that wavers
+  /// halfway through hasn't changed its mind about what it's doing.
+  bool? _forward;
+
+  /// how far the wheel has been turned while [_forward] was still undecided
+  double _deciding = 0;
+
+  /// Where the wheel itself is standing, which is not where the clock is.
+  ///
+  /// The clicking happens to the world, not to the wheel: under a thumb the
+  /// rim goes exactly where the thumb puts it, smoothly, while the world jumps
+  /// from one action to the next underneath it — so what the wheel is showing
+  /// between two clicks is how much further there is to push. Let go and it
+  /// settles onto the clock. Null until the first frame.
+  double? _shownWheel;
+
+  /// how quickly the wheel settles back onto the clock once it's let go — a
+  /// blend a frame, like everything else here that follows something
+  static const double _wheelSettle = 0.3;
+
+  /// Where to draw the wheel this frame: exactly where the thumb has it while
+  /// it's being turned, and easing back onto the clock the rest of the time.
+  ///
+  /// Nothing ever moves the wheel but the drag — a wheel that repositioned
+  /// itself under a thumb would be the thumb losing its place, and the clicks
+  /// after it would land somewhere nobody aimed at. The settling is the one
+  /// exception and it happens after the finger has gone.
+  ///
+  /// Nothing reads any of this but the painter — where the *world* is is
+  /// [Game.now] and always was.
+  double _wheelNow(Game game) {
+    final rest = dialWoundFor(game);
+    final was = _shownWheel;
+    if (_onOuterWheel && game.dialHeld) return _shownWheel = _wound;
+    if (was == null) return _shownWheel = rest;
+    final next = was + (rest - was) * _wheelSettle;
+    // a blend never quite arrives, and a wheel that never quite settles would
+    // re-lay the segments every frame for ever
+    return _shownWheel = (rest - next).abs() < 1 ? rest : next;
+  }
 
   /// what the clock read on the last frame, so the minute hand can be drawn as
   /// the ground it covered rather than as a line that jumped
@@ -6445,28 +6885,86 @@ class _TimeDialState extends State<TimeDial> {
   Offset get _middle => Offset(_wheelRadius, _wheelRadius);
 
   void _down(Offset local) {
+    final game = widget.game;
     _onOuterWheel = dialIsFineWheel(
       widget.faceSize,
       (local - _middle).distance,
     );
     _lastTouch = local;
-    _wound = widget.game.now.toDouble();
-    widget.game.dialHeld = true;
+    _wound = _onOuterWheel ? dialWoundFor(game) : game.now.toDouble();
+    _forward = null;
+    _deciding = 0;
+    game.dialHeld = true;
+  }
+
+  /// One band per player: everything ahead of them, as a fraction of a band's
+  /// worth of wheel from where the wheel is standing.
+  ///
+  /// [here] is the wheel's own position and not the clock's — see [_wheelNow].
+  /// Clipped to the band rather than wrapped round it, and a segment the wheel
+  /// is in the middle of is cut off at the near end, so what's drawn is what's
+  /// left of it.
+  static List<(List<(double, double)>, Color)> _bands(Game game, double here) {
+    final clock = game.synthetic;
+    return [
+      for (var w = 0; w < game.players.length; w++)
+        (
+          [
+            for (final s in clock.bandOf(w))
+              if (s.end > here && s.start < here + _wheelSpan)
+                (
+                  max(0.0, (s.start - here) / _wheelSpan),
+                  min(1.0, (s.end - here) / _wheelSpan),
+                ),
+          ],
+          game.players[w].color,
+        ),
+    ];
   }
 
   void _drag(Offset local) {
+    final game = widget.game;
     final turned = dialTurnFor(
       widget.faceSize,
       _lastTouch - _middle,
       local - _middle,
     );
     _lastTouch = local;
-    final gearing = _onOuterWheel ? _outerWheelGearing : 1.0;
-    _wound += turned / (2 * pi) * _dialTurn * gearing;
-    // the clock has a floor and no ceiling: you can always wait, and you can
-    // never go back before the level knows about
-    _wound = max(_wound, widget.game.earliestMoment.toDouble());
-    widget.game.headFor(_wound.round(), ClockPush.dial);
+    if (!_onOuterWheel) {
+      // The clock face is a clock, and winds time itself: smoothly, anywhere,
+      // including into a future nobody has decided anything about. It's the
+      // only way to wait for something — the rim can only step through things
+      // that are going to happen, and waiting is the absence of one.
+      _wound += turned / (2 * pi) * _dialTurn;
+      // a floor and no ceiling: you can always wait, and you can never go back
+      // before the level knows about
+      _wound = max(_wound, game.earliestMoment.toDouble());
+      game.headFor(_wound.round(), ClockPush.dial);
+      return;
+    }
+
+    // The rim is a row of actions, and with nothing on the list there is
+    // nothing to click through — an inert rim, rather than a rim that quietly
+    // goes back to being a clock.
+    final band = dialBand(game);
+    if (band.isEmpty) return;
+
+    // The wheel goes where the thumb puts it, and everything else is worked
+    // out from where it ends up.
+    _wound += turned / (2 * pi) * _wheelSpan;
+    // and stops at the ends of the list rather than winding off into nothing
+    // — see [dialWoundFor], which is the same two bounds
+    _wound = _wound.clamp(band.first.start - 1, band.last.end + 1);
+
+    // a thumb landing on the rim moves a pixel or two of its own accord, and
+    // that isn't a direction. Settled once, and it holds for the turn.
+    if (_forward == null) {
+      _deciding += turned;
+      if (_deciding.abs() < _dialSnapDeadzone) return;
+      _forward = _deciding > 0;
+    }
+    final to = dialStopAt(game, _wound, _forward!);
+    if (to != null) game.headFor(to, ClockPush.dial);
   }
 
   @override
@@ -6496,17 +6994,16 @@ class _TimeDialState extends State<TimeDial> {
           builder: (context, _, _) => CustomPaint(
             size: Size.square(_box),
             painter: _DialWheelPainter(
-              // How much each player has still to do, drawn as an arc apiece:
-              // the only sign on screen that there's a future to wind forward
-              // into, and with everyone on the wheel it also says at a glance
-              // which of them you've left behind.
-              ahead: [
-                for (final p in game.players)
-                  (
-                    (game.frontierOf(p) - game.now) / _dialTurn.toDouble(),
-                    p.color,
-                  ),
-              ],
+              // What each player has still to do, a segment per thing they're
+              // going to do: the only sign on screen that there's a future to
+              // wind forward into, and with everyone on the wheel it also says
+              // at a glance which of them you've left behind.
+              //
+              // Read off [SyntheticClock], so what's drawn is exactly what a
+              // thumb on the rim winds through — including the room made for
+              // the instant actions, which are most of them and which a wheel
+              // showing plain time would draw as nothing at all.
+              ahead: _bands(game, _wheelNow(game)),
               wheel: paletteSignal.value.pad,
               width: widget.faceSize * _wheelWidthFactor,
               faceRadius: widget.faceSize / 2,
@@ -6536,9 +7033,11 @@ class _TimeDialState extends State<TimeDial> {
 }
 
 class const _DialWheelPainter({
-  /// one per player, innermost first: how far ahead of the clock their list
-  /// still stretches, in turns of the hour hand, and what colour they are
-  required final List<(double, Color)> ahead,
+  /// One band per player, innermost first, and what colour they are. Each band
+  /// is the things that player still has to do, as (start, end) pairs of a
+  /// band's worth of wheel — see [_TimeDialState._bands]. Already clipped to
+  /// 0..1, already in order.
+  required final List<(List<(double, double)>, Color)> ahead,
   required final Color wheel,
   required final double width,
   required final double faceRadius,
@@ -6546,12 +7045,10 @@ class const _DialWheelPainter({
   /// What the dial will take a finger on: the clock face, and a band across
   /// the rim wide enough to grab.
   ///
-  /// This is the whole of what makes the wheel a control. The widget is a
-  /// square as wide as the wheel, and if it swallowed everything inside it the
-  /// dial would eat most of the map — so the gap between the face and the rim
-  /// is left alone, and taps there go to the map that is drawn there. The band
-  /// is [_wheelTouchWidth] whatever the rim is drawn at, because the width a
-  /// thumb needs is not the width that looks right.
+  /// The widget is a square as wide as the wheel, and if it swallowed
+  /// everything inside it the dial would eat most of the map — so the gap
+  /// between the face and the rim is left alone, and taps there go to the map
+  /// that is drawn there.
   @override
   bool hitTest(Offset position) {
     final reach = dialWheelRadius(faceRadius * 2);
@@ -6582,21 +7079,28 @@ class const _DialWheelPainter({
     // dial rather than as the end of something.
     final each = width / ahead.length;
     for (var i = 0; i < ahead.length; i++) {
-      final (turns, color) = ahead[i];
-      if (turns <= 0) continue;
+      final (segments, color) = ahead[i];
       final r = outer - width / 2 + each * (i + 0.5);
-      // a list stretching more than one turn of the hand fills its band rather
-      // than wrapping round it; past that the arc has stopped meaning anything
-      canvas.drawArc(
-        Rect.fromCircle(center: c, radius: r),
-        _dialStartAngle,
-        _dialSweepSign * min(turns, 1) * 2 * pi,
-        false,
-        Paint()
-          ..color = color
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = each * 0.4,
-      );
+      final paint = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = each * 0.4;
+      for (final (from, to) in segments) {
+        final sweep = (to - from) * 2 * pi;
+        // Every segment gives up its last few degrees, so that a row of
+        // instant actions reads as a row rather than as one long arc. Never
+        // more than [_segmentGapMax] of it: a segment eaten by its own gap
+        // would be a thing you did that left no mark.
+        final drawn = sweep - min(_segmentGap, sweep * _segmentGapMax);
+        if (drawn <= 0) continue;
+        canvas.drawArc(
+          Rect.fromCircle(center: c, radius: r),
+          _dialStartAngle + _dialSweepSign * from * 2 * pi,
+          _dialSweepSign * drawn,
+          false,
+          paint,
+        );
+      }
     }
   }
 
@@ -6608,8 +7112,15 @@ class const _DialWheelPainter({
         old.ahead.length != ahead.length) {
       return true;
     }
+    // by hand, because the lists inside the records are compared by identity
+    // and these are built fresh every frame
     for (var i = 0; i < ahead.length; i++) {
-      if (old.ahead[i] != ahead[i]) return true;
+      final (segments, color) = ahead[i];
+      final (was, wasColor) = old.ahead[i];
+      if (color != wasColor || segments.length != was.length) return true;
+      for (var k = 0; k < segments.length; k++) {
+        if (segments[k] != was[k]) return true;
+      }
     }
     return false;
   }
@@ -7465,7 +7976,7 @@ class const ControlsPanel({
                   p,
                   orbSize: 30,
                   onTap: () {
-                    game.selectedPlayer.value = p;
+                    game.select(p);
                     recenterNudge.value++;
                   },
                 ),
@@ -8330,11 +8841,7 @@ class const NodeContentWidget({
               for (final p in players)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 2),
-                  child: PlayerOrb(
-                    game,
-                    p,
-                    onTap: () => game.selectedPlayer.value = p,
-                  ),
+                  child: PlayerOrb(game, p, onTap: () => game.select(p)),
                 ),
             ],
           );
