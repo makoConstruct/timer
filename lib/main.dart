@@ -99,6 +99,10 @@ const backingCornerRounding = 0.6;
 /// A common thickness for thick lines
 const makoLineThickness = 8.0;
 
+const double standardShadowRadius = 60;
+
+const double standardShadowOpacity = 0.14;
+
 Widget fittedPlayIcon(color) => PaintedPlayIcon(size: 10, color: color);
 
 /// Was supposed to be a custom Hero flight shuttle builder with 60ms delay, but I it looks like it does nothing, I can't see how the movement part of the animation would be affected by this, it would only affect an animation over the hero widget
@@ -1052,10 +1056,9 @@ void _fastForwardSequence(TimerData parent, double pos, DateTime to) {
     if (placed) {
       // only the ones still claiming to run need shutting off; leaving the rest
       // alone keeps them completed, which is what a member not yet reached this
-      // pass looks like. Marking them paused meant several members claiming to
-      // be the resume point, and [_startChildren]'s scan takes the last one it
-      // sees — so a pause and play after a resume jumped to the end of the
-      // cycle. — Opus 5
+      // pass looks like. Marking them paused instead would leave several members
+      // claiming to be the resume point that [_startChildren] then has to choose
+      // between. — Opus 5
       if (cd.isRunning) child.value = _completed(cd);
     } else {
       final td = totalDuration(cd);
@@ -1281,7 +1284,11 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
     case TimerKind.loop:
     case TimerKind.series:
       // if any of the timers are paused rather than completed, (ignore suggestedStart and) resume at that point in the chain. (if any of the timers are running, do nothing)
-      // find the first non-complete child
+      // find the first non-complete child. The scan still runs to the end after
+      // finding one, because a running child anywhere means there's nothing to
+      // start, but only the earliest paused one is kept: resuming should pick up
+      // at the foremost stage still owing time, not the last one that happens to
+      // be marked paused. — Opus 5
       Mobj<TimerData>? firstPausedChild;
       int firstPausedIndex = -1;
       for (int i = 0; i < host.children.length; i++) {
@@ -1291,9 +1298,10 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
             // there's nothing to do, already started
             return false;
           case TimerData.paused:
-            firstPausedChild = child;
-            firstPausedIndex = i;
-            break;
+            if (firstPausedChild == null) {
+              firstPausedChild = child;
+              firstPausedIndex = i;
+            }
           case TimerData.completed:
             continue;
           default:
@@ -1303,15 +1311,9 @@ bool _startChildren(TimerData host, {Duration? delay, int suggestedStart = 0}) {
         }
       }
 
-      final int startingIndex;
-      if (firstPausedChild != null) {
-        if (firstPausedChild.peek()!.isRunning) {
-          return false;
-        } // otherwise, it's paused, so we should start it
-        startingIndex = firstPausedIndex;
-      } else {
-        startingIndex = suggestedStart;
-      }
+      final int startingIndex = firstPausedChild != null
+          ? firstPausedIndex
+          : suggestedStart;
       // execute every already complete until it ends or loops
       int ci = startingIndex;
       bool taskAlreadyComplete = true;
@@ -5971,9 +5973,9 @@ class TimerScreenState extends State<TimerScreen>
                         : [
                             BoxShadow(
                               color: Colors.black.withValues(
-                                alpha: 0.17 * shadowp,
+                                alpha: standardShadowOpacity * shadowp,
                               ),
-                              blurRadius: 20,
+                              blurRadius: standardShadowRadius,
                               spreadRadius: 1,
                             ),
                           ],

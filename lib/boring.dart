@@ -38,7 +38,11 @@ import 'package:vibration/vibration_presets.dart';
 
 import 'platform_audio.dart';
 import 'main.dart'
-    show getCachedCornerRadius, getReasonableAestheticBottomCornerRadius;
+    show
+        getCachedCornerRadius,
+        getReasonableAestheticBottomCornerRadius,
+        standardShadowOpacity,
+        standardShadowRadius;
 
 const double tau = 2 * pi;
 const double backingIndicatorGap = 8.0;
@@ -4813,11 +4817,12 @@ class OurThemeData({
 final BackdropKey ourGlassBackdropKey = BackdropKey();
 // final BackdropKey? ourGlassBackdropKey = null;
 
-/// Our standard [GlassOptions]. Differs from the package defaults only in a
-/// crisper backdrop [blurRadius]; go through this so the app's glass look stays
-/// consistent across the timer menu and drag rings. [blurRadius] and [edgeTint]
-/// should come from [OurThemeData.glassBlurRadius] and [OurThemeData.edgeTint]
-/// so they stay themeable.
+/// Our standard [GlassOptions]. Differs from the package defaults in a crisper
+/// backdrop [blurRadius] and our wider [standardShadowRadius]; go through this
+/// so the app's glass look stays consistent across the timer menu and drag
+/// rings. [blurRadius] and [edgeTint] should come from
+/// [OurThemeData.glassBlurRadius] and [OurThemeData.edgeTint] so they stay
+/// themeable.
 GlassOptions ourGlassOptions({
   required double blurRadius,
   required Color edgeTint,
@@ -4825,6 +4830,7 @@ GlassOptions ourGlassOptions({
   GlassMode mode = GlassMode.glass,
   double blendRadius = 20,
   double? childRefractionIntensity,
+  double shadowRadius = standardShadowRadius,
 }) => GlassOptions(
   mode: mode,
   bevelThickness: bevelThickness ?? 18,
@@ -4832,6 +4838,12 @@ GlassOptions ourGlassOptions({
   blurRadius: blurRadius,
   edgeTint: edgeTint,
   childRefractionIntensity: childRefractionIntensity ?? 0,
+  shadowRadius: shadowRadius,
+  // glass mode only: flat blobs are a solid tint against the backdrop and
+  // carry their own contrast, so a shadow under them reads as grime rather
+  // than depth. It's the transparency that needs the shadow to sit off the
+  // page.
+  shadowIntensity: mode == GlassMode.flat ? 0 : standardShadowOpacity,
 );
 
 /// How much the content on a glass surface should bend through the bevel part
@@ -7928,13 +7940,13 @@ class MaterialYouIconPainter({
   void paint(Canvas canvas, Size size) {
     final span = min(size.width, size.height);
     final center = Offset(size.width / 2, size.height / 2);
-    final stroke = span * 0.2;
+    final stroke = span * 0.22;
     final discRadius = span / 2;
     final discRect = Rect.fromCircle(center: center, radius: discRadius);
 
     // the strike, across the whole disc and overhanging it a little at each
     // end.
-    final lineR = discRadius * 1.26;
+    final lineR = discRadius * 1.3;
     final along = Offset.fromDirection(_tipAngle);
     final strikeTip = center + along * lineR;
     final strikeTail = center - along * lineR;
@@ -7979,7 +7991,7 @@ class MaterialYouIconPainter({
           ..blendMode = BlendMode.clear
           ..style = PaintingStyle.stroke
           ..strokeWidth = stroke
-          ..strokeCap = StrokeCap.round,
+          ..strokeCap = StrokeCap.butt,
       );
     }
     canvas.restore();
@@ -7992,7 +8004,7 @@ class MaterialYouIconPainter({
           ..color = strokeColor
           ..style = PaintingStyle.stroke
           ..strokeWidth = stroke
-          ..strokeCap = StrokeCap.round,
+          ..strokeCap = StrokeCap.butt,
       );
     }
   }
