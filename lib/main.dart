@@ -2967,6 +2967,9 @@ class TimerState extends TimerBaseState<Timer> {
           )
         : BoxDecoration(shape: BoxShape.circle, color: color);
 
+    Color clockfaceBaseColor = TimerBaseState.primaryColor(d.hue);
+    Color clockfaceBackgroundColor = TimerBaseState.backgroundColor(d.hue);
+
     Widget clockDial = nesting(
       [
         (next) {
@@ -2992,7 +2995,6 @@ class TimerState extends TimerBaseState<Timer> {
           builder: (context, atRestProgress, child) => AnimatedBuilder(
             animation: _completedRecentlyAnimation,
             builder: (context, child) {
-              final baseColor = TimerBaseState.primaryColor(d.hue);
               var pie = Pie(
                 innerRadp:
                     (1 -
@@ -3012,10 +3014,10 @@ class TimerState extends TimerBaseState<Timer> {
                             _completedRecentlyAnimation.value,
                           ),
                         )),
-                backgroundColor: TimerBaseState.backgroundColor(d.hue),
+                backgroundColor: clockfaceBackgroundColor,
                 color: lerpColor(
-                  baseColor,
-                  desaturateColor(lightenColor(baseColor, 0.65), 0.4),
+                  clockfaceBaseColor,
+                  desaturateColor(lightenColor(clockfaceBaseColor, 0.65), 0.4),
                   Curves.easeInOut.transform(atRestProgress),
                 ),
                 value: pieCompletion,
@@ -3029,11 +3031,10 @@ class TimerState extends TimerBaseState<Timer> {
           signal: _pieAtRest,
           duration: const Duration(milliseconds: 90),
           builder: (context, atRestProgress, child) {
-            final baseColor = TimerBaseState.primaryColor(d.hue);
             return Container(
               width: innerTimerSpan,
               height: innerTimerSpan,
-              decoration: containerShape(TimerBaseState.backgroundColor(d.hue)),
+              decoration: containerShape(clockfaceBackgroundColor),
               child: Center(
                 child: Container(
                   width: stopwatchPulseSize,
@@ -3050,8 +3051,8 @@ class TimerState extends TimerBaseState<Timer> {
                       rotation: 45 / 2,
                     ),
                     color: lerpColor(
-                      baseColor,
-                      lightenColor(baseColor, 0.65),
+                      clockfaceBaseColor,
+                      lightenColor(clockfaceBaseColor, 0.65),
                       Curves.easeInOut.transform(atRestProgress),
                     ),
                   ),
@@ -5732,9 +5733,10 @@ class TimerScreenState extends State<TimerScreen>
         final dialFill = materialYouOn()
             ? theme.colorScheme.primaryContainer
             : mt.glassFill(glassOn);
-        final onDialFill = materialYouOn()
+        final containerColor = materialYouOn()
             ? theme.colorScheme.onPrimaryContainer
             : mt.onGlassFill(glassOn);
+        final onDialFill = containerColor;
         // read here, in the SignalBuilder's own build, rather than down in the
         // AnimatedBuilder (whose element wouldn't track the read).
         final dialAngle = buttonScaleDialAngle.value;
@@ -5757,28 +5759,24 @@ class TimerScreenState extends State<TimerScreen>
               );
               final Offset dialOrigin = -dialBox.topLeft;
 
-              // currently not glass-responsive, used to be
-              final knurlColor = mt.foreBackColor;
-              final onKnurlColor = theme.colorScheme.onSurface;
-
               final blobs = <GlassBlob>[
                 GlassBlob(
                   center: dialOrigin,
                   radii: Size.square(dialDiscR * knobp),
-                  tint: dialFill,
+                  tint: containerColor,
                 ),
                 if (budp > 0.01) ...[
                   GlassBlob(
                     center: dialOrigin + dialClosePos(budp) * knobp,
                     radii: Size.square(dialCloseR * knobp),
-                    tint: dialFill,
+                    tint: containerColor,
                   ),
                   GlassBlob(
                     center: dialOrigin + dialHandlePos(budp) * knobp,
                     radii: Size.square(dialHandleR * knobp),
                     cornerRadius: dialHandleCorner,
                     cornerContinuity: 0,
-                    tint: dialFill,
+                    tint: containerColor,
                   ),
                 ],
               ];
@@ -5858,7 +5856,7 @@ class TimerScreenState extends State<TimerScreen>
                                   child: Container(
                                     alignment: Alignment.center,
                                     decoration: ShapeDecoration(
-                                      color: knurlColor,
+                                      color: dialFill,
                                       shape: const StarBorder(
                                         points: 18,
                                         innerRadiusRatio: 0.9,
@@ -5872,7 +5870,7 @@ class TimerScreenState extends State<TimerScreen>
                                         "turn me",
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
-                                          color: onKnurlColor,
+                                          color: onDialFill,
                                           fontSize: 30,
                                           fontFamily: 'Dongle',
                                         ),
@@ -5897,7 +5895,7 @@ class TimerScreenState extends State<TimerScreen>
                             padding: const EdgeInsets.all(6.0),
                             child: CrossIcon(
                               lineWidth: dialLineThickness,
-                              color: onDialFill,
+                              color: dialFill,
                             ),
                           ),
                         ),
@@ -5915,7 +5913,7 @@ class TimerScreenState extends State<TimerScreen>
                             padding: const EdgeInsets.all(6.0),
                             child: GripBarsIcon(
                               lineWidth: dialLineThickness,
-                              color: onDialFill,
+                              color: dialFill,
                             ),
                           ),
                         ),
