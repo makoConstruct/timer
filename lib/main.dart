@@ -192,6 +192,12 @@ Future<void> initializeDatabase() async {
       debugLabel: "continuous corners",
     ),
     Mobj.getOrCreate(
+      bouncyAnimationsID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "bouncy animations",
+    ),
+    Mobj.getOrCreate(
       materialYouID,
       type: BoolType(),
       initial: () =>
@@ -1867,6 +1873,18 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             // downward shrink plays, so closing is the shrink rather than an
             // un-reveal.
             final revealProgress = unlerpUnit(0, 0.7, upp);
+            // the bounce, in pixels the body pushes out past its resting edge:
+            // on over the reveal, peaking as it lands and off again over the
+            // tail. Off the rise component and faded out by the shrink, so a
+            // menu on its way out never swells. 0 when bouncy animations are
+            // off.
+            final revealSwell =
+                appearanceOvershoot(
+                  upp,
+                  landsAt: 0.60,
+                  amount: _glassMenuBounceRoom(buttonSpan),
+                ) *
+                (1 - downp);
             final downwardProgress = downp;
             final contentOpacity = Curves.easeInOut.transform(
               unlerpUnit(0.1, 0.6, upp),
@@ -1886,18 +1904,20 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             // excursion plus the bevel, and lift the box by the same amount so
             // the content still lands at [top].
             final double topHeadroom = max(0.0, -origin.dy) + _glassMenuTopPad;
+            final double bulgePad = _glassMenuBulgePad(buttonSpan);
             double cornerStyle = continuousCornersOn() ? 1 : 0;
             final Widget body = _buildGlassBody(
               mt: mt,
               glassOn: glassOn,
               progress: revealProgress,
+              swell: revealSwell,
               downwardProgress: downwardProgress,
               opacity: contentOpacity,
               origin: origin,
               cornerRounding: cornerRounding,
               width: width,
               topInset: topHeadroom,
-              bulgeInset: _glassMenuBulgePad,
+              bulgeInset: bulgePad,
               tint: tint,
               cornerStyle: cornerStyle,
               child: column,
@@ -1910,9 +1930,9 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
               clipBehavior: Clip.none,
               children: [
                 Positioned(
-                  left: left - _glassMenuBulgePad,
+                  left: left - bulgePad,
                   top: top - topHeadroom,
-                  width: width + _glassMenuBulgePad * 2,
+                  width: width + bulgePad * 2,
                   child: body,
                 ),
               ],
@@ -1931,6 +1951,13 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
     required OurThemeData mt,
     required bool glassOn,
     required double progress,
+
+    /// how far out past its resting edge the body is currently pushed, in
+    /// logical pixels — the bounce, 0 unless bouncy animations are on. It
+    /// arrives alongside [progress] rather than inside it because every stage of
+    /// the reveal is clamped to 0..1 (and feeds curves that assert on it), so an
+    /// overshoot fed in at the front would only get flattened out again.
+    required double swell,
     required double downwardProgress,
     required double opacity,
     required Offset origin,
@@ -2013,6 +2040,12 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
           ),
           earlyBlubp,
         );
+        // the bounce: the body carries a little past its resting size and
+        // settles back onto the content — a uniform push outward, the same
+        // depth on every edge, which is the clip room [bulgeInset] budgeted for
+        // it. It rides on the span rather than on the rect below so the arrow's
+        // base, which is solved against the span, comes along with it.
+        span += (swell * 2).offset;
         final body = Rect.fromCenter(
           center: lerpOffset(shiftedOrigin, target.center, earlyBlubp),
           width: span.dx,
@@ -2044,7 +2077,7 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             GlassBlob(
               center: body.center,
               radii: Size(body.width / 2, body.height / 2),
-              cornerRadius: corner,
+              cornerRadius: corner + swell,
               cornerContinuity: lerp(0, cornerStyle, deblubbingp),
               tint: tint,
             ),
@@ -2087,7 +2120,23 @@ const double _glassMenuTopPad = 32;
 /// the displaced edge. The GlassLayer clips its shading to its own box, so
 /// anything the blobs reach past the content has to be paid for in box size.
 /// —Opus 5
-const double _glassMenuBulgePad = GlassMenuButton.swellDepth + 7;
+double _glassMenuBulgePad(double buttonSpan) =>
+    GlassMenuButton.swellDepth +
+    7 +
+    (bouncyAnimationsOn() ? _glassMenuBounceRoom(buttonSpan) : 0);
+
+/// How far out the menu body pushes at the peak of its bounce, when bouncy
+/// animations are on — 2 logical pixels at the default button span, scaled by
+/// the span so the bounce keeps its size relative to the UI wherever the scale
+/// dial is set. Off the button scale rather than off the menu's own size so
+/// that it's a push outward at a set depth, the same for a two-item menu and a
+/// six-item one, instead of a proportional stretch that a tall menu would wear
+/// as a much bigger excursion than a short one.
+///
+/// [_glassMenuBulgePad] buys exactly this much extra clip room for it, so the
+/// swell never needs capping at the call site: it's transparent margin, the
+/// menu is still the same width, and the shine's own budget stays intact.
+double _glassMenuBounceRoom(double buttonSpan) => buttonSpan / 30;
 
 abstract class const TimerBase({
   super.key,
@@ -3668,6 +3717,7 @@ class DragActionRingState extends State<DragActionRing>
   Listenable get _expansionListenable => _upDown ?? _spring!;
   double get _expansionGrowth =>
       _upDown != null ? _upDown!.scalarValue : _spring!.value;
+
   void _expansionForward() {
     if (_upDown != null) {
       _upDown!.forward();
@@ -4097,9 +4147,17 @@ class DragActionRingState extends State<DragActionRing>
 
     final radialRadiusMax = thumbSpan * (0.5 + 0.17);
     // how grown the ring is overall (grow-in, fall-out). selection collapse is handled by the blob builder via swipep / selections, not here.
+    // When bouncy animations are on the spring path overshoots on its own (its
+    // expansion spring runs underdamped), so this can sit a little above 1 —
+    // the geometry lerps below then extrapolate past their targets and settle
+    // back, which is the bounce.
     final baseGrow = widget.useSpringExpansion
         ? growp
         : Curves.easeOut.transform(unlerpUnit(0, 0.6, growp));
+    // baseGrow with any overshoot taken back off, for the readings of it that
+    // are a fraction of the way in rather than a distance travelled (a color
+    // mix, the glass-to-flat blend) and have nowhere sensible to go past 1.
+    final settledGrow = baseGrow.clamp(0.0, 1.0);
     final completion = Curves.easeInCubic.transform(completionAnimation.value);
     final iconFade =
         unlerpUnit(0.6, 1, baseGrow) *
@@ -4384,7 +4442,7 @@ class DragActionRingState extends State<DragActionRing>
         () => glassOn
             ? tensionedGlassColor(context, togetherp)
             : mt.nonGlassColor,
-        g,
+        settledGrow,
       );
 
       if (halfThickness < 0.5) {
@@ -4489,7 +4547,7 @@ class DragActionRingState extends State<DragActionRing>
     }
 
     final List<GlassBlob> blobs = [...ringBlobs, ...pillBlobs];
-    final double glassiness = widget.persistent ? baseGrow : 1;
+    final double glassiness = widget.persistent ? settledGrow : 1;
     final Widget clippedRing = blobs.isEmpty
         ? const SizedBox.shrink()
         : GlassLayer(
@@ -7988,6 +8046,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             liquidGlassOnMobj.value = asFlat && value != null
                                 ? !value
                                 : value;
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    SignalBuilder(
+                      builder: (context) {
+                        final bouncyAnimationsMobj = Mobj.getAlreadyLoaded(
+                          bouncyAnimationsID,
+                          BoolType(),
+                        );
+                        final on = bouncyAnimationsMobj.value ?? false;
+                        return RoundedCheckboxListTile(
+                          title: settingTitle('Bouncy animations'),
+                          subtitle: settingSubtitle(
+                            on
+                                ? 'On: things overshoot a little and settle back'
+                                : 'Off: things ease into place',
+                          ),
+                          value: on,
+                          onChanged: (value) {
+                            bouncyAnimationsMobj.value = value;
                           },
                           contentPadding: listItemPadding,
                         );

@@ -126,6 +126,77 @@ bool materialYouOn() =>
     Platform.isAndroid &&
     (Mobj.getAlreadyLoaded(materialYouID, BoolType()).value ?? false);
 
+// --- bounce ---
+// The app's primary appearance animations (the special-timer drag ring growing
+// out of its button, the timer menu revealing out of its origin) either ease
+// into place or, per the [bouncyAnimationsID] setting, carry a little past their
+// target and settle back. The spring-driven ones get that by running underdamped
+// ([bouncySpringFor]); the ones on a fixed duration get it as a swell added on
+// top of the motion they already had ([appearanceOvershoot]). One overshoot
+// figure feeds both, so they bounce by the same amount.
+//
+// It doesn't go on everything that moves. A multistage animation (the numeral
+// ring, which grows a hub, then leaves off it, then collapses onto a choice)
+// reads as a mess when a stage overshoots into the next one, and springs that
+// track something the finger is steering (the arc's cap angles) want to arrive
+// where they were aimed, not swing past it.
+
+/// Whether appearance animations currently overshoot their target slightly
+/// before settling. Reading this from a reactive build (a
+/// [SignalStatefulWidget], a `SignalBuilder`, an effect) subscribes to the
+/// setting; the springs read it when they launch, so a toggle takes effect from
+/// the next animation rather than mid-flight.
+bool bouncyAnimationsOn() =>
+    Mobj.getAlreadyLoaded(bouncyAnimationsID, BoolType()).value ?? false;
+
+/// How far past its target a bouncy appearance carries, as a fraction of the
+/// distance it travelled.
+const double bouncyOvershoot = 0.06;
+
+/// The damping ratio a spring needs for its step response to overshoot by
+/// [overshoot]. (Standard second-order result: the first peak of an underdamped
+/// step response sits `exp(-pi * zeta / sqrt(1 - zeta^2))` above the target.)
+double dampingRatioForOvershoot(double overshoot) {
+  final l = log(overshoot);
+  return -l / sqrt(pi * pi + l * l);
+}
+
+/// [spring], underdamped so it overshoots by about [bouncyOvershoot] before
+/// settling, at the same natural frequency so the motion keeps its timescale.
+/// A spring launched with a velocity kick overshoots rather more than that — the
+/// kick is energy a step response doesn't have — so a big kick wants trimming
+/// when it's bouncing (see [SpringExpansionController]'s launch).
+SpringDescription bouncySpringFor(SpringDescription spring) =>
+    SpringDescription.withDampingRatio(
+      mass: spring.mass,
+      stiffness: spring.stiffness,
+      ratio: dampingRatioForOvershoot(bouncyOvershoot),
+    );
+
+/// The swell to add to an appearance that runs on a fixed duration rather than a
+/// spring: it eases on from the very start of the rise, reaching [amount] just
+/// as that rise lands (at [landsAt] of the raw progress [t]), then eases off
+/// again over the tail. [amount] carries the units — a fraction of the distance
+/// travelled by default, or hand it a distance and get one back, for the call
+/// sites whose overshoot is better set as a depth to push out to than as a
+/// proportion of a size that varies. So the thing is carrying the
+/// overshoot the whole way out — it aims at a slightly inflated target and
+/// retracts from it — rather than arriving and then swelling a second time,
+/// which is what a hump confined to the tail looks like. Eased at both ends and
+/// at the peak, so there's no corner anywhere in it. Flat 0 the whole way when
+/// bouncy animations are off, so a call site can add it to an eased progress
+/// unconditionally and get exactly the old motion back when the setting is off.
+double appearanceOvershoot(
+  double t, {
+  required double landsAt,
+  double amount = bouncyOvershoot,
+}) {
+  if (!bouncyAnimationsOn()) return 0;
+  return amount *
+      Curves.easeInOut.transform(unlerpUnit(0, landsAt, t)) *
+      (1 - Curves.easeInOut.transform(unlerpUnit(landsAt, 1, t)));
+}
+
 // --- corner style ---
 // Every rounded box in the app is drawn either with circular corner arcs or
 // with Apple-style continuous ("squircle") corners, per the
@@ -1424,6 +1495,12 @@ class _UpDownToDoubleAdapter(@override final Animation<(double, double)> parent)
 class SpringExpansionController({
   required TickerProvider vsync,
   final SpringDescription spring = SpringExpansionController.defaultSpring,
+
+  /// the spring the rise runs on while [bouncyAnimationsOn] — [spring]
+  /// underdamped, so the expansion carries past 1 and settles back. Only the
+  /// rise: a fall that overshot would dip past shut. Pass [spring] itself to opt
+  /// this controller out of the setting.
+  final SpringDescription? bouncySpring,
   final double kickSpeed = 25.0,
   final double restThreshold = 0.01,
 }) extends Animation<double>
@@ -1464,12 +1541,17 @@ class SpringExpansionController({
 
   void _launch(double target) {
     _target = target;
+    final bouncy = target != 0 && bouncyAnimationsOn();
+    // Half the kick on a bouncy rise: the kick is there to give a critically
+    // damped spring an easeOut-ish lead, which an underdamped one has anyway,
+    // and at full kick the energy it puts in all lands on the overshoot (17%
+    // past its target, against the 10% half a kick gives — which still reaches
+    // 1 in 90ms, where the critically damped rise takes 120ms just to hit 0.95).
     final v = _controller.value.abs() < restThreshold && target != 0
-        ? kickSpeed
+        ? (bouncy ? kickSpeed / 2 : kickSpeed)
         : _controller.velocity;
-    _controller.animateWith(
-      SpringSimulation(spring, _controller.value, target, v),
-    );
+    final s = bouncy ? (bouncySpring ?? bouncySpringFor(spring)) : spring;
+    _controller.animateWith(SpringSimulation(s, _controller.value, target, v));
   }
 
   void forward() => _launch(1);
@@ -4853,7 +4935,7 @@ GlassOptions ourGlassOptions({
 /// the cheap path — [GlassLayer] skips the child's refraction pass entirely
 /// there. Feed [ourGlassOptions]'s [GlassOptions.childRefractionIntensity].
 double openingChildRefraction(double openp, {double from = 90}) =>
-    from * (1 - Curves.easeOut.transform(openp));
+    from * (1 - Curves.easeOut.transform(clampUnit(openp)));
 
 /// Eases [options] between a flat fill and full glass: at [glassiness] 0 the
 /// refraction, shine, blur and bevel all vanish, leaving just the blobs' flat

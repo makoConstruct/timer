@@ -28,6 +28,14 @@ const MobjID liquidGlassOnID = '25a474bb-c0fa-4f42-9b95-dd7b308885bb';
 /// also where the helpers that draw in the chosen style live.
 const MobjID continuousCornersID = 'cf3b2bd4-93ff-4825-b1df-d596b92b849c';
 
+/// whether the primary appearance animations — the special-timer drag ring
+/// growing out of its button, the timer menu revealing out of its origin —
+/// overshoot slightly and settle back instead of easing straight into place. Off
+/// by default. Read it through `bouncyAnimationsOn()` in boring.dart, next to
+/// the rest of the bounce helpers (and to the note on what deliberately doesn't
+/// bounce).
+const MobjID bouncyAnimationsID = 'eb6b8edc-9585-4695-99cb-d7402b986c20';
+
 /// whether the app takes its colors from the system's wallpaper-derived palette
 /// (Material You) instead of our own monochrome scheme. Android only — the
 /// setting isn't offered elsewhere — and off by default. Read it through
@@ -51,6 +59,7 @@ const MobjID buttonScaleDialOnID = '59a00948-75e1-4a87-8f57-42208b03c3a2';
 /// when enabled, the trainscape game screen opens by default, over the timer
 /// screen, when the app launches
 const MobjID trainscapeModeID = '8365048f-a403-4d82-b408-5fd7fb8c41a5';
+
 /// the trainscape level that was on screen when the game was last left, stored
 /// whole (see the saving section of trainscape_boring.dart) so that it comes
 /// back on the next run
