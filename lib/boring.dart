@@ -4683,7 +4683,9 @@ class OurThemeData({
   required final Color nonGlassOnSurface,
 
   /// Fill for a popup menu when liquid glass is off. [nonGlassColor]
-  /// everywhere except [materialYou], where it's [ColorScheme.secondary] so
+  /// (flat black) on the light theme; a dimmed surface tone rather than flat
+  /// white on the dark theme, since a fully white menu would blow out against
+  /// the rest of the dark UI; and on [materialYou], [ColorScheme.secondary] so
   /// the menu picks up the wallpaper tint instead of reading as flat
   /// black/white. Content on top uses [onNonGlassPopupMenu].
   required final Color nonGlassPopupMenu,
@@ -4788,10 +4790,11 @@ class OurThemeData({
               0.1,
             ).withValues(alpha: 0.4),
             onGlassColor: cs.onSurface,
-            nonGlassColor: Colors.white,
+            nonGlassColor: cs.primary,
             nonGlassOnSurface: Colors.black,
-            nonGlassPopupMenu: Colors.white,
-            onNonGlassPopupMenu: Colors.black,
+            // it would be too bright if it used white.
+            nonGlassPopupMenu: lightenColor(cs.surfaceContainerHighest, 0.15),
+            onNonGlassPopupMenu: cs.onSurface,
             edgeTint: Colors.white.withValues(alpha: defaultEdgeTint.a),
           )
         : OurThemeData(
@@ -4859,7 +4862,7 @@ class OurThemeData({
           // : lightenColor(cs.onSurface, 0.66),
           : cs.outline,
       collapsedSpecialDragRingColor: cs.primary,
-      veryLowProminenceColor: cs.surfaceDim,
+      veryLowProminenceColor: darkenColor(cs.onSurface, 0.67),
       hintTextColor: dark
           ? darkenColor(cs.onSurface, 0.4)
           : lightenColor(cs.onSurface, 0.375),

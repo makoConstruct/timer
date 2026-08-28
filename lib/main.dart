@@ -194,7 +194,7 @@ Future<void> initializeDatabase() async {
     Mobj.getOrCreate(
       bouncyAnimationsID,
       type: BoolType(),
-      initial: () => false,
+      initial: () => Platform.isIOS,
       debugLabel: "bouncy animations",
     ),
     Mobj.getOrCreate(
@@ -1617,8 +1617,10 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                 seedColor: Colors.white,
                 dynamicSchemeVariant: DynamicSchemeVariant.monochrome,
                 // brightness: (() {
-                //   print("CRITICAL WARNING: overriding theme for debugging purposes");
-                //   return Brightness.light;
+                //   print(
+                //     "CRITICAL WARNING: overriding theme for debugging purposes",
+                //   );
+                //   return Brightness.dark;
                 // })(),
                 brightness: brightness,
               ),
@@ -1642,8 +1644,7 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
             scaffoldMessengerKey: globalScaffoldMessengerKey,
             title: 'timer',
             theme: makeTheme(Brightness.light, wallpaper),
-            // darkTheme: makeTheme(Brightness.dark, wallpaper),
-            darkTheme: makeTheme(Brightness.light, wallpaper),
+            darkTheme: makeTheme(Brightness.dark, wallpaper),
             onGenerateRoute: (settings) {
               if (settings.name == '/') {
                 return OurPageRoute(builder: (context) => TimerScreen());
@@ -5725,8 +5726,15 @@ class TimerScreenState extends State<TimerScreen>
         final glassOn =
             Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
             (defaultTargetPlatform == TargetPlatform.iOS);
-        final glassFill = mt.glassFill(glassOn);
-        final onGlassFill = mt.onGlassFill(glassOn);
+        // the dial's blobs read as a primary-toned accent object rather than
+        // a neutral glass one when materialYou, so they pick up the
+        // wallpaper tint instead of the usual glass neutral.
+        final dialFill = materialYouOn()
+            ? theme.colorScheme.primaryContainer
+            : mt.glassFill(glassOn);
+        final onDialFill = materialYouOn()
+            ? theme.colorScheme.onPrimaryContainer
+            : mt.onGlassFill(glassOn);
         // read here, in the SignalBuilder's own build, rather than down in the
         // AnimatedBuilder (whose element wouldn't track the read).
         final dialAngle = buttonScaleDialAngle.value;
@@ -5757,20 +5765,20 @@ class TimerScreenState extends State<TimerScreen>
                 GlassBlob(
                   center: dialOrigin,
                   radii: Size.square(dialDiscR * knobp),
-                  tint: glassFill,
+                  tint: dialFill,
                 ),
                 if (budp > 0.01) ...[
                   GlassBlob(
                     center: dialOrigin + dialClosePos(budp) * knobp,
                     radii: Size.square(dialCloseR * knobp),
-                    tint: glassFill,
+                    tint: dialFill,
                   ),
                   GlassBlob(
                     center: dialOrigin + dialHandlePos(budp) * knobp,
                     radii: Size.square(dialHandleR * knobp),
                     cornerRadius: dialHandleCorner,
                     cornerContinuity: 0,
-                    tint: glassFill,
+                    tint: dialFill,
                   ),
                 ],
               ];
@@ -5889,7 +5897,7 @@ class TimerScreenState extends State<TimerScreen>
                             padding: const EdgeInsets.all(6.0),
                             child: CrossIcon(
                               lineWidth: dialLineThickness,
-                              color: onGlassFill,
+                              color: onDialFill,
                             ),
                           ),
                         ),
@@ -5907,7 +5915,7 @@ class TimerScreenState extends State<TimerScreen>
                             padding: const EdgeInsets.all(6.0),
                             child: GripBarsIcon(
                               lineWidth: dialLineThickness,
-                              color: onGlassFill,
+                              color: onDialFill,
                             ),
                           ),
                         ),
@@ -8060,11 +8068,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final on = bouncyAnimationsMobj.value ?? false;
                         return RoundedCheckboxListTile(
                           title: settingTitle('Bouncy animations'),
-                          subtitle: settingSubtitle(
-                            on
-                                ? 'On: things overshoot a little and settle back'
-                                : 'Off: things ease into place',
-                          ),
                           value: on,
                           onChanged: (value) {
                             bouncyAnimationsMobj.value = value;
