@@ -2195,10 +2195,20 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
   final FocusNode _titleFocusNode = FocusNode();
   late final TextEditingController _titleController = TextEditingController();
 
-  static Color backgroundColor(double hue) =>
-      hpluvToRGBColor([hue * 360, 100, 90]);
-  static Color primaryColor(double hue) =>
-      hpluvToRGBColor([hue * 360, 100, 30]);
+  static Color backgroundColor(Brightness brightness, double hue) =>
+      brightness == .light
+      ? hpluvToRGBColor([hue * 360, 100, 90])
+      : hpluvToRGBColor([hue * 360, 55, 50]);
+  static Color primaryColor(Brightness brightness, double hue) =>
+      brightness == .light
+      ? hpluvToRGBColor([hue * 360, 100, 30])
+      : hpluvToRGBColor([hue * 360, 100, 90]);
+  static Color primaryColorDimmed(Brightness brightness, double hue) =>
+      HSLColor.lerp(
+        HSLColor.fromColor(backgroundColor(brightness, hue)),
+        HSLColor.fromColor(primaryColor(brightness, hue)),
+        0.3,
+      )!.toColor();
 
   late final Signal<double> depth = Signal(0.0);
   void Function()? _parentDepthDispose;
@@ -2967,8 +2977,14 @@ class TimerState extends TimerBaseState<Timer> {
           )
         : BoxDecoration(shape: BoxShape.circle, color: color);
 
-    Color clockfaceBaseColor = TimerBaseState.primaryColor(d.hue);
-    Color clockfaceBackgroundColor = TimerBaseState.backgroundColor(d.hue);
+    Color clockfaceBaseColor = TimerBaseState.primaryColor(
+      theme.colorScheme.brightness,
+      d.hue,
+    );
+    Color clockfaceBackgroundColor = TimerBaseState.backgroundColor(
+      theme.colorScheme.brightness,
+      d.hue,
+    );
 
     Widget clockDial = nesting(
       [
@@ -2988,50 +3004,47 @@ class TimerState extends TimerBaseState<Timer> {
           );
         },
       ],
-      switch (d.kind) {
-        TimerKind.timer => BoolSignalTween(
-          signal: _pieAtRest,
-          duration: const Duration(milliseconds: 90),
-          builder: (context, atRestProgress, child) => AnimatedBuilder(
-            animation: _completedRecentlyAnimation,
-            builder: (context, child) {
-              var pie = Pie(
-                innerRadp:
-                    (1 -
-                        Curves.easeOutCubic.transform(
-                              unlerpUnit(
-                                0.2,
-                                0.46,
-                                _completedRecentlyAnimation.value,
-                              ),
-                            ) *
-                            ((defaultTimerOutline * 2) / innerTimerSpan)) *
-                    (1 -
-                        unlerpUnit(
-                          0.5,
-                          1,
-                          Curves.easeInCubic.transform(
-                            _completedRecentlyAnimation.value,
-                          ),
-                        )),
-                backgroundColor: clockfaceBackgroundColor,
-                color: lerpColor(
-                  clockfaceBaseColor,
-                  desaturateColor(lightenColor(clockfaceBaseColor, 0.65), 0.4),
-                  Curves.easeInOut.transform(atRestProgress),
-                ),
-                value: pieCompletion,
-                size: innerTimerSpan,
-              );
-              return pie;
-            },
-          ),
-        ),
-        TimerKind.stopwatch => BoolSignalTween(
-          signal: _pieAtRest,
-          duration: const Duration(milliseconds: 90),
-          builder: (context, atRestProgress, child) {
-            return Container(
+      BoolSignalTween(
+        signal: _pieAtRest,
+        duration: const Duration(milliseconds: 90),
+        builder: (context, atRestProgress, child) {
+          Color litColor = lerpColor(
+            clockfaceBaseColor,
+            TimerBaseState.primaryColorDimmed(theme.brightness, d.hue),
+            Curves.easeInOut.transform(atRestProgress),
+          );
+          return switch (d.kind) {
+            TimerKind.timer => AnimatedBuilder(
+              animation: _completedRecentlyAnimation,
+              builder: (context, child) {
+                var pie = Pie(
+                  innerRadp:
+                      (1 -
+                          Curves.easeOutCubic.transform(
+                                unlerpUnit(
+                                  0.2,
+                                  0.46,
+                                  _completedRecentlyAnimation.value,
+                                ),
+                              ) *
+                              ((defaultTimerOutline * 2) / innerTimerSpan)) *
+                      (1 -
+                          unlerpUnit(
+                            0.5,
+                            1,
+                            Curves.easeInCubic.transform(
+                              _completedRecentlyAnimation.value,
+                            ),
+                          )),
+                  backgroundColor: clockfaceBackgroundColor,
+                  color: litColor,
+                  value: pieCompletion,
+                  size: innerTimerSpan,
+                );
+                return pie;
+              },
+            ),
+            TimerKind.stopwatch => Container(
               width: innerTimerSpan,
               height: innerTimerSpan,
               decoration: containerShape(clockfaceBackgroundColor),
@@ -3050,20 +3063,15 @@ class TimerState extends TimerBaseState<Timer> {
                       ),
                       rotation: 45 / 2,
                     ),
-                    color: lerpColor(
-                      clockfaceBaseColor,
-                      lightenColor(clockfaceBaseColor, 0.65),
-                      Curves.easeInOut.transform(atRestProgress),
-                    ),
+                    color: litColor,
                   ),
                 ),
               ),
-            );
-          },
-        ),
-        _ => throw wrongTimerVariantError(d.kind),
-      },
-      // size: 90),
+            ),
+            _ => throw wrongTimerVariantError(d.kind),
+          };
+        },
+      ),
     );
 
     final bud = padBud;
@@ -5307,7 +5315,7 @@ class TimerScreenState extends State<TimerScreen>
     // per-timer highlight colors tend to clash with materialYou menu color
     Color inkColor = td.isComposite || materialYouOn()
         ? foregroundColor
-        : TimerBaseState.backgroundColor(td.hue);
+        : TimerBaseState.backgroundColor(theme.brightness, td.hue);
     // Items inject their press highlight into the menu body's glass, so they
     // need its layer; it's made here rather than in TimerMenu because both
     // sides of that split need it. —Opus 5
