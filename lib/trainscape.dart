@@ -410,33 +410,93 @@ enum GamePhase { playing, won, lost }
 ///
 /// One mover serves all of it, because there's only one clock and it can be
 /// pushed by several things at once — a walk playing out while a finger is on
-/// the dial. What changes is how hard.
-///
-/// [hourSeconds] is how long it takes to cross one game hour from a standstill
-/// and stop dead on the far side. Stated that way round because it's the thing
-/// anyone tuning this actually wants to say; the acceleration is worked out
-/// from it. Bigger distances take longer, but only as the square root — a
-/// day's worth is not twenty-four times the wait.
+/// the dial. What changes is the speed it wants to be going at, given how far
+/// it still has to go — see [speedFor], which is the whole of the difference
+/// between these — and how long it takes to change its mind about that.
 enum ClockPush {
-  /// catching up to the end of something the player set going
-  ease(0.5),
+  /// Something the player set going, playing out. Crosses the ground at
+  /// exactly the rate the world runs at when it's simply running
+  /// ([Parameters.pace]), in a straight line — so a walk you asked for looks
+  /// the same as a walk that was already happening, which is the only reason
+  /// to watch one rather than be told about it.
+  follow(lag: 0.09),
 
-  /// following a finger on the dial. Quick, because a control that lags behind
-  /// the thumb doesn't read as a control at all — what smoothing there is here
-  /// is for taking the jitter out of a drag, not for feel.
-  dial(0.14),
+  /// A second thing set going while the first was still playing out, and
+  /// anything else that has to close a gap rather than watch it.
+  ///
+  /// Nobody wants to sit through the backlog at walking pace, so it's crossed
+  /// on an elastic: the further behind, the faster, easing back to [follow]'s
+  /// speed exactly as the gap closes. It lands going at normal speed rather
+  /// than braking to nothing, so there is no seam where the rush ends and the
+  /// world simply carrying on begins.
+  catchUp(lag: 0.09),
 
-  /// plain unpaused play, where the destination keeps receding. Quick, so the
-  /// standing lag behind a moving target stays too small to see.
-  play(0.1);
+  /// Following a finger on the dial. The only one that brakes to a stop,
+  /// because it's the only one whose destination is a place somebody is
+  /// pointing at rather than a moment the world is running towards: a clock
+  /// that crept on at [follow]'s pace under a finger holding still would be a
+  /// dial that fought the hand. Quick, too — a control that lags behind the
+  /// thumb doesn't read as a control at all.
+  dial(lag: 0.03);
 
-  const ClockPush(this.hourSeconds);
-  final double hourSeconds;
+  const ClockPush({required this.lag});
 
-  /// ticks per real second per real second. Constant acceleration, so the
-  /// distance covered goes as the square of the time — which is what makes
-  /// this a parabola rather than the exponential it replaced.
-  double get accel => 4 * gameHour / (hourSeconds * hourSeconds);
+  /// How long the clock takes to change its mind about how fast it's going,
+  /// in real seconds: the wanted speed is approached rather than taken, so
+  /// there is no instant at which the hand jumps or stops.
+  ///
+  /// A time constant and not an acceleration, which is the difference between
+  /// this and the ramp it replaced. What has to be smoothed is a *change* —
+  /// somewhere else to be, or a different reason for going there — and how big
+  /// a change that is has nothing to do with how many ticks per second it
+  /// works out to. Capping the acceleration instead meant an elastic stretched
+  /// far enough couldn't relax as fast as it wanted to, and a catch-up that
+  /// can't relax is a catch-up that arrives still going.
+  final double lag;
+
+  /// How long the dial takes to cross a game hour from a standstill and stop
+  /// dead on the far side. Stated that way round because it's the thing
+  /// anyone tuning it actually wants to say; the acceleration is worked out
+  /// from it. Bigger distances take longer, but only as the square root.
+  static const double _dialHour = 0.14;
+
+  /// which is this much acceleration, in ticks per real second per real second
+  static const double _dialAccel = 4 * gameHour / (_dialHour * _dialHour);
+
+  /// [catchUp]'s elastic, in real seconds: being one second's worth of
+  /// ordinary play behind adds this much again to the speed. Lower is
+  /// tighter. The gap closes in `_stretch * ln(1 + behind / _stretch)`
+  /// seconds, so a long backlog costs much less than proportionally more.
+  static const double _stretch = 1.4;
+
+  /// Whether this one means to be standing still when it gets there, which is
+  /// [dial] and only [dial]: the others hand over to the world running on at
+  /// the speed they arrived at. It's what makes [speedFor] a ceiling rather
+  /// than an aim — a brake that can be overrun isn't a brake.
+  bool get arrivesStopped => this == dial;
+
+  /// How fast to be going with [gap] ticks still to cover — signed, since the
+  /// clock winds back as readily as forward.
+  ///
+  /// [dial] is the odd one out and it's one line of physics: `v² = 2ad` is the
+  /// fastest you can be going at distance d and still stop exactly on the
+  /// mark, so that's the speed to aim for. Never exceeding it is what stops it
+  /// overshooting, which for a clock would mean sailing past the moment and
+  /// re-simulating the world to come back to it.
+  ///
+  /// The other two don't stop, they *arrive*: they want [pace] all the way to
+  /// the mark and are cut off there by the crossing check. [catchUp] wants
+  /// that plus a share of whatever is still outstanding, which is what makes
+  /// it an elastic and what makes it relax into the other exactly as it lands.
+  double speedFor(double gap, double pace) {
+    final d = gap.abs(), sign = gap.isNegative ? -1 : 1;
+    return sign *
+        switch (this) {
+          dial => sqrt(2 * _dialAccel * d),
+          follow => pace,
+          catchUp => pace + d / _stretch,
+        };
+  }
 }
 
 // ────────────────────────────── intervals ──────────────────────────────
@@ -2820,12 +2880,20 @@ class Player(final String name, final Color color) extends Thing {
   /// they're flat on their back, so the block is folded into the time rather
   /// than being an event of its own — coming round from a mugging isn't
   /// something that happens, it's something that stops being true.
+  /// Overdue means *now*, which is the same rule the planner reads the list
+  /// by — see [Game.walkPlan], which takes each action at `max(t, notBefore)`.
+  /// Without it, deciding something while a walk is still under way puts the
+  /// decision's moment behind the walk's end, and the event loop obligingly
+  /// runs it at that moment: the world's clock steps backwards, the walk that
+  /// follows sets off before the one before it landed, and the player is drawn
+  /// most of the way along it the instant they arrive.
   TTime? nextEventAt(Game g) {
     if (traversing != null) return arrivesAt;
     final a = script.next;
     if (a == null || at.peek() == null) return null;
     final u = incapacitatedUntil.peek();
-    return u == null ? a.notBefore : max(a.notBefore, u);
+    final t = max(a.notBefore, g.now);
+    return u == null ? t : max(t, u);
   }
 
   /// whether the pending event is an arrival, which sorts ahead of departures;
@@ -4299,10 +4367,16 @@ class Game({
     final j = jumping.value;
     if (j == null) return false;
     final (station, p) = j;
-    if (!station.isTarget(n, p)) return false;
-    jumping.value = null;
-    commit(p, JumpAction(station, n, notBefore: actionMoment));
-    return true;
+    // whether it's a legal target is a question about the world at the moment
+    // they'd be jumping, which is where the clock is going — see [decide]
+    var legal = false;
+    decide(() {
+      legal = station.isTarget(n, p);
+      if (!legal) return;
+      jumping.value = null;
+      commit(p, JumpAction(station, n, notBefore: actionMoment));
+    });
+    return legal;
   }
 
   /// tapping the facility whose tooltip is showing closes it again — unless a
@@ -4564,7 +4638,7 @@ class Game({
   /// before it looked at anyone else — two players queueing at the same
   /// standstill would come out grouped rather than taking turns. A tick each
   /// is what makes the order they were decided the order they happen in.
-  void commit(Player p, PlayerAction a) {
+  void commit(Player p, PlayerAction a) => decide(() {
     p.script.truncateReplayed();
     final last = p.script.actions.lastOrNull;
     if (last != null && a.notBefore <= last.notBefore) {
@@ -4572,10 +4646,52 @@ class Game({
     }
     p.script.actions.add(a);
     playUntilIdle(p);
+  });
+
+  /// Works [what] out at the moment it belongs to, rather than at the frame
+  /// the animation happens to be on.
+  ///
+  /// A clock on its way somewhere is a decision already made, playing out. The
+  /// controls on screen describe where it's going and not where it has got to
+  /// — see [readControls] — so a tap that lands mid-journey has to be worked
+  /// out there too: which node they'll be standing on, where the train will
+  /// have got to, what's already on their list. The case that makes it obvious
+  /// is winding back to somebody who stopped an hour ago and moving them
+  /// before the clock has finished getting there. The move is theirs to make an
+  /// hour ago — that being the whole reason the clock was going there — and
+  /// taking it at the half-way frame would schedule it in the middle of the
+  /// journey nobody was watching for its own sake.
+  ///
+  /// So the world is taken there, asked, and put straight back underneath the
+  /// animation, which hasn't moved and mustn't jump. Nothing is lost in the
+  /// putting back: what a decision writes down is history, and history is the
+  /// one thing winding the world does not touch — see [rewindTo].
+  ///
+  /// Only ever backwards. A journey still ahead of the world is one that can
+  /// be read off the list without moving anything — [walkPlan] folds in the
+  /// walk under way and everything queued behind it, and comes back with the
+  /// same answer the world would give if it went there — so going would only
+  /// mean carrying out a queue of decisions early to find out what they were
+  /// going to say. Backwards is the one that can't be done on paper: the state
+  /// itself has to be unwound.
+  ///
+  /// Nested calls cost nothing, since the second one finds the world already
+  /// standing where it would have sent it. Which is what lets [commit] use
+  /// this as well as the drags that call [commit].
+  void decide(void Function() what) {
+    final was = now;
+    final to = headingFor;
+    if (to != null && to < now) rewindTo(to);
+    what();
+    if (now != was) rewindTo(was);
   }
 
-  /// The moment an action decided on now belongs to: the next tick, not this
-  /// one.
+  /// The moment an action decided on now belongs to: the next tick after
+  /// wherever the clock is *going*.
+  ///
+  /// Where it's going, not where it is, for the reasons in [decide] — and
+  /// written so that it reads the same on both sides of that journey, since
+  /// most of its callers name it before the world has been taken there.
   ///
   /// A tick is 1/16384 of a game second and nobody will ever see the
   /// difference, but it buys a property worth having — **for every action
@@ -4590,7 +4706,7 @@ class Game({
   /// out. Picking a tree takes no time, so a plan to be done by now is a plan
   /// the ticker has no journey to make for, and it would sit there until
   /// something else happened to move time.
-  TTime get actionMoment => now + 1;
+  TTime get actionMoment => (headingFor ?? now) + 1;
 
   /// Carries out whatever [p] is up to next, and decides whether it came out
   /// the way it did the first time.
@@ -4790,7 +4906,13 @@ class Game({
   /// itself would quietly go back to describing now.
   PanelView readControls() {
     final p = selectedPlayer.peek();
-    final (at, _) = actionTimeFor(p);
+    // The later of the two things a tap would have to get past: the walk this
+    // player is in the middle of, and the journey the clock is on — which is
+    // the same pair [actionMoment] is the far side of, so what's described is
+    // what a tap would land in. Only forwards; going back to read the controls
+    // would be unwinding the world every frame of an animation, and what's
+    // behind is [decide]'s business, once, when something is actually decided.
+    final at = max(actionTimeFor(p).$1, headingFor ?? now);
     if (at <= now) return _controlsHere(p);
     final held = captureState(this);
     final was = _outsideTheSnapshot();
@@ -4867,11 +4989,11 @@ class Game({
 
   // ── playback ──
   //
-  // The clock never jumps to where it's been asked for; it travels there, on a
-  // spring, so that a walk is watched rather than reported. Every way of
-  // moving time — an action playing out, the dial being turned, plain unpaused
-  // play — is the same one mechanism: name a moment and say why, and the
-  // ticker carries the world to it.
+  // The clock never jumps to where it's been asked for; it travels there, so
+  // that a walk is watched rather than reported. Every way of moving time — an
+  // action playing out, the dial being turned, plain unpaused play — is the
+  // same one mechanism: name a moment and say why, and the ticker carries the
+  // world to it.
 
   /// whether a finger is on the dial, which stops free-running play from
   /// arguing with it — see [TimeDial]
@@ -4879,37 +5001,50 @@ class Game({
 
   /// where the clock is headed, or null when it's arrived and stopped
   TTime? headingFor;
-  ClockPush _push = ClockPush.ease;
+  ClockPush _push = ClockPush.follow;
 
   /// The clock as it's being shown, which is not [now]: a real number of
-  /// ticks, carrying a velocity, so that it can be sprung towards a
+  /// ticks, carrying a velocity, so that it can be carried towards a
   /// destination instead of cutting to it. Each frame it's rounded and the
   /// world is taken to that moment. See [ClockPush].
   double _shown = 0, _shownVelocity = 0;
 
-  /// where the clock has sprung to, and how fast it's going — in ticks and in
-  /// ticks per real second
+  /// where the clock has got to, and how fast it's going — in ticks and in
+  /// ticks per real second — and what's pushing it there
   double get shownClock => _shown;
   double get clockVelocity => _shownVelocity;
+  ClockPush get clockPush => _push;
 
   /// Sets the clock travelling to [t], with [why] deciding how eagerly.
   ///
   /// Deliberately touches nothing but the destination. A clock already on its
   /// way somewhere and told to go somewhere else carries on from where it is
-  /// at the speed it was going — the spring re-solves from the position and
-  /// velocity it already has, so redirecting mid-flight bends the movement
-  /// instead of restarting it. Changing [why] at the same time changes how
-  /// hard it's pulled, which is a change of acceleration; the hand itself
-  /// neither jumps nor stops.
+  /// at the speed it was going — the mover re-reads the position and velocity
+  /// it already has, so redirecting mid-flight bends the movement instead of
+  /// restarting it. Changing [why] at the same time changes what speed it's
+  /// heading for and how fast it changes its mind; the hand itself neither
+  /// jumps nor stops.
   void headFor(TTime t, ClockPush why) {
     headingFor = max(t, earliestMoment);
     _push = why;
   }
 
+  /// Plays the world out to [t]: at ordinary speed if it's standing still, and
+  /// on the elastic if it's already on its way somewhere.
+  ///
+  /// That one test is the whole rule, and it's the player's own hand that
+  /// decides it. Set something going and you get to watch it happen. Set
+  /// something else going before it's finished and you've said you'd rather be
+  /// somewhere else — so the rest of it is crossed on [ClockPush.catchUp],
+  /// which hurries in proportion to how much you've stacked up and hands back
+  /// to ordinary speed as it lands. See [ClockPush].
+  void playOut(TTime t) =>
+      headFor(t, headingFor == null ? ClockPush.follow : ClockPush.catchUp);
+
   /// runs the clock until [p] has nothing left on their list. [frontierOf] is
   /// exact — walking is the only thing that takes any time and wires don't
   /// change length — so this is a moment, not a condition to keep testing.
-  void playUntilIdle(Player p) => headFor(frontierOf(p), ClockPush.ease);
+  void playUntilIdle(Player p) => playOut(frontierOf(p));
 
   /// Turns to [p] — and takes the clock with them, to the end of *their* last
   /// action rather than leaving it at the end of everyone's.
@@ -4928,7 +5063,30 @@ class Game({
   void select(Player p) {
     if (p.isSameAs(selectedPlayer.peek())) return;
     selectedPlayer.value = p;
-    headFor(storyEndOf(p), ClockPush.ease);
+    // [ClockPush.catchUp] and not [playOut]: this is a jump to where somebody
+    // else got to, which is as often an hour behind as a minute ahead, and
+    // nobody wants an hour of it played back to them at walking pace.
+    headFor(storyEndOf(p), ClockPush.catchUp);
+  }
+
+  /// Where a level picked up off disk opens: on [p], at the moment their last
+  /// action finished.
+  ///
+  /// [select]'s idea, without the journey. Reopening a save is turning to
+  /// whoever was being played when it was put down, so the clock belongs at
+  /// the end of *their* story and not at the end of everyone's — but there is
+  /// no previous frame to travel from, so the hand is placed there rather than
+  /// sent there, and the first frame drawn is already the right one.
+  ///
+  /// The placing is the part that has to be here. [now] on its own is only the
+  /// world; the hand is [_shown], and a hand left at zero over a world that
+  /// stands hours in reads the wrong time until the next thing the player does
+  /// drags it up from nothing — replaying the level to them on the way.
+  void openOn(Player p) {
+    rewindTo(storyEndOf(p));
+    _shown = now.toDouble();
+    _shownVelocity = 0;
+    headingFor = null;
   }
 
   /// The one call the ticker makes, and the only place real time touches the
@@ -4953,28 +5111,27 @@ class Game({
     final to = headingFor;
     if (to == null) return;
 
-    // Braking to a stop, rather than a spring relaxing towards one.
+    // Chased rather than set: [ClockPush.speedFor] says how fast to be going
+    // with this much left to cover, and the clock closes on that answer over
+    // [ClockPush.lag] instead of taking it. Which is what makes a destination
+    // that changes mid-flight bend the movement rather than restart it — the
+    // hand never jumps and never stops dead, whatever it's told.
     //
-    // A spring never actually arrives: it closes the remaining distance by a
-    // fraction each frame, so the last little bit of a big move takes as long
-    // as the first big bit, and the clock spends a second crawling the final
-    // few minutes. This gets there — under constant acceleration, at a moment
-    // that can be named — and stops.
+    // Written as a decay rather than a fraction a frame so that it means the
+    // same thing at any frame rate, and so that a frame long enough to have
+    // been a whole journey simply arrives.
     //
-    // The whole of it is one line of physics. `v² = 2ad` is the fastest you
-    // can be going at distance d and still stop exactly on the mark, so that's
-    // the speed to aim for, and the acceleration is the limit on how fast the
-    // aim can change. Steering towards it rather than jumping to it is what
-    // makes the motion continuous when the destination changes mid-flight;
-    // never exceeding it is what stops it overshooting, which for a clock
-    // would mean sailing past the moment and re-simulating the world to come
-    // back to it.
+    // A push that means to arrive at a standstill needs its answer to be a
+    // ceiling as well as an aim, since a brake that can be overrun isn't one;
+    // the others are arriving at a speed and have nothing to overshoot.
     final target = to.toDouble();
     final gap = target - _shown;
-    final a = _push.accel;
-    final canStopFrom = sqrt(2 * a * gap.abs()) * (gap.isNegative ? -1 : 1);
-    final step = a * realSeconds;
-    _shownVelocity += (canStopFrom - _shownVelocity).clamp(-step, step);
+    final want = _push.speedFor(gap, params.pace);
+    _shownVelocity +=
+        (want - _shownVelocity) * (1 - exp(-realSeconds / _push.lag));
+    if (_push.arrivesStopped) {
+      _shownVelocity = _shownVelocity.clamp(-want.abs(), want.abs());
+    }
     _shown += _shownVelocity * realSeconds;
 
     // Arrived: either near enough that another frame would be a frame of
@@ -5166,7 +5323,7 @@ class Game({
   /// now, and a replay wants the decision, which is the node. Scheduling ahead
   /// is allowed now — a player mid-walk who is told to walk again queues it,
   /// and it goes when they land.
-  void dragPlayerMove(Player p, double dragAngle) {
+  void dragPlayerMove(Player p, double dragAngle) => decide(() {
     if (!params.playersHaveMoveAction) return;
     // from where they'll be when they get round to it, not from where they
     // are: a drag while they're mid-walk means "and then from there"
@@ -5183,10 +5340,16 @@ class Game({
     }
     if (best == null || bestDist > pi / 2) return;
     commit(p, MoveAction(best.other(source), notBefore: actionMoment));
-  }
+  });
 
   /// Same drag mechanic for a train, resolved to the station it meant.
-  void dragTrainMove(TrainNode train, Player by, double dragAngle) {
+  void dragTrainMove(
+    TrainNode train,
+    Player by,
+    double dragAngle,
+  ) => decide(() {
+    // where the train will be standing when the drag's owner gets to it, for
+    // the same reason [dragPlayerMove] asks where *they* will be standing
     final from = train.dockedAt.value;
     if (from == null) return;
     Node? best;
@@ -5202,7 +5365,7 @@ class Game({
     }
     if (best == null || bestDist > pi / 2) return;
     commit(by, TrainMoveAction(train, best, notBefore: actionMoment));
-  }
+  });
 
   /// Sends [train] to [to] on [by]'s say-so, paying whatever it asks. The
   /// checks are all here rather than at the drag, because by the time a replay
@@ -5312,10 +5475,23 @@ class const _Pad({
 /// The map is monotonic and never goes backwards, but it is emphatically not
 /// proportional. That's the point of it: what it measures out is how much
 /// wheel each action is worth, both to look at and to turn past, and a turn of
-/// the wheel is a number of *things*, not a number of minutes. The world
-/// itself only ever stands at the ends of those things — see [dialStopAt].
+/// the wheel is a number of *things*, not a number of minutes. Along the row
+/// of them the world only ever stands at their ends — see [dialStopAt]; past
+/// it there are no things left and the wheel is a plain clock again.
 class SyntheticClock {
-  SyntheticClock._(this.spans, this._pads, this._cum);
+  SyntheticClock._(this.spans, this._pads, this._cum) {
+    // The same padding gathered by moment rather than by action, which is what
+    // reading the map backwards needs: several actions can end at one instant,
+    // and the wheel crosses all of their room in one go — see [timeAt].
+    for (var i = 0; i < _pads.length; i++) {
+      if (_moments.isNotEmpty && _moments.last == _pads[i].at) {
+        _thru.last = _cum[i + 1];
+      } else {
+        _moments.add(_pads[i].at);
+        _thru.add(_cum[i + 1]);
+      }
+    }
+  }
 
   /// every action anyone has run or is going to, in the order the world runs
   /// them
@@ -5325,6 +5501,11 @@ class SyntheticClock {
   /// alongside: `_cum[i]` is all the padding let in before `_pads[i]`
   final List<_Pad> _pads;
   final List<double> _cum;
+
+  /// the distinct moments of [_pads], ascending, and all the padding let in up
+  /// to and including each of them
+  final List<TTime> _moments = [];
+  final List<double> _thru = [];
 
   /// bigger than any action's place in the run order: "after everything that
   /// happens at this moment"
@@ -5414,6 +5595,33 @@ class SyntheticClock {
   /// Where the wheel stands when the clock reads [t]: past everything that has
   /// already happened at that instant, since it has already happened.
   double at(TTime t) => t + _before(t, _afterAll);
+
+  /// What the clock reads when the wheel stands at [wound] — [at] read
+  /// backwards, and exact in the sense that `timeAt(at(t)) == t`.
+  ///
+  /// It can't be exact the other way round, and that's the padding itself
+  /// said from the other side: where a stretch of wheel was let into a single
+  /// instant, the whole of that stretch is that instant, so the world stands
+  /// still while the thumb crosses the room something was given. Between the
+  /// stretches the two run at the same rate, tick for tick — which is what
+  /// makes the wheel past the end of a list an ordinary, if finely geared,
+  /// clock.
+  TTime timeAt(double wound) {
+    // the last moment the wheel has definitely got past, padding and all
+    var lo = 0, hi = _moments.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_moments[mid] + _thru[mid] <= wound) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    final t = (wound - (lo == 0 ? 0.0 : _thru[lo - 1])).floor();
+    // and no further than the brink of the next one, whose own stretch of
+    // wheel is still ahead of the thumb
+    return lo == _moments.length ? t : min(t, _moments[lo] - 1);
+  }
 
   /// one player's actions, in order — the band drawn for them, and the
   /// detents the wheel clicks through when they're the one selected
@@ -6715,20 +6923,14 @@ List<SyntheticSpan> dialBand(Game game) =>
     game.synthetic.bandOf(game.players.indexOf(game.selectedPlayer.peek()));
 
 /// Where the wheel stands when the world stands at [Game.now]: on the clock,
-/// but never off the ends of the list.
+/// wherever that is.
 ///
-/// The wheel past the last action is time nobody decided anything in, and
-/// having to crank back through an hour of it to reach the thing you actually
-/// wanted to unmake is not a control. So the rim's ends are the list's ends, a
-/// tick either side — that tick being the room to stand before the first
-/// action or after the last — and idling on past the end of a list leaves the
-/// wheel sitting where a turn still means something.
-double dialWoundFor(Game game) {
-  final band = dialBand(game);
-  final at = game.synthetic.at(game.now);
-  if (band.isEmpty) return at;
-  return at.clamp(band.first.start - 1, band.last.end + 1);
-}
+/// No ends. Past the last thing anyone has decided, the rim stops being a row
+/// of things and goes back to being a clock — see [dialStopAt] — so there is
+/// nowhere out there it would be meaningless to stand, and pinning it to the
+/// end of the list would only mean the wheel showing one thing while the world
+/// stood at another.
+double dialWoundFor(Game game) => game.synthetic.at(game.now);
 
 /// Where the world stands when the rim has been turned to [wound]: the far
 /// side of the action the wheel is on, on the side it's being turned towards.
@@ -6751,10 +6953,22 @@ double dialWoundFor(Game game) {
 /// settled once, when the turn starts, and holds for the whole of it.
 ///
 /// The selected player's list, not everyone's, for the same reason tapping the
-/// clock uses theirs. Null when they have no list to turn through at all.
-TTime? dialStopAt(Game game, double wound, bool forward) {
+/// clock uses theirs.
+TTime dialStopAt(Game game, double wound, bool forward) {
   final band = dialBand(game);
-  if (band.isEmpty) return null;
+  // Off either end there is nothing left to click through, so the rim goes
+  // back to being what it is underneath — a clock, geared right down. Time
+  // passes at the rate the wheel turns, which is how you wait for something,
+  // and which way the turn is going stops mattering, because out here there
+  // are no actions to be on one side or the other of. A list with nothing on
+  // it is all end, and winds time from the first hair of a turn.
+  if (band.isEmpty) return game.synthetic.timeAt(wound);
+  if (wound > band.last.end) {
+    return max(band.last.to, game.synthetic.timeAt(wound));
+  }
+  if (wound < band.first.start) {
+    return min(band.first.from - 1, game.synthetic.timeAt(wound));
+  }
   if (forward) {
     // before the first of them is the world with none of it done
     var best = band.first.from - 1;
@@ -6848,9 +7062,14 @@ class _TimeDialState extends State<TimeDial> {
   /// settles onto the clock. Null until the first frame.
   double? _shownWheel;
 
-  /// how quickly the wheel settles back onto the clock once it's let go — a
-  /// blend a frame, like everything else here that follows something
-  static const double _wheelSettle = 0.3;
+  /// How quickly the wheel settles back onto the clock once it's let go — a
+  /// blend a frame, like everything else here that follows something.
+  ///
+  /// Loose. What it's settling out of is a thumb having let go somewhere
+  /// between two clicks, so the distance is small and the whole of the motion
+  /// is a relaxation being watched rather than a control catching up with
+  /// anything; a stiff one reads as the wheel being snatched back.
+  static const double _wheelSettle = 0.14;
 
   /// Where to draw the wheel this frame: exactly where the thumb has it while
   /// it's being turned, and easing back onto the clock the rest of the time.
@@ -6932,9 +7151,10 @@ class _TimeDialState extends State<TimeDial> {
     _lastTouch = local;
     if (!_onOuterWheel) {
       // The clock face is a clock, and winds time itself: smoothly, anywhere,
-      // including into a future nobody has decided anything about. It's the
-      // only way to wait for something — the rim can only step through things
-      // that are going to happen, and waiting is the absence of one.
+      // including into a future nobody has decided anything about. The rim
+      // will wait too, once it's off the end of the list, but only the face
+      // will wait an afternoon — which is the gearing between them and the
+      // whole reason there are two.
       _wound += turned / (2 * pi) * _dialTurn;
       // a floor and no ceiling: you can always wait, and you can never go back
       // before the level knows about
@@ -6943,28 +7163,25 @@ class _TimeDialState extends State<TimeDial> {
       return;
     }
 
-    // The rim is a row of actions, and with nothing on the list there is
-    // nothing to click through — an inert rim, rather than a rim that quietly
-    // goes back to being a clock.
-    final band = dialBand(game);
-    if (band.isEmpty) return;
-
     // The wheel goes where the thumb puts it, and everything else is worked
     // out from where it ends up.
     _wound += turned / (2 * pi) * _wheelSpan;
-    // and stops at the ends of the list rather than winding off into nothing
-    // — see [dialWoundFor], which is the same two bounds
-    _wound = _wound.clamp(band.first.start - 1, band.last.end + 1);
+    // A floor and no ceiling, exactly as on the face: you can always wait, and
+    // you can never go back before the level knows about. Off the end of the
+    // list the rim is winding plain time — see [dialStopAt].
+    _wound = max(_wound, game.synthetic.at(game.earliestMoment));
 
-    // a thumb landing on the rim moves a pixel or two of its own accord, and
-    // that isn't a direction. Settled once, and it holds for the turn.
-    if (_forward == null) {
+    // Which action the wheel is over is the whole rule, and a thumb landing on
+    // the rim moves a pixel or two of its own accord, which isn't a direction.
+    // Settled once, and it holds for the turn. With nothing on the list to be
+    // over there's nothing to settle: the rim is a clock, and a clock doesn't
+    // care which way you came at it.
+    if (_forward == null && dialBand(game).isNotEmpty) {
       _deciding += turned;
       if (_deciding.abs() < _dialSnapDeadzone) return;
       _forward = _deciding > 0;
     }
-    final to = dialStopAt(game, _wound, _forward!);
-    if (to != null) game.headFor(to, ClockPush.dial);
+    game.headFor(dialStopAt(game, _wound, _forward ?? true), ClockPush.dial);
   }
 
   @override
@@ -6981,10 +7198,8 @@ class _TimeDialState extends State<TimeDial> {
         behavior: HitTestBehavior.deferToChild,
         // the one thing they're in the middle of, or about to start — not
         // the whole list. Tapping again takes the next one.
-        onTapUp: (_) => game.headFor(
-          game.nextActionEndsAt(game.selectedPlayer.peek()),
-          ClockPush.ease,
-        ),
+        onTapUp: (_) =>
+            game.playOut(game.nextActionEndsAt(game.selectedPlayer.peek())),
         onPanDown: (d) => _down(d.localPosition),
         onPanUpdate: (d) => _drag(d.localPosition),
         onPanEnd: (_) => game.dialHeld = false,
@@ -7508,6 +7723,12 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
     setState(() {
       _game = saved ?? generateLevel(Parameters.levelOne(widget.seed ?? 1));
       _seed = game.params.seed;
+      // Where the level opens, which is a decision about play and so isn't the
+      // save format's to make: [levelFromJson] hands back the world exactly as
+      // it was put down, and this turns to whoever was being played. A fresh
+      // level is the same call answering nothing — nobody has done anything
+      // yet, so its moment is the beginning.
+      game.openOn(game.selectedPlayer.peek());
     });
     _ticker.start();
   }

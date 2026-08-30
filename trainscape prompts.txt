@@ -245,13 +245,20 @@ The outer wheel's representation of time should be somewhat synthetic, it should
 when the wheel starts to move, the direction is noted, and time snaps to before or after the current wheel action depending on the direction. If the wheel is being moved back in time, then it immediately rolls back to before the most recent action, if it's being moved forward in time, then it immediately snaps to the end of the next action
 The snap should animate. So I guess if the action has a duration, use the spring target, otherwise.. do whatever it is you do to advance over instant actions.
 When a player is selected, time needs to go back to the end of their last action.
---
 allow turning the outer wheel beyond the action history, it should proceed at the usual rate (it currently wont go past the final action)
 events currently run far too fast. when the player schedules an action, it should animate linearly at normal speed. It should only rush to complete that if they schedule another action, but the way the catchup works should also be changed, it should be an elastic snap to the present, it should move faster when it's further behind, and it should land in the present smoothly, with no discontinuity in velocity most of the time. This shouldn't interfere with the spring snapping behavior of the outer clock event wheel, though that also needs to be a little bit more relaxed.
-If a player moves into the smaller camera sensitivity box, center on them.
+Ringing forward beyond the final action works.
+the catch up animation doesn't look right at all, it's extremely discontinuous. When I start a move, it plays forward at normal rate, the problem is visible when another move is scheduled partway through.
+What we want: time dynamically springs to catch up with a new "now" that is time as of the next, newly scheduled action, ie, the new frontier is the ending of the current action, moving towards the next action, the visible present is springing to catch up with that new frontier, with final velocity of 1 second per second.
+What we currently have: Time speeds up when the second action is scheduled, but when time reaches the end of the first action, it just instantly leaps to the end of the second action.
+Another major issue, the unmoved player is selected, and the clock is playing back to their last move, it takes a while if it's been a long time, which looks nice, but if they move before it animates all the way back to them, the move is scheduled at the current visible position of the animation rather than its target, which is wrong. if they do move early, what should happen should be similar to the above, their action is scheduled after the actual frontier for them, then a finite duration spring should catch up with that frontier.
+This may require rethinking the wheel/paused time animation.
+--
+If the selected player player moves into the smaller square mindim x mindim camera sensitivity box, center on them.
 Make player inventory vertical, next to the move pad.
+
 we need to start the player with tutorial levels, so there's a mobj that stores their progress, and there's a level screen
-the game initially boots into level 1 though
+the game should initially boot straight into level 1 though
 Level 1: "open the lock". 1 heart required. three days. players: 1
 	the player starts in a route that leads to a thing that trades a1 and a2 for heart
 	but a1 is behind an a3 r mugger.
