@@ -126,26 +126,10 @@ bool materialYouOn() =>
     Platform.isAndroid &&
     (Mobj.getAlreadyLoaded(materialYouID, BoolType()).value ?? false);
 
-// --- bounce ---
-// The app's primary appearance animations (the special-timer drag ring growing
-// out of its button, the timer menu revealing out of its origin) either ease
-// into place or, per the [bouncyAnimationsID] setting, carry a little past their
-// target and settle back. The spring-driven ones get that by running underdamped
-// ([bouncySpringFor]); the ones on a fixed duration get it as a swell added on
-// top of the motion they already had ([appearanceOvershoot]). One overshoot
-// figure feeds both, so they bounce by the same amount.
-//
-// It doesn't go on everything that moves. A multistage animation (the numeral
-// ring, which grows a hub, then leaves off it, then collapses onto a choice)
-// reads as a mess when a stage overshoots into the next one, and springs that
-// track something the finger is steering (the arc's cap angles) want to arrive
-// where they were aimed, not swing past it.
+bool liquidGlassOn() =>
+    Mobj.getAlreadyLoaded(liquidGlassOnID, BoolType()).value ??
+    (defaultTargetPlatform == TargetPlatform.iOS);
 
-/// Whether appearance animations currently overshoot their target slightly
-/// before settling. Reading this from a reactive build (a
-/// [SignalStatefulWidget], a `SignalBuilder`, an effect) subscribes to the
-/// setting; the springs read it when they launch, so a toggle takes effect from
-/// the next animation rather than mid-flight.
 bool bouncyAnimationsOn() =>
     Mobj.getAlreadyLoaded(bouncyAnimationsID, BoolType()).value ?? false;
 
@@ -4697,20 +4681,16 @@ class OurThemeData({
   /// control buttons.
   final double timerculeBackingCornerRadius = 23,
 
-  /// Backdrop blur radius for liquid-glass surfaces; feed into [ourGlassOptions]
-  /// so the app's glass look stays themeable rather than hardcoded per call site.
-  /// The light theme takes it down (glass over a light background needs less
-  /// blur to read as glass); the initializations that don't say otherwise get
-  /// [defaultGlassBlurRadius].
   final double glassBlurRadius = OurThemeData.defaultGlassBlurRadius,
 
-  /// Rim-darkening tint for liquid-glass surfaces; feed into [ourGlassOptions]'s
-  /// [GlassOptions.edgeTint].
   final Color edgeTint = OurThemeData.defaultEdgeTint,
 }) {
   static const double defaultGlassBlurRadius = 12;
 
   static const Color defaultEdgeTint = Color(0x09000000);
+
+  static const double glassShineIntensityLight = 0.6;
+  static const double glassShineIntensityDark = 0.4;
 
   /// Fill for a glass-like surface: the translucent [glassColor] when liquid
   /// glass is on, the solid [nonGlassColor] when it's off.
@@ -4862,7 +4842,9 @@ class OurThemeData({
           // : lightenColor(cs.onSurface, 0.66),
           : cs.outline,
       collapsedSpecialDragRingColor: cs.primary,
-      veryLowProminenceColor: darkenColor(cs.onSurface, 0.67),
+      veryLowProminenceColor: dark
+          ? darkenColor(cs.onSurface, 0.57)
+          : lightenColor(cs.onSurface, 0.7),
       hintTextColor: dark
           ? darkenColor(cs.onSurface, 0.4)
           : lightenColor(cs.onSurface, 0.375),
@@ -4876,10 +4858,7 @@ class OurThemeData({
       nonGlassOnSurface: cs.onPrimary,
       nonGlassPopupMenu: cs.secondary,
       onNonGlassPopupMenu: cs.onSecondary,
-      edgeTint: dark
-          ? tint(Colors.white, 0.2).withValues(alpha: 0.7)
-          : tint(HSLColor.fromAHSL(1, 0, 0, 0.2).toColor())
-                .withValues(alpha: 0.16),
+      edgeTint: surfaceBack.withValues(alpha: 0.16),
     );
   }
 
@@ -4902,34 +4881,40 @@ class OurThemeData({
 final BackdropKey ourGlassBackdropKey = BackdropKey();
 // final BackdropKey? ourGlassBackdropKey = null;
 
-/// Our standard [GlassOptions]. Differs from the package defaults in a crisper
-/// backdrop [blurRadius] and our wider [standardShadowRadius]; go through this
-/// so the app's glass look stays consistent across the timer menu and drag
-/// rings. [blurRadius] and [edgeTint] should come from
-/// [OurThemeData.glassBlurRadius] and [OurThemeData.edgeTint] so they stay
-/// themeable.
-GlassOptions ourGlassOptions({
-  required double blurRadius,
-  required Color edgeTint,
+GlassOptions ourGlassOptions(
+  BuildContext context, {
   double? bevelThickness,
-  GlassMode mode = GlassMode.glass,
+  GlassMode? mode,
   double blendRadius = 20,
   double? childRefractionIntensity,
   double shadowRadius = standardShadowRadius,
-}) => GlassOptions(
-  mode: mode,
-  bevelThickness: bevelThickness ?? 18,
-  blendRadius: blendRadius,
-  blurRadius: blurRadius,
-  edgeTint: edgeTint,
-  childRefractionIntensity: childRefractionIntensity ?? 0,
-  shadowRadius: shadowRadius,
-  // glass mode only: flat blobs are a solid tint against the backdrop and
-  // carry their own contrast, so a shadow under them reads as grime rather
-  // than depth. It's the transparency that needs the shadow to sit off the
-  // page.
-  shadowIntensity: mode == GlassMode.flat ? 0 : standardShadowOpacity,
-);
+  double? blurRadius,
+  Color? edgeTint,
+  double? shineIntensity,
+}) {
+  final mt = OurThemeData.fromContext(context);
+  final resolvedMode =
+      mode ?? (liquidGlassOn() ? GlassMode.glass : GlassMode.flat);
+  return GlassOptions(
+    mode: resolvedMode,
+    bevelThickness: bevelThickness ?? 18,
+    blendRadius: blendRadius,
+    blurRadius: blurRadius ?? mt.glassBlurRadius,
+    edgeTint: edgeTint ?? mt.edgeTint,
+    childRefractionIntensity: childRefractionIntensity ?? 0,
+    shadowRadius: shadowRadius,
+    shineIntensity:
+        shineIntensity ??
+        (Theme.of(context).brightness == Brightness.dark
+            ? OurThemeData.glassShineIntensityDark
+            : OurThemeData.glassShineIntensityLight),
+    // glass mode only: flat blobs are a solid tint against the backdrop and
+    // carry their own contrast, so a shadow under them reads as grime rather
+    // than depth. It's the transparency that needs the shadow to sit off the
+    // page.
+    shadowIntensity: resolvedMode == GlassMode.flat ? 0 : standardShadowOpacity,
+  );
+}
 
 /// How much the content on a glass surface should bend through the bevel part
 /// way through that surface's reveal ([openp] 0 -> 1): strong while the glass

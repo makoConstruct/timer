@@ -1908,8 +1908,6 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             final double bulgePad = _glassMenuBulgePad(buttonSpan);
             double cornerStyle = continuousCornersOn() ? 1 : 0;
             final Widget body = _buildGlassBody(
-              mt: mt,
-              glassOn: glassOn,
               progress: revealProgress,
               swell: revealSwell,
               downwardProgress: downwardProgress,
@@ -1945,12 +1943,10 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
   }
 
   /// The menu body: merged [GlassBlob]s revealing out of [origin], rendered as
-  /// liquid glass or (when [glassOn] is false) a flat fill of [tint]. The
+  /// liquid glass or (when liquid glass is off) a flat fill of [tint]. The
   /// arrow/speech nub is a narrow pill fused into the body across the layer's
   /// smooth-min bridge (its "viscosity", i.e. [GlassOptions.blendRadius]).
   Widget _buildGlassBody({
-    required OurThemeData mt,
-    required bool glassOn,
     required double progress,
 
     /// how far out past its resting edge the body is currently pushed, in
@@ -2004,11 +2000,9 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
       key: widget.glassLayerKey,
       backdropGroupKey: ourGlassBackdropKey,
       options: ourGlassOptions(
-        mode: glassOn ? GlassMode.glass : GlassMode.flat,
+        context,
         blendRadius: blendRadius,
         bevelThickness: bevelThickness,
-        blurRadius: mt.glassBlurRadius,
-        edgeTint: mt.edgeTint,
         // the items ride the bevel while the body is still liquid and flatten
         // onto it as the reveal lands.
         childRefractionIntensity: openingChildRefraction(p),
@@ -2957,11 +2951,28 @@ class TimerState extends TimerBaseState<Timer> {
         stopwatchPulse *
         (1 -
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
-    final double timerOutline = depth > 0 ? 1.4 : defaultTimerOutline;
-    final double innerTimerSpan = 2 * (clockRadius - defaultTimerOutline);
+    // the inset between the clockface and the edge of the timer's circle. in
+    // dark mode both of the clockface pastels contrast with the background on
+    // their own, so a timer standing on its own leaves the inset transparent
+    // and narrows it, letting the clockface come most of the way out to the
+    // edge. inside a timercule it keeps the painted fringe, staying smaller so
+    // it reads as a part of a larger whole.
+    final bool bareClockface =
+        theme.brightness == Brightness.dark && !parentIsTimercule();
+    final double clockFringe = bareClockface
+        ? defaultTimerOutline * 0.8
+        : defaultTimerOutline;
+    final double timerOutline = bareClockface
+        ? 0
+        : (depth > 0 ? 1.4 : defaultTimerOutline);
+    final double innerTimerSpan = 2 * (clockRadius - clockFringe);
+    // the decorative insets within the clockface are authored against the
+    // fringed one, so they scale up with it when the fringe goes away
+    final double faceScale =
+        innerTimerSpan / (2 * (clockRadius - defaultTimerOutline));
     final stopwatchPulseSize = lerp(
-      innerTimerSpan - defaultTimerOutline * 2,
-      (clockRadius - timerGap / 2) * 2 * 0.28,
+      innerTimerSpan - defaultTimerOutline * 2 * faceScale,
+      (clockRadius - timerGap / 2) * 2 * 0.28 * faceScale,
       // Curves.easeOutCubic.transform(stopwatchPulse) *
       stopwatchPulseProgress,
     );
@@ -2994,7 +3005,7 @@ class TimerState extends TimerBaseState<Timer> {
             child: Container(
               width: 2 * clockRadius,
               height: 2 * clockRadius,
-              padding: EdgeInsets.all(defaultTimerOutline - timerOutline),
+              padding: EdgeInsets.all(clockFringe - timerOutline),
               child: Container(
                 padding: EdgeInsets.all(timerOutline),
                 decoration: containerShape(outerBackground),
@@ -3027,7 +3038,8 @@ class TimerState extends TimerBaseState<Timer> {
                                   _completedRecentlyAnimation.value,
                                 ),
                               ) *
-                              ((defaultTimerOutline * 2) / innerTimerSpan)) *
+                              ((defaultTimerOutline * 2 * faceScale) /
+                                  innerTimerSpan)) *
                       (1 -
                           unlerpUnit(
                             0.5,
@@ -4564,10 +4576,8 @@ class DragActionRingState extends State<DragActionRing>
             backdropGroupKey: ourGlassBackdropKey,
             options: glassLerpedToFlat(
               ourGlassOptions(
-                mode: glassOn ? GlassMode.glass : GlassMode.flat,
+                context,
                 blendRadius: blendRadius,
-                blurRadius: mt.glassBlurRadius,
-                edgeTint: mt.edgeTint,
                 // refraction looks terrible on the blobmode rings
                 childRefractionIntensity: widget.arcModeNotBlobMode
                     ? openingChildRefraction(baseGrow)
@@ -5802,12 +5812,10 @@ class TimerScreenState extends State<TimerScreen>
               return GlassLayer(
                 backdropGroupKey: ourGlassBackdropKey,
                 options: ourGlassOptions(
-                  mode: glassOn ? GlassMode.glass : GlassMode.flat,
+                  context,
                   // a fat bridge while the satellites are still budding off,
                   // tightening as they arrive.
                   blendRadius: lerp(34, 26, budp),
-                  blurRadius: mt.glassBlurRadius,
-                  edgeTint: mt.edgeTint,
                   // knurl and controls bend with the disc as it forms, flat
                   // once it has settled.
                   childRefractionIntensity: openingChildRefraction(p),
@@ -6071,10 +6079,9 @@ class TimerScreenState extends State<TimerScreen>
                       backdropGroupKey: ourGlassBackdropKey,
                       options: glassLerpedToFlat(
                         ourGlassOptions(
+                          context,
                           mode: GlassMode.glass,
-                          blurRadius: mt.glassBlurRadius,
                           blendRadius: PadBud.blend,
-                          edgeTint: mt.edgeTint,
                           // the backing has no child (the numerals sit above
                           // it), so keep it on the plain-mask path throughout.
                           childRefractionIntensity: 0,
@@ -8099,7 +8106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             title: settingTitle('Corner rounding'),
                             subtitle: settingSubtitle(
                               on
-                                  ? 'Continuous: corners ease into the sides (squircles, as on iOS)'
+                                  ? 'Continuous: corners ease in (as on iOS)'
                                   : 'Circular: corners are circular arcs',
                             ),
                             value: on,
