@@ -2951,28 +2951,11 @@ class TimerState extends TimerBaseState<Timer> {
         stopwatchPulse *
         (1 -
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
-    // the inset between the clockface and the edge of the timer's circle. in
-    // dark mode both of the clockface pastels contrast with the background on
-    // their own, so a timer standing on its own leaves the inset transparent
-    // and narrows it, letting the clockface come most of the way out to the
-    // edge. inside a timercule it keeps the painted fringe, staying smaller so
-    // it reads as a part of a larger whole.
-    final bool bareClockface =
-        theme.brightness == Brightness.dark && !parentIsTimercule();
-    final double clockFringe = bareClockface
-        ? defaultTimerOutline * 0.8
-        : defaultTimerOutline;
-    final double timerOutline = bareClockface
-        ? 0
-        : (depth > 0 ? 1.4 : defaultTimerOutline);
-    final double innerTimerSpan = 2 * (clockRadius - clockFringe);
-    // the decorative insets within the clockface are authored against the
-    // fringed one, so they scale up with it when the fringe goes away
-    final double faceScale =
-        innerTimerSpan / (2 * (clockRadius - defaultTimerOutline));
+    final double timerOutline = depth > 0 ? 1.4 : defaultTimerOutline;
+    final double innerTimerSpan = 2 * (clockRadius - defaultTimerOutline);
     final stopwatchPulseSize = lerp(
-      innerTimerSpan - defaultTimerOutline * 2 * faceScale,
-      (clockRadius - timerGap / 2) * 2 * 0.28 * faceScale,
+      innerTimerSpan - defaultTimerOutline * 2,
+      (clockRadius - timerGap / 2) * 2 * 0.28,
       // Curves.easeOutCubic.transform(stopwatchPulse) *
       stopwatchPulseProgress,
     );
@@ -2996,6 +2979,17 @@ class TimerState extends TimerBaseState<Timer> {
       theme.colorScheme.brightness,
       d.hue,
     );
+    // in dark mode both clockface pastels already contrast with the page
+    // background on their own, so a timer standing on its own doesn't need a
+    // visible fringe: paint it the same color as the clockface's own
+    // background instead of the surrounding highlight, so it blends away
+    // while the clockface (and its contrasting foreground) keeps the same
+    // size it has in light mode. inside a timercule the fringe stays visible,
+    // so the timer still reads as part of the group.
+    final Color timerRingColor =
+        theme.brightness == Brightness.dark && !parentIsTimercule()
+        ? clockfaceBackgroundColor
+        : outerBackground;
 
     Widget clockDial = nesting(
       [
@@ -3005,10 +2999,10 @@ class TimerState extends TimerBaseState<Timer> {
             child: Container(
               width: 2 * clockRadius,
               height: 2 * clockRadius,
-              padding: EdgeInsets.all(clockFringe - timerOutline),
+              padding: EdgeInsets.all(defaultTimerOutline - timerOutline),
               child: Container(
                 padding: EdgeInsets.all(timerOutline),
-                decoration: containerShape(outerBackground),
+                decoration: containerShape(timerRingColor),
                 child: next,
               ),
             ),
@@ -3038,8 +3032,7 @@ class TimerState extends TimerBaseState<Timer> {
                                   _completedRecentlyAnimation.value,
                                 ),
                               ) *
-                              ((defaultTimerOutline * 2 * faceScale) /
-                                  innerTimerSpan)) *
+                              ((defaultTimerOutline * 2) / innerTimerSpan)) *
                       (1 -
                           unlerpUnit(
                             0.5,
