@@ -253,9 +253,9 @@ What we want: time dynamically springs to catch up with a new "now" that is time
 What we currently have: Time speeds up when the second action is scheduled, but when time reaches the end of the first action, it just instantly leaps to the end of the second action.
 Another major issue, the unmoved player is selected, and the clock is playing back to their last move, it takes a while if it's been a long time, which looks nice, but if they move before it animates all the way back to them, the move is scheduled at the current visible position of the animation rather than its target, which is wrong. if they do move early, what should happen should be similar to the above, their action is scheduled after the actual frontier for them, then a finite duration spring should catch up with that frontier.
 This may require rethinking the wheel/paused time animation.
---
-If the selected player player moves into the smaller square mindim x mindim camera sensitivity box, center on them.
+~~If the selected player moves into the smaller square mindim x mindim camera sensitivity box, center on them.~~ (changed my mind on this, not the way)
 Make player inventory vertical, next to the move pad.
+--
 
 we need to start the player with tutorial levels, so there's a mobj that stores their progress, and there's a level screen
 the game should initially boot straight into level 1 though
@@ -276,19 +276,18 @@ Level X3: "The true way"
 if the player beats all 3 X3 levels, it unlocks a diatribe from me
 	the diatribe
 		"Habitat"
-		We wouldn't recognize our home. Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in the The rest of us dwindle as some fresh plague bubbles over our feet.
-		We see someone walking upright, armed, a child upon their back. They notice us and approach and, alas, those big black eyes, emotions we do not recognize, inscrutable mutterings, a reaching device whose function we do not understand, and we left behind another cautionary tale.
+		We wouldn't recognize our home. Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in them. The rest of us dwindle as some fresh plague bubbles over our feet.
+		We see someone walking upright, armed, a child upon their back. They notice us and approach and, alas, those big black eyes, emotions we do not recognize, inscrutable mutterings, a reaching device whose function we do not understand, and we are turned into a cautionary tale.
 		Our vision will need to improve.
 
 		Humanity's home shore is shattering and sinking.
-		There are many habitable places, all varying degrees of abyssal. There's nowhere left on the shore, but there are places closer to it, but the closer you wish to be, the harder it is to survive at all. It stands to reason that there is one place of minimal compromise where the most humanlike remaining things still defiantly flourish, reachable only by those with absolute courage that is tempered with inerrent wisdom. You might not be among those people, in which case your place will be further down.
-		As you descend, as you're' embedded in your abyssal cell, you will hear the screams of the humans who couldn't or wouldn't sink as deep as you did as they're dashed and swallowed by monsters older than you. You will feel guilty when you are spared. They will spare you because you no longer taste good.
-		One day, long after your descent, you will learn of a place of lesser compromise, further up. You will learn how you could have kept your hair or your smooth scaleless skin, but you were too fearful, or too stupid, to find that place, you casted it all away. You might shudder in grief. Or, now an abyssal thing, you may not grieve at all, you may chuckle ruefully, for that thing you grew from, who cared, is dead, their memories are just another thing you took from the world, to dissolve in your maw.
+		There are many habitable places, but all varying degrees of abyssal. There's nowhere left on the shore. There are places closer to it, but the closer you wish to be, the harder it is to survive at all. It stands to reason that there is one place of minimal compromise where the most humanlike remaining things still defiantly flourish, reachable only by those with absolute courage that is tempered with inerrent wisdom. You are not among those people. Your place will be further down.
+		As you descend, as you're embedded in your abyssal cell, you will hear the screams of the humans who couldn't or wouldn't sink as deep as you did as they're dashed and swallowed by monsters older than you. You will feel guilty when you are spared. They will spare you because you no longer taste good.
+		One day, long after your descent, you will learn of a place closer to the shore, a place of lesser compromise. You will learn how you could have kept your hair or your smooth scaleless skin, but you were too fearful, or too stupid, to find that place, you casted it all away. You might shudder in grief. Or, now an abyssal thing, you may not grieve at all, you may chuckle ruefully, for that thing you grew from, who cared, is dead, their memories dissolve in your maw.
 		Look the other way, downwards, you will only see greater older monsters, chuckling ruefully about how you kept your brown eyes, or your flat face, and how pathetic you are for doing that.
 
-		None of this has happened yet.
+		But you aren't an abyssal thing, yet.
 		The sooner you accept that your shore is soon to shatter and sink, the lesser the compromise you will need to enact.
 		Your vision is going to need to improve. We know that it is inhuman to see like us, but we don't believe there is any place of lesser compromise than ours. You don't believe us, yet? You don't have much time.
-		
 		
 Add the ability to carry other players piggyback.

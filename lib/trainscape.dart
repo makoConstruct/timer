@@ -7362,7 +7362,7 @@ Widget actionChip({
   );
 }
 
-/// An inventory-style item slot, used by the inventory row and storage
+/// An inventory-style item slot, used by the inventory column and storage
 /// controls. [count] is for the one control that stands for more than what's
 /// in front of it — an inbox's slots are the whole map's outboxes gathered
 /// into one per item, so they carry the number the way an item icon does.
@@ -8101,23 +8101,12 @@ class const ControlsPanel({
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _inventoryRow(sel, v),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: v.actions,
-                        ),
-                      ),
-                    ),
-                  ],
+                child: SingleChildScrollView(
+                  child: Wrap(spacing: 4, runSpacing: 4, children: v.actions),
                 ),
               ),
+              const SizedBox(width: 6),
+              Center(child: _inventoryColumn(sel, v)),
               const SizedBox(width: 6),
               if (game.params.playersHaveMoveAction)
                 SizedBox(
@@ -8147,13 +8136,13 @@ class const ControlsPanel({
   /// The hand as it will be when the player can next act on it, out of
   /// [PanelView] — but the red flash of being robbed comes off the live clock,
   /// because that's a thing that just happened rather than a thing about to.
-  Widget _inventoryRow(Player p, PanelView v) {
+  Widget _inventoryColumn(Player p, PanelView v) {
     final inv = v.inventory;
-    final row = Row(
+    final slots = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         for (var i = 0; i < game.params.inventoryCap; i++) ...[
-          if (i > 0) const SizedBox(width: 3),
+          if (i > 0) const SizedBox(height: 3),
           slotBox(
             item: i < inv.length ? inv[i] : null,
             onTap: v.hasStorage && i < inv.length
@@ -8171,14 +8160,14 @@ class const ControlsPanel({
         final redness = p.flash.flashingAt(game.now, game.params.redFlashSpan)
             ? p.flash.rednessAt(game.clock.value, game.params.redFlashSpan)
             : 0.0;
-        if (redness <= 0) return row;
+        if (redness <= 0) return slots;
         return Container(
           padding: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             color: Colors.red.withValues(alpha: 0.55 * redness),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: row,
+          child: slots,
         );
       },
     );
