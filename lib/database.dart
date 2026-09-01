@@ -36,6 +36,8 @@ const MobjID continuousCornersID = 'cf3b2bd4-93ff-4825-b1df-d596b92b849c';
 /// bounce).
 const MobjID bouncyAnimationsID = 'eb6b8edc-9585-4695-99cb-d7402b986c20';
 
+const MobjID liquidBirthAnimationID = '22f17156-4f96-4f0c-a046-10257f42e12d';
+
 /// whether the app takes its colors from the system's wallpaper-derived palette
 /// (Material You) instead of our own monochrome scheme. Android only — the
 /// setting isn't offered elsewhere — and off by default. Read it through

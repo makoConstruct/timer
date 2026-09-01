@@ -198,6 +198,12 @@ Future<void> initializeDatabase() async {
       debugLabel: "bouncy animations",
     ),
     Mobj.getOrCreate(
+      liquidBirthAnimationID,
+      type: BoolType(),
+      initial: () => false,
+      debugLabel: "liquid birth animation",
+    ),
+    Mobj.getOrCreate(
       materialYouID,
       type: BoolType(),
       initial: () =>
@@ -2290,7 +2296,7 @@ abstract class TimerBaseState<T extends TimerBase> extends State<T>
           trivialAndClearable(widget.mobj, previousValue);
     });
     _appearanceAnimation = AnimationController(
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
     );
     _unpinnedIndicatorShowing = AnimationController(
@@ -2631,7 +2637,7 @@ class TimerState extends TimerBaseState<Timer> {
       vsync: this,
     );
     _slideActivateBounceAnimation = AnimationController(
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
     );
     _selectedUnderlineAnimation = AnimationController(
@@ -2739,6 +2745,15 @@ class TimerState extends TimerBaseState<Timer> {
       padLevel: padLevelFor(durationDigits.length),
     );
 
+    Color clockfaceBaseColor = TimerBaseState.primaryColor(
+      theme.colorScheme.brightness,
+      d.hue,
+    );
+    Color clockfaceBackgroundColor = TimerBaseState.backgroundColor(
+      theme.colorScheme.brightness,
+      d.hue,
+    );
+
     List<int> withDigitsReplacedWith(List<int> v, int d) =>
         List.filled(v.length, d);
 
@@ -2783,7 +2798,9 @@ class TimerState extends TimerBaseState<Timer> {
                 child: Container(
                   height: underlineHeight / 2,
                   decoration: BoxDecoration(
-                    color: mt.foreBackColor.withAlpha(128),
+                    color: theme.brightness == .dark
+                        ? clockfaceBackgroundColor.withAlpha(60)
+                        : mt.foreBackColor.withAlpha(128),
                     borderRadius: BorderRadius.circular(underlineHeight * 1.5),
                   ),
                 ),
@@ -2953,9 +2970,14 @@ class TimerState extends TimerBaseState<Timer> {
             Curves.easeOutCubic.transform(unlerpUnit(0.84, 1, stopwatchPulse)));
     final double timerOutline = depth > 0 ? 1.4 : defaultTimerOutline;
     final double innerTimerSpan = 2 * (clockRadius - defaultTimerOutline);
+    final bool stopwatchPulseFillsFace =
+        theme.brightness == Brightness.dark && !parentIsTimercule();
+    final stopwatchPulseMax = stopwatchPulseFillsFace
+        ? innerTimerSpan * 0.87
+        : innerTimerSpan - defaultTimerOutline * 2;
     final stopwatchPulseSize = lerp(
-      innerTimerSpan - defaultTimerOutline * 2,
-      (clockRadius - timerGap / 2) * 2 * 0.28,
+      stopwatchPulseMax,
+      stopwatchPulseMax * 0.4,
       // Curves.easeOutCubic.transform(stopwatchPulse) *
       stopwatchPulseProgress,
     );
@@ -2971,14 +2993,6 @@ class TimerState extends TimerBaseState<Timer> {
           )
         : BoxDecoration(shape: BoxShape.circle, color: color);
 
-    Color clockfaceBaseColor = TimerBaseState.primaryColor(
-      theme.colorScheme.brightness,
-      d.hue,
-    );
-    Color clockfaceBackgroundColor = TimerBaseState.backgroundColor(
-      theme.colorScheme.brightness,
-      d.hue,
-    );
     // in dark mode both clockface pastels already contrast with the page
     // background on their own, so a timer standing on its own doesn't need a
     // visible fringe: paint it the same color as the clockface's own
@@ -3105,7 +3119,7 @@ class TimerState extends TimerBaseState<Timer> {
           builder: (context, child) => Transform.translate(
             offset:
                 _slideBounceDirection *
-                10 *
+                13.5 *
                 defaultPulserFunction(_slideActivateBounceAnimation.value),
             child: child,
           ),
@@ -6559,6 +6573,10 @@ class TimerScreenState extends State<TimerScreen>
   }) {
     if (_pendingPadBud != id) return null;
     _pendingPadBud = null;
+    if (!(Mobj.getAlreadyLoaded(liquidBirthAnimationID, BoolType()).peek() ??
+        false)) {
+      return null;
+    }
     final bud = PadBud(timer: id, face: face, progress: progress);
     padBuds.add(bud);
     _padBudsChanged();
@@ -7872,9 +7890,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         return MenuTile(
                           title: settingTitle('Button size'),
                           subtitle: settingSubtitle(
-                            buttonScaleDialOnOn.value!
-                                ? "Button scale dial is currently deployed, tap here to turn it off"
-                                : 'Introduce a dial by which you can adjust UI scale',
+                            'Introduce a dial by which you can adjust UI scale',
                           ),
                           onTap: () {
                             buttonScaleDialOnOn.value =
@@ -8077,6 +8093,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: on,
                           onChanged: (value) {
                             bouncyAnimationsMobj.value = value;
+                          },
+                          contentPadding: listItemPadding,
+                        );
+                      },
+                    ),
+                    SignalBuilder(
+                      builder: (context) {
+                        final liquidBirthAnimationMobj = Mobj.getAlreadyLoaded(
+                          liquidBirthAnimationID,
+                          BoolType(),
+                        );
+                        return RoundedCheckboxListTile(
+                          title: settingTitle('Liquid Birth Animation'),
+                          subtitle: settingSubtitle(
+                            'new timers emerge from the numeral pad (goofy, excessive)',
+                          ),
+                          value: liquidBirthAnimationMobj.value ?? false,
+                          onChanged: (value) {
+                            liquidBirthAnimationMobj.value = value;
                           },
                           contentPadding: listItemPadding,
                         );

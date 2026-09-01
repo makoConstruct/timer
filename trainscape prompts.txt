@@ -257,23 +257,32 @@ This may require rethinking the wheel/paused time animation.
 Make player inventory vertical, next to the move pad.
 --
 
-we need to start the player with tutorial levels, so there's a mobj that stores their progress, and there's a level screen
-the game should initially boot straight into level 1 though
-Level 1: "open the lock". 1 heart required. three days. players: 1
-	the player starts in a route that leads to a thing that trades a1 and a2 for heart
-	but a1 is behind an a3 r mugger.
-	likewise, a2 is behind an a1 r mugger, and a3 is behind an a2 r mugger.
-	but there is an a3 plant down a long route to the south.
-Level X1: "The known way"
-	easy parameters, randomly generated. An endless hallway of levels, each time the player wins, the hallway is extended one out, the new level is at the beginning of the list.
-	10 levels and a random generator which the player can seed
-Level X2: "Many ways"
-	basic parameters
-	5 levels, seedable generator
-Level X3: "The true way"
-	hard parameters
-	3 levels, seedable generator
-if the player beats all 3 X3 levels, it unlocks a diatribe from me
+we need to start the player with tutorial levels, so there's a mobj that stores their progress, and which levels are unlocked, and there's a level screen
+the level screen:
+	I guess we'll just make it a list like every other screen in the app! x]
+	Levels that're newly unlocked (player hasn't played a game since they were unlocked show with a small green circle indicator). The list tile is otherwise just their name.
+	At the bottom, there's a small psuedo-section (handedness-aligned) that just has a "<lock icon> <number> <heart>", showing the number of wins in the previous section required to unlock the next section.
+	
+If the player hasn't completed level 1, boot straight into level 1, otherwise to the level select.
+Section 1
+	Level 1: "open the lock". 1 heart required. three days. players: 1
+		the player starts in a route that leads to a thing that trades a1 and a2 for heart
+		but a1 is behind an a3 r mugger.
+		likewise, a2 is behind an a1 r mugger, and a3 is behind an a2 r mugger.
+		but there is an a3 plant down a long route to the south.
+Section 2
+	Level X1: "The known way"
+		easy parameters, randomly generated. An endless hallway of levels, each time the player wins, the hallway is extended one out, the new level is at the beginning of the list.
+		10 levels and a random generator which the player can seed
+Section 3
+	Level X2: "Many ways"
+		basic parameters
+		5 levels, seedable generator
+Section 4
+	Level X3: "The true way"
+		hard parameters
+		3 levels, seedable generator
+if the player beats all 3 X3 levels, it unlocks a diatribe from me, as the final level
 	the diatribe
 		"Habitat"
 		We wouldn't recognize our home. Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in them. The rest of us dwindle as some fresh plague bubbles over our feet.

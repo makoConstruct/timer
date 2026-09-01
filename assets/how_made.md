@@ -2,23 +2,23 @@
 
 Initially, the interface was just one big dial.
 
-I started with an intuition that it ought to be possible to create, set, and start a timer with just one interaction. You'd simply turn the dial until you had the number you wanted, and you'd release it, and then it would start winding back, and when it hit 0 the timer would sound.
+I started with an intuition that it ought to be possible to create, set, and start a timer with just one interaction. You'd simply turn the dial until you had the number you wanted, and you'd release it, and it'd go.
 
-That intuition was right, but through other means. It seemed like there was no way to make the dial feel good. Under the simplest approach, you'd usually land one to three seconds off from the exact time that you wanted, which wouldn't matter on a practical level, but it felt horrible. The timer would be *wrong*, not quite the timer you wanted, and you'd feel the pressure of its wrongness hanging over you.
+Unfortunately it seemed like there was no way to make the dial feel good. Under the simplest approach, you'd usually land one to three seconds off from the exact time that you wanted, which wouldn't matter on a practical level, but it felt truly horrible, you'd never get the timer you asked for. I could have made the dial clicky, dividing it into discrete 10 or 30 second or 1 or 5 or 10 minute increments, so that the user could select an exact time, but this would lack the elegance I was hoping to find in the analog dial, and I fear that the user would have to slow down at the end of their drag to make sure they'd gotten the right number, and every now and then the dial would slip onto the next number as they lifted off, and again in that case the timer would be wrong, and it would feel horrible.
 
-I could make the dial clicky, limit it to 30 second increments, but then we'd lose the analog qualities that made a dial interesting to begin with.
-
-So I came to appreciate the digital precision of the number pad. I then noticed some optimizations I could apply to a numpad. First came the upward drag to launch, which brought us down to about two interactions per median timer-creation. Then came dragging left, to add two zeroes and launch, which brought it down to about one interaction. At this point, I was excited about the design.
+So I came to appreciate the digital precision of a simple number pad. I then noticed some optimizations I could apply to a numpad. First came the upward drag to launch, which brought us down to about two interactions per median timer-creation. Then came dragging left, to add two zeroes and launch, which brought it down to about one interaction. I saw a few other optimizations I could make, handedness, visual compaction, and at that point I was excited about the design.
 
 ## Tribulations
 
+It turns out that making a bug-free visually polished cross-platform app in a fairly new framework is hard work.
+
 At one point, morale was severely under threat. None of my friends believed in me. My cook friend from auckland told me that he would not and could not use a phone app timer in his kitchen due to aerosol grease, and due to the fact that he already had a bunch of physical timers. A designer friend from wellington, frustrated that I was allowing timer app to distract me from our admittedly much more important project of building a better web, threatened to ship me thirty physical "chook timers", which are a certain kind of egg-shaped timer that you can twist and release, which I would then be forced to appreciate the neatness and adequacy of. There was a real risk that if they had done this, they would have sated my hunger for timer, and I never would have completed the app.
 
-There were other morale challenges. Flutter, the UI framework this app was built on, was in many ways incomplete. But I'd become familiar enough with flutter to know that I'd be able to complete it. Uniquely among UI frameworks, flutter is simple enough to be understood, and flexible enough to be fixed.
+And the UI framework this app was built on, Flutter, was in many ways incomplete. But I'd become familiar enough with flutter to know that I'd be able to complete it. Uniquely among UI frameworks, flutter is simple enough to be understood, and flexible enough to be fixed.
 
 ## General Automatic Animation of Layout
 
-No UI framework has a robust approach to the automatic animation of positioning and sizing. I had to develop the very first one.
+No UI framework has a robust approach to the automatic animation of positioning and sizing. So I had to make that.
 
 At the center of the app is a "Wrap" container widget. A wrap takes many widgets, in our case, the timers, and arranges them in a flow, in the same way that a paragraph arranges its words, from left to right in lines and the lines go from top to bottom, or you can flip it so that the lines go up instead of down, or so that they flow from right to left, or it can all be rotated by 90 degrees, and the lines can be aligned with the start or the end, or evenly spread over the page, and they can be splayed or bunched up at the end. (In our case, all we did was flip the line direction to right to left, or not, depending on whether you're right handed). So, a Wrap widget is somewhat complex. Which means that when you add or remove a timer, sometimes the layout can change in somewhat surprising ways, you might not be able to visually understand what happened, especially when wraps are being nested.
 
