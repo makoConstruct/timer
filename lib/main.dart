@@ -48,6 +48,9 @@ import 'package:animove/animove.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:uuid/v4.dart';
 
+const maxFreeTimerUses = 81;
+const maxFreeTimerUsersCritical = 108;
+
 Future<void> deleteDatabase() async {
   final directory = await getApplicationSupportDirectory();
   final file = File(p.join(directory.path, '$databaseName.sqlite'));
@@ -299,6 +302,18 @@ Future<void> initializeDatabase() async {
       type: IntType(),
       initial: () => 0,
       debugLabel: "number of timers created",
+    ),
+    Mobj.getOrCreate(
+      realishTimerUsesID,
+      type: IntType(),
+      initial: () => 0,
+      debugLabel: "realish timer uses",
+    ),
+    Mobj.getOrCreate(
+      paymentNotRequiredID,
+      type: BoolType(),
+      initial: () => true,
+      debugLabel: "payment not required",
     ),
     Mobj.getOrCreate(
       autodeleteModeID,
@@ -666,6 +681,13 @@ class TimerHolm {
   void _timerGoesOff(TimerTrack tt, Mobj<TimerData> mobj) {
     final d = mobj.value!;
     tt.completionTimer = null;
+    if (totalDuration(d) > 30) {
+      final realishTimerUses = Mobj.getAlreadyLoaded(
+        realishTimerUsesID,
+        IntType(),
+      );
+      realishTimerUses.value = realishTimerUses.value! + 1;
+    }
     // No dart runs while iOS has us suspended, so on resume every completion we
     // slept through arrives at once. Those already went off as notifications, so
     // catching up should move state without making a sound. — Opus 5
@@ -4849,6 +4871,14 @@ class TimerScreenState extends State<TimerScreen>
   late final Signal<int> hintSequence = Signal(0);
   late final Computed<bool> hasntDoneBothDragActionsHint;
   late final Computed<bool> hasntUsedMenuTwiceHint;
+  late final Computed<bool> shouldShowPaymentHint = Computed(() {
+    final uses = Mobj.getAlreadyLoaded(realishTimerUsesID, IntType()).value!;
+    final paymentNotRequired =
+        Mobj.getAlreadyLoaded(paymentNotRequiredID, BoolType()).value ?? false;
+    return !paymentNotRequired &&
+        uses >= maxFreeTimerUses &&
+        uses < maxFreeTimerUsersCritical;
+  }, options: ComputedOptions(autoDispose: true));
   late final Computed<bool> timerculeCurrentlyDeployed = Computed(
     () => timerListMobj.value!.any(
       // we peek, because the type of a timer never changes, so this shouldn't recompute every time a root timerdata changes
@@ -5600,6 +5630,13 @@ class TimerScreenState extends State<TimerScreen>
     }
   }
 
+  void _openThankAuthorScreen() {
+    Navigator.push(
+      context,
+      OurPageRoute(builder: (context) => ThankAuthorScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // print('TimerScreenState build');
@@ -6323,6 +6360,43 @@ class TimerScreenState extends State<TimerScreen>
             showCondition: hintDoesntGetCompositeTimersCondition,
             message: "'Timercules' like 'cycle' and 'series' allow you to drag other timers into them. You can use those to create pomodoro timers, which some people find useful for productivity and focus, or multi-stage sequence timers, which are useful for carrying out complex recipes with precise timings.",
           ),
+          HintToast(
+            showCondition: shouldShowPaymentHint,
+            child: GestureDetector(
+              onTap: _openThankAuthorScreen,
+              child: SignalBuilder(
+                builder: (context) {
+                  final count = Mobj.getAlreadyLoaded(
+                    realishTimerUsesID,
+                    IntType(),
+                  ).value!;
+                  final hintColor = OurThemeData.fromContext(context)
+                      .hintTextColor;
+                  return RichText(
+                    text: TextSpan(
+                      children: [
+                        WidgetSpan(
+                          child: Icon(
+                            Icons.info_rounded,
+                            size: 16,
+                            color: hintColor,
+                          ),
+                        ),
+                        const WidgetSpan(child: SizedBox(width: 4)),
+                        TextSpan(
+                          text:
+                              "You've used $count timers. Please pay for the app soon",
+                          style: theme.textTheme.bodyMedium!.copyWith(
+                            color: hintColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -6460,7 +6534,6 @@ class TimerScreenState extends State<TimerScreen>
                   child: Stack(
                     children:
                         [
-                          hintTray,
                           Positioned.fill(
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -6526,6 +6599,40 @@ class TimerScreenState extends State<TimerScreen>
                                 ).center,
                               ),
                           buttonScaleDial,
+                          hintTray,
+                          SignalBuilder(
+                            builder: (context) {
+                              final uses = Mobj.getAlreadyLoaded(
+                                realishTimerUsesID,
+                                IntType(),
+                              ).value!;
+                              final paymentNotRequired =
+                                  Mobj.getAlreadyLoaded(
+                                    paymentNotRequiredID,
+                                    BoolType(),
+                                  ).value ??
+                                  false;
+                              if (uses < maxFreeTimerUsersCritical ||
+                                  paymentNotRequired) {
+                                return const SizedBox.shrink();
+                              }
+                              return Positioned(
+                                left: isRightHanded ? 0 : null,
+                                right: isRightHanded ? null : 0,
+                                bottom:
+                                    screenSize.height -
+                                    numeralBackingRect.top +
+                                    timerHeight * 0.45,
+                                child: IconButton(
+                                  onPressed: _openThankAuthorScreen,
+                                  tooltip: 'Pay for the app',
+                                  iconSize: 120,
+                                  color: Color(0xffff0026),
+                                  icon: const Icon(Icons.warning_sharp),
+                                ),
+                              );
+                            },
+                          ),
                         ] +
                         children,
                   ),
@@ -8695,28 +8802,66 @@ class const ThankAuthorScreen({super.key, final GlobalKey? iconKey})
     extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InfoScaffold(
-      title: headingBandLabel(
-        theme: theme,
-        icon: Icons.heart_broken,
-        heroTag: 'thank-author-icon',
-        title: 'Thank the author',
-      ),
-      slivers: [
-        SliverList(
-          delegate: SliverChildListDelegate([
-            Padding(
-              padding: EdgeInsets.all(24.0),
-              child: Text(
-                'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
-                style: theme.textTheme.bodyLarge,
-              ),
+    return SignalBuilder(
+      builder: (context) {
+        final theme = Theme.of(context);
+        final uses = Mobj.getAlreadyLoaded(
+          realishTimerUsesID,
+          IntType(),
+        ).value!;
+        final paymentNotRequired =
+            Mobj.getAlreadyLoaded(paymentNotRequiredID, BoolType()).value ??
+            false;
+        final paymentDue = uses >= maxFreeTimerUsersCritical;
+        return InfoScaffold(
+          title: headingBandLabel(
+            theme: theme,
+            icon: Icons.heart_broken,
+            heroTag: 'thank-author-icon',
+            title: 'Thank the author',
+          ),
+          slivers: [
+            SliverList(
+              delegate: SliverChildListDelegate([
+                Padding(
+                  padding: EdgeInsets.all(24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'The audience for this app is large. Even a small payment in total would enable the author to go on to create much more ambitious projects.',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      if (paymentDue) ...[
+                        const SizedBox(height: 24),
+                        Text(
+                          "You've used this app $uses times.${paymentNotRequired ? '' : ' You should pay for it now.'}",
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                      ],
+                      if (paymentDue && !paymentNotRequired) ...[
+                        const SizedBox(height: 24),
+                        TextButton(
+                          onPressed: () {
+                            Mobj.getAlreadyLoaded(
+                              paymentNotRequiredID,
+                              BoolType(),
+                            ).value = true;
+                          },
+                          child: const Text(
+                            "I can't, payment features aren't implemented yet.",
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                SizedBox(height: 24),
+              ]),
             ),
-            SizedBox(height: 24),
-          ]),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

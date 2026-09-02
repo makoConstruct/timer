@@ -256,29 +256,81 @@ This may require rethinking the wheel/paused time animation.
 ~~If the selected player moves into the smaller square mindim x mindim camera sensitivity box, center on them.~~ (changed my mind on this, not the way)
 Make player inventory vertical, next to the move pad.
 --
+a station that requires an item to move the train must also show that item in its representation, as the train does
 
 we need to start the player with tutorial levels, so there's a mobj that stores their progress, and which levels are unlocked, and there's a level screen
 the level screen:
 	I guess we'll just make it a list like every other screen in the app! x]
 	Levels that're newly unlocked (player hasn't played a game since they were unlocked show with a small green circle indicator). The list tile is otherwise just their name.
 	At the bottom, there's a small psuedo-section (handedness-aligned) that just has a "<lock icon> <number> <heart>", showing the number of wins in the previous section required to unlock the next section.
-	
-If the player hasn't completed level 1, boot straight into level 1, otherwise to the level select.
-Section 1
-	Level 1: "open the lock". 1 heart required. three days. players: 1
+	On open, it opens scrolled to the end.
+After a game, player should be directed back to level screen.
+And I guess it should open to the level screen when trainscape is opened, except when they have *open straight to trainscape* active, in which case they clearly care more about speed. There will have to be per-level save states, and a way of clearing them from the level select screen after clicking the save icon in the level's tile.
+
+Try to stick to a neat, clear api for describing levels. I will likely have to use it too.
+```psuedocode
+Level {
+	Node newNodeRelative(Offset r {Node? relativeTo}){
+		final r = relativeTo ?? nodes.last.offset;
+		final Node v = Node(nodes.last.offset + r);
+		addNode(v);
+		addEdge(r, v);
+		return v;
+	}
+}
+
+level.addNodeNode(Offset(0,0)))
+final nn = level.newNodeRelative(Offset(0, 10));
+level.addFacility(nn, ...)
+```
+or a different api if you'd consider it to be cleaner.
+
+Section 1, wins required: 3
+	Level: "locks". 1 heart required. three days. players: 1
 		the player starts in a route that leads to a thing that trades a1 and a2 for heart
 		but a1 is behind an a3 r mugger.
 		likewise, a2 is behind an a1 r mugger, and a3 is behind an a2 r mugger.
 		but there is an a3 plant down a long route to the south.
+	Level: "trains". hearts:1, days: 1, players:1
+		triangle n11 n12 n13, with n13 converting a1 to <3
+		n12 has a a2 plant
+		n13 has
+			a3 plant
+			train a, controllable from the inside or in the station, which goes to n21
+		n21 has a chain that goes to n29, with a mugger on the way
+		n22 has a station that goes to n29, but train2 is at the other station, and train2 consumes an a4
+		n23 has
+		 	storage
+			a4 plant
+		n24 has a mugger who rcs an a2
+		n27 has a4 plant
+		n29 has trade a3 for a1
+	Level: "time". hearts:6, days: 1, players:1
+		a1 plant, 3 hour cooldown
+		a2 plant, 3 hour cooldown
+		trade a3 for a1 a2
+		trade 4 a1 for a3
+		trade a1 for <3
+		trade a2 for <3
+		a hollow rectangle of 6 nodes by 5, with a plane terminal and one train that requires an a3
+	Level: "perfect time". hearts:9, days: 1, players:1
+		otherwise same as above
 Section 2
-	Level X1: "The known way"
-		easy parameters, randomly generated. An endless hallway of levels, each time the player wins, the hallway is extended one out, the new level is at the beginning of the list.
-		10 levels and a random generator which the player can seed
+	Level: "fjelniurn", hearts:3, days: 3, players: 1
+		generate a random level according to X2 and express it according to our hand-generation API so that I can edit it.
+
+now start the procedural sections. Procedural sections generate a new level when the tile is clicked, previously genreated levels display above the tile in a wrap, when long clicked, a dialog asks to delete them.
+
 Section 3
-	Level X2: "Many ways"
+	Level X1: "The known way"
+		procedural
+		easy parameters (either narrow (2 or 3 items per tier) or shallow (only 2 tiers) generation chains). An endless hallway of levels, each time the player wins, the hallway is extended one out, the new level is at the beginning of the list.
+		10 levels and a random generator which the player can seed
+Section 4
+	Level X2: "Other ways"
 		basic parameters
 		5 levels, seedable generator
-Section 4
+Section 5
 	Level X3: "The true way"
 		hard parameters
 		3 levels, seedable generator

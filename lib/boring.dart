@@ -4816,12 +4816,6 @@ class OurThemeData({
     final cs = theme.colorScheme;
     final dark = brightness == Brightness.dark;
 
-    /// [base] nudged toward the wallpaper's hue, keeping its lightness and
-    /// alpha. Keep [amount] low — these should read as neutrals that happen to
-    /// agree with the wallpaper, not as colored surfaces.
-    Color tint(Color base, [double amount = 0.12]) =>
-        lerpColor(base, cs.primary.withValues(alpha: base.a), amount);
-
     final surfaceBack = dark
         ? cs.surfaceContainerLowest
         : cs.surfaceContainerHighest;

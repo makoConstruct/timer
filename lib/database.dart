@@ -85,6 +85,12 @@ const MobjID hintGetsCompositeTimersID = 'aa1b4520-d435-41f4-a13f-d5a1b2d617ae';
 /// total count of timers ever created in this install (plain, stopwatch, composite)
 const MobjID numberOfTimersCreatedID = 'f1d7810e-0a88-4a61-b7c3-9ad89604c890';
 
+/// number of times a timer longer than 30 seconds has gone off — GPT-5
+const MobjID realishTimerUsesID = '3cefe92f-94e2-4c94-ad6d-d0b98d250343';
+
+/// whether paying for the app is currently required — GPT-5
+const MobjID paymentNotRequiredID = 'd738d788-04eb-4aec-a4f4-d6ef3ce1819a';
+
 /// what happens to completed timers when a new one is created — stored as the
 /// index of an `AutodeleteMode`: 0 = send to bin (default), 1 = retain only the
 /// lowest 60, 2 = off (keep everything).
