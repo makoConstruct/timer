@@ -1509,21 +1509,44 @@ Game levelFromJson(String s) => LevelType().fromJson(jsonDecode(s));
 /// and a game mutates in place, so there'd be nothing for the signal to notify
 /// anyone about — every save would be a forced write through a cache that
 /// never told anyone anything.
-void saveLevel(Game game) {
+MobjID _levelSaveID(String? levelID) =>
+    levelID == null ? savedTrainscapeLevelID : 'trainscape-level-save/$levelID';
+
+final Set<MobjID> _savedLevelIDsThisRun = {};
+
+void saveLevel(Game game, [String? levelID]) {
   if (!MobjRegistry.isInitialized) return;
-  Mobj.write(savedTrainscapeLevelID, game, LevelType());
+  final id = _levelSaveID(levelID);
+  _savedLevelIDsThisRun.add(id);
+  Mobj.write(id, game, LevelType());
 }
 
 /// The level [saveLevel] last put down, or null if there isn't one, or it was
 /// written by a build whose format this one can't read — in which case the
 /// caller generates a fresh level and the unreadable save is overwritten the
 /// next time the game is left.
-Future<Game?> loadSavedLevel() async {
+Future<Game?> loadSavedLevel([String? levelID]) async {
   if (!MobjRegistry.isInitialized) return null;
   try {
-    return await Mobj.read(savedTrainscapeLevelID, LevelType());
+    return await Mobj.read(_levelSaveID(levelID), LevelType());
   } catch (e) {
     debugPrint('trainscape: discarding an unreadable saved level: $e');
     return null;
   }
+}
+
+Future<void> deleteSavedLevel([String? levelID]) async {
+  if (!MobjRegistry.isInitialized) return;
+  final id = _levelSaveID(levelID);
+  _savedLevelIDsThisRun.remove(id);
+  await (MobjRegistry.db.kVs.delete()..where((row) => row.id.equals(id))).go();
+}
+
+Future<bool> hasSavedLevel(String levelID) async {
+  if (!MobjRegistry.isInitialized) return false;
+  final id = _levelSaveID(levelID);
+  if (_savedLevelIDsThisRun.contains(id)) return true;
+  return await (MobjRegistry.db.kVs.select()..where((row) => row.id.equals(id)))
+          .getSingleOrNull() !=
+      null;
 }

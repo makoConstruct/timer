@@ -35,7 +35,11 @@ import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/crank_game.dart';
 import 'package:makos_timer/trainscape.dart'
-    show TrainscapeScreen, trainscapeName;
+    show
+        TrainscapeLevelScreen,
+        TrainscapeScreen,
+        trainscapeLevels,
+        trainscapeName;
 // import 'package:makos_timer/journeying_game.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/size_reporter.dart';
@@ -278,6 +282,12 @@ Future<void> initializeDatabase() async {
       type: BoolType(),
       initial: () => false,
       debugLabel: "trainscape mode",
+    ),
+    Mobj.getOrCreate(
+      trainscapeProgressID,
+      type: MapType(StringType(), IntType()),
+      initial: () => <String, int>{},
+      debugLabel: "trainscape progress",
     ),
     Mobj.getOrCreate(
       usedDragActionRecordID,
@@ -1707,7 +1717,9 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                   OurPageRoute(builder: (context) => TimerScreen()),
                   if (trainscapeMode)
                     OurPageRoute(
-                      builder: (context) => const TrainscapeScreen(),
+                      builder: (context) => TrainscapeScreen(
+                        level: trainscapeLevels.lastUnlocked,
+                      ),
                     ),
                 ];
               } else {
@@ -8473,7 +8485,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.push(
                               context,
                               OurPageRoute(
-                                builder: (context) => const TrainscapeScreen(),
+                                builder: (context) =>
+                                    const TrainscapeLevelScreen(),
                               ),
                             );
                           },

@@ -16,7 +16,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
-import 'package:makos_timer/database.dart' show savedTrainscapeLevelID;
+import 'package:drift/drift.dart' hide Column;
+import 'package:makos_timer/database.dart';
 import 'package:makos_timer/mobj.dart';
 import 'package:makos_timer/type_help.dart' show Coord, CoordType;
 import 'package:signals/signals_flutter.dart';
@@ -24,6 +25,7 @@ import 'package:signals/signals_flutter.dart';
 /// the sampling utilities, the number formatting and the save format — the
 /// parts with no design in them
 part 'trainscape_boring.dart';
+part 'trainscape_levels.dart';
 
 const String trainscapeName = "Trainscape";
 
@@ -405,6 +407,8 @@ enum StationControl {
 
 enum GamePhase { playing, won, lost }
 
+enum PlaybackMode { playing, scrubbing }
+
 /// Why the clock is moving, which is the only thing that decides how eagerly
 /// it gets there.
 ///
@@ -581,8 +585,18 @@ ClockInterval _divisionInterval(GameRng rng, int division) => ClockInterval(
 /// inside [rednessAt] — during the second or so it's actually pulsing. The
 /// last frame of a flash is subscribed, so it rebuilds once more and lets go.
 class RedFlash {
+  static final Stopwatch _realClock = Stopwatch()..start();
   final Signal<TTime?> startedAt = signal(null);
-  void trigger(TTime t) => startedAt.value = t;
+  final Signal<int> liveTriggers = signal(0);
+  int? _liveStartedAtMicros;
+
+  void trigger(Game game) {
+    startedAt.value = game.now;
+    if (!game.probing && game.playbackMode.peek() == PlaybackMode.playing) {
+      _liveStartedAtMicros = _realClock.elapsedMicroseconds;
+      liveTriggers.value++;
+    }
+  }
 
   /// whether the flash is showing at [now], without subscribing to the clock
   bool flashingAt(TTime now, TTime span) {
@@ -598,7 +612,102 @@ class RedFlash {
     if (s == null) return 0;
     final e = t - s;
     if (e < 0 || e > span) return 0;
-    return sin(e / span * redFlashPulses * pi).abs();
+    final progress = e / span;
+    return cos(progress * redFlashPulses * pi).abs() * (1 - progress);
+  }
+
+  double replayRednessAt(TTime t, TTime span) {
+    final s = startedAt.value;
+    if (s == null) return 0;
+    final replaySpan = max(1, span ~/ redFlashPulses);
+    final e = t - s;
+    if (e < 0 || e > replaySpan) return 0;
+    return 1 - e / replaySpan;
+  }
+
+  double get liveRednessNow {
+    final started = _liveStartedAtMicros;
+    if (started == null) return 0;
+    final progress =
+        (_realClock.elapsedMicroseconds - started) /
+        (redFlashRealSeconds * Duration.microsecondsPerSecond);
+    if (progress < 0 || progress > 1) return 0;
+    return cos(progress * redFlashPulses * pi).abs() * (1 - progress);
+  }
+}
+
+class RedFlashView extends StatefulWidget {
+  const RedFlashView({
+    super.key,
+    required this.game,
+    required this.flash,
+    required this.builder,
+  });
+
+  final Game game;
+  final RedFlash flash;
+  final Widget Function(BuildContext context, double redness) builder;
+
+  @override
+  State<RedFlashView> createState() => _RedFlashViewState();
+}
+
+class _RedFlashViewState extends State<RedFlashView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _live = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: (redFlashRealSeconds * 1000).round()),
+  );
+  late Function _unsubscribe;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribe();
+  }
+
+  void _subscribe() {
+    _unsubscribe = widget.flash.liveTriggers.subscribe((_) {
+      if (mounted) _live.forward(from: 0);
+    });
+  }
+
+  @override
+  void didUpdateWidget(RedFlashView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.flash == widget.flash) return;
+    _unsubscribe();
+    _subscribe();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _live,
+    builder: (context, _) => SignalBuilder(
+      builder: (context) {
+        final double redness;
+        if (_live.isAnimating &&
+            widget.game.playbackMode.value == PlaybackMode.playing) {
+          final progress = _live.value;
+          redness = cos(progress * redFlashPulses * pi).abs() * (1 - progress);
+        } else if (widget.game.playbackMode.value == PlaybackMode.scrubbing) {
+          redness = widget.flash.replayRednessAt(
+            widget.game.clock.value,
+            widget.game.params.redFlashSpan,
+          );
+        } else {
+          redness = 0;
+        }
+        return widget.builder(context, redness);
+      },
+    ),
+  );
+
+  @override
+  void dispose() {
+    _unsubscribe();
+    _live.dispose();
+    super.dispose();
   }
 }
 
@@ -3244,6 +3353,8 @@ class Station(final TrainNode train, final StationControl control)
       badgeText('s'),
       badgeIcon(Icons.train),
       if (level != NodeZoomLevel.small) ...[
+        if (control != StationControl.none && train.activation != null)
+          quantityWidget(train.activation!, size: _facilityItemSize),
         if (control == StationControl.remote) badgeIcon(Icons.swipe_right_alt),
         if (control == StationControl.localOnly) ...[
           badgeText('L'),
@@ -3636,10 +3747,10 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
     if (!activeNow(g)) return;
     // muggers no longer freeze anyone: they clean you out
     if (!g.playerHas(p, [Quantity(item, 1)])) {
-      flash.trigger(g.now);
+      flash.trigger(g);
+      p.flash.trigger(g);
       if (p.inventory.peek().isNotEmpty) {
         p.inventory.value = const [];
-        p.flash.trigger(g.now);
       }
       return;
     }
@@ -3650,22 +3761,17 @@ class Mugger(final Item item, final MuggerKind kind) extends Facility {
     // told about it.
     if (_takes && g.playerHas(p, [Quantity(item, 1)])) {
       g.takeItems(p, [Quantity(item, 1)]);
-      flash.trigger(g.now);
-      p.flash.trigger(g.now);
+      flash.trigger(g);
+      p.flash.trigger(g);
     }
   }
 
   @override
-  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
-    builder: (context) {
-      var color = paletteSignal.value.ink;
-      if (flash.flashingAt(g.now, g.params.redFlashSpan)) {
-        color = Color.lerp(
-          paletteSignal.value.ink,
-          Colors.red,
-          flash.rednessAt(g.clock.value, g.params.redFlashSpan),
-        )!;
-      }
+  Widget badge(Game g, NodeZoomLevel level) => RedFlashView(
+    game: g,
+    flash: flash,
+    builder: (context, redness) {
+      final color = Color.lerp(paletteSignal.value.ink, Colors.red, redness)!;
       return explainTap(
         g,
         phaseBadgeRow(g, [
@@ -4143,13 +4249,13 @@ class Blight({
       if (hungry) satiated.value = false;
       return;
     }
-    flash.trigger(g.now);
+    flash.trigger(g);
     bool within(Offset o) => (o - node.pos).distance <= radius;
     final struck = <Player>[];
     for (final p in g.players) {
       if (!within(p.worldPos(g.now))) continue;
       p.inventory.value = const [];
-      p.flash.trigger(g.now);
+      p.flash.trigger(g);
       struck.add(p);
     }
     for (final n in g.nodes) {
@@ -4180,16 +4286,11 @@ class Blight({
   }
 
   @override
-  Widget badge(Game g, NodeZoomLevel level) => SignalBuilder(
-    builder: (context) {
-      var color = paletteSignal.value.ink;
-      if (flash.flashingAt(g.now, g.params.redFlashSpan)) {
-        color = Color.lerp(
-          paletteSignal.value.ink,
-          Colors.red,
-          flash.rednessAt(g.clock.value, g.params.redFlashSpan),
-        )!;
-      }
+  Widget badge(Game g, NodeZoomLevel level) => RedFlashView(
+    game: g,
+    flash: flash,
+    builder: (context, redness) {
+      final color = Color.lerp(paletteSignal.value.ink, Colors.red, redness)!;
       final fed = satiated.value;
       return explainTap(
         g,
@@ -4286,6 +4387,7 @@ class Game({
   final Signal<bool> paused = signal(true);
   late final Signal<Player> selectedPlayer;
   final Signal<GamePhase> phase = signal(GamePhase.playing);
+  final Signal<PlaybackMode> playbackMode = signal(PlaybackMode.scrubbing);
 
   /// Day occupies the first half of each day, night the second. It goes by
   /// unremarked — nothing about the world changes as it turns — and is here
@@ -5029,6 +5131,11 @@ class Game({
     _push = why;
   }
 
+  void seekTo(TTime t, ClockPush why) {
+    playbackMode.value = PlaybackMode.scrubbing;
+    headFor(t, why);
+  }
+
   /// Plays the world out to [t]: at ordinary speed if it's standing still, and
   /// on the elastic if it's already on its way somewhere.
   ///
@@ -5038,8 +5145,10 @@ class Game({
   /// somewhere else — so the rest of it is crossed on [ClockPush.catchUp],
   /// which hurries in proportion to how much you've stacked up and hands back
   /// to ordinary speed as it lands. See [ClockPush].
-  void playOut(TTime t) =>
-      headFor(t, headingFor == null ? ClockPush.follow : ClockPush.catchUp);
+  void playOut(TTime t) {
+    playbackMode.value = PlaybackMode.playing;
+    headFor(t, headingFor == null ? ClockPush.follow : ClockPush.catchUp);
+  }
 
   /// runs the clock until [p] has nothing left on their list. [frontierOf] is
   /// exact — walking is the only thing that takes any time and wires don't
@@ -5066,7 +5175,7 @@ class Game({
     // [ClockPush.catchUp] and not [playOut]: this is a jump to where somebody
     // else got to, which is as often an hour behind as a minute ahead, and
     // nobody wants an hour of it played back to them at walking pace.
-    headFor(storyEndOf(p), ClockPush.catchUp);
+    seekTo(storyEndOf(p), ClockPush.catchUp);
   }
 
   /// Where a level picked up off disk opens: on [p], at the moment their last
@@ -5083,6 +5192,7 @@ class Game({
   /// stands hours in reads the wrong time until the next thing the player does
   /// drags it up from nothing — replaying the level to them on the way.
   void openOn(Player p) {
+    playbackMode.value = PlaybackMode.scrubbing;
     rewindTo(storyEndOf(p));
     _shown = now.toDouble();
     _shownVelocity = 0;
@@ -5102,6 +5212,7 @@ class Game({
     // Not while the dial is held: a finger on the clock outranks the clock
     // running on.
     if (!paused.peek() && !dialHeld) {
+      playbackMode.value = PlaybackMode.playing;
       _shown += params.realSeconds(realSeconds).toDouble();
       _shownVelocity = 0;
       headingFor = null;
@@ -7030,6 +7141,32 @@ class const TimeDial({
 }
 
 class _TimeDialState extends State<TimeDial> {
+  static const Duration _arcRevealDuration = Duration(milliseconds: 320);
+  final Stopwatch _arcRevealClock = Stopwatch()..start();
+  late List<int> _knownBandLengths;
+  final Map<(int, int), int> _arcRevealStarts = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _knownBandLengths = [
+      for (var w = 0; w < widget.game.players.length; w++)
+        widget.game.synthetic.bandOf(w).length,
+    ];
+  }
+
+  @override
+  void didUpdateWidget(covariant TimeDial oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.game, widget.game)) {
+      _arcRevealStarts.clear();
+      _knownBandLengths = [
+        for (var w = 0; w < widget.game.players.length; w++)
+          widget.game.synthetic.bandOf(w).length,
+      ];
+    }
+  }
+
   /// which wheel the finger came down on, decided once when it lands: a drag
   /// that started on the fine wheel stays on it even as it wanders inward,
   /// because changing gear halfway through a turn is not something a hand
@@ -7123,17 +7260,42 @@ class _TimeDialState extends State<TimeDial> {
   /// Clipped to the band rather than wrapped round it, and a segment the wheel
   /// is in the middle of is cut off at the near end, so what's drawn is what's
   /// left of it.
-  static List<(List<(double, double)>, Color)> _bands(Game game, double here) {
+  List<(List<(double, double, double)>, Color)> _bands(Game game, double here) {
     final clock = game.synthetic;
+    final now = _arcRevealClock.elapsedMilliseconds;
+    for (var w = 0; w < game.players.length; w++) {
+      final length = clock.bandOf(w).length;
+      final known = w < _knownBandLengths.length ? _knownBandLengths[w] : 0;
+      for (var i = known; i < length; i++) {
+        _arcRevealStarts[(w, i)] = now;
+      }
+      if (w < _knownBandLengths.length) {
+        _knownBandLengths[w] = length;
+      } else {
+        _knownBandLengths.add(length);
+      }
+    }
+    _arcRevealStarts.removeWhere(
+      (_, started) => now - started >= _arcRevealDuration.inMilliseconds,
+    );
+    double reveal(int who, int index) {
+      final started = _arcRevealStarts[(who, index)];
+      if (started == null) return 1;
+      return Curves.easeOutCubic.transform(
+        ((now - started) / _arcRevealDuration.inMilliseconds).clamp(0.0, 1.0),
+      );
+    }
+
     return [
       for (var w = 0; w < game.players.length; w++)
         (
           [
-            for (final s in clock.bandOf(w))
+            for (final (i, s) in clock.bandOf(w).indexed)
               if (s.end > here && s.start < here + _wheelSpan)
                 (
                   max(0.0, (s.start - here) / _wheelSpan),
                   min(1.0, (s.end - here) / _wheelSpan),
+                  reveal(w, i),
                 ),
           ],
           game.players[w].color,
@@ -7159,7 +7321,7 @@ class _TimeDialState extends State<TimeDial> {
       // a floor and no ceiling: you can always wait, and you can never go back
       // before the level knows about
       _wound = max(_wound, game.earliestMoment.toDouble());
-      game.headFor(_wound.round(), ClockPush.dial);
+      game.seekTo(_wound.round(), ClockPush.dial);
       return;
     }
 
@@ -7181,7 +7343,7 @@ class _TimeDialState extends State<TimeDial> {
       if (_deciding.abs() < _dialSnapDeadzone) return;
       _forward = _deciding > 0;
     }
-    game.headFor(dialStopAt(game, _wound, _forward ?? true), ClockPush.dial);
+    game.seekTo(dialStopAt(game, _wound, _forward ?? true), ClockPush.dial);
   }
 
   @override
@@ -7220,6 +7382,8 @@ class _TimeDialState extends State<TimeDial> {
               // showing plain time would draw as nothing at all.
               ahead: _bands(game, _wheelNow(game)),
               wheel: paletteSignal.value.pad,
+              dark: paletteSignal.value.isDark,
+              gradientRevision: 1,
               width: widget.faceSize * _wheelWidthFactor,
               faceRadius: widget.faceSize / 2,
             ),
@@ -7252,8 +7416,10 @@ class const _DialWheelPainter({
   /// is the things that player still has to do, as (start, end) pairs of a
   /// band's worth of wheel — see [_TimeDialState._bands]. Already clipped to
   /// 0..1, already in order.
-  required final List<(List<(double, double)>, Color)> ahead,
+  required final List<(List<(double, double, double)>, Color)> ahead,
   required final Color wheel,
+  required final bool dark,
+  required final int gradientRevision,
   required final double width,
   required final double faceRadius,
 }) extends CustomPainter {
@@ -7278,11 +7444,21 @@ class const _DialWheelPainter({
     final c = size.center(Offset.zero);
     // the same rim the hit test uses, so what's drawn is what's grabbable
     final outer = dialRimRadius(faceRadius * 2);
+    const gradientSweep = 0.14;
+    final rim = Rect.fromCircle(center: c, radius: outer);
     canvas.drawCircle(
       c,
       outer,
       Paint()
-        ..color = wheel
+        ..shader = SweepGradient(
+          colors: [
+            Color.lerp(wheel, dark ? Colors.white : Colors.black, 0.10)!,
+            wheel,
+            wheel,
+          ],
+          stops: [0, gradientSweep, 1],
+          transform: const GradientRotation(_dialStartAngle),
+        ).createShader(rim)
         ..style = PaintingStyle.stroke
         ..strokeWidth = width,
     );
@@ -7300,8 +7476,8 @@ class const _DialWheelPainter({
         ..color = color
         ..style = PaintingStyle.stroke
         ..strokeWidth = each * 0.4;
-      for (final (from, to) in segments) {
-        final sweep = (to - from) * 2 * pi;
+      for (final (from, to, reveal) in segments) {
+        final sweep = (to - from) * 2 * pi * reveal;
         // Every segment gives up its last few degrees, so that a row of
         // instant actions reads as a row rather than as one long arc. Never
         // more than [_segmentGapMax] of it: a segment eaten by its own gap
@@ -7322,6 +7498,8 @@ class const _DialWheelPainter({
   @override
   bool shouldRepaint(_DialWheelPainter old) {
     if (old.wheel != wheel ||
+        old.dark != dark ||
+        old.gradientRevision != gradientRevision ||
         old.width != width ||
         old.faceRadius != faceRadius ||
         old.ahead.length != ahead.length) {
@@ -7654,6 +7832,9 @@ class const TrainscapeScreen({
   /// generate this level rather than picking up the saved one. Passing a seed
   /// is asking for a particular map, which a save would only get in the way of
   final int? seed,
+  final TrainscapeLevel? level,
+  final bool levelScreenBelow = false,
+  final ValueChanged<bool>? onSaveChanged,
   // signal-tracked: the screen is built against [paletteSignal] and has to
   // follow it
 }) extends SignalStatefulWidget {
@@ -7677,6 +7858,7 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   /// see [Game.readControls]
   final ValueNotifier<PanelView?> _panel = ValueNotifier(null);
   final ValueNotifier<int> _recenterNudge = ValueNotifier(0);
+  bool _savedForExit = false;
 
   @override
   void initState() {
@@ -7718,10 +7900,15 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   /// spends a frame or two on the empty ground colour first — better than
   /// showing a freshly generated level and swapping it out from under them.
   Future<void> _open() async {
-    final saved = widget.seed == null ? await loadSavedLevel() : null;
+    final saved = widget.seed == null
+        ? await loadSavedLevel(widget.level?.id)
+        : null;
     if (!mounted) return;
     setState(() {
-      _game = saved ?? generateLevel(Parameters.levelOne(widget.seed ?? 1));
+      _game =
+          saved ??
+          (widget.level?.build() ??
+              generateLevel(Parameters.levelOne(widget.seed ?? 1)));
       _seed = game.params.seed;
       // Where the level opens, which is a decision about play and so isn't the
       // save format's to make: [levelFromJson] hands back the world exactly as
@@ -7747,7 +7934,12 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
 
   @override
   void dispose() {
-    if (_game != null) saveLevel(game);
+    if (!_savedForExit &&
+        _game != null &&
+        game.phase.peek() == GamePhase.playing) {
+      saveLevel(game, widget.level?.id);
+      widget.onSaveChanged?.call(true);
+    }
     WidgetsBinding.instance.removeObserver(this);
     _lifecycle.dispose();
     _ticker.dispose();
@@ -7764,6 +7956,22 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
     });
   }
 
+  void _finish() {
+    if (game.phase.peek() == GamePhase.won && widget.level != null) {
+      recordTrainscapeWin(widget.level!);
+    }
+    _savedForExit = true;
+    deleteSavedLevel(widget.level?.id);
+    widget.onSaveChanged?.call(false);
+    if (widget.levelScreenBelow) {
+      Navigator.of(context).maybePop();
+    } else {
+      Navigator.of(context).pushReplacement(
+        OurPageRoute(builder: (_) => const TrainscapeLevelScreen()),
+      );
+    }
+  }
+
   /// Everything below is built against [paletteSignal], and this build is
   /// signal-tracked — see [SignalStatefulWidget] — so reading the scheme for
   /// the scaffold's own colour is what rebuilds the lot when the system flips.
@@ -7775,101 +7983,113 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
   Widget build(BuildContext context) {
     if (_game == null) return ColoredBox(color: paletteSignal.value.ground);
     return EscapeToPop(
-      child: Scaffold(
-        backgroundColor: paletteSignal.value.ground,
-        body: SafeArea(
-          child: Stack(
-            children: [
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final isWide = constraints.maxWidth > constraints.maxHeight;
-                  // The dial is sized off the map, and the map's size is known
-                  // here and nowhere further in: a [Positioned] that names only
-                  // two edges hands its child unbounded constraints, so asking
-                  // from down inside the stack gets infinity back.
-                  final world = Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, mapBox) {
-                        // off the narrower side, so it's the same clock held
-                        // the same way round in either orientation
-                        final dialFace =
-                            min(mapBox.maxWidth, mapBox.maxHeight) *
-                            dialFaceSpan;
-                        return Stack(
-                          children: [
-                            Positioned.fill(
-                              child: WorldView(
-                                key: ObjectKey(game),
-                                game: game,
-                                frame: _frame,
-                                recenterNudge: _recenterNudge,
+      child: PopScope(
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop ||
+              _savedForExit ||
+              game.phase.peek() != GamePhase.playing) {
+            return;
+          }
+          _savedForExit = true;
+          saveLevel(game, widget.level?.id);
+          widget.onSaveChanged?.call(true);
+        },
+        child: Scaffold(
+          backgroundColor: paletteSignal.value.ground,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth > constraints.maxHeight;
+                    // The dial is sized off the map, and the map's size is known
+                    // here and nowhere further in: a [Positioned] that names only
+                    // two edges hands its child unbounded constraints, so asking
+                    // from down inside the stack gets infinity back.
+                    final world = Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, mapBox) {
+                          // off the narrower side, so it's the same clock held
+                          // the same way round in either orientation
+                          final dialFace =
+                              min(mapBox.maxWidth, mapBox.maxHeight) *
+                              dialFaceSpan;
+                          return Stack(
+                            children: [
+                              Positioned.fill(
+                                child: WorldView(
+                                  key: ObjectKey(game),
+                                  game: game,
+                                  frame: _frame,
+                                  recenterNudge: _recenterNudge,
+                                ),
                               ),
-                            ),
-                            Positioned(
-                              left: 10,
-                              right: 10,
-                              top: 3,
-                              child: _hud(),
-                            ),
-                            Positioned(
-                              // less the touch area [mapButton] carries, so the
-                              // button looks where it always did
-                              right: mapButtonInset - mapButtonTouch,
-                              bottom: mapButtonInset - mapButtonTouch,
-                              child: _pauseButton(),
-                            ),
-                            // hard into the corner: the wheel drawn round it
-                            // runs off the bottom and both sides, which is the
-                            // point of it — see [TimeDial]
-                            Positioned(
-                              // The dial widget is the whole wheel, so it
-                              // hangs off the corner by everything that isn't
-                              // the clock — the face ends up sitting where it
-                              // looks like it is, a little in from both edges.
-                              left:
-                                  dialFace / 2 +
-                                  dialPadding -
-                                  dialFace * _wheelRadiusFactor,
-                              bottom:
-                                  dialFace / 2 +
-                                  dialPadding -
-                                  dialFace * _wheelRadiusFactor,
-                              child: TimeDial(
-                                game: game,
-                                frame: _frame,
-                                faceSize: dialFace,
+                              Positioned(
+                                left: 10,
+                                right: 10,
+                                top: 3,
+                                child: _hud(),
                               ),
+                              Positioned(
+                                // less the touch area [mapButton] carries, so the
+                                // button looks where it always did
+                                right: mapButtonInset - mapButtonTouch,
+                                bottom: mapButtonInset - mapButtonTouch,
+                                child: _pauseButton(),
+                              ),
+                              // hard into the corner: the wheel drawn round it
+                              // runs off the bottom and both sides, which is the
+                              // point of it — see [TimeDial]
+                              Positioned(
+                                // The dial widget is the whole wheel, so it
+                                // hangs off the corner by everything that isn't
+                                // the clock — the face ends up sitting where it
+                                // looks like it is, a little in from both edges.
+                                left:
+                                    dialFace / 2 +
+                                    dialPadding -
+                                    dialFace * _wheelRadiusFactor,
+                                bottom:
+                                    dialFace / 2 +
+                                    dialPadding -
+                                    dialFace * _wheelRadiusFactor,
+                                child: TimeDial(
+                                  game: game,
+                                  frame: _frame,
+                                  faceSize: dialFace,
+                                ),
+                              ),
+                              Positioned.fill(child: _announcement()),
+                            ],
+                          );
+                        },
+                      ),
+                    );
+                    final controls = isWide
+                        ? SizedBox(
+                            width: 340,
+                            child: ControlsPanel(
+                              game: game,
+                              view: _panel,
+                              recenterNudge: _recenterNudge,
                             ),
-                            Positioned.fill(child: _announcement()),
-                          ],
-                        );
-                      },
-                    ),
-                  );
-                  final controls = isWide
-                      ? SizedBox(
-                          width: 340,
-                          child: ControlsPanel(
-                            game: game,
-                            view: _panel,
-                            recenterNudge: _recenterNudge,
-                          ),
-                        )
-                      : SizedBox(
-                          height: 210,
-                          child: ControlsPanel(
-                            game: game,
-                            view: _panel,
-                            recenterNudge: _recenterNudge,
-                          ),
-                        );
-                  return isWide
-                      ? Row(children: [world, controls])
-                      : Column(children: [world, controls]);
-                },
-              ),
-              _phaseOverlay(),
-            ],
+                          )
+                        : SizedBox(
+                            height: 210,
+                            child: ControlsPanel(
+                              game: game,
+                              view: _panel,
+                              recenterNudge: _recenterNudge,
+                            ),
+                          );
+                    return isWide
+                        ? Row(children: [world, controls])
+                        : Column(children: [world, controls]);
+                  },
+                ),
+                _phaseOverlay(),
+              ],
+            ),
           ),
         ),
       ),
@@ -8038,16 +8258,12 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         TextButton(
-                          onPressed: () => _newGame(_seed),
-                          child: const Text('Restart'),
-                        ),
-                        TextButton(
-                          onPressed: () => _newGame(_seed + 1),
-                          child: const Text('New map'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          child: const Text('Exit'),
+                          onPressed: widget.level == null
+                              ? () => _newGame(_seed)
+                              : _finish,
+                          child: Text(
+                            widget.level == null ? 'Restart' : 'Levels',
+                          ),
                         ),
                       ],
                     ),
@@ -8155,11 +8371,10 @@ class const ControlsPanel({
         ],
       ],
     );
-    return SignalBuilder(
-      builder: (context) {
-        final redness = p.flash.flashingAt(game.now, game.params.redFlashSpan)
-            ? p.flash.rednessAt(game.clock.value, game.params.redFlashSpan)
-            : 0.0;
+    return RedFlashView(
+      game: game,
+      flash: p.flash,
+      builder: (context, redness) {
         if (redness <= 0) return slots;
         return Container(
           padding: const EdgeInsets.all(2),
@@ -8769,8 +8984,11 @@ class _WorldPainter({
       paletteSignal.value.blightWash,
     )!;
     for (final b in game.blights) {
-      final color = b.flash.flashingAt(game.now, game.params.redFlashSpan)
-          ? Color.lerp(blightBase, Colors.red, 0.5)!
+      final redness = game.playbackMode.peek() == PlaybackMode.playing
+          ? b.flash.liveRednessNow
+          : b.flash.replayRednessAt(game.now, game.params.redFlashSpan);
+      final color = redness > 0
+          ? Color.lerp(blightBase, Colors.red, 0.5 * redness)!
           : b.dormant
           ? Color.lerp(blightBase, paletteSignal.value.ground, 0.55)!
           : blightBase;

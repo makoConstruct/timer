@@ -66,6 +66,7 @@ const MobjID trainscapeModeID = '8365048f-a403-4d82-b408-5fd7fb8c41a5';
 /// whole (see the saving section of trainscape_boring.dart) so that it comes
 /// back on the next run
 const MobjID savedTrainscapeLevelID = '68f20569-ab64-42ca-af0d-8789882f5559';
+const MobjID trainscapeProgressID = '9956a61e-f061-4bd3-b4b7-323994457c83';
 const MobjID crankGameWinMessageIndexID =
     '71874fd9-f83b-4bc3-a2a4-327298746577';
 const MobjID usedDragActionRecordID = '1cf75159-85e7-46eb-aa21-5b06a164b01b';

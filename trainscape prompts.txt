@@ -255,9 +255,8 @@ Another major issue, the unmoved player is selected, and the clock is playing ba
 This may require rethinking the wheel/paused time animation.
 ~~If the selected player moves into the smaller square mindim x mindim camera sensitivity box, center on them.~~ (changed my mind on this, not the way)
 Make player inventory vertical, next to the move pad.
---
 a station that requires an item to move the train must also show that item in its representation, as the train does
-
+=> sol
 we need to start the player with tutorial levels, so there's a mobj that stores their progress, and which levels are unlocked, and there's a level screen
 the level screen:
 	I guess we'll just make it a list like every other screen in the app! x]
@@ -320,7 +319,15 @@ Section 2
 		generate a random level according to X2 and express it according to our hand-generation API so that I can edit it.
 
 now start the procedural sections. Procedural sections generate a new level when the tile is clicked, previously genreated levels display above the tile in a wrap, when long clicked, a dialog asks to delete them.
-
+you need to respect the settings menu conventions from the rest of the app, android defaults suck. Your trainscape screens lack the drag-to-go-back behavior. The lock icon in level select is on the wrong side. Remember to put it in its own little psuedo-section
+clicking the save icon needs to open a dialog (styled appropriately) that says "Reset the save data for this level?" The save data doesn't show up right away when player comes back. Requirement should be on the other side, it's not designed to be reached, it's designed to be seen.
+... the corner radii on the dilaog and its options do not match the corner radii we generally use.
+The save icon and the level tiles aren't the same height. Ideally the height of these sections would be the max of the intrinsic heights of the two, and each child would be sized to that height
+When a player enters a node with a mugger, the mugging should happen right away. Currently, it seems to happen when they move again.
+Keep that, but this is the wrong solution. Some animations, such as this one, need to play in real-time, not in game time. I suppose we'd also like a distinction between first play and replay. On the replay, you'd want the flash to just go once, briefly, in game-time, but if it's a response to player action, it should play in full in real-time when the mugging is triggered. How would you recommend implementing that.
+you haven't separated the sections in the level select
+when an action is taken, the new arc in the history on the outer clock wheel should animate in, instead of just appearing. Also give the outer wheel a subtle sweep gradient that goes darker/lighter (theme brightness-sensitive) at the end to make it clear where the beginning/wrap of the wheel is.
+--
 Section 3
 	Level X1: "The known way"
 		procedural
