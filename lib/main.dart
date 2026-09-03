@@ -3410,10 +3410,9 @@ class TimerculeState extends TimerBaseState<Timercule> {
             parentId: widget.mobj.id,
             selected: false,
           );
-          // a timer must not keep running on its own once it's part of a
-          // timercule — the parent's play/pause now governs it, so pause the
-          // moved subtree (no-op if it wasn't running)
-          _pauseTimer(cm, reset: false);
+          if (cm.peek()!.isRunning) {
+            _startAncestors(widget.mobj.id);
+          }
         }
       },
     );

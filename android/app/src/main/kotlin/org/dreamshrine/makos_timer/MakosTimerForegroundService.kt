@@ -254,7 +254,7 @@ class MakosTimerForegroundService : Service() {
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(resId("res_notification_icon"))
+            .setSmallIcon(R.mipmap.ic_launcher_monochrome)
             .setColor(NOTIFICATION_ACCENT_COLOR)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -346,7 +346,4 @@ class MakosTimerForegroundService : Service() {
         flutterEngine?.destroy()
         flutterEngine = null
     }
-
-    private fun resId(name: String, type: String = "drawable"): Int =
-        resources.getIdentifier(name, type, packageName)
 }

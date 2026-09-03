@@ -144,15 +144,14 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
      * statement. — Opus 5
      */
     private fun showCompletion(id: Int, channelKey: String, title: String, subtitle: String?) {
-        val smallIcon = resId("res_notification_icon")
-        val bigPicture = loadBitmap("res_large_notification_icon")
+        val bigPicture = renderDrawable(R.mipmap.ic_launcher)
 
         val contentIntent = broadcastIntent(id, EVENT_ACTION, 0)
         val deleteIntent = broadcastIntent(id, EVENT_DISMISS, 1)
         val dismissIntent = broadcastIntent(id, EVENT_ACTION, 2)
 
         val builder = NotificationCompat.Builder(context, channelKey)
-            .setSmallIcon(smallIcon)
+            .setSmallIcon(R.mipmap.ic_launcher_monochrome)
             .setColor(NOTIFICATION_ACCENT_COLOR)
             .setContentTitle(
                 if (subtitle.isNullOrBlank()) title else "$title: $subtitle",
@@ -180,19 +179,6 @@ class PlatformNotificationPlugin : FlutterPlugin, MethodCallHandler {
             NotificationManagerCompat.from(context).notify(id, builder.build())
         }
     }
-
-    private fun resId(name: String, type: String = "drawable"): Int =
-        context.resources.getIdentifier(name, type, context.packageName)
-
-    /**
-     * Renders [name] to a bitmap. Tolerant: a `<bitmap>` wrapper around an
-     * adaptive launcher icon can't be inflated as a BitmapDrawable, so on any
-     * failure we fall back to rendering the launcher mipmap directly (adaptive
-     * icons draw fine to a canvas). Returns null if even that fails — the
-     * notification still posts, just without a big picture.
-     */
-    private fun loadBitmap(name: String): Bitmap? =
-        renderDrawable(resId(name)) ?: renderDrawable(resId("ic_launcher", "mipmap"))
 
     private fun renderDrawable(id: Int): Bitmap? {
         if (id == 0) return null
