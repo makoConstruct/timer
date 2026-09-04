@@ -330,6 +330,10 @@ when an action is taken, the new arc in the history on the outer clock wheel sho
 when an action is replayed, it replays extremely quickly, how is this controlled.
 Switch from "N Days remain" to N hours remain
 I don't like the way trainscapeLevels is expressed, I'd like for each trainscape level to be specified inside a section object, where the number of levels required to win that section and the section's name is also expressed
+move the "new level" icon to the right side, same size as the save icon (nothing ever has both at once)
+level titles and save icons should fade once they've been completed (whether they've been completed or played should be recorded)
+make it so that when the player triggers a train to go, if they're on the train, the train's movement is trated like the action, ie, the action duration is the duration of the train trip
+when a plant is deactivated, fade its item icon
 --
 Section 3
 	Level X1: "The known way"

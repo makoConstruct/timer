@@ -50,9 +50,11 @@ Map<String, int> _progress() => Map.of(
 );
 
 int _wonLevelCount(TrainscapeSection section, Map<String, int> progress) =>
-    section.levels
-        .where((level) => (progress['wins/${level.id}'] ?? 0) > 0)
-        .length;
+    section.levels.where((level) => _isCompleted(level, progress)).length;
+
+bool _isCompleted(TrainscapeLevel level, Map<String, int> progress) =>
+    (progress['completed/${level.id}'] ?? 0) > 0 ||
+    (progress['wins/${level.id}'] ?? 0) > 0;
 
 bool _isSectionUnlocked(int index, Map<String, int> progress) =>
     index == 0 ||
@@ -74,6 +76,7 @@ void recordTrainscapeWin(TrainscapeLevel level) {
   final before = _progress();
   final after = Map<String, int>.of(before);
   after['wins/${level.id}'] = (after['wins/${level.id}'] ?? 0) + 1;
+  after['completed/${level.id}'] = 1;
   for (final candidate in trainscapeLevels.all) {
     if (!_isUnlocked(candidate, before) && _isUnlocked(candidate, after)) {
       after['new/${candidate.id}'] = 1;
@@ -82,12 +85,13 @@ void recordTrainscapeWin(TrainscapeLevel level) {
   mobj.value = after;
 }
 
-void _markPlayed() {
+void _markPlayed(TrainscapeLevel level) {
   final mobj = Mobj.getAlreadyLoaded(
     trainscapeProgressID,
     MapType(StringType(), IntType()),
   );
   final next = _progress()..removeWhere((key, _) => key.startsWith('new/'));
+  next['played/${level.id}'] = 1;
   mobj.value = next;
 }
 
@@ -189,7 +193,7 @@ class _TrainscapeLevelScreenState extends State<TrainscapeLevelScreen> {
   }
 
   Future<void> _play(TrainscapeLevel level) async {
-    _markPlayed();
+    _markPlayed(level);
     await Navigator.of(context).push(
       OurPageRoute(
         builder: (_) => TrainscapeScreen(
@@ -276,22 +280,14 @@ class _TrainscapeLevelScreenState extends State<TrainscapeLevelScreen> {
                               children: [
                                 Expanded(
                                   child: MenuTile(
-                                    title: Row(
-                                      children: [
-                                        if (progress['new/${level.id}'] ==
-                                            1) ...[
-                                          const Icon(
-                                            Icons.circle,
-                                            size: 9,
-                                            color: Colors.green,
-                                          ),
-                                          const SizedBox(width: 9),
-                                        ],
-                                        Text(
-                                          level.name,
-                                          style: theme.textTheme.bodyLarge,
-                                        ),
-                                      ],
+                                    title: Opacity(
+                                      opacity: _isCompleted(level, progress)
+                                          ? 0.5
+                                          : 1,
+                                      child: Text(
+                                        level.name,
+                                        style: theme.textTheme.bodyLarge,
+                                      ),
                                     ),
                                     onTap: () => _play(level),
                                   ),
@@ -310,8 +306,35 @@ class _TrainscapeLevelScreenState extends State<TrainscapeLevelScreen> {
                                           minWidth: MenuTile.trailingSlotSpan,
                                           minHeight: MenuTile.trailingSlotSpan,
                                         ),
-                                        child: const Center(
-                                          child: Icon(Icons.save),
+                                        child: Center(
+                                          child: Opacity(
+                                            opacity:
+                                                _isCompleted(level, progress)
+                                                ? 0.5
+                                                : 1,
+                                            child: const Icon(Icons.save),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (progress['new/${level.id}'] == 1)
+                                  EvenPadding(
+                                    all:
+                                        MenuTile.defaultPaddingTotal -
+                                        MenuTile.defaultPaddingInside,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        minWidth: MenuTile.trailingSlotSpan,
+                                        minHeight: MenuTile.trailingSlotSpan,
+                                      ),
+                                      child: Center(
+                                        child: Transform.scale(
+                                          scale: 0.4,
+                                          child: Icon(
+                                            Icons.circle,
+                                            color: theme.colorScheme.primary,
+                                          ),
                                         ),
                                       ),
                                     ),

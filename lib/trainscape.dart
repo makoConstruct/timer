@@ -2748,8 +2748,8 @@ sealed class PlayerAction {
   TTime notBefore;
   PlayerAction({required this.notBefore});
 
-  /// When it actually happened, and when what it started was over — the same
-  /// moment for everything but a walk. Null until it has run once.
+  /// When it actually happened, and when what it started was over. Null until
+  /// it has run once.
   ///
   /// Recorded for the same reason [recorded] is: it's history, and history
   /// outlives a rewind. It can't be worked out afterwards — an action waits on
@@ -2809,8 +2809,7 @@ class PlayerScript {
   }
 }
 
-/// Step onto the next node along. The only action that leaves the player busy
-/// afterwards; the rest are done the moment they're done.
+/// Step onto the next node along.
 class MoveAction(final Node to, {required super.notBefore})
     extends PlayerAction {
   @override
@@ -2918,9 +2917,9 @@ class RotateAction(
       g.rotateItemOnward(p, from, item) ? ActionResult.of(p) : null;
 }
 
-/// Sending a train isn't something the player does to themselves, so what it
-/// leaves behind in [ActionResult] is only whatever the fare cost them. The
-/// train's own journey is the train's, and is replayed by the train.
+/// What this leaves behind in [ActionResult] is only whatever the fare cost
+/// the player. The train's journey is replayed by the train, but when its
+/// mover is aboard that journey is also the span of this action.
 class TrainMoveAction(
   final TrainNode train,
   final Node to, {
@@ -3001,7 +3000,12 @@ class Player(final String name, final Color color) extends Thing {
     final a = script.next;
     if (a == null || at.peek() == null) return null;
     final u = incapacitatedUntil.peek();
-    final t = max(a.notBefore, g.now);
+    var t = max(a.notBefore, g.now);
+    final here = at.peek();
+    if (here is TrainNode) {
+      final trainArrives = here.arrivesAt.peek();
+      if (trainArrives != null) t = max(t, trainArrives);
+    }
     return u == null ? t : max(t, u);
   }
 
@@ -3481,7 +3485,10 @@ class Tree(
             badgeIcon(Icons.local_florist),
             if (level != NodeZoomLevel.small)
               for (final q in produces)
-                quantityWidget(q, size: _facilityItemSize),
+                Opacity(
+                  opacity: ready ? 1 : dimFade,
+                  child: quantityWidget(q, size: _facilityItemSize),
+                ),
           ]),
           pie: CountdownPie(
             game: g,
@@ -4853,7 +4860,12 @@ class Game({
       return;
     }
     a.ranAt = now;
-    a.ranUntil = p.traversing != null ? p.arrivesAt : now;
+    a.ranUntil = switch (a) {
+      MoveAction _ when p.traversing != null => p.arrivesAt,
+      TrainMoveAction t when p.at.peek().isSameAs(t.train) =>
+        t.train.arrivesAt.peek() ?? now,
+      _ => now,
+    };
     p.script.done++;
   }
 
@@ -4981,6 +4993,11 @@ class Game({
           here = m.to;
         case JumpAction j:
           here = j.to;
+        case TrainMoveAction a when here.isSameAs(a.train):
+          final from = a.train.dockedAt.peek();
+          if (from != null && !from.isSameAs(a.to)) {
+            t += a.train.travelTimeBetween(from, a.to, params);
+          }
         default:
           break; // everything else is done the moment it's begun
       }
