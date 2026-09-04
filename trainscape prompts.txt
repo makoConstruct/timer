@@ -327,6 +327,9 @@ When a player enters a node with a mugger, the mugging should happen right away.
 Keep that, but this is the wrong solution. Some animations, such as this one, need to play in real-time, not in game time. I suppose we'd also like a distinction between first play and replay. On the replay, you'd want the flash to just go once, briefly, in game-time, but if it's a response to player action, it should play in full in real-time when the mugging is triggered. How would you recommend implementing that.
 you haven't separated the sections in the level select
 when an action is taken, the new arc in the history on the outer clock wheel should animate in, instead of just appearing. Also give the outer wheel a subtle sweep gradient that goes darker/lighter (theme brightness-sensitive) at the end to make it clear where the beginning/wrap of the wheel is.
+when an action is replayed, it replays extremely quickly, how is this controlled.
+Switch from "N Days remain" to N hours remain
+I don't like the way trainscapeLevels is expressed, I'd like for each trainscape level to be specified inside a section object, where the number of levels required to win that section and the section's name is also expressed
 --
 Section 3
 	Level X1: "The known way"

@@ -4415,7 +4415,7 @@ class Game({
   /// Derived, not counted down: the level's whole span less how much of it has
   /// gone. One less thing to put back when the clock moves.
   TTime get timeLeft => max(0, params.globalTime - now);
-  int get daysRemaining => timeLeft ~/ gameDay;
+  int get hoursRemaining => timeLeft ~/ gameHour;
 
   /// [who] it happened to is part of the message, not decoration: the camera is
   /// rarely on every player at once, and a bare MUGGED with the victim off
@@ -7452,7 +7452,7 @@ class const _DialWheelPainter({
       Paint()
         ..shader = SweepGradient(
           colors: [
-            Color.lerp(wheel, dark ? Colors.white : Colors.black, 0.10)!,
+            Color.lerp(wheel, dark ? Colors.white : Colors.black, 0.06)!,
             wheel,
             wheel,
           ],
@@ -8156,7 +8156,7 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
         // written across its own face, and a second reading of it in the
         // opposite corner is one more thing to check against.
         //
-        // The days left are still read off [Game.now], which is a plain field,
+        // The hours left are still read off [Game.now], which is a plain field,
         // so this is what subscribes the line to it — it used to come for free
         // from a timeLeft signal, back when the level counted its remaining
         // time down instead of working it out; see [Game.timeLeft].
@@ -8187,11 +8187,9 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                 ),
               ),
               Text(
-                game.daysRemaining == 0
-                    ? "FINAL DAY"
-                    : game.daysRemaining == 1
-                    ? "1 DAY REMAINS"
-                    : "${game.daysRemaining} DAYS REMAIN",
+                game.hoursRemaining == 1
+                    ? "1 HOUR REMAINS"
+                    : "${game.hoursRemaining} HOURS REMAIN",
                 style: hudStyle,
               ),
               Text.rich(

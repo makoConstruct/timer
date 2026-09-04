@@ -259,8 +259,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final crankGameTheme = CrankGameTheme.fromContext(context);
-    final mako = OurThemeData.fromTheme(theme);
-    final backgroundColorA = mako.menuSurfaceFore;
+    final mt = OurThemeData.fromTheme(theme);
     final mq = MediaQuery.of(context);
     final screenWidth = mq.size.width;
     final screenHeight = mq.size.height;
@@ -284,7 +283,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
     final barThickness = 50.0;
     // (bound to EscapeToPop at the end of the build, as in SettingsScreen)
     final scaffold = Scaffold(
-      backgroundColor: backgroundColorA,
+      backgroundColor: mt.lowestBackColor,
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -328,7 +327,7 @@ class _CrankGameScreenState extends State<CrankGameScreen>
             ),
           ],
         ),
-        backgroundColor: backgroundColorA,
+        backgroundColor: mt.lowestBackColor,
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.transparent,
         elevation: 0,
