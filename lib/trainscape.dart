@@ -13,6 +13,7 @@ import 'package:animove/animove.dart'
     show Animove, AnimoveFrame, TimelyParabolicSimulation;
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:hsluv/hsluvcolor.dart';
 import 'package:makos_timer/boring.dart';
@@ -438,7 +439,8 @@ enum ClockPush {
   /// Following the dial quickly and braking to a stop at its target. — GPT-6
   dial(lag: 0.03),
 
-  replay(duration: 0.3);
+  replay(duration: 0.3),
+  move;
 
   const ClockPush({this.lag = 0.09, this.duration = 0});
 
@@ -497,10 +499,77 @@ enum ClockPush {
         switch (this) {
           dial => sqrt(2 * _dialAccel * d),
           replay => throw StateError('Replay uses ReplayEase'),
+          move => throw StateError('Moves use MoveSeek'),
           follow => pace,
           catchUp => pace + d / _stretch,
         };
   }
+}
+
+class MoveSeek extends Simulation {
+  MoveSeek(this.from, this.to, double velocity, {required double distance}) {
+    final gap = to - from;
+    cruiseSeconds = min(3.0, 1.8 * log(max(1, distance / 4.5)));
+    _rampSeconds = min(0.06, cruiseSeconds);
+    final launchRate = 1 / (cruiseSeconds + 1 / _frequency);
+    final along = gap == 0 ? 0.0 : velocity / gap;
+    _initialVelocity = gap * (along <= 0 ? launchRate : min(along, launchRate));
+
+    // Integrate the velocity ramp and cruise, reserving v/frequency distance
+    // for a critically damped stop. This keeps velocity continuous at both
+    // joins and prevents overshoot after a retarget. — GPT-6
+    _cruiseVelocity =
+        (gap - _initialVelocity * _rampSeconds / 2) /
+        (cruiseSeconds - _rampSeconds / 2 + 1 / _frequency);
+    _brake = SpringSimulation(
+      const SpringDescription(mass: 1, stiffness: 400, damping: 40),
+      from +
+          _initialVelocity * _rampSeconds / 2 +
+          _cruiseVelocity * (cruiseSeconds - _rampSeconds / 2),
+      to,
+      cruiseSeconds == 0 ? _initialVelocity : _cruiseVelocity,
+      tolerance: Tolerance(
+        distance: max(1, gap.abs() * 0.0001),
+        velocity: max(1, gap.abs() * 0.001),
+      ),
+    );
+  }
+
+  final double from, to;
+  static const double _frequency = 20;
+  late final double cruiseSeconds;
+  late final double _rampSeconds, _initialVelocity, _cruiseVelocity;
+  late final SpringSimulation _brake;
+
+  @override
+  double x(double time) {
+    if (time >= cruiseSeconds) return _brake.x(time - cruiseSeconds);
+    if (time < _rampSeconds) {
+      return from +
+          _initialVelocity * time +
+          (_cruiseVelocity - _initialVelocity) *
+              time *
+              time /
+              (2 * _rampSeconds);
+    }
+    return from +
+        (_initialVelocity + _cruiseVelocity) * _rampSeconds / 2 +
+        _cruiseVelocity * (time - _rampSeconds);
+  }
+
+  @override
+  double dx(double time) {
+    if (time >= cruiseSeconds) return _brake.dx(time - cruiseSeconds);
+    if (time < _rampSeconds) {
+      return _initialVelocity +
+          (_cruiseVelocity - _initialVelocity) * time / _rampSeconds;
+    }
+    return _cruiseVelocity;
+  }
+
+  @override
+  bool isDone(double time) =>
+      time >= cruiseSeconds && _brake.isDone(time - cruiseSeconds);
 }
 
 class ReplayEase {
@@ -5162,7 +5231,8 @@ class Game({
   /// world is taken to that moment. See [ClockPush].
   double _shown = 0, _shownVelocity = 0;
   ReplayEase? _replaySpring;
-  double _replayElapsed = 0;
+  MoveSeek? _moveSeek;
+  double _seekElapsed = 0;
 
   /// where the clock has got to, and how fast it's going — in ticks and in
   /// ticks per real second — and what's pushing it there
@@ -5175,7 +5245,7 @@ class Game({
   /// Replay preserves velocity where it can do so without overshooting;
   /// starting or reversing supplies a distance-scaled kick. — GPT-6
   void headFor(TTime t, ClockPush why) {
-    if (why == ClockPush.replay &&
+    if ((why == ClockPush.replay || why == ClockPush.move) &&
         _push == why &&
         headingFor == max(t, earliestMoment)) {
       return;
@@ -5183,6 +5253,8 @@ class Game({
     headingFor = max(t, earliestMoment);
     _push = why;
     _replaySpring = null;
+    _moveSeek = null;
+    _seekElapsed = 0;
     if (why == ClockPush.replay) {
       _replaySpring = ReplayEase(
         _shown,
@@ -5190,8 +5262,35 @@ class Game({
         _shownVelocity,
         duration: why.duration,
       );
-      _replayElapsed = 0;
       _shownVelocity = _replaySpring!.dx(0);
+    } else if (why == ClockPush.move) {
+      final low = min(_shown, headingFor!.toDouble());
+      final high = max(_shown, headingFor!.toDouble());
+      final p = selectedPlayer.peek();
+      var distance = 0.0;
+      void measure(PlayerAction action, TTime from, TTime to) {
+        final span = max(0, min(high, to) - max(low, from));
+        distance +=
+            span *
+            switch (action) {
+              MoveAction _ => params.playerSpeed * 1.15,
+              TrainMoveAction _ => params.trainSpeed,
+              _ => 0,
+            };
+      }
+
+      for (final action in p.script.actions.take(p.script.done)) {
+        final from = action.ranAt;
+        if (from != null) measure(action, from, action.ranUntil ?? from);
+      }
+      walkPlan(p, each: (action, from, to, _) => measure(action, from, to));
+      _moveSeek = MoveSeek(
+        _shown,
+        headingFor!.toDouble(),
+        _shownVelocity,
+        distance: distance,
+      );
+      _shownVelocity = _moveSeek!.dx(0);
     }
   }
 
@@ -5200,18 +5299,9 @@ class Game({
     headFor(t, why);
   }
 
-  /// Plays the world out to [t]: at ordinary speed if it's standing still, and
-  /// on the elastic if it's already on its way somewhere.
-  ///
-  /// That one test is the whole rule, and it's the player's own hand that
-  /// decides it. Set something going and you get to watch it happen. Set
-  /// something else going before it's finished and you've said you'd rather be
-  /// somewhere else — so the rest of it is crossed on [ClockPush.catchUp],
-  /// which hurries in proportion to how much you've stacked up and hands back
-  /// to ordinary speed as it lands. See [ClockPush].
   void playOut(TTime t) {
     playbackMode.value = PlaybackMode.playing;
-    headFor(t, headingFor == null ? ClockPush.follow : ClockPush.catchUp);
+    headFor(t, ClockPush.move);
   }
 
   /// runs the clock until [p] has nothing left on their list. [frontierOf] is
@@ -5302,9 +5392,13 @@ class Game({
     final target = to.toDouble();
     final gap = target - _shown;
     if (_push == ClockPush.replay) {
-      _replayElapsed += realSeconds;
-      _shown = _replaySpring!.x(_replayElapsed);
-      _shownVelocity = _replaySpring!.dx(_replayElapsed);
+      _seekElapsed += realSeconds;
+      _shown = _replaySpring!.x(_seekElapsed);
+      _shownVelocity = _replaySpring!.dx(_seekElapsed);
+    } else if (_push == ClockPush.move) {
+      _seekElapsed += realSeconds;
+      _shown = _moveSeek!.x(_seekElapsed);
+      _shownVelocity = _moveSeek!.dx(_seekElapsed);
     } else {
       final want = _push.speedFor(gap, params.pace);
       _shownVelocity +=
@@ -5320,7 +5414,9 @@ class Game({
     // second is the one a long frame produces, and is why the crossing is
     // checked rather than assumed away.
     final arrived = _push == ClockPush.replay
-        ? _replayElapsed >= _replaySpring!.duration
+        ? _seekElapsed >= _replaySpring!.duration
+        : _push == ClockPush.move
+        ? _moveSeek!.isDone(_seekElapsed)
         : gap * (target - _shown) <= 0 || (target - _shown).abs() < tickRate;
     if (arrived) {
       _shown = target;

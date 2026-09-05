@@ -7052,6 +7052,7 @@ class DragActionRingController({
         radialActivatorFunctions.length == radialActivatorIcons.length,
         'DragActionRingController: radialActivatorFunctions and radialActivatorIcons should have the same length',
       );
+  static const dragActionActivationThresholdThumbs = 0.2;
 
   /// -1 means nothing is selected, number means item has been selected, null means dismissed
   late final Signal<int?> _dragEvents = Signal(
@@ -7159,7 +7160,8 @@ class DragActionRingController({
   void onPanUpdate(BuildContext context, Offset p) {
     Offset dp = p - _startDrag;
     if (!dragActionRingDisabled) {
-      if (dp.distance > Thumbspan.of(context) * 0.3) {
+      if (dp.distance >
+          Thumbspan.of(context) * dragActionActivationThresholdThumbs) {
         bool isRightHanded = Mobj.getAlreadyLoaded(
           isRightHandedID,
           BoolType(),

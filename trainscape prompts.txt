@@ -335,8 +335,9 @@ level titles and save icons should fade once they've been completed (whether the
 make it so that when the player triggers a train to go, if they're on the train, the train's movement is trated like the action, ie, the action duration is the duration of the train trip
 when a plant is deactivated, fade its item icon
 add undo/redo icons out from the outer clock wheel above/below angle pi*0.15
---
 rework the way move playing works so that it feels more immediate, I guess I'm just asking you to switch to spring-based seeking instead of the linear "play until" motion we currently have, which iirc we're now only using for train trips.
+--
+redo fjelniurn, I'd initially asked for it to be generated according to the defaults.
 Section 3
 	Level X1: "The known way"
 		procedural
