@@ -1485,7 +1485,7 @@ class SpringExpansionController({
   /// rise: a fall that overshot would dip past shut. Pass [spring] itself to opt
   /// this controller out of the setting.
   final SpringDescription? bouncySpring,
-  final double kickSpeed = 25.0,
+  final double kickSpeed = SpringExpansionController.defaultKickSpeed,
   final double restThreshold = 0.01,
 }) extends Animation<double>
     with
@@ -1501,6 +1501,7 @@ class SpringExpansionController({
     stiffness: 625,
     damping: 50,
   );
+  static const double defaultKickSpeed = 25;
 
   this {
     _controller = AnimationController.unbounded(vsync: vsync);

@@ -435,15 +435,14 @@ enum ClockPush {
   /// world simply carrying on begins.
   catchUp(lag: 0.09),
 
-  /// Following a finger on the dial. The only one that brakes to a stop,
-  /// because it's the only one whose destination is a place somebody is
-  /// pointing at rather than a moment the world is running towards: a clock
-  /// that crept on at [follow]'s pace under a finger holding still would be a
-  /// dial that fought the hand. Quick, too — a control that lags behind the
-  /// thumb doesn't read as a control at all.
-  dial(lag: 0.03);
+  /// Following the dial quickly and braking to a stop at its target. — GPT-6
+  dial(lag: 0.03),
 
-  const ClockPush({required this.lag});
+  replay(duration: 0.3);
+
+  const ClockPush({this.lag = 0.09, this.duration = 0});
+
+  final double duration;
 
   /// How long the clock takes to change its mind about how fast it's going,
   /// in real seconds: the wanted speed is approached rather than taken, so
@@ -497,9 +496,39 @@ enum ClockPush {
     return sign *
         switch (this) {
           dial => sqrt(2 * _dialAccel * d),
+          replay => throw StateError('Replay uses ReplayEase'),
           follow => pace,
           catchUp => pace + d / _stretch,
         };
+  }
+}
+
+class ReplayEase {
+  ReplayEase(this.from, this.to, double velocity, {required this.duration}) {
+    final gap = to - from;
+    final along = gap == 0 ? 0.0 : velocity / gap * duration;
+    _slope = along <= 0 ? 1.5 : min(along, 3);
+  }
+
+  final double from, to;
+  final double duration;
+  late final double _slope;
+
+  // The cubic branch of TimelyParabolicSimulation, used at every launch speed.
+  // Its derivative is (1-u) * (s + (6-3s)*u), nonnegative for 0 <= s <= 3.
+  // s=1.5 kicks immediately, then increases braking linearly until it stops
+  // at u=1. Bounding launch velocity makes the whole curve monotonic. — GPT-6
+  double x(double seconds) {
+    if (seconds >= duration) return to;
+    final u = seconds / duration;
+    final progress = u * (_slope + u * (3 - 2 * _slope + u * (_slope - 2)));
+    return from + (to - from) * progress;
+  }
+
+  double dx(double seconds) {
+    if (seconds >= duration) return 0;
+    final u = seconds / duration;
+    return (to - from) / duration * (1 - u) * (_slope + (6 - 3 * _slope) * u);
   }
 }
 
@@ -951,7 +980,7 @@ class Parameters({
         (4, StationControl.remote),
         (3, StationControl.localOnly),
       ],
-      trainTerminusDistance: 1.5,
+      trainTerminusDistance: 1.4,
       oneWayReturnDelay: 12 * gameMinute,
     );
   }
@@ -4916,8 +4945,13 @@ class Game({
   /// item. This is what tapping the clock runs to — one thing at a time, tap
   /// again for the one after — where [frontierOf] is the whole list and is
   /// what the dial's bands are drawn from.
-  TTime nextActionEndsAt(Player p) =>
-      p.traversing != null ? max(now, p.arrivesAt) : frontier(p, take: 1).$1;
+  TTime nextActionEndsAt(Player p) {
+    final at = headingFor ?? now;
+    for (final span in synthetic.bandOf(players.indexOf(p))) {
+      if (span.to > at) return span.to;
+    }
+    return at;
+  }
 
   /// The far end of the last thing [p] has been told to do, whichever side of
   /// the clock it falls on. [earliestMoment] for somebody who has never done
@@ -5127,6 +5161,8 @@ class Game({
   /// destination instead of cutting to it. Each frame it's rounded and the
   /// world is taken to that moment. See [ClockPush].
   double _shown = 0, _shownVelocity = 0;
+  ReplayEase? _replaySpring;
+  double _replayElapsed = 0;
 
   /// where the clock has got to, and how fast it's going — in ticks and in
   /// ticks per real second — and what's pushing it there
@@ -5136,16 +5172,27 @@ class Game({
 
   /// Sets the clock travelling to [t], with [why] deciding how eagerly.
   ///
-  /// Deliberately touches nothing but the destination. A clock already on its
-  /// way somewhere and told to go somewhere else carries on from where it is
-  /// at the speed it was going — the mover re-reads the position and velocity
-  /// it already has, so redirecting mid-flight bends the movement instead of
-  /// restarting it. Changing [why] at the same time changes what speed it's
-  /// heading for and how fast it changes its mind; the hand itself neither
-  /// jumps nor stops.
+  /// Replay preserves velocity where it can do so without overshooting;
+  /// starting or reversing supplies a distance-scaled kick. — GPT-6
   void headFor(TTime t, ClockPush why) {
+    if (why == ClockPush.replay &&
+        _push == why &&
+        headingFor == max(t, earliestMoment)) {
+      return;
+    }
     headingFor = max(t, earliestMoment);
     _push = why;
+    _replaySpring = null;
+    if (why == ClockPush.replay) {
+      _replaySpring = ReplayEase(
+        _shown,
+        headingFor!.toDouble(),
+        _shownVelocity,
+        duration: why.duration,
+      );
+      _replayElapsed = 0;
+      _shownVelocity = _replaySpring!.dx(0);
+    }
   }
 
   void seekTo(TTime t, ClockPush why) {
@@ -5254,19 +5301,28 @@ class Game({
     // the others are arriving at a speed and have nothing to overshoot.
     final target = to.toDouble();
     final gap = target - _shown;
-    final want = _push.speedFor(gap, params.pace);
-    _shownVelocity +=
-        (want - _shownVelocity) * (1 - exp(-realSeconds / _push.lag));
-    if (_push.arrivesStopped) {
-      _shownVelocity = _shownVelocity.clamp(-want.abs(), want.abs());
+    if (_push == ClockPush.replay) {
+      _replayElapsed += realSeconds;
+      _shown = _replaySpring!.x(_replayElapsed);
+      _shownVelocity = _replaySpring!.dx(_replayElapsed);
+    } else {
+      final want = _push.speedFor(gap, params.pace);
+      _shownVelocity +=
+          (want - _shownVelocity) * (1 - exp(-realSeconds / _push.lag));
+      if (_push.arrivesStopped) {
+        _shownVelocity = _shownVelocity.clamp(-want.abs(), want.abs());
+      }
+      _shown += _shownVelocity * realSeconds;
     }
-    _shown += _shownVelocity * realSeconds;
 
     // Arrived: either near enough that another frame would be a frame of
     // nothing, or a whole frame was long enough to carry it over the mark. The
     // second is the one a long frame produces, and is why the crossing is
     // checked rather than assumed away.
-    if (gap * (target - _shown) <= 0 || (target - _shown).abs() < tickRate) {
+    final arrived = _push == ClockPush.replay
+        ? _replayElapsed >= _replaySpring!.duration
+        : gap * (target - _shown) <= 0 || (target - _shown).abs() < tickRate;
+    if (arrived) {
       _shown = target;
       _shownVelocity = 0;
       headingFor = null;
@@ -5455,7 +5511,7 @@ class Game({
     if (!params.playersHaveMoveAction) return;
     // from where they'll be when they get round to it, not from where they
     // are: a drag while they're mid-walk means "and then from there"
-    final source = frontierNodeOf(p);
+    final source = actionTimeFor(p).$2;
     if (source == null) return;
     Edge? best;
     var bestDist = double.infinity;
@@ -7115,11 +7171,56 @@ TTime dialStopAt(Game game, double wound, bool forward) {
   return best;
 }
 
+TTime? dialStepTarget(Game game, bool forward) {
+  final here = game.headingFor ?? game.now;
+  final band = dialBand(game);
+  if (forward) {
+    for (final span in band) {
+      if (span.to > here) return span.to;
+    }
+    return null;
+  }
+  for (final span in band.reversed) {
+    if (span.from <= here && span.from > game.earliestMoment) {
+      return span.from - 1;
+    }
+  }
+  return null;
+}
+
 /// how much of the map's narrower side the clock face takes up
 const double dialFaceSpan = 0.24;
 
 /// how far the clock face is held off the corner
 const double dialPadding = 10;
+
+const double _dialStepIconSize = 22;
+const double _dialStepTouchSize = 48;
+
+Widget _dialStepButton(Game game, bool forward) {
+  final target = dialStepTarget(game, forward);
+  return Semantics(
+    button: true,
+    enabled: target != null,
+    label: forward ? 'Redo' : 'Undo',
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final next = dialStepTarget(game, forward);
+        if (next != null) game.seekTo(next, ClockPush.replay);
+      },
+      child: Center(
+        child: Icon(
+          forward ? Icons.redo : Icons.undo,
+          size: _dialStepIconSize,
+          color: paletteSignal.value.ink.withValues(
+            alpha: target == null ? 0.25 : 1,
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
 /// The clock, turned rather than watched.
 ///
@@ -8076,6 +8177,33 @@ class _TrainscapeScreenState extends State<TrainscapeScreen>
                                   faceSize: dialFace,
                                 ),
                               ),
+                              for (final (forward, angle) in [
+                                (false, -_dialStartAngle),
+                                (true, _dialStartAngle),
+                              ])
+                                Positioned(
+                                  left:
+                                      dialFace / 2 +
+                                      dialPadding +
+                                      (dialWheelRadius(dialFace) +
+                                              _dialStepIconSize / 2) *
+                                          cos(angle) -
+                                      _dialStepTouchSize / 2,
+                                  bottom:
+                                      dialFace / 2 +
+                                      dialPadding -
+                                      (dialWheelRadius(dialFace) +
+                                              _dialStepIconSize / 2) *
+                                          sin(angle) -
+                                      _dialStepTouchSize / 2,
+                                  width: _dialStepTouchSize,
+                                  height: _dialStepTouchSize,
+                                  child: ValueListenableBuilder(
+                                    valueListenable: _frame,
+                                    builder: (context, _, _) =>
+                                        _dialStepButton(game, forward),
+                                  ),
+                                ),
                               Positioned.fill(child: _announcement()),
                             ],
                           );

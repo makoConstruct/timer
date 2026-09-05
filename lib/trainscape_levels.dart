@@ -518,23 +518,26 @@ class _HandLevel {
     return facility;
   }
 
-  TrainNode train(Node a, Node b, {Quantity? cost}) {
+  TrainNode train((Node, double) a, (Node, double) b, {Quantity? cost}) {
+    final (aNode, aAngle) = a;
+    final (bNode, bAngle) = b;
+    final termini = {
+      aNode: aNode.pos + angleToOffset(aAngle) * params.trainTerminusDistance,
+      bNode: bNode.pos + angleToOffset(bAngle) * params.trainTerminusDistance,
+    };
     final train = TrainNode(
-      pos: a.pos + const Offset(0, -1.5),
+      pos: termini[aNode]!,
       activation: cost,
       activationConsumed: cost != null,
       movableFromInside: true,
       schedule: const NeverSchedule(),
-      stationNodes: [a, b],
-      terminusFor: {
-        a: a.pos + const Offset(0, -1.5),
-        b: b.pos + const Offset(0, -1.5),
-      },
+      stationNodes: [aNode, bNode],
+      terminusFor: termini,
     );
     nodes.add(train);
     trains.add(train);
-    facility(a, Station(train, StationControl.remote));
-    facility(b, Station(train, StationControl.remote));
+    facility(aNode, Station(train, StationControl.remote));
+    facility(bNode, Station(train, StationControl.remote));
     return train;
   }
 
@@ -592,19 +595,28 @@ Game _locksLevel() {
 
 Game _trainsLevel() {
   final l = _HandLevel(hearts: 1, timeLimit: 1 * gameDay);
-  final n11 = l.node(Offset.zero);
-  final n12 = l.relative(const Offset(4, 4), from: n11);
-  final n13 = l.relative(const Offset(4, -4), from: n11);
+  final nc = l.node(Offset.zero);
+  // node separation
+  final ns = 3;
+  final triu = ns * sqrt(3 / 4) / 3;
+  final n12 = l.relative(Offset(-ns / 2, triu), from: nc);
+  final n13 = l.relative(Offset(ns / 2, triu), from: nc);
+  final n11 = l.relative(Offset(0, -ns * sqrt(3 / 4) * 2 / 3), from: nc);
+  l.connect(n11, n12);
   l.connect(n12, n13);
+  l.connect(n13, n11);
   l.facility(n12, Tree([l.q(2)], ArbitraryInterval(3 * gameHour)));
   l.facility(n13, Tree([l.q(3)], ArbitraryInterval(3 * gameHour)));
-  l.facility(n13, Trader([l.q(1)], [l.heart]));
-  final n21 = l.node(const Offset(14, -4));
-  l.train(n13, n21);
+  l.facility(n11, Trader([l.q(1)], [l.heart]));
+  final n21 = l.node(const Offset(-1, 14));
+  l.train((n13, pi / 2), (n21, -pi / 2));
   var chain = n21;
   for (var i = 0; i < 8; i++) {
-    chain = l.relative(const Offset(3, 0), from: chain);
-    if (i == 2) {
+    chain = l.relative(
+      Offset(0, ns + l.rng.nextDouble() * ns * 0.2),
+      from: chain,
+    );
+    if (i == 3) {
       l.facility(chain, Mugger(l.item(2), MuggerKind.rc));
     }
     if (i == 5) {
@@ -613,12 +625,13 @@ Game _trainsLevel() {
   }
   final n29 = chain;
   l.facility(n29, Trader([l.q(3)], [l.q(1)]));
-  final n22 = l.relative(const Offset(0, 5), from: n21);
-  final n23 = l.relative(const Offset(4, 0), from: n22);
+
+  final n22 = l.relative(const Offset(2.3, 0), from: n21);
+  final n23 = l.relative(angleToOffset(pi / 3) * 2.3, from: n22);
   l.facility(n23, Storage(4));
   l.facility(n23, Tree([l.q(4)], ArbitraryInterval(3 * gameHour)));
-  l.train(n22, n29, cost: l.q(4));
-  return l.finish(n11);
+  l.train((n22, 2 * pi / 3), (n29, pi), cost: l.q(4));
+  return l.finish(nc);
 }
 
 Game _timeLevel(int hearts) {
