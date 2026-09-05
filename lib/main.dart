@@ -1914,15 +1914,10 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
             // downward shrink plays, so closing is the shrink rather than an
             // un-reveal.
             final revealProgress = unlerpUnit(0, 0.7, upp);
-            // the bounce, in pixels the body pushes out past its resting edge:
-            // on over the reveal, peaking as it lands and off again over the
-            // tail. Off the rise component and faded out by the shrink, so a
-            // menu on its way out never swells. 0 when bouncy animations are
-            // off.
             final revealSwell =
                 appearanceOvershoot(
                   upp,
-                  landsAt: 0.60,
+                  landsAt: 0.5,
                   amount: _glassMenuBounceRoom(buttonSpan),
                 ) *
                 (1 - downp);
@@ -2081,8 +2076,14 @@ class _TimerMenuState extends State<TimerMenu> with TickerProviderStateMixin {
         // it. It rides on the span rather than on the rect below so the arrow's
         // base, which is solved against the span, comes along with it.
         span += (swell * 2).offset;
+        final appearanceDirection = target.center - shiftedOrigin;
+        final forwardBump = appearanceDirection.distance == 0
+            ? Offset.zero
+            : appearanceDirection * (swell / appearanceDirection.distance);
         final body = Rect.fromCenter(
-          center: lerpOffset(shiftedOrigin, target.center, earlyBlubp),
+          center:
+              lerpOffset(shiftedOrigin, target.center, earlyBlubp) +
+              forwardBump,
           width: span.dx,
           height: span.dy,
         );
@@ -2158,7 +2159,7 @@ const double _glassMenuTopPad = 32;
 double _glassMenuBulgePad(double buttonSpan) =>
     GlassMenuButton.swellDepth +
     7 +
-    (bouncyAnimationsOn() ? _glassMenuBounceRoom(buttonSpan) : 0);
+    (bouncyAnimationsOn() ? _glassMenuBounceRoom(buttonSpan) * 2 : 0);
 
 /// How far out the menu body pushes at the peak of its bounce, when bouncy
 /// animations are on — 2 logical pixels at the default button span, scaled by
@@ -2168,10 +2169,9 @@ double _glassMenuBulgePad(double buttonSpan) =>
 /// six-item one, instead of a proportional stretch that a tall menu would wear
 /// as a much bigger excursion than a short one.
 ///
-/// [_glassMenuBulgePad] buys exactly this much extra clip room for it, so the
-/// swell never needs capping at the call site: it's transparent margin, the
-/// menu is still the same width, and the shine's own budget stays intact.
-double _glassMenuBounceRoom(double buttonSpan) => buttonSpan / 30;
+/// [_glassMenuBulgePad] reserves room for both the swell and the forward bump.
+/// —GPT-6
+double _glassMenuBounceRoom(double buttonSpan) => buttonSpan * 0.1;
 
 abstract class const TimerBase({
   super.key,
