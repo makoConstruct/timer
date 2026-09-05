@@ -336,30 +336,24 @@ make it so that when the player triggers a train to go, if they're on the train,
 when a plant is deactivated, fade its item icon
 add undo/redo icons out from the outer clock wheel above/below angle pi*0.15
 rework the way move playing works so that it feels more immediate, I guess I'm just asking you to switch to spring-based seeking instead of the linear "play until" motion we currently have, which iirc we're now only using for train trips.
---
-redo fjelniurn, I'd initially asked for it to be generated according to the defaults.
-Section 3
-	Level X1: "The known way"
-		procedural
-		easy parameters (either narrow (2 or 3 items per tier) or shallow (only 2 tiers) generation chains). An endless hallway of levels, each time the player wins, the hallway is extended one out, the new level is at the beginning of the list.
-		10 levels and a random generator which the player can seed
-Section 4
-	Level X2: "Other ways"
-		basic parameters
-		5 levels, seedable generator
-Section 5
-	Level X3: "The true way"
+Add some more suites, procedural ones, and an ending reward. Generative levels always show 3 uncompleted variants. When a level is completed, some new generations show.
+Suite 3: requires 2 completions
+	Level: "known way (world)", procedural
+		easy parameters (meaning, either narrow (2 or 3 items per tier) or shallow (only 2 tiers) generation chains).
+Suite 4: requires 2 completions
+	Level: "alternate way (world)", procedural
+		default parameters
+Suite 5: requires 2 completions
+	Level: "true way (world)" procedural
 		hard parameters
-		3 levels, seedable generator
-if the player beats all 3 X3 levels, it unlocks a diatribe from me, as the final level
-	the diatribe
-		"Habitat"
-		We wouldn't recognize our home. Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in them. The rest of us dwindle as some fresh plague bubbles over our feet.
-		We see someone walking upright, armed, a child upon their back. They notice us and approach and, alas, those big black eyes, emotions we do not recognize, inscrutable mutterings, a reaching device whose function we do not understand, and we are turned into a cautionary tale.
-		Our vision will need to improve.
+Terminus
+	"Habitat": just shows text, which the winner gets to read
+		We wouldn't recognize our home.
+
+		Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in them. Others dwindle as fresh plague bubbles over our feet.
 
 		Humanity's home shore is shattering and sinking.
-		There are many habitable places, but all varying degrees of abyssal. There's nowhere left on the shore. There are places closer to it, but the closer you wish to be, the harder it is to survive at all. It stands to reason that there is one place of minimal compromise where the most humanlike remaining things still defiantly flourish, reachable only by those with absolute courage that is tempered with inerrent wisdom. You are not among those people. Your place will be further down.
+		There are many habitable places, but all varying degrees of abyssal. There's nowhere left on the shore. There must be one place of minimal compromise where the most humanlike remaining things still defiantly flourish, reachable only by those with absolute courage that is tempered with inerrent wisdom. Dismally, you'll think that's you. But you are not among those people. Your place will be further down.
 		As you descend, as you're embedded in your abyssal cell, you will hear the screams of the humans who couldn't or wouldn't sink as deep as you did as they're dashed and swallowed by monsters older than you. You will feel guilty when you are spared. They will spare you because you no longer taste good.
 		One day, long after your descent, you will learn of a place closer to the shore, a place of lesser compromise. You will learn how you could have kept your hair or your smooth scaleless skin, but you were too fearful, or too stupid, to find that place, you casted it all away. You might shudder in grief. Or, now an abyssal thing, you may not grieve at all, you may chuckle ruefully, for that thing you grew from, who cared, is dead, their memories dissolve in your maw.
 		Look the other way, downwards, you will only see greater older monsters, chuckling ruefully about how you kept your brown eyes, or your flat face, and how pathetic you are for doing that.
@@ -367,5 +361,9 @@ if the player beats all 3 X3 levels, it unlocks a diatribe from me, as the final
 		But you aren't an abyssal thing, yet.
 		The sooner you accept that your shore is soon to shatter and sink, the lesser the compromise you will need to enact.
 		Your vision is going to need to improve. We know that it is inhuman to see like us, but we don't believe there is any place of lesser compromise than ours. You don't believe us, yet? You don't have much time.
-		
+--
+
+redo fjelniurn as a hand-editable replica of a fresh generation from known way.
+
+
 Add the ability to carry other players piggyback.

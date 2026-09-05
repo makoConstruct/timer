@@ -20,6 +20,7 @@ import 'package:makos_timer/boring.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/mobj.dart';
+import 'package:makos_timer/main.dart' show InfoScaffold, markdownPageSliver;
 import 'package:makos_timer/type_help.dart' show Coord, CoordType;
 import 'package:signals/signals_flutter.dart';
 

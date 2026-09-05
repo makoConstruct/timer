@@ -35,11 +35,7 @@ import 'package:makos_timer/boring.dart';
 import 'package:makos_timer/boring.dart' as boring;
 import 'package:makos_timer/crank_game.dart';
 import 'package:makos_timer/trainscape.dart'
-    show
-        TrainscapeLevelScreen,
-        TrainscapeScreen,
-        trainscapeLevels,
-        trainscapeName;
+    show TrainscapeLevelScreen, trainscapeName;
 // import 'package:makos_timer/journeying_game.dart';
 import 'package:makos_timer/database.dart';
 import 'package:makos_timer/size_reporter.dart';
@@ -276,12 +272,6 @@ Future<void> initializeDatabase() async {
       type: IntType(),
       initial: () => 0,
       debugLabel: "crank game win message index",
-    ),
-    Mobj.getOrCreate(
-      trainscapeModeID,
-      type: BoolType(),
-      initial: () => false,
-      debugLabel: "trainscape mode",
     ),
     Mobj.getOrCreate(
       trainscapeProgressID,
@@ -1710,17 +1700,8 @@ class _TimersAppState extends State<TimersApp> with WidgetsBindingObserver {
                   Mobj.getAlreadyLoaded(completedSetupID, BoolType()).value ??
                   false;
               if (completedSetup) {
-                final trainscapeMode =
-                    Mobj.getAlreadyLoaded(trainscapeModeID, BoolType()).value ??
-                    false;
                 return <Route<dynamic>>[
                   OurPageRoute(builder: (context) => TimerScreen()),
-                  if (trainscapeMode)
-                    OurPageRoute(
-                      builder: (context) => TrainscapeScreen(
-                        level: trainscapeLevels.lastUnlocked,
-                      ),
-                    ),
                 ];
               } else {
                 // Start with a blank placeholder, then onboarding on top.
@@ -7541,6 +7522,7 @@ Widget headingBand({
   required Color background,
   bool fade = false,
   double? sectionRadius,
+  EdgeInsets? padding,
 }) => SignalBuilder(
   builder: (context) {
     // A title sitting within the horizontal span of the section's corner reads
@@ -7560,12 +7542,14 @@ Widget headingBand({
       height: height,
       color: background,
       alignment: Alignment.bottomLeft,
-      padding: EdgeInsets.only(
-        left:
-            RoundedSectionSliver.defaultMargin +
-            max(MenuTile.defaultPaddingTotal, r),
-        bottom: headingTitleBottomPadding,
-      ),
+      padding:
+          padding ??
+          EdgeInsets.only(
+            left:
+                RoundedSectionSliver.defaultMargin +
+                max(MenuTile.defaultPaddingTotal, r),
+            bottom: headingTitleBottomPadding,
+          ),
       child: label != null
           ? DefaultTextStyle(
               style: headingTextStyle(theme, fade: fade),
@@ -7729,6 +7713,7 @@ Widget markdownPageSliver(
   ThemeData theme,
   String? md, {
   MarkdownImageBuilder? imageBuilder,
+  bool selectable = true,
 }) => SliverPadding(
   padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 24.0),
   sliver: SliverToBoxAdapter(
@@ -7739,9 +7724,11 @@ Widget markdownPageSliver(
             duration: const Duration(milliseconds: 200),
             builder: (context, value, child) =>
                 Opacity(opacity: value, child: child),
-            child: SelectionArea(
-              child: markdownBody(theme, md, imageBuilder: imageBuilder),
-            ),
+            child: selectable
+                ? SelectionArea(
+                    child: markdownBody(theme, md, imageBuilder: imageBuilder),
+                  )
+                : markdownBody(theme, md, imageBuilder: imageBuilder),
           ),
   ),
 );
@@ -7794,6 +7781,11 @@ class const InfoScaffold({
                   child: headingBand(
                     theme: theme,
                     label: title,
+                    padding: const EdgeInsets.only(
+                      left: 24,
+                      right: 24,
+                      bottom: 24,
+                    ),
                     height:
                         halfScreenHeight(context) +
                         MediaQuery.of(context).viewPadding.top,
@@ -8491,36 +8483,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             );
                           },
-                          contentPadding: const EdgeInsets.only(
-                            top: MenuTile.defaultPaddingInside,
-                            left: MenuTile.defaultPaddingInside,
-                            bottom: MenuTile.defaultPaddingInside / 3,
-                          ),
-                        );
-                      },
-                    ),
-                    SignalBuilder(
-                      builder: (context) {
-                        final trainscapeModeMobj = Mobj.getAlreadyLoaded(
-                          trainscapeModeID,
-                          BoolType(),
-                        );
-                        final trainscapeMode =
-                            trainscapeModeMobj.value ?? false;
-                        return RoundedCheckboxListTile(
-                          title: settingTitle('$trainscapeName Mode'),
-                          subtitle: settingSubtitle(
-                            'If enabled, app opens straight into Trainscape: Thrival',
-                          ),
-                          value: trainscapeMode,
-                          onChanged: (value) {
-                            trainscapeModeMobj.value = value == true;
-                          },
-                          contentPadding: const EdgeInsets.only(
-                            top: MenuTile.defaultPaddingInside / 3,
-                            left: MenuTile.defaultPaddingInside,
-                            bottom: MenuTile.defaultPaddingInside,
-                          ),
+                          contentPadding: listItemPadding,
                         );
                       },
                     ),

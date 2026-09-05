@@ -16,12 +16,74 @@ class TrainscapeSection {
   const TrainscapeSection({
     required this.name,
     required this.levelsRequiredToWin,
-    required this.levels,
+    this.levels = const [],
+    this.worlds,
+    this.text,
   });
 
   final String name;
   final int levelsRequiredToWin;
   final List<TrainscapeLevel> levels;
+  final TrainscapeWorlds? worlds;
+  final String? text;
+
+  List<TrainscapeLevel> availableLevels(Map<String, int> progress) =>
+      worlds?.variants(progress) ?? levels;
+
+  int completedCount(Map<String, int> progress) {
+    if (worlds == null) {
+      return levels.where((level) => _isCompleted(level, progress)).length;
+    }
+    return progress.entries
+        .where(
+          (entry) =>
+              entry.value > 0 &&
+              (entry.key.startsWith('completed/') ||
+                  entry.key.startsWith('wins/')),
+        )
+        .map(
+          (entry) => entry.key.replaceFirst(RegExp(r'^(completed|wins)/'), ''),
+        )
+        .where((id) => worlds!.contains(id))
+        .toSet()
+        .length;
+  }
+}
+
+class TrainscapeWorlds {
+  const TrainscapeWorlds(this.id, this.name, this.seedOffset, this.tiers);
+
+  final String id;
+  final String name;
+  final int seedOffset;
+  final List<List<int>> tiers;
+
+  bool contains(String levelId) =>
+      levelId.startsWith('$id/') &&
+      int.tryParse(levelId.substring(id.length + 1)) != null;
+
+  List<TrainscapeLevel> variants(Map<String, int> progress) {
+    final result = <TrainscapeLevel>[];
+    for (var index = 0; result.length < 3; index++) {
+      final variant = index;
+      final level = TrainscapeLevel(
+        id: '$id/$variant',
+        name: '$name · ${variant + 1}',
+        build: () {
+          final defaults = Parameters.levelOne(seedOffset + variant);
+          if (tiers.isEmpty) return generateLevel(defaults);
+          final json = Map<String, Object?>.of(
+            jsonDecode(jsonEncode(ParametersType().toJson(defaults)))
+                as Map<String, dynamic>,
+          );
+          json['tierCount'] = tiers[variant % tiers.length];
+          return generateLevel(ParametersType().fromJson(json));
+        },
+      );
+      if (!_isCompleted(level, progress)) result.add(level);
+    }
+    return result;
+  }
 }
 
 class TrainscapeLevelCatalog {
@@ -30,15 +92,7 @@ class TrainscapeLevelCatalog {
   final List<TrainscapeSection> sections;
 
   Iterable<TrainscapeLevel> get all =>
-      sections.expand((section) => section.levels);
-
-  TrainscapeLevel get lastUnlocked {
-    final progress = _progress();
-    return all.lastWhere(
-      (level) => _isUnlocked(level, progress),
-      orElse: () => all.first,
-    );
-  }
+      sections.expand((section) => section.availableLevels(const {}));
 }
 
 Map<String, int> _progress() => Map.of(
@@ -50,7 +104,7 @@ Map<String, int> _progress() => Map.of(
 );
 
 int _wonLevelCount(TrainscapeSection section, Map<String, int> progress) =>
-    section.levels.where((level) => _isCompleted(level, progress)).length;
+    section.completedCount(progress);
 
 bool _isCompleted(TrainscapeLevel level, Map<String, int> progress) =>
     (progress['completed/${level.id}'] ?? 0) > 0 ||
@@ -63,7 +117,9 @@ bool _isSectionUnlocked(int index, Map<String, int> progress) =>
 
 bool _isUnlocked(TrainscapeLevel level, Map<String, int> progress) {
   final index = trainscapeLevels.sections.indexWhere(
-    (section) => section.levels.contains(level),
+    (section) =>
+        section.levels.contains(level) ||
+        (section.worlds?.contains(level.id) ?? false),
   );
   return index >= 0 && _isSectionUnlocked(index, progress);
 }
@@ -77,8 +133,16 @@ void recordTrainscapeWin(TrainscapeLevel level) {
   final after = Map<String, int>.of(before);
   after['wins/${level.id}'] = (after['wins/${level.id}'] ?? 0) + 1;
   after['completed/${level.id}'] = 1;
-  for (final candidate in trainscapeLevels.all) {
-    if (!_isUnlocked(candidate, before) && _isUnlocked(candidate, after)) {
+  final previousIds = {
+    for (final section in trainscapeLevels.sections)
+      for (final candidate in section.availableLevels(before)) candidate.id,
+  };
+  for (final candidate in trainscapeLevels.sections.expand(
+    (section) => section.availableLevels(after),
+  )) {
+    if ((!previousIds.contains(candidate.id) ||
+            !_isUnlocked(candidate, before)) &&
+        _isUnlocked(candidate, after)) {
       after['new/${candidate.id}'] = 1;
     }
   }
@@ -117,7 +181,9 @@ class _TrainscapeLevelScreenState extends State<TrainscapeLevelScreen> {
 
   Future<void> _readSaves() async {
     final results = await Future.wait([
-      for (final level in trainscapeLevels.all)
+      for (final level in trainscapeLevels.sections.expand(
+        (section) => section.availableLevels(_progress()),
+      ))
         hasSavedLevel(level.id).then((saved) => (level.id, saved)),
     ]);
     if (!mounted) return;
@@ -273,7 +339,19 @@ class _TrainscapeLevelScreenState extends State<TrainscapeLevelScreen> {
                     child: EvenPadColumn(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        for (final level in section.levels)
+                        if (section.text != null)
+                          MenuTile(
+                            title: Text(
+                              'Habitat',
+                              style: theme.textTheme.bodyLarge,
+                            ),
+                            onTap: () => Navigator.of(context).push(
+                              OurPageRoute(
+                                builder: (_) => _HabitatScreen(section.text!),
+                              ),
+                            ),
+                          ),
+                        for (final level in section.availableLevels(progress))
                           IntrinsicHeight(
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -441,6 +519,37 @@ final trainscapeLevels = TrainscapeLevelCatalog([
         build: _fjelniurnLevel,
       ),
     ],
+  ),
+  const TrainscapeSection(
+    name: 'Suite 3',
+    levelsRequiredToWin: 2,
+    worlds: TrainscapeWorlds('known-way', 'known way (world)', 31000, [
+      [2, 3, 2],
+      [13, 10],
+      [3, 2, 3],
+    ]),
+  ),
+  const TrainscapeSection(
+    name: 'Suite 4',
+    levelsRequiredToWin: 2,
+    worlds: TrainscapeWorlds(
+      'alternate-way',
+      'alternate way (world)',
+      41000,
+      [],
+    ),
+  ),
+  const TrainscapeSection(
+    name: 'Suite 5',
+    levelsRequiredToWin: 2,
+    worlds: TrainscapeWorlds('true-way', 'true way (world)', 51000, [
+      [13, 10, 6, 4],
+    ]),
+  ),
+  const TrainscapeSection(
+    name: 'Terminus',
+    levelsRequiredToWin: 0,
+    text: _habitat,
   ),
 ]);
 
@@ -674,3 +783,29 @@ Game _timeLevel(int hearts) {
 Game _fjelniurnLevel() => generateLevel(
   _scenarioParameters(hearts: 3, timeLimit: 3 * gameDay, seed: 24763),
 );
+
+class _HabitatScreen extends StatelessWidget {
+  const _HabitatScreen(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => InfoScaffold(
+    title: const Text('Habitat'),
+    slivers: [markdownPageSliver(Theme.of(context), text, selectable: false)],
+  );
+}
+
+const _habitat = '''We wouldn't recognize our home.
+
+Modern pitcher plants promise echoes matching the shape of our wounds and many of us die in them. Others dwindle as fresh plague bubbles over our feet.
+
+Humanity's home shore is shattering and sinking.
+There are many habitable places, but all varying degrees of abyssal. There's nowhere left on the shore. There must be one place of minimal compromise where the most humanlike remaining things still defiantly flourish, reachable only by those with absolute courage that is tempered with inerrent wisdom. Dismally, you'll think that's you. But you are not among those people. Your place will be further down.
+As you descend, as you're embedded in your abyssal cell, you will hear the screams of the humans who couldn't or wouldn't sink as deep as you did as they're dashed and swallowed by monsters older than you. You will feel guilty when you are spared. They will spare you because you no longer taste good.
+One day, long after your descent, you will learn of a place closer to the shore, a place of lesser compromise. You will learn how you could have kept your hair or your smooth scaleless skin, but you were too fearful, or too stupid, to find that place, you casted it all away. You might shudder in grief. Or, now an abyssal thing, you may not grieve at all, you may chuckle ruefully, for that thing you grew from, who cared, is dead, their memories dissolve in your maw.
+Look the other way, downwards, you will only see greater older monsters, chuckling ruefully about how you kept your brown eyes, or your flat face, and how pathetic you are for doing that.
+
+But you aren't an abyssal thing, yet.
+The sooner you accept that your shore is soon to shatter and sink, the lesser the compromise you will need to enact.
+Your vision is going to need to improve. We know that it is inhuman to see like us, but we don't believe there is any place of lesser compromise than ours. You don't believe us, yet? You don't have much time.''';
